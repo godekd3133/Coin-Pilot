@@ -1,7 +1,7 @@
 {
-  "name": "coin-automation",
+  "name": "coin-pilot",
   "version": "2.0.0",
-  "description": "Advanced Upbit cryptocurrency automated trading system with ML, backtesting, and optimization",
+  "description": "AI-powered cryptocurrency automated trading system for Upbit with multi-coin support, genetic algorithm optimization, and real-time web dashboard",
   "main": "src/index.js",
   "type": "module",
   "scripts": {
@@ -19,10 +19,24 @@
     "automation",
     "machine-learning",
     "backtesting",
-    "optimization"
+    "optimization",
+    "genetic-algorithm",
+    "technical-analysis",
+    "sentiment-analysis"
   ],
-  "author": "",
+  "author": "godekd3133",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/godekd3133/Coin-Pilot.git"
+  },
+  "bugs": {
+    "url": "https://github.com/godekd3133/Coin-Pilot/issues"
+  },
+  "homepage": "https://github.com/godekd3133/Coin-Pilot#readme",
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "dependencies": {
     "axios": "^1.6.2",
     "cheerio": "^1.0.0-rc.12",
