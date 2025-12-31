@@ -1,0 +1,19 @@
+node_modules/
+.env
+.env.*
+logs/
+*.log
+.DS_Store
+
+# Portfolio & trading data (sensitive)
+dry_portfolio.json
+initial_seed_money.json
+portfolio_history.json
+
+# Backtest/optimization results (can be regenerated)
+backtest_results*.json
+optimization_history.json
+optimal_config.json
+
+# Ignore vscode AI rules
+.github/instructions/codacy.instructions.md
