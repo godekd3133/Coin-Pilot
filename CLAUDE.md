@@ -500,6 +500,25 @@ Key environment variables:
 - `STOP_LOSS_PERCENT`, `TAKE_PROFIT_PERCENT` - Risk management
 - `RSI_PERIOD`, `RSI_OVERSOLD`, `RSI_OVERBOUGHT` - Technical indicator params
 
+## totalAssets 계산 규칙 (CRITICAL)
+
+**모든 API에서 `calculateTotalAssets()` 사용 필수**
+
+```javascript
+// ✅ 올바른 패턴 - 통일된 계산
+const totalAssets = await server.tradingSystem.calculateTotalAssets();
+
+// ❌ 잘못된 패턴 - 직접 계산 (불일치 발생)
+let totalAssets = krwBalance;
+positions.forEach(pos => totalAssets += pos.amount * pos.currentPrice);
+```
+
+`calculateTotalAssets()`가 정확한 이유:
+
+- `virtualPortfolio.holdings` 기반 (추가 매수 반영)
+- ticker 조회 실패 시 평균단가로 fallback
+- 모든 보유 코인 포함 (누락 없음)
+
 ## Known Architectural Limitations
 
 ### Race Condition (이론적)

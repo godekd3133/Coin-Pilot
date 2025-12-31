@@ -86,11 +86,10 @@ export default function createAccountRoutes(server) {
         }
       }
 
-      // 실시간 현재가 조회 및 총 평가자산 계산
-      let totalAssets = server.tradingSystem.dryRun
-        ? (server.tradingSystem.virtualPortfolio?.krwBalance || 0)
-        : krwBalance;
+      // totalAssets는 calculateTotalAssets()로 통일 (cumulative-pnl과 동일한 계산)
+      const totalAssets = await server.tradingSystem.calculateTotalAssets();
 
+      // 실시간 현재가 조회 (positions 표시용)
       if (positionCoins.length > 0 && server.tradingSystem.upbit) {
         try {
           const tickers = await server.getCachedTicker(positionCoins);
@@ -103,7 +102,6 @@ export default function createAccountRoutes(server) {
             if (priceMap[pos.coin]) {
               pos.currentPrice = priceMap[pos.coin];
               const positionValue = pos.amount * pos.currentPrice;
-              totalAssets += positionValue;
 
               // avgPrice (평균단가)를 우선 사용 - 추가 매수 반영된 값
               const avgPrice = pos.avgPrice || pos.entryPrice || pos.currentPrice;
@@ -119,7 +117,6 @@ export default function createAccountRoutes(server) {
           positions.forEach(pos => {
             const entryPrice = pos.entryPrice || pos.avgPrice || 0;
             const positionValue = pos.amount * entryPrice;
-            totalAssets += positionValue;
             pos.currentPrice = entryPrice;
             pos.currentValue = Math.round(positionValue);
             pos.costBasis = Math.round(positionValue);
