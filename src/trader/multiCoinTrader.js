@@ -119,26 +119,31 @@ class MultiCoinTrader {
 
       const holdingCoins = Array.from(this.virtualPortfolio.holdings.keys());
       if (holdingCoins.length > 0) {
+        // 현재가 맵 초기화
+        const priceMap = new Map();
+
         try {
           const tickers = await this.upbit.getTicker(holdingCoins);
-          // ticker 응답 유효성 검사
-          if (tickers && Array.isArray(tickers) && tickers.length > 0) {
+          // ticker 응답을 맵으로 변환
+          if (tickers && Array.isArray(tickers)) {
             for (const ticker of tickers) {
               if (ticker && ticker.market && typeof ticker.trade_price === 'number') {
-                const holding = this.virtualPortfolio.holdings.get(ticker.market);
-                if (holding) {
-                  totalAssets += ticker.trade_price * holding.amount;
-                }
+                priceMap.set(ticker.market, ticker.trade_price);
               }
-            }
-          } else {
-            // ticker 조회 실패 시 평균매입가로 계산
-            for (const holding of this.virtualPortfolio.holdings.values()) {
-              totalAssets += holding.avgPrice * holding.amount;
             }
           }
         } catch (error) {
-          for (const holding of this.virtualPortfolio.holdings.values()) {
+          // ticker 조회 실패 시 priceMap은 비어있음 → 평균단가로 계산됨
+        }
+
+        // 모든 보유 코인에 대해 계산 (현재가 또는 평균단가)
+        for (const [coin, holding] of this.virtualPortfolio.holdings.entries()) {
+          const currentPrice = priceMap.get(coin);
+          if (currentPrice !== undefined) {
+            // 현재가로 계산
+            totalAssets += currentPrice * holding.amount;
+          } else {
+            // 현재가 조회 실패 시 평균단가로 계산
             totalAssets += holding.avgPrice * holding.amount;
           }
         }
