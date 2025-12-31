@@ -56,22 +56,32 @@ export default function createAccountRoutes(server) {
       }
 
       // 2. 가상 포트폴리오 holdings (스마트 매수 등)
+      // 중요: holdings의 amount가 strategy보다 정확함 (추가 매수 반영)
       if (server.tradingSystem.virtualPortfolio?.holdings) {
         const holdingsData = server.tradingSystem.virtualPortfolio.holdings;
         const holdingsEntries = holdingsData instanceof Map
           ? Array.from(holdingsData.entries())
           : Object.entries(holdingsData || {});
         for (const [coin, holding] of holdingsEntries) {
-          if (!addedCoins.has(coin) && holding.amount > 0) {
-            positions.push({
-              coin,
-              entryPrice: holding.avgPrice,
-              amount: holding.amount,
-              entryTime: holding.entryTime || new Date().toISOString(),
-              source: 'holdings'
-            });
-            positionCoins.push(coin);
-            addedCoins.add(coin);
+          if (holding.amount > 0) {
+            // 이미 strategy에서 추가된 코인이면 amount/avgPrice를 holdings 값으로 업데이트
+            const existingIdx = positions.findIndex(p => p.coin === coin);
+            if (existingIdx >= 0) {
+              // holdings의 amount가 더 정확 (추가 매수 포함)
+              positions[existingIdx].amount = holding.amount;
+              positions[existingIdx].avgPrice = holding.avgPrice;
+              // entryPrice는 strategy 값 유지 (최초 매수가)
+            } else {
+              positions.push({
+                coin,
+                entryPrice: holding.avgPrice,
+                amount: holding.amount,
+                entryTime: holding.entryTime || new Date().toISOString(),
+                source: 'holdings'
+              });
+              positionCoins.push(coin);
+              addedCoins.add(coin);
+            }
           }
         }
       }
@@ -95,8 +105,9 @@ export default function createAccountRoutes(server) {
               const positionValue = pos.amount * pos.currentPrice;
               totalAssets += positionValue;
 
-              const entryPrice = pos.entryPrice || pos.avgPrice || pos.currentPrice;
-              const costBasis = pos.amount * entryPrice;
+              // avgPrice (평균단가)를 우선 사용 - 추가 매수 반영된 값
+              const avgPrice = pos.avgPrice || pos.entryPrice || pos.currentPrice;
+              const costBasis = pos.amount * avgPrice;
               pos.currentValue = Math.round(positionValue);
               pos.costBasis = Math.round(costBasis);
               pos.profit = Math.round(positionValue - costBasis);
