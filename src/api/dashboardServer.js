@@ -736,6 +736,7 @@ class DashboardServer {
       // 현재가 조회
       const holdingCoins = Array.from(holdings.keys());
       const tickers = await this.tradingSystem.upbit.getTicker(holdingCoins);
+      if (!tickers || !Array.isArray(tickers)) return bundles;
       const priceMap = new Map(tickers.map(t => [t.market, t]));
 
       // 보유 코인 분석 (매도 후보)
@@ -793,8 +794,10 @@ class DashboardServer {
 
       // 상위 거래량 코인에서 매수 후보 탐색
       const markets = await this.tradingSystem.upbit.getMarkets();
+      if (!markets || !Array.isArray(markets)) return bundles;
       const krwMarkets = markets.filter(m => m.market.startsWith('KRW-')).map(m => m.market);
       const allTickers = await this.tradingSystem.upbit.getTicker(krwMarkets);
+      if (!allTickers || !Array.isArray(allTickers)) return bundles;
       const topCoins = [...allTickers]
         .filter(t => !holdings.has(t.market))
         .sort((a, b) => b.acc_trade_price_24h - a.acc_trade_price_24h)
