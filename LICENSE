@@ -1,40 +1,47 @@
-MIT License
+Coin Pilot - Non-Commercial License
 
-Copyright (c) 2025 Coin Pilot
+Copyright (c) 2025 godekd3133
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+이 소프트웨어는 비상업적 용도로만 사용할 수 있습니다.
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+허용되는 사항:
+- 개인적인 학습 및 연구 목적의 사용
+- 교육 목적의 사용
+- 비상업적 프로젝트에서의 수정 및 배포 (출처 표시 필수)
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+금지되는 사항:
+- 상업적 목적의 사용, 판매, 라이선스 부여
+- 유료 서비스나 제품에 포함
+- 회사 또는 영리 단체에서의 업무 목적 사용
+
+이 라이선스를 위반할 경우 사용 권한이 자동으로 종료됩니다.
 
 ---
 
-DISCLAIMER
+NON-COMMERCIAL USE ONLY
 
-This software is provided for educational and research purposes only.
-Cryptocurrency trading involves substantial risk of loss and is not suitable
-for all investors. Past performance is not indicative of future results.
+This software may only be used for non-commercial purposes.
 
-The authors and contributors of this software are not responsible for any
-financial losses incurred through the use of this software. Users should
-conduct their own research and consult with a qualified financial advisor
-before making any investment decisions.
+Permitted:
+- Personal learning and research
+- Educational use
+- Modification and distribution for non-commercial projects (with attribution)
 
-By using this software, you acknowledge that:
-1. You understand the risks involved in cryptocurrency trading
-2. You are solely responsible for your trading decisions
-3. You will not hold the authors liable for any losses
-4. You will comply with all applicable laws and regulations
+Prohibited:
+- Commercial use, sale, or licensing
+- Inclusion in paid services or products
+- Business or for-profit organizational use
+
+Violation of this license automatically terminates your rights to use this software.
+
+---
+
+면책 조항 / DISCLAIMER
+
+이 소프트웨어는 "있는 그대로" 제공되며, 어떠한 종류의 보증도 제공하지 않습니다.
+암호화폐 거래는 높은 위험을 수반하며, 투자 손실이 발생할 수 있습니다.
+개발자는 이 소프트웨어의 사용으로 인한 어떠한 손실에 대해서도 책임지지 않습니다.
+
+This software is provided "as is" without warranty of any kind.
+Cryptocurrency trading involves substantial risk of loss.
+The developer is not responsible for any losses incurred through the use of this software.
