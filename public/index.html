@@ -3,6 +3,19 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#0b1e33">
+    <meta name="description" content="CoinPilot 과매도 반응 스캘핑 모의투자·워크포워드 검증 대시보드">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="manifest" href="/manifest.webmanifest">
+    <link rel="icon" href="/icon.svg" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="/icon.svg">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@phosphor-icons/web@2.1.1/src/regular/style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&family=Noto+Sans+KR:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/pilot-redesign.css?v=20260910-6">
     <title>CoinPilot | Automated Trading</title>
     <style>
         :root {
@@ -2447,12 +2460,661 @@
         .market-price-value.price-down {
             color: var(--accent-red) !important;
         }
+
+        /* CoinPilot product shell: a cool, instrument-panel surface that stays
+           readable on a narrow phone and still feels deliberate on desktop. */
+        :root {
+            --pilot-navy: #08111f;
+            --pilot-blue: #102d4d;
+            --pilot-mint: #70e1bb;
+            --pilot-amber: #ffd166;
+            --pilot-ink: #dce9f5;
+        }
+
+        body {
+            background:
+                radial-gradient(circle at 8% 0%, rgba(42, 104, 154, 0.22), transparent 32rem),
+                radial-gradient(circle at 92% 12%, rgba(62, 183, 155, 0.1), transparent 28rem),
+                var(--pilot-navy);
+        }
+
+        .container {
+            padding-bottom: 44px;
+        }
+
+        .header {
+            background: linear-gradient(120deg, rgba(16, 45, 77, 0.96), rgba(12, 22, 36, 0.96));
+            border-color: rgba(112, 225, 187, 0.22);
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.24);
+        }
+
+        .header h1 {
+            letter-spacing: -0.03em;
+            color: var(--pilot-ink);
+        }
+
+        .header h1::after {
+            content: ' / PAPER EDGE';
+            margin-left: 8px;
+            color: var(--pilot-mint);
+            font-size: 10px;
+            letter-spacing: 0.16em;
+            font-weight: 700;
+            align-self: flex-end;
+            padding-bottom: 3px;
+        }
+
+        .pilot-context-ribbon {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            gap: 14px;
+            align-items: center;
+            margin: -4px 0 18px;
+            padding: 13px 16px;
+            border: 1px solid rgba(112, 225, 187, 0.2);
+            border-radius: 10px;
+            background: rgba(8, 17, 31, 0.72);
+        }
+
+        .pilot-context-kicker {
+            color: var(--pilot-amber);
+            font-size: 10px;
+            letter-spacing: 0.16em;
+            font-weight: 800;
+            text-transform: uppercase;
+        }
+
+        .pilot-context-copy {
+            color: var(--text-secondary);
+            font-size: 12px;
+            margin-top: 3px;
+        }
+
+        .pilot-context-actions {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+        }
+
+        .pilot-install-btn {
+            border-color: rgba(112, 225, 187, 0.35);
+            color: var(--pilot-mint);
+        }
+
+        .pilot-install-btn[hidden] {
+            display: none;
+        }
+
+        .pilot-validation-card {
+            position: relative;
+            overflow: hidden;
+            border-color: rgba(255, 209, 102, 0.25);
+            background:
+                linear-gradient(135deg, rgba(255, 209, 102, 0.08), transparent 42%),
+                var(--bg-secondary);
+        }
+
+        .pilot-validation-card::after {
+            content: '';
+            position: absolute;
+            width: 180px;
+            height: 180px;
+            right: -70px;
+            top: -80px;
+            border: 1px solid rgba(112, 225, 187, 0.16);
+            border-radius: 50%;
+            pointer-events: none;
+        }
+
+        .pilot-validation-summary {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) repeat(3, minmax(90px, 0.25fr));
+            gap: 12px;
+            align-items: stretch;
+        }
+
+        .pilot-validation-lead,
+        .pilot-validation-stat {
+            padding: 14px;
+            border-radius: 9px;
+            background: rgba(8, 17, 31, 0.55);
+            border: 1px solid rgba(255, 255, 255, 0.06);
+        }
+
+        .pilot-validation-lead {
+            border-left: 3px solid var(--pilot-amber);
+        }
+
+        .pilot-validation-state {
+            color: var(--pilot-amber);
+            font-weight: 800;
+            font-size: 17px;
+        }
+
+        .pilot-validation-state.pass {
+            color: var(--pilot-mint);
+        }
+
+        .pilot-validation-meta,
+        .pilot-validation-stat-label {
+            color: var(--text-muted);
+            font-size: 11px;
+            margin-top: 4px;
+        }
+
+        .pilot-validation-stat-value {
+            font-size: 20px;
+            font-weight: 800;
+            color: var(--pilot-ink);
+        }
+
+        .pilot-validation-markets {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+            gap: 10px;
+            margin-top: 12px;
+        }
+
+        .pilot-validation-market {
+            padding: 11px 12px;
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+            background: rgba(8, 17, 31, 0.38);
+        }
+
+        .pilot-validation-market.pass {
+            border-color: rgba(112, 225, 187, 0.38);
+        }
+
+        .pilot-validation-market.fail {
+            border-color: rgba(255, 123, 114, 0.38);
+        }
+
+        .pilot-validation-market-head {
+            display: flex;
+            justify-content: space-between;
+            gap: 8px;
+            font-weight: 700;
+        }
+
+        .pilot-validation-market-detail {
+            color: var(--text-secondary);
+            font-size: 11px;
+            margin-top: 6px;
+            line-height: 1.5;
+        }
+
+        .pilot-paper-panel {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            gap: 14px;
+            align-items: center;
+        }
+
+        .pilot-paper-state {
+            font-size: 17px;
+            font-weight: 800;
+            color: var(--text-secondary);
+        }
+
+        .pilot-paper-state.running { color: var(--pilot-amber); }
+        .pilot-paper-state.pass { color: var(--pilot-mint); }
+        .pilot-paper-state.stopped { color: var(--accent-red); }
+
+        .pilot-paper-meta {
+            color: var(--text-secondary);
+            font-size: 12px;
+            line-height: 1.6;
+            margin-top: 5px;
+        }
+
+        .pilot-mobile-nav {
+            display: none;
+        }
+
+        /* AI Desk: a focused command-deck layer for read-only consultations. */
+        .ai-desk {
+            --ai-ink: #f6f0df;
+            --ai-muted: #a9a391;
+            --ai-line: rgba(246, 240, 223, 0.13);
+            --ai-teal: #6fe1bb;
+            --ai-amber: #ffd166;
+            --ai-red: #ff7b72;
+            position: relative;
+            overflow: hidden;
+            border-color: rgba(111, 225, 187, 0.24);
+            background:
+                radial-gradient(circle at 88% -12%, rgba(111, 225, 187, 0.16), transparent 34%),
+                linear-gradient(135deg, rgba(11, 35, 52, 0.98), rgba(10, 19, 29, 0.98));
+        }
+
+        .ai-desk::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+            opacity: 0.28;
+            background-image: linear-gradient(rgba(246, 240, 223, 0.035) 1px, transparent 1px), linear-gradient(90deg, rgba(246, 240, 223, 0.035) 1px, transparent 1px);
+            background-size: 28px 28px;
+            mask-image: linear-gradient(to bottom, black, transparent 85%);
+        }
+
+        .ai-desk > * {
+            position: relative;
+            z-index: 1;
+        }
+
+        .ai-hero {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            gap: 20px;
+            align-items: end;
+            padding: 22px 24px 18px;
+            border-bottom: 1px solid var(--ai-line);
+        }
+
+        .ai-kicker {
+            color: var(--ai-amber);
+            font: 800 10px/1.2 "SFMono-Regular", Consolas, monospace;
+            letter-spacing: 0.18em;
+            text-transform: uppercase;
+        }
+
+        .ai-hero h2 {
+            margin-top: 7px;
+            color: var(--ai-ink);
+            font: 700 clamp(22px, 3vw, 34px)/1.05 "Avenir Next", "Helvetica Neue", sans-serif;
+            letter-spacing: -0.045em;
+        }
+
+        .ai-hero p {
+            max-width: 700px;
+            margin-top: 9px;
+            color: var(--ai-muted);
+            font-size: 13px;
+        }
+
+        .ai-policy-stamp {
+            align-self: start;
+            padding: 10px 12px;
+            border: 1px solid rgba(255, 209, 102, 0.35);
+            border-radius: 8px;
+            color: var(--ai-amber);
+            font: 700 10px/1.4 "SFMono-Regular", Consolas, monospace;
+            letter-spacing: 0.06em;
+            text-align: right;
+            text-transform: uppercase;
+        }
+
+        .ai-desk-grid {
+            display: grid;
+            grid-template-columns: minmax(260px, 0.72fr) minmax(380px, 1.28fr);
+            gap: 1px;
+            background: var(--ai-line);
+        }
+
+        .ai-desk-column {
+            min-width: 0;
+            padding: 18px;
+            background: rgba(8, 17, 31, 0.72);
+        }
+
+        .ai-section-title {
+            display: flex;
+            align-items: baseline;
+            justify-content: space-between;
+            gap: 10px;
+            margin-bottom: 12px;
+            color: var(--ai-ink);
+            font: 700 14px/1.2 "Avenir Next", "Helvetica Neue", sans-serif;
+        }
+
+        .ai-section-title small {
+            color: var(--ai-muted);
+            font: 600 10px/1.2 "SFMono-Regular", Consolas, monospace;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+        }
+
+        .ai-provider-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        .ai-provider-card {
+            min-height: 122px;
+            padding: 13px;
+            border: 1px solid var(--ai-line);
+            border-radius: 10px;
+            background: rgba(246, 240, 223, 0.035);
+            transition: border-color 0.2s ease, transform 0.2s ease, background 0.2s ease;
+        }
+
+        .ai-provider-card:hover {
+            transform: translateY(-2px);
+            border-color: rgba(111, 225, 187, 0.42);
+            background: rgba(111, 225, 187, 0.07);
+        }
+
+        .ai-provider-head,
+        .ai-session-head,
+        .ai-event-head,
+        .ai-consultation-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+        }
+
+        .ai-provider-name {
+            color: var(--ai-ink);
+            font-size: 13px;
+            font-weight: 800;
+        }
+
+        .ai-provider-state {
+            color: var(--ai-muted);
+            font: 700 10px/1 "SFMono-Regular", Consolas, monospace;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+        }
+
+        .ai-provider-state.ready { color: var(--ai-teal); }
+        .ai-provider-state.warn { color: var(--ai-amber); }
+        .ai-provider-state.error { color: var(--ai-red); }
+
+        .ai-provider-detail {
+            min-height: 42px;
+            margin-top: 12px;
+            color: var(--ai-muted);
+            font-size: 11px;
+            line-height: 1.5;
+        }
+
+        .ai-form {
+            padding: 14px;
+            border: 1px solid var(--ai-line);
+            border-radius: 10px;
+            background: rgba(0, 0, 0, 0.14);
+        }
+
+        .ai-form .form-label {
+            color: var(--ai-muted);
+            font-size: 11px;
+        }
+
+        .ai-form .form-input {
+            border-color: rgba(246, 240, 223, 0.14);
+            background: rgba(246, 240, 223, 0.06);
+        }
+
+        .ai-check-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 7px;
+        }
+
+        .ai-check {
+            display: flex;
+            align-items: center;
+            gap: 7px;
+            padding: 8px 9px;
+            border: 1px solid rgba(246, 240, 223, 0.1);
+            border-radius: 7px;
+            color: var(--ai-muted);
+            cursor: pointer;
+            font-size: 11px;
+        }
+
+        .ai-check:has(input:checked) {
+            border-color: rgba(111, 225, 187, 0.45);
+            color: var(--ai-ink);
+            background: rgba(111, 225, 187, 0.08);
+        }
+
+        .ai-check input {
+            accent-color: var(--ai-teal);
+        }
+
+        .ai-session-list,
+        .ai-event-list,
+        .ai-consultation-list {
+            display: grid;
+            gap: 9px;
+        }
+
+        .ai-session-card,
+        .ai-event-card,
+        .ai-consultation-card {
+            padding: 12px;
+            border: 1px solid var(--ai-line);
+            border-radius: 9px;
+            background: rgba(246, 240, 223, 0.035);
+        }
+
+        .ai-session-card {
+            border-left: 3px solid var(--ai-teal);
+        }
+
+        .ai-session-card.paused { border-left-color: var(--ai-amber); }
+        .ai-session-card.stopped { border-left-color: var(--ai-red); opacity: 0.76; }
+
+        .ai-session-name,
+        .ai-event-title {
+            color: var(--ai-ink);
+            font-size: 13px;
+            font-weight: 800;
+        }
+
+        .ai-session-meta,
+        .ai-event-meta,
+        .ai-consultation-meta {
+            margin-top: 6px;
+            color: var(--ai-muted);
+            font-size: 11px;
+            line-height: 1.55;
+        }
+
+        .ai-session-actions {
+            display: flex;
+            gap: 6px;
+            margin-top: 10px;
+            flex-wrap: wrap;
+        }
+
+        .ai-session-actions .btn {
+            padding: 6px 9px;
+            font-size: 11px;
+        }
+
+        .ai-event-card {
+            cursor: pointer;
+            transition: border-color 0.2s ease, background 0.2s ease;
+        }
+
+        .ai-event-card:hover {
+            border-color: rgba(111, 225, 187, 0.5);
+            background: rgba(111, 225, 187, 0.08);
+        }
+
+        .ai-event-card.buy { border-left: 3px solid var(--ai-teal); }
+        .ai-event-card.sell { border-left: 3px solid var(--ai-red); }
+        .ai-event-card.news { border-left: 3px solid var(--ai-amber); }
+
+        .ai-event-action {
+            color: var(--ai-teal);
+            font: 800 10px/1 "SFMono-Regular", Consolas, monospace;
+            letter-spacing: 0.08em;
+        }
+
+        .ai-event-card.sell .ai-event-action { color: var(--ai-red); }
+        .ai-event-card.news .ai-event-action { color: var(--ai-amber); }
+
+        .ai-event-ask {
+            margin-top: 9px;
+            color: var(--ai-muted);
+            font-size: 10px;
+        }
+
+        .ai-consultation-card {
+            border-left: 3px solid rgba(246, 240, 223, 0.25);
+        }
+
+        .ai-consultation-card.completed { border-left-color: var(--ai-teal); }
+        .ai-consultation-card.failed { border-left-color: var(--ai-red); }
+
+        .ai-advice-grid {
+            display: grid;
+            grid-template-columns: auto minmax(0, 1fr);
+            gap: 10px;
+            align-items: start;
+            margin-top: 9px;
+        }
+
+        .ai-advice-action {
+            min-width: 58px;
+            padding: 8px 7px;
+            border-radius: 7px;
+            background: rgba(111, 225, 187, 0.12);
+            color: var(--ai-teal);
+            font: 900 13px/1 "SFMono-Regular", Consolas, monospace;
+            text-align: center;
+        }
+
+        .ai-advice-action.sell { background: rgba(255, 123, 114, 0.12); color: var(--ai-red); }
+        .ai-advice-action.wait { background: rgba(246, 240, 223, 0.08); color: var(--ai-muted); }
+
+        .ai-consultation-result {
+            color: var(--ai-ink);
+            font-size: 12px;
+            line-height: 1.55;
+        }
+
+        .ai-risk-list {
+            margin: 6px 0 0 16px;
+            color: var(--ai-muted);
+            font-size: 11px;
+        }
+
+        .ai-empty {
+            padding: 18px 12px;
+            border: 1px dashed rgba(246, 240, 223, 0.15);
+            border-radius: 8px;
+            color: var(--ai-muted);
+            font-size: 12px;
+            text-align: center;
+        }
+
+        .ai-inline-note {
+            margin-top: 10px;
+            color: var(--ai-muted);
+            font: 10px/1.5 "SFMono-Regular", Consolas, monospace;
+        }
+
+        @media (max-width: 768px) {
+            body {
+                padding-bottom: 68px;
+            }
+
+            .container {
+                padding: 12px 12px 84px;
+            }
+
+            .header {
+                padding: 15px;
+                margin-bottom: 12px;
+            }
+
+            .header h1 {
+                font-size: 20px;
+            }
+
+            .header h1::after {
+                display: none;
+            }
+
+            .pilot-context-ribbon {
+                grid-template-columns: 1fr;
+                margin-top: 0;
+            }
+
+            .pilot-context-actions {
+                justify-content: flex-start;
+            }
+
+            .pilot-validation-summary {
+                grid-template-columns: 1fr 1fr;
+            }
+
+            .pilot-validation-lead {
+                grid-column: 1 / -1;
+            }
+
+            .pilot-paper-panel {
+                grid-template-columns: 1fr;
+            }
+
+            .pilot-mobile-nav {
+                position: fixed;
+                display: grid;
+                grid-template-columns: repeat(5, 1fr);
+                gap: 4px;
+                left: 10px;
+                right: 10px;
+                bottom: 10px;
+                z-index: 900;
+                padding: 6px;
+                border: 1px solid rgba(112, 225, 187, 0.2);
+                border-radius: 14px;
+                background: rgba(8, 17, 31, 0.92);
+                backdrop-filter: blur(16px);
+                box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+            }
+
+            .pilot-mobile-nav button {
+                min-height: 44px;
+                border: 0;
+                border-radius: 9px;
+                background: transparent;
+                color: var(--text-secondary);
+                font-size: 11px;
+                font-weight: 700;
+            }
+
+            .pilot-mobile-nav button.active {
+                background: rgba(112, 225, 187, 0.14);
+                color: var(--pilot-mint);
+            }
+
+            .tabs {
+                display: none;
+            }
+
+            .ai-hero {
+                grid-template-columns: 1fr;
+                padding: 18px;
+            }
+
+            .ai-policy-stamp {
+                justify-self: start;
+                text-align: left;
+            }
+
+            .ai-desk-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .ai-desk-column {
+                padding: 14px;
+            }
+        }
     </style>
-    <link rel="stylesheet" href="/ai-desk.css">
 </head>
 <body>
-    <div id="ai-desk-root"></div>
-
     <div class="container">
         <!-- Header -->
         <header class="header">
@@ -2465,6 +3127,18 @@
             </div>
         </header>
 
+        <section class="pilot-context-ribbon" aria-label="CoinPilot 실행 컨텍스트">
+            <div>
+                <div class="pilot-context-kicker">OVERSOLD REACTION / PAPER EDGE</div>
+                <div class="pilot-context-copy">실제 주문 전, 워크포워드 게이트를 통과한 마켓만 승격합니다. 현재 화면은 웹·모바일·설치앱에서 동일하게 동작합니다.</div>
+            </div>
+            <div class="pilot-context-actions">
+                <span id="pwaInstallState" class="badge badge-dry">브라우저 모드</span>
+                <button id="pwaInstallButton" class="btn btn-secondary btn-sm pilot-install-btn" hidden>앱으로 설치</button>
+                <button class="btn btn-secondary btn-sm" onclick="loadScalpingValidation()">검증 새로고침</button>
+            </div>
+        </section>
+
         <!-- Tab Navigation -->
         <div class="tabs">
             <button class="tab active" data-tab="overview">Overview</button>
@@ -2472,6 +3146,7 @@
             <button class="tab" data-tab="portfolio">Portfolio</button>
             <button class="tab" data-tab="market">Market</button>
             <button class="tab" data-tab="analysis">Analysis</button>
+            <button class="tab" data-tab="ai">AI Desk</button>
             <button class="tab" data-tab="news">News</button>
             <button class="tab" data-tab="parameters">Parameters</button>
             <button class="tab" data-tab="history">History</button>
@@ -2479,6 +3154,30 @@
 
         <!-- Overview Tab -->
         <div id="tab-overview" class="tab-content">
+            <div class="card pilot-validation-card" style="margin-bottom: 20px;">
+                <div class="card-header">
+                    <h2>🧪 실전 승격 게이트</h2>
+                    <span id="validationGeneratedAt" style="color: var(--text-muted); font-size: 11px;">검증 리포트 로딩 중</span>
+                </div>
+                <div class="card-body" id="scalpingValidationPanel">
+                    <div class="loading"><div class="spinner"></div>워크포워드 결과를 불러오는 중...</div>
+                </div>
+            </div>
+
+            <div class="card pilot-validation-card" style="margin-bottom: 20px;">
+                <div class="card-header">
+                    <h2>🧭 Forward Paper Session</h2>
+                    <span id="paperValidationUpdatedAt" style="color: var(--text-muted); font-size: 11px;">세션 없음</span>
+                </div>
+                <div class="card-body" id="paperValidationPanel">
+                    <div class="empty-state">기존 모의 포트폴리오를 자동 초기화하지 않았습니다. 깨끗한 paper 세션을 시작할 때만 아래 버튼을 사용하세요.</div>
+                    <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top: 12px;">
+                        <button class="btn btn-secondary btn-sm" onclick="startPaperValidationSession(false)">현재 상태 기준 세션 시작</button>
+                        <button class="btn btn-danger btn-sm" onclick="startPaperValidationSession(true)">새 시드로 초기화 후 시작</button>
+                    </div>
+                </div>
+            </div>
+
             <!-- 시스템 상태 & 오늘의 거래 요약 -->
             <div class="grid grid-2" style="margin-bottom: 20px;">
                 <!-- 시스템 상태 -->
@@ -2581,6 +3280,104 @@
                     </div>
                 </div>
             </div>
+        </div>
+
+        <!-- AI Desk Tab: subscription-backed, read-only decision consultation -->
+        <div id="tab-ai" class="tab-content" style="display: none;">
+            <section class="card ai-desk">
+                <div class="ai-hero">
+                    <div>
+                        <div class="ai-kicker">AI ADVISORY / LONG-RUN WATCH</div>
+                        <h2>판단이 필요한 순간만, 빠르게 자문</h2>
+                        <p>모니터링 이벤트를 고르고 GPT·Claude 구독 세션에 읽기 전용 자문을 요청합니다. 기존 설정값 기반 자동 매수·매도는 그대로 별도 실행됩니다.</p>
+                    </div>
+                    <div class="ai-policy-stamp">ADVISORY ONLY<br>NO ORDER ROUTING</div>
+                </div>
+
+                <div class="ai-desk-grid">
+                    <div class="ai-desk-column">
+                        <div class="ai-section-title">
+                            <span>연결 상태</span>
+                            <button class="btn btn-secondary btn-sm" onclick="loadAiDesk(true)">새로고침</button>
+                        </div>
+                        <div id="aiProviderStatus" class="ai-provider-grid">
+                            <div class="ai-empty" style="grid-column: 1 / -1;">provider 상태를 확인하는 중...</div>
+                        </div>
+
+                        <div class="ai-section-title">
+                            <span>장기 모니터링 세션</span>
+                            <small id="aiSessionCount">0 active</small>
+                        </div>
+                        <div id="aiSessionList" class="ai-session-list">
+                            <div class="ai-empty">아직 만든 모니터링 세션이 없습니다.</div>
+                        </div>
+
+                        <div class="ai-section-title" style="margin-top: 20px;">
+                            <span>새 세션 열기</span>
+                            <small>persistent</small>
+                        </div>
+                        <form class="ai-form" onsubmit="createAiMonitoringSession(event)">
+                            <div class="form-group">
+                                <label class="form-label" for="aiSessionName">세션 이름</label>
+                                <input id="aiSessionName" class="form-input" maxlength="80" placeholder="예: BTC 반등 감시" value="시장 이벤트 자문">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">자문 provider</label>
+                                <div class="ai-check-grid">
+                                    <label class="ai-check"><input type="checkbox" name="aiProvider" value="gpt" checked> GPT / Codex</label>
+                                    <label class="ai-check"><input type="checkbox" name="aiProvider" value="claude" checked> Claude</label>
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">감시할 이벤트</label>
+                                <div class="ai-check-grid">
+                                    <label class="ai-check"><input type="checkbox" name="aiEventType" value="BUY_SIGNAL" checked> 매수 신호</label>
+                                    <label class="ai-check"><input type="checkbox" name="aiEventType" value="SELL_SIGNAL" checked> 매도 신호</label>
+                                    <label class="ai-check"><input type="checkbox" name="aiEventType" value="REBOUND_CANDIDATE"> 반등 후보</label>
+                                    <label class="ai-check"><input type="checkbox" name="aiEventType" value="BREAKING_NEWS"> 속보</label>
+                                    <label class="ai-check"><input type="checkbox" name="aiEventType" value="BUNDLE_SUGGESTION"> 리밸런싱 제안</label>
+                                    <label class="ai-check"><input type="checkbox" name="aiEventType" value="TRADE_EXECUTED"> 체결 알림</label>
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label" for="aiSessionCoins">코인 필터 <span style="color: var(--text-muted);">(선택, BTC 또는 KRW-BTC 형식)</span></label>
+                                <input id="aiSessionCoins" class="form-input" placeholder="전체 코인 감시">
+                            </div>
+                            <div class="grid grid-2" style="gap: 10px; margin-bottom: 4px;">
+                                <div class="form-group" style="margin-bottom: 10px;">
+                                    <label class="form-label" for="aiCooldown">동일 이벤트 재자문 간격 (초)</label>
+                                    <input id="aiCooldown" class="form-input" type="number" min="30" max="86400" step="30" value="300">
+                                </div>
+                                <div class="form-group" style="margin-bottom: 10px;">
+                                    <label class="form-label" for="aiAutoConsult">자동 자문</label>
+                                    <label class="ai-check" style="height: 42px;"><input id="aiAutoConsult" type="checkbox" checked> 이벤트 발생 시 즉시 요청</label>
+                                </div>
+                            </div>
+                            <button class="btn btn-primary" type="submit" style="width: 100%;">장기 모니터링 시작</button>
+                            <div class="ai-inline-note">세션은 JSON 기록으로 재시작 후에도 보존됩니다. 자동 자문은 선택한 이벤트와 cooldown 안에서만 실행됩니다.</div>
+                        </form>
+                    </div>
+
+                    <div class="ai-desk-column">
+                        <div class="ai-section-title">
+                            <span>실시간 이벤트</span>
+                            <small id="aiLatestSnapshotAt">waiting for snapshot</small>
+                        </div>
+                        <div id="aiEventList" class="ai-event-list">
+                            <div class="ai-empty">자동매매 루프가 분석을 완료하면 매수·매도 이벤트가 여기에 표시됩니다.</div>
+                        </div>
+                        <div class="ai-inline-note">이벤트 카드를 누르면 선택한 provider에 수동으로 자문을 요청할 수 있습니다.</div>
+
+                        <div class="ai-section-title" style="margin-top: 22px;">
+                            <span>AI 자문 결과</span>
+                            <small id="aiConsultationCount">0 consultations</small>
+                        </div>
+                        <div id="aiConsultationList" class="ai-consultation-list">
+                            <div class="ai-empty">아직 자문 결과가 없습니다.</div>
+                        </div>
+                    </div>
+                </div>
+            </section>
         </div>
 
         <!-- Trading Tab (수동 매매) -->
@@ -3350,6 +4147,12 @@
         </div>
     </div>
 
+    <!-- Signal Ledger redesign shell. The legacy dashboard remains in the DOM as a
+         compatibility layer for its existing data loaders and is visually hidden
+         by pilot-redesign.css. -->
+    <div id="pilot-redesign-root"></div>
+    <script>window.__PILOT_REDESIGN__ = true;</script>
+
     <!-- Accept Modal (추천 수락용) -->
     <div class="modal-overlay" id="acceptModal">
         <div class="modal">
@@ -3584,6 +4387,14 @@
         </div>
     </div>
 
+    <nav class="pilot-mobile-nav" aria-label="모바일 빠른 메뉴">
+        <button data-mobile-tab="overview" class="active">상태</button>
+        <button data-mobile-tab="trading">거래</button>
+        <button data-mobile-tab="portfolio">자산</button>
+        <button data-mobile-tab="analysis">신호</button>
+        <button data-mobile-tab="ai">AI</button>
+    </nav>
+
     <!-- Toast Container -->
     <div class="toast-container" id="toastContainer"></div>
 
@@ -3600,6 +4411,61 @@
         const COIN_ANALYSIS_INTERVAL = 60000; // 1분
         let socket = null;
         let notificationQueue = [];
+        let deferredInstallPrompt = null;
+        let aiEvents = [];
+        let aiConsultations = [];
+        let aiSessions = [];
+        let aiDeskLoading = false;
+
+        function initProgressiveInstall() {
+            const installButton = document.getElementById('pwaInstallButton');
+            const installState = document.getElementById('pwaInstallState');
+            const isStandalone = window.matchMedia?.('(display-mode: standalone)').matches || window.navigator.standalone;
+
+            if (isStandalone) {
+                if (installState) {
+                    installState.textContent = '설치앱 모드';
+                    installState.className = 'badge badge-running';
+                }
+            }
+
+            if ('serviceWorker' in navigator) {
+                navigator.serviceWorker.register('/sw.js').catch(error => {
+                    console.warn('PWA service worker 등록 실패:', error.message);
+                });
+            }
+
+            window.addEventListener('beforeinstallprompt', event => {
+                event.preventDefault();
+                deferredInstallPrompt = event;
+                if (installButton) installButton.hidden = false;
+                if (installState && !isStandalone) {
+                    installState.textContent = '설치 가능';
+                    installState.className = 'badge badge-buy';
+                }
+            });
+
+            window.addEventListener('appinstalled', () => {
+                deferredInstallPrompt = null;
+                if (installButton) installButton.hidden = true;
+                if (installState) {
+                    installState.textContent = '설치앱 모드';
+                    installState.className = 'badge badge-running';
+                }
+                showToast('CoinPilot 설치가 완료되었습니다', 'success');
+            });
+
+            installButton?.addEventListener('click', async () => {
+                if (!deferredInstallPrompt) {
+                    showToast('브라우저 메뉴에서 홈 화면/앱 설치를 선택해주세요', 'info');
+                    return;
+                }
+                deferredInstallPrompt.prompt();
+                await deferredInstallPrompt.userChoice;
+                deferredInstallPrompt = null;
+                installButton.hidden = true;
+            });
+        }
 
         // ===== Socket.io 실시간 알림 시스템 =====
         function initializeSocket() {
@@ -3633,6 +4499,17 @@
                 socket.on('auto-trade', (data) => {
                     console.log('🤖 자동매매 알림:', data);
                     showAutoTradeNotification(data.trade);
+                });
+
+                // AI monitoring event / consultation updates
+                socket.on('ai-monitoring-event', (data) => {
+                    if (data?.event) handleAiMonitoringEvent(data.event);
+                });
+                socket.on('ai-consultation', (data) => {
+                    if (data?.consultation) handleAiConsultationUpdate(data.consultation);
+                });
+                socket.on('ai-session-update', (data) => {
+                    if (data?.session) handleAiSessionUpdate(data.session);
                 });
 
             } catch (error) {
@@ -3856,7 +4733,7 @@
         }
 
         // 페이지 로드 시 Socket.io 초기화
-        if (typeof io !== 'undefined') {
+        if (!document.getElementById('pilot-redesign-root') && typeof io !== 'undefined') {
             initializeSocket();
         }
 
@@ -3882,6 +4759,9 @@
                 const tabId = 'tab-' + tabName;
                 document.getElementById(tabId).style.display = 'block';
                 localStorage.setItem('currentTab', tabName);
+                document.querySelectorAll('[data-mobile-tab]').forEach(button => {
+                    button.classList.toggle('active', button.dataset.mobileTab === tabName);
+                });
 
                 // Load tab-specific data
                 if (tabName === 'market') {
@@ -3895,6 +4775,8 @@
                 } else if (tabName === 'analysis') {
                     loadCoinAnalysis();
                     lastCoinAnalysisTime = Date.now(); // 탭 전환 시 즉시 로드
+                } else if (tabName === 'ai') {
+                    loadAiDesk(true);
                 } else if (tabName === 'news') {
                     loadNews();
                 } else if (tabName === 'trading') {
@@ -3937,6 +4819,10 @@
             });
         });
 
+        document.querySelectorAll('[data-mobile-tab]').forEach(button => {
+            button.addEventListener('click', () => switchToTab(button.dataset.mobileTab));
+        });
+
         // 저장된 탭 복원
         const savedTab = localStorage.getItem('currentTab');
         if (savedTab) {
@@ -3952,6 +4838,513 @@
             } catch (error) {
                 console.error(`API Error (${endpoint}):`, error);
                 return null;
+            }
+        }
+
+        // ===== AI Desk / 장기 모니터링 =====
+        const AI_EVENT_LABELS = {
+            BUY_SIGNAL: '매수 신호',
+            SELL_SIGNAL: '매도 신호',
+            REBOUND_CANDIDATE: '반등 후보',
+            BREAKING_NEWS: '속보',
+            BUNDLE_SUGGESTION: '리밸런싱 제안',
+            TRADE_EXECUTED: '체결 알림'
+        };
+
+        function aiProviderLabel(provider) {
+            return provider === 'gpt' ? 'GPT / Codex' : provider === 'claude' ? 'Claude' : String(provider || '-');
+        }
+
+        function aiTime(value) {
+            if (!value) return '-';
+            const date = new Date(value);
+            return Number.isNaN(date.getTime()) ? '-' : date.toLocaleString('ko-KR', {
+                month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit'
+            });
+        }
+
+        function renderAiProviders(status) {
+            const container = document.getElementById('aiProviderStatus');
+            if (!container) return;
+            if (!status?.providers?.length) {
+                container.innerHTML = '<div class="ai-empty" style="grid-column: 1 / -1;">provider 상태를 불러오지 못했습니다.</div>';
+                return;
+            }
+
+            container.innerHTML = status.providers.map(provider => {
+                const stateClass = provider.ready ? 'ready' : provider.status === 'NOT_AUTHENTICATED' ? 'warn' : 'error';
+                const stateText = provider.ready ? 'READY' : provider.status === 'NOT_AUTHENTICATED' ? 'LOGIN NEEDED' : provider.status || 'UNAVAILABLE';
+                return `
+                    <div class="ai-provider-card">
+                        <div class="ai-provider-head">
+                            <span class="ai-provider-name">${escapeHtml(provider.label || aiProviderLabel(provider.id))}</span>
+                            <span class="ai-provider-state ${stateClass}">${escapeHtml(stateText)}</span>
+                        </div>
+                        <div class="ai-provider-detail">${escapeHtml(provider.detail || provider.subscriptionLabel || '')}</div>
+                        <div style="color: var(--text-muted); font: 10px/1.3 'SFMono-Regular', Consolas, monospace;">${provider.ready ? 'subscription session' : 'check local CLI login'}</div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function renderAiSessions(sessions) {
+            const container = document.getElementById('aiSessionList');
+            const count = document.getElementById('aiSessionCount');
+            if (!container) return;
+            const activeCount = (sessions || []).filter(session => session.status === 'RUNNING').length;
+            if (count) count.textContent = `${activeCount} active / ${(sessions || []).length} total`;
+            if (!sessions?.length) {
+                container.innerHTML = '<div class="ai-empty">아직 만든 모니터링 세션이 없습니다.</div>';
+                return;
+            }
+
+            container.innerHTML = sessions.map(session => {
+                const statusClass = String(session.status || '').toLowerCase();
+                const statusLabel = session.status === 'RUNNING' ? 'RUNNING' : session.status === 'PAUSED' ? 'PAUSED' : 'STOPPED';
+                const eventLabels = (session.eventTypes || []).map(type => AI_EVENT_LABELS[type] || type).join(' · ');
+                const providerLabels = (session.providers || []).map(aiProviderLabel).join(' + ');
+                const coinText = session.coins?.length ? session.coins.map(coin => coin.replace('KRW-', '')).join(', ') : '전체 코인';
+                const actions = session.status === 'RUNNING'
+                    ? `<button class="btn btn-secondary" onclick="updateAiSession('${session.id}', 'pause')">일시정지</button><button class="btn btn-danger" onclick="updateAiSession('${session.id}', 'stop')">종료</button>`
+                    : session.status === 'PAUSED'
+                        ? `<button class="btn btn-secondary" onclick="updateAiSession('${session.id}', 'resume')">재개</button><button class="btn btn-danger" onclick="updateAiSession('${session.id}', 'stop')">종료</button>`
+                        : '';
+                return `
+                    <div class="ai-session-card ${statusClass}">
+                        <div class="ai-session-head">
+                            <span class="ai-session-name">${escapeHtml(session.name)}</span>
+                            <span class="ai-provider-state ${statusClass === 'stopped' ? 'error' : statusClass === 'paused' ? 'warn' : 'ready'}">${statusLabel}</span>
+                        </div>
+                        <div class="ai-session-meta">${escapeHtml(providerLabels)}<br>${escapeHtml(eventLabels)}<br>${escapeHtml(coinText)} · 이벤트 ${session.eventCount || 0} · 자문 ${session.consultationCount || 0}</div>
+                        <div class="ai-session-meta">시작 ${aiTime(session.startedAt)} · 마지막 이벤트 ${aiTime(session.lastEventAt)}</div>
+                        <div class="ai-session-actions">${actions}</div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function renderAiEvents(events) {
+            const container = document.getElementById('aiEventList');
+            if (!container) return;
+            if (!events?.length) {
+                container.innerHTML = '<div class="ai-empty">자동매매 루프가 분석을 완료하면 매수·매도 이벤트가 여기에 표시됩니다.</div>';
+                return;
+            }
+
+            container.innerHTML = events.slice(0, 40).map(event => {
+                const typeClass = event.type === 'SELL_SIGNAL' ? 'sell' : event.type === 'BREAKING_NEWS' ? 'news' : 'buy';
+                const eventLabel = AI_EVENT_LABELS[event.type] || event.type;
+                const coin = event.coin ? event.coin.replace('KRW-', '') : 'MARKET';
+                const price = event.price === null || event.price === undefined ? '-' : `${formatNumber(event.price)}원`;
+                return `
+                    <div class="ai-event-card ${typeClass}">
+                        <div class="ai-event-head">
+                            <span class="ai-event-title">${escapeHtml(coin)} · ${escapeHtml(eventLabel)}</span>
+                            <span class="ai-event-action">${escapeHtml(event.action || 'WAIT')}</span>
+                        </div>
+                        <div class="ai-event-meta">${escapeHtml(aiTime(event.timestamp))} · ${escapeHtml(price)}${event.signalStrength ? ` · ${escapeHtml(event.signalStrength)}` : ''}<br>${escapeHtml(event.reason || event.snapshot?.title || '관찰 이벤트')}</div>
+                        <div class="ai-event-ask"><button class="btn btn-secondary btn-sm" onclick="requestAiConsultation('${event.id}')">이 이벤트 자문</button></div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function renderAiConsultations(consultations) {
+            const container = document.getElementById('aiConsultationList');
+            const count = document.getElementById('aiConsultationCount');
+            if (!container) return;
+            if (count) count.textContent = `${(consultations || []).length} consultations`;
+            if (!consultations?.length) {
+                container.innerHTML = '<div class="ai-empty">아직 자문 결과가 없습니다.</div>';
+                return;
+            }
+
+            container.innerHTML = consultations.slice(0, 40).map(consultation => {
+                const stateClass = consultation.status === 'COMPLETED' ? 'completed' : consultation.status === 'RUNNING' ? '' : 'failed';
+                const event = consultation.event || {};
+                const coin = event.coin ? event.coin.replace('KRW-', '') : 'MARKET';
+                const resultHtml = (consultation.results || []).map(result => {
+                    if (result.status !== 'COMPLETED' || !result.advice) {
+                        return `<div class="ai-consultation-result"><span style="color: var(--ai-red);">${escapeHtml(aiProviderLabel(result.provider))}: ${escapeHtml(result.error || '응답 실패')}</span></div>`;
+                    }
+                    const advice = result.advice;
+                    const actionClass = advice.action === 'SELL' ? 'sell' : ['HOLD', 'WAIT'].includes(advice.action) ? 'wait' : '';
+                    const risks = (advice.risks || []).map(risk => `<li>${escapeHtml(risk)}</li>`).join('');
+                    return `
+                        <div class="ai-advice-grid">
+                            <div class="ai-advice-action ${actionClass}">${escapeHtml(advice.action)}<br><small>${advice.confidence}%</small></div>
+                            <div class="ai-consultation-result"><strong>${escapeHtml(aiProviderLabel(result.provider))}</strong> · ${escapeHtml(advice.horizon || '')}<br>${escapeHtml(advice.rationale || '')}${risks ? `<ul class="ai-risk-list">${risks}</ul>` : ''}<div class="ai-consultation-meta">무효화 조건: ${escapeHtml(advice.invalidation || '추가 확인 필요')}</div></div>
+                        </div>
+                    `;
+                }).join('');
+                const failure = consultation.error ? `<div class="ai-consultation-result" style="color: var(--ai-red);">${escapeHtml(consultation.error)}</div>` : '';
+                const pending = consultation.status === 'RUNNING' ? '<div class="ai-consultation-result">응답을 기다리는 중…</div>' : '';
+                return `
+                    <div class="ai-consultation-card ${stateClass}">
+                        <div class="ai-consultation-head"><span class="ai-event-title">${escapeHtml(coin)} · ${escapeHtml((event.type && AI_EVENT_LABELS[event.type]) || event.type || '자문')}</span><span class="ai-provider-state ${stateClass === 'completed' ? 'ready' : stateClass === 'failed' ? 'error' : 'warn'}">${escapeHtml(consultation.status || '-')}</span></div>
+                        <div class="ai-consultation-meta">${escapeHtml(aiTime(consultation.createdAt))} · ${(consultation.providerSelection || []).map(aiProviderLabel).map(escapeHtml).join(' + ')}${consultation.auto ? ' · 자동 자문' : ' · 수동 자문'}</div>
+                        ${resultHtml || pending || failure}
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function renderAiSnapshot(snapshot) {
+            if (!snapshot) return;
+            aiSessions = snapshot.sessions || [];
+            aiEvents = snapshot.events || [];
+            aiConsultations = snapshot.consultations || [];
+            renderAiSessions(aiSessions);
+            renderAiEvents(aiEvents);
+            renderAiConsultations(aiConsultations);
+            const latestAt = document.getElementById('aiLatestSnapshotAt');
+            if (latestAt) latestAt.textContent = snapshot.latestSnapshot?.timestamp ? `last ${aiTime(snapshot.latestSnapshot.timestamp)}` : 'no snapshot';
+        }
+
+        async function loadAiDesk(force = false) {
+            if (aiDeskLoading) return;
+            aiDeskLoading = true;
+            try {
+                const providerEndpoint = force ? '/ai/providers?refresh=true' : '/ai/providers';
+                const [providerStatus, snapshot] = await Promise.all([
+                    fetchAPI(providerEndpoint),
+                    fetchAPI('/ai/monitoring?limit=40')
+                ]);
+                renderAiProviders(providerStatus);
+                renderAiSnapshot(snapshot);
+            } finally {
+                aiDeskLoading = false;
+            }
+        }
+
+        async function createAiMonitoringSession(event) {
+            event.preventDefault();
+            const providers = [...document.querySelectorAll('input[name="aiProvider"]:checked')].map(input => input.value);
+            const eventTypes = [...document.querySelectorAll('input[name="aiEventType"]:checked')].map(input => input.value);
+            if (!providers.length || !eventTypes.length) {
+                showToast('provider와 감시 이벤트를 하나 이상 선택해주세요', 'warning');
+                return;
+            }
+            const result = await fetchAPI('/ai/sessions', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    name: document.getElementById('aiSessionName')?.value,
+                    providers,
+                    eventTypes,
+                    coins: document.getElementById('aiSessionCoins')?.value || '',
+                    cooldownSeconds: Number(document.getElementById('aiCooldown')?.value) || 300,
+                    autoConsult: document.getElementById('aiAutoConsult')?.checked !== false
+                })
+            });
+            if (!result?.success) {
+                showToast('AI session 시작 실패: ' + (result?.error || '서버 오류'), 'error');
+                return;
+            }
+            showToast('장기 AI 모니터링 세션을 시작했습니다', 'success');
+            await loadAiDesk(false);
+        }
+
+        async function updateAiSession(sessionId, action) {
+            const result = await fetchAPI(`/ai/sessions/${sessionId}/${action}`, { method: 'POST' });
+            if (!result?.success) {
+                showToast('session 상태 변경 실패: ' + (result?.error || '서버 오류'), 'error');
+                return;
+            }
+            showToast(action === 'stop' ? 'AI 모니터링 세션을 종료했습니다' : `session을 ${action === 'pause' ? '일시정지' : '재개'}했습니다`, 'success');
+            await loadAiDesk(false);
+        }
+
+        async function requestAiConsultation(eventId) {
+            const providers = [...document.querySelectorAll('input[name="aiProvider"]:checked')].map(input => input.value);
+            const provider = providers.length === 2 ? 'both' : providers[0] || 'both';
+            showToast('AI 자문 요청 중…', 'info');
+            const result = await fetchAPI('/ai/consult', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ eventId, provider })
+            });
+            if (!result?.consultation) {
+                showToast('AI 자문 요청 실패: ' + (result?.error || '서버 오류'), 'error');
+                return;
+            }
+            handleAiConsultationUpdate(result.consultation);
+            showToast(result.consultation.status === 'COMPLETED' ? 'AI 자문 결과를 받았습니다' : 'AI 자문이 완료되지 않았습니다', result.consultation.status === 'COMPLETED' ? 'success' : 'error');
+        }
+
+        function handleAiMonitoringEvent(event) {
+            aiEvents = [event, ...aiEvents.filter(item => item.id !== event.id)].slice(0, 80);
+            if (localStorage.getItem('currentTab') === 'ai') renderAiEvents(aiEvents);
+            if (['BUY_SIGNAL', 'SELL_SIGNAL'].includes(event.type)) {
+                showToast(`AI Desk 이벤트 · ${event.coin?.replace('KRW-', '') || 'MARKET'} ${AI_EVENT_LABELS[event.type]}`, event.type === 'SELL_SIGNAL' ? 'error' : 'info', 4000);
+            }
+        }
+
+        function handleAiConsultationUpdate(consultation) {
+            aiConsultations = [consultation, ...aiConsultations.filter(item => item.id !== consultation.id)].slice(0, 80);
+            if (localStorage.getItem('currentTab') === 'ai') renderAiConsultations(aiConsultations);
+        }
+
+        function handleAiSessionUpdate(session) {
+            aiSessions = [session, ...aiSessions.filter(item => item.id !== session.id)].sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+            if (localStorage.getItem('currentTab') === 'ai') renderAiSessions(aiSessions);
+        }
+
+        function renderScalpingValidation(report) {
+            const panel = document.getElementById('scalpingValidationPanel');
+            const generatedAt = document.getElementById('validationGeneratedAt');
+            if (!panel) return;
+
+            if (!report?.available) {
+                if (generatedAt) generatedAt.textContent = '리포트 없음';
+                panel.innerHTML = `
+                    <div class="empty-state">
+                        아직 읽기 전용 워크포워드 리포트가 없습니다.<br>
+                        <code>npm run validate:scalping</code> 실행 후 이 화면에서 결과를 확인하세요.
+                    </div>
+                `;
+                return;
+            }
+
+            const promotedMarkets = report.promotedMarkets || [];
+            const results = report.results || [];
+            const validationCount = results.filter(result => result.validation?.validation).length;
+            const stateClass = report.promoted ? 'pass' : '';
+            const stateText = report.promoted ? '전체 마켓 승격 가능' : '전체 승격 보류';
+            const generated = report.generatedAt ? new Date(report.generatedAt).toLocaleString('ko-KR') : '-';
+            const validationMode = report.validationMode === 'fixed_config'
+                ? '현재 설정 고정 검증'
+                : '학습 구간 튜닝 검증';
+            if (generatedAt) generatedAt.textContent = `${generated} · ${report.candleCount || '-'}개 캔들 · ${validationMode}`;
+
+            const marketHtml = results.map(result => {
+                const metrics = result.validation?.validation;
+                const passed = result.validation?.promoted;
+                if (!metrics) {
+                    return `<div class="pilot-validation-market fail"><div class="pilot-validation-market-head"><span>${result.market}</span><span>데이터 부족</span></div><div class="pilot-validation-market-detail">${result.error || result.validation?.reason || '-'}</div></div>`;
+                }
+                const pf = Number.isFinite(metrics.profitFactor) ? metrics.profitFactor.toFixed(2) : '∞';
+                const training = result.validation?.tuning?.metrics;
+                const trainingPf = Number.isFinite(training?.profitFactor) ? training.profitFactor.toFixed(2) : '∞';
+                const gateReason = result.validation?.reason || (passed ? 'walk_forward_gate_passed' : 'walk_forward_gate_failed');
+                const topTrainingRejection = Object.entries(training?.rejectionCounts || {})
+                    .sort((a, b) => b[1] - a[1])[0];
+                const topHoldoutRejection = Object.entries(metrics.rejectionCounts || {})
+                    .sort((a, b) => b[1] - a[1])[0];
+                const rejectionSummary = topTrainingRejection || topHoldoutRejection
+                    ? `학습 ${topTrainingRejection?.[0] || '-'} ${topTrainingRejection?.[1] || 0}회 · holdout ${topHoldoutRejection?.[0] || '-'} ${topHoldoutRejection?.[1] || 0}회`
+                    : '거절 telemetry 없음';
+                return `
+                    <div class="pilot-validation-market ${passed ? 'pass' : 'fail'}">
+                        <div class="pilot-validation-market-head"><span>${result.market}</span><span>${passed ? 'PASS' : 'HOLD'}</span></div>
+                        <div class="pilot-validation-market-detail">
+                            검증 수익률 ${formatPercent(metrics.totalReturnPercent)}% · 거래 ${metrics.tradeCount}회<br>
+                            승률 ${formatPercent(metrics.winRate)}% · PF ${pf} · MDD ${formatPercent(metrics.maxDrawdownPercent)}%<br>
+                            학습 수익률 ${formatPercent(training?.totalReturnPercent)}% · 학습 거래 ${training?.tradeCount || 0}회 · 학습 PF ${trainingPf}<br>
+                            주요 거절: ${rejectionSummary}<br>
+                            판정 사유 ${gateReason}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            panel.innerHTML = `
+                <div class="pilot-validation-summary">
+                    <div class="pilot-validation-lead">
+                        <div class="pilot-validation-state ${stateClass}">${stateText}</div>
+                        <div class="pilot-validation-meta">실전 주문은 이 리포트의 PASS 여부와 별개로 DRY_RUN에서 먼저 확인해야 합니다.</div>
+                    </div>
+                    <div class="pilot-validation-stat"><div class="pilot-validation-stat-value">${promotedMarkets.length}/${results.length}</div><div class="pilot-validation-stat-label">승격 마켓</div></div>
+                    <div class="pilot-validation-stat"><div class="pilot-validation-stat-value">${validationCount}</div><div class="pilot-validation-stat-label">검증 완료</div></div>
+                    <div class="pilot-validation-stat"><div class="pilot-validation-stat-value">${report.candleUnit || 1}분</div><div class="pilot-validation-stat-label">캔들 단위</div></div>
+                </div>
+                <div class="pilot-validation-markets">${marketHtml || '<div class="empty-state">마켓 결과 없음</div>'}</div>
+            `;
+        }
+
+        async function loadScalpingValidation() {
+            const report = await fetchAPI('/scalping-validation');
+            renderScalpingValidation(report);
+        }
+
+        function renderPaperValidation(status) {
+            const panel = document.getElementById('paperValidationPanel');
+            const updatedAt = document.getElementById('paperValidationUpdatedAt');
+            if (!panel) return;
+
+            if (!status?.available) {
+                if (updatedAt) updatedAt.textContent = '세션 없음';
+                panel.innerHTML = `
+                    <div class="empty-state">forward paper 세션이 없습니다. 기존 dry_portfolio는 자동 초기화하지 않았습니다.</div>
+                    <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top: 12px;">
+                        <button class="btn btn-secondary btn-sm" onclick="startPaperValidationSession(false)">현재 상태 기준 세션 시작</button>
+                        <button class="btn btn-danger btn-sm" onclick="startPaperValidationSession(true)">새 시드로 초기화 후 시작</button>
+                    </div>
+                `;
+                return;
+            }
+
+            const state = status.state || (status.active ? 'RUNNING' : 'STOPPED');
+            const stateClass = state === 'PASS' ? 'pass' : state === 'RUNNING' ? 'running' : 'stopped';
+            const stateText = state === 'PASS' ? 'PAPER PASS' : state === 'RUNNING' ? 'PAPER 관찰 중' : 'PAPER 중지';
+            const startedAt = status.startedAt ? new Date(status.startedAt).toLocaleString('ko-KR') : '-';
+            const telemetry = status.telemetry || {};
+            const strictEvaluation = status.strictEvaluation || {};
+            const lossCircuitBreaker = status.lossCircuitBreaker || strictEvaluation.lossCircuitBreaker || {};
+            const signalWindow = status.signalWindow || {};
+            const marketRegimeEnabled = status.configSnapshot?.marketRegimeEnabled === true;
+            const lastMarketRegime = telemetry.lastMarketRegime || null;
+            const requestStats = telemetry.requestStats || {};
+            const candleFreshness = status.candleFreshness || {};
+            const candleDataQuality = status.candleDataQuality || {};
+            const insufficientCandleEntry = Object.entries(candleDataQuality.insufficientByCoin || {})
+                .sort((a, b) => (Number(b[1]?.count) || 0) - (Number(a[1]?.count) || 0))[0];
+            const insufficientCandleText = insufficientCandleEntry
+                ? `${insufficientCandleEntry[0]} (${insufficientCandleEntry[1].count}회 · 최근 ${insufficientCandleEntry[1].lastReceivedCount}/${insufficientCandleEntry[1].requiredCount}개)`
+                : '없음';
+            const freshnessReasonEntry = Object.entries(candleFreshness.blockReasons || {})
+                .sort((a, b) => b[1] - a[1])[0];
+            const freshnessReason = freshnessReasonEntry
+                ? `${freshnessReasonEntry[0]} (${freshnessReasonEntry[1]}회)`
+                : '없음';
+            const lastFreshnessBlock = candleFreshness.lastBlock || null;
+            const freshnessAgeStats = candleFreshness.ageStats || {};
+            const freshnessAgeStatsText = freshnessAgeStats.sampleCount
+                ? ` · 표본 ${freshnessAgeStats.sampleCount}회 · 평균 age ${freshnessAgeStats.averageAgeSeconds !== null && freshnessAgeStats.averageAgeSeconds !== undefined ? formatNumber(freshnessAgeStats.averageAgeSeconds) + '초' : '확인 불가'} · 최대 ${freshnessAgeStats.maxObservedAgeSeconds !== null && freshnessAgeStats.maxObservedAgeSeconds !== undefined ? formatNumber(freshnessAgeStats.maxObservedAgeSeconds) + '초' : '확인 불가'}`
+                : '';
+            const freshnessCoinEntry = Object.entries(candleFreshness.blockedByCoin || {})
+                .map(([coin, blocked]) => ({
+                    coin,
+                    blocked: Number(blocked) || 0,
+                    observed: Number(candleFreshness.observedByCoin?.[coin]) || 0
+                }))
+                .sort((a, b) => b.blocked - a.blocked)[0];
+            const freshnessCoinText = freshnessCoinEntry
+                ? ` · 주요 마켓 ${freshnessCoinEntry.coin} (${freshnessCoinEntry.blocked}/${freshnessCoinEntry.observed || '?'}회 · ${freshnessCoinEntry.observed > 0 ? formatPercent((freshnessCoinEntry.blocked / freshnessCoinEntry.observed) * 100) + '%' : '비율 확인 불가'})`
+                : '';
+            const freshnessMarketSummary = Object.entries(candleFreshness.blockedByCoin || {})
+                .map(([coin, blocked]) => {
+                    const observed = Number(candleFreshness.observedByCoin?.[coin]) || 0;
+                    const staleRate = observed > 0 ? (Number(blocked) || 0) / observed * 100 : null;
+                    return { coin, blocked: Number(blocked) || 0, observed, staleRate };
+                })
+                .sort((a, b) => b.blocked - a.blocked || (b.staleRate || 0) - (a.staleRate || 0))
+                .slice(0, 5)
+                .map(item => `${item.coin} ${item.blocked}/${item.observed || '?'}${item.staleRate !== null ? ` (${formatPercent(item.staleRate)}%)` : ''}`)
+                .join(' · ') || '없음';
+            const freshnessDetail = lastFreshnessBlock
+                ? `${freshnessReason} · 마지막 age ${lastFreshnessBlock.ageSeconds !== null && lastFreshnessBlock.ageSeconds !== undefined ? formatNumber(lastFreshnessBlock.ageSeconds) + '초' : '확인 불가'}${freshnessAgeStatsText}${freshnessCoinText}`
+                : `${freshnessReason}${freshnessAgeStatsText}${freshnessCoinText}`;
+            const shadowEvaluation = status.shadowEvaluation || {};
+            const looseShadowEvaluation = status.looseShadowEvaluation || {};
+            const topReasonEntry = Object.entries(telemetry.reasonCounts || {})
+                .sort((a, b) => b[1] - a[1])[0];
+            const topReason = topReasonEntry
+                ? `${topReasonEntry[0]} (${topReasonEntry[1]}회)`
+                : '아직 없음';
+            const topRejectionEntry = Object.entries(telemetry.rejectionCounts || {})
+                .sort((a, b) => b[1] - a[1])[0];
+            const topRejection = topRejectionEntry
+                ? `${topRejectionEntry[0]} (${topRejectionEntry[1]}회)`
+                : '아직 없음';
+            const topRejectionOutcome = shadowEvaluation.rejectionOutcomes?.[0];
+            const rejectionOutcomeText = topRejectionOutcome
+                ? `${topRejectionOutcome.reason}: ${topRejectionOutcome.tradeCount}회 · 손익 ${formatProfit(topRejectionOutcome.netProfit)} · 승률 ${formatPercent(topRejectionOutcome.winRate)}%`
+                : '아직 청산된 거절 후보 없음';
+            const starvationHtml = status.filterStarvation
+                ? `<div style="margin-top:6px; color:var(--accent-yellow);">⚠️ 필터 고착 경고: ${status.suggestedAdjustments?.join(' · ') || '별도 홀드아웃 검증 필요'}</div>`
+                : '';
+            const continuityHtml = status.continuityEligible === false
+                ? `<div style="margin-top:6px; color:var(--accent-red);">⚠️ 연속 관찰 게이트 보류: ${formatPercent(status.maxInterruptionMinutes || 0)}분 공백 기록</div>`
+                : '';
+            const storage = status.storage || {};
+            const storageHtml = storage.available && storage.healthy === false
+                ? `<div style="margin-top:6px; color:var(--accent-red);">⚠️ 저장공간 부족: ${formatPercent(storage.availableMiB || 0)}MiB 남음 · 최소 ${formatPercent(storage.minimumMiB || 128)}MiB 필요</div>`
+                : '';
+            const configHtml = status.configSnapshotComplete !== true
+                ? '<div style="margin-top:6px; color:var(--accent-red);">⚠️ 전략 설정 snapshot이 없어 전체 세션 재현성을 확인할 수 없습니다. 승격 보류</div>'
+                    : status.configConsistent === false
+                        ? `<div style="margin-top:6px; color:var(--accent-red);">⚠️ 전략 설정 drift 감지: ${(status.configDrift || []).join(', ') || '확인 필요'} · 승격 보류</div>`
+                        : '';
+            const circuitHtml = lossCircuitBreaker.enabled && lossCircuitBreaker.coolingDown
+                ? `<div style="margin-top:6px; color:var(--accent-red);">🛑 전역 손실 회로차단기 발동: ${lossCircuitBreaker.lossCount || 0}/${lossCircuitBreaker.maxLosses || 0}회 · ${Math.ceil((lossCircuitBreaker.cooldownRemainingMs || 0) / 60000)}분 후 신규 진입 재개 예정</div>`
+                : lossCircuitBreaker.enabled
+                    ? `<div style="margin-top:6px; color:var(--accent-yellow);">🧯 전역 손실 회로차단기 대기: 최근 ${lossCircuitBreaker.lossCount || 0}/${lossCircuitBreaker.maxLosses || 0}회 · ${lossCircuitBreaker.windowMinutes || 0}분 창</div>`
+                    : '<div style="margin-top:6px; color:var(--text-secondary);">🧯 전역 손실 회로차단기: 비활성화</div>';
+            const unsettledHtml = status.endedWithOpenPositions
+                ? `<div style="margin-top:6px; color:var(--accent-red);">⚠️ 미청산 strict 포지션을 남긴 세션입니다. 같은 ledger에서 새 세션을 시작하려면 reset 또는 명시적 resume 허가가 필요합니다.</div>`
+                : '';
+            if (updatedAt) updatedAt.textContent = `${startedAt} 시작`;
+
+            panel.innerHTML = `
+                <div class="pilot-paper-panel">
+                    <div>
+                        <div class="pilot-paper-state ${stateClass}">${stateText}</div>
+                        <div class="pilot-paper-meta">
+                            경과 ${formatPercent(status.elapsedDays)}일 · 자산 ${formatNumber(status.currentAssets)}원 · 수익률 ${formatChange(status.returnPercent)}<br>
+                            청산 거래 ${status.closedTradeCount || 0}회 · 실현손익 ${formatProfit(status.realizedProfit)} · MDD ${formatPercent(status.maxDrawdownPercent)}%<br>
+                            strict 현재 포지션 ${strictEvaluation.activePositions || 0}개 · ${strictEvaluation.positions?.map(position => `${position.coin} @ ${formatNumber(position.entryPrice)}원${position.entryDelayMs !== null && position.entryDelayMs !== undefined ? ` · 지연 ${formatNumber(position.entryDelayMs)}ms` : ''}${position.executionDriftPercent !== null && position.executionDriftPercent !== undefined ? ` · drift ${formatChange(position.executionDriftPercent)}` : ''}${position.breakEvenArmed ? ' · BE armed' : ''}${position.trailingArmed ? ' · trailing armed' : ''}`).join(', ') || '없음'}<br>
+                            전역 손실 회로: ${lossCircuitBreaker.enabled ? `${lossCircuitBreaker.lossCount || 0}/${lossCircuitBreaker.maxLosses || 0}회 · ${lossCircuitBreaker.windowMinutes || 0}분 창 · ${lossCircuitBreaker.cooldownMinutes || 0}분 차단` : '비활성화'} · 차단된 strict 진입 ${telemetry.circuitBlockedEntries || 0}회<br>
+                            동일 신호창 진입 상한: ${signalWindow.enabled ? `${signalWindow.maxEntriesPerSignalWindow}개 · 마지막 ${signalWindow.lastEntryCount || 0}개 기록 · 차단 ${signalWindow.blockedEntries || 0}회` : '비활성화'}<br>
+                            시장 regime gate: ${marketRegimeEnabled ? `활성화 · breadth ${status.configSnapshot?.marketRegimeMinBreadth ?? 0.5} · ${status.configSnapshot?.marketRegimeLookback ?? 5}봉 · strict 차단 ${telemetry.marketRegimeBlockedEntries || 0}회 · shadow 차단 ${telemetry.shadowMarketRegimeBlockedEntries || 0}회 · 현재 ${lastMarketRegime ? `${lastMarketRegime.confirmed ? '통과' : '차단'} (${formatPercent(lastMarketRegime.breadth || 0)})` : '계산 전'}` : '비활성화'}<br>
+                            요청 경로: ticker batch ${requestStats.batchTickerRequests || 0}회 · 개별 ${requestStats.individualTickerRequests || 0}회 · candle ${requestStats.candleRequests || 0}회 · batch 실패 ${requestStats.batchTickerFailures || 0}회<br>
+                            캔들 신선도: 최대 ${formatNumber(candleFreshness.maxAgeSeconds || 0)}초 · 전체 차단 ${candleFreshness.blockedSnapshots || 0}회 · 분석 ${candleFreshness.blockedAnalyses || 0}회 · 지연진입 ${candleFreshness.blockedEntries || 0}회 · 주요 사유 ${freshnessDetail}<br>
+                            stale 상위 마켓: ${freshnessMarketSummary}<br>
+                            캔들 데이터 부족: 최소 ${candleDataQuality.minimumCandleCount || 0}개 · 주요 마켓 ${insufficientCandleText}<br>
+                            분석 사이클 ${telemetry.cycles || 0}회 · strict BUY ${telemetry.buyCandidates || 0}회 · soft 후보 ${telemetry.shadowCandidates || 0}회 · HOLD ${telemetry.holdDecisions || 0}회<br>
+                            soft 장부 ${shadowEvaluation.closedTradeCount || 0}회 청산 · 참고손익 ${formatProfit(shadowEvaluation.realizedProfit || 0)} · 참고 PF ${Number.isFinite(shadowEvaluation.profitFactor) ? Number(shadowEvaluation.profitFactor).toFixed(2) : '∞'}<br>
+                            loose 장부 ${looseShadowEvaluation.closedTradeCount || 0}회 청산 · 참고손익 ${formatProfit(looseShadowEvaluation.realizedProfit || 0)} · 참고 PF ${Number.isFinite(looseShadowEvaluation.profitFactor) ? Number(looseShadowEvaluation.profitFactor).toFixed(2) : '∞'}<br>
+                            현재 주요 병목: ${topReason}<br>
+                            필터별 병목: ${topRejection}<br>
+                            거절 후보 결과: ${rejectionOutcomeText}<br>
+                            ${starvationHtml}
+                            ${continuityHtml}
+                            ${storageHtml}
+                            ${configHtml}
+                            ${circuitHtml}
+                            ${unsettledHtml}
+                            ${status.baselineIncludesHoldings ? '⚠️ 기존 보유분 포함 기준입니다. 깨끗한 성과 검증은 리셋 후 새 세션이 필요합니다.' : '✅ 세션 시작 시점부터 독립적으로 측정 중입니다.'}
+                        </div>
+                    </div>
+                    <div style="display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end;">
+                        <button class="btn btn-secondary btn-sm" onclick="loadPaperValidation()">새로고침</button>
+                        ${status.active ? '<button class="btn btn-danger btn-sm" onclick="stopPaperValidationSession()">세션 중지</button>' : '<button class="btn btn-secondary btn-sm" onclick="startPaperValidationSession(false)">새 세션 시작</button>'}
+                    </div>
+                </div>
+            `;
+        }
+
+        async function loadPaperValidation() {
+            const status = await fetchAPI('/paper-validation');
+            renderPaperValidation(status);
+        }
+
+        async function startPaperValidationSession(reset = false) {
+            const message = reset
+                ? '새 시드로 가상 포트폴리오를 초기화하고 기존 paper ledger와 별도의 forward 세션을 시작합니다. 기존 dry_portfolio 데이터가 이 작업으로 덮어써집니다. 계속할까요?'
+                : '현재 가상 포트폴리오 상태를 기준으로 forward paper 세션을 시작합니다. 기존 포지션은 초기화하지 않습니다. 계속할까요?';
+            if (!confirm(message)) return;
+            const result = await fetchAPI('/paper-validation/start', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(reset ? { reset: true } : {})
+            });
+            if (result?.success) {
+                renderPaperValidation(result.status);
+                showToast('forward paper 세션을 시작했습니다', 'success');
+            } else {
+                showToast(result?.error || 'paper 세션 시작 실패', 'error');
+            }
+        }
+
+        async function stopPaperValidationSession() {
+            if (!confirm('현재 forward paper 세션을 중지할까요? 포트폴리오 자체는 유지됩니다.')) return;
+            const result = await fetchAPI('/paper-validation/stop', { method: 'POST' });
+            if (result?.success) {
+                renderPaperValidation(result.status);
+                showToast('forward paper 세션을 중지했습니다', 'info');
+            } else {
+                showToast(result?.error || 'paper 세션 중지 실패', 'error');
             }
         }
 
@@ -6657,16 +8050,50 @@
 
         // Parameter Settings
         async function loadParameterRanges() {
-            const ranges = await fetchAPI('/parameter-ranges');
-            const config = await fetchAPI('/optimal-config');
+            const [ranges, config, investmentConfig] = await Promise.all([
+                fetchAPI('/parameter-ranges'),
+                fetchAPI('/optimal-config'),
+                fetchAPI('/investment-config')
+            ]);
 
             if (!ranges) return;
 
             parameterRanges = ranges;
-            currentParams = config?.parameters || {};
+            currentParams = {
+                ...(config?.parameters || {}),
+                ...(investmentConfig?.scalping || {})
+            };
+            const scalping = investmentConfig?.scalping || {};
 
             const container = document.getElementById('parameterSettings');
-            let html = '';
+            let html = `
+                <div class="optimization-settings" style="grid-column: 1 / -1; margin-bottom: 8px;">
+                    <div class="optimization-row">
+                        <div class="optimization-row-info">
+                            <span class="optimization-row-label">Portfolio regime gate</span>
+                            <span class="optimization-row-desc">전체 대상 마켓의 breadth와 평균 방향성이 약하면 신규 반등 진입을 막습니다. 기본값은 검증 전 비활성입니다.</span>
+                        </div>
+                        <div class="optimization-row-control">
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="flag-marketRegimeEnabled" ${scalping.marketRegimeEnabled === true ? 'checked' : ''}>
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="optimization-row">
+                        <div class="optimization-row-info">
+                            <span class="optimization-row-label">Rebound overbought guard</span>
+                            <span class="optimization-row-desc">반등 확정 시점의 RSI가 과매수 기준을 넘으면 늦은 진입을 차단합니다. 별도 holdout 후보입니다.</span>
+                        </div>
+                        <div class="optimization-row-control">
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="flag-requireReboundBelowOverbought" ${scalping.requireReboundBelowOverbought === true ? 'checked' : ''}>
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+            `;
 
             for (const [key, range] of Object.entries(ranges)) {
                 const currentValue = currentParams[key] ?? range.min;
@@ -6822,6 +8249,10 @@
                     params[key] = range?.step < 1 ? parseFloat(input.value) : parseInt(input.value);
                 }
             }
+            const regimeFlag = document.getElementById('flag-marketRegimeEnabled');
+            const overboughtFlag = document.getElementById('flag-requireReboundBelowOverbought');
+            if (regimeFlag) params.marketRegimeEnabled = regimeFlag.checked;
+            if (overboughtFlag) params.requireReboundBelowOverbought = overboughtFlag.checked;
 
             const result = await fetchAPI('/config/update', {
                 method: 'POST',
@@ -7253,7 +8684,9 @@
                     safeLoad(loadDetailedSystemStatus, 0),
                     safeLoad(loadTodaySummary, 0),
                     safeLoad(loadPortfolioAnalysis, 0),
-                    safeLoad(loadManualPositions, 0)
+                    safeLoad(loadManualPositions, 0),
+                    safeLoad(loadScalpingValidation, 0),
+                    safeLoad(loadPaperValidation, 0)
                 ]);
 
                 // Save portfolio snapshot
@@ -7277,6 +8710,8 @@
                     await safeLoad(loadManualPositions, 0);
                     await safeLoad(updateBuyPresetInfo, 0);
                     await safeLoad(updateSellPresetInfo, 0);
+                } else if (currentTab === 'ai') {
+                    await safeLoad(() => loadAiDesk(false), 0);
                 }
                 // parameters 탭은 자동 새로고침 안함 (사용자 변경 내용 보존)
                 else if (currentTab === 'history') {
@@ -8194,10 +9629,11 @@
         }
 
         // Initialize
-        console.log('Dashboard initializing...');
+        if (!document.getElementById('pilot-redesign-root')) console.log('Dashboard initializing...');
 
         // 초기 로드
-        (async function init() {
+        if (!document.getElementById('pilot-redesign-root')) (async function init() {
+            initProgressiveInstall();
             await loadTargetCoins();  // 코인 목록 먼저 로드
             await loadAllData();
             await loadParameterRanges();
@@ -8237,8 +9673,15 @@
             console.log('Dashboard ready');
         })();
 
+        if (!document.getElementById('pilot-redesign-root')) {
         // Auto refresh - 메인 데이터 5초마다 (rate limit 방지)
         setInterval(loadAllData, 5000);
+
+        // AI Desk history/session state is lightweight; provider health is
+        // cached server-side so this does not spawn a CLI on every refresh.
+        setInterval(() => {
+            if (localStorage.getItem('currentTab') === 'ai') loadAiDesk(false);
+        }, 10000);
 
         // 마켓 가격은 3초마다 업데이트 + 실시간 캔들 업데이트
         setInterval(async () => {
@@ -8281,6 +9724,7 @@
                 }
             }
         }, 5000);
+        }
 
         // ===== News Functions =====
         let newsData = [];
@@ -8701,6 +10145,6 @@
             }
         });
     </script>
-    <script src="/ai-desk.js"></script>
+    <script src="/pilot-redesign.js?v=ai-desk-5"></script>
 </body>
 </html>

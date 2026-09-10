@@ -327,6 +327,11 @@ class DashboardServer {
         res.json({
           isRunning: this.tradingSystem.isRunning,
           mode: this.tradingSystem.dryRun ? 'DRY_RUN' : 'LIVE',
+          strategyMode: this.tradingSystem.strategyMode,
+          maxPositions: this.tradingSystem.maxPositions,
+          entryDelayMs: this.tradingSystem.isScalpingMode
+            ? [this.tradingSystem.entryDelayMinMs, this.tradingSystem.entryDelayMaxMs]
+            : null,
           uptime: Math.floor(uptime),
           uptimeFormatted: `${Math.floor(uptime / 3600)}시간 ${Math.floor((uptime % 3600) / 60)}분`,
           lastTradeTime,
@@ -1162,7 +1167,9 @@ class DashboardServer {
 
         const response = await axios.get(
           `https://api.upbit.com/v1/candles/minutes/${unit}`,
-          { params }
+          this.tradingSystem?.upbit?.getRequestConfig
+            ? this.tradingSystem.upbit.getRequestConfig({ params })
+            : { params, timeout: Number(process.env.UPBIT_REQUEST_TIMEOUT_MS) || 10000 }
         );
 
         const candles = response.data;
@@ -1213,6 +1220,7 @@ class DashboardServer {
         // 리스크 관리
         stopLossPercent: params.stopLossPercent,
         takeProfitPercent: params.takeProfitPercent,
+        maxSignalRangePercent: params.maxSignalRangePercent,
         trailingStopPercent: params.trailingStopPercent,
         // 매매 임계값
         buyThreshold: params.buyThreshold,
@@ -1228,6 +1236,7 @@ class DashboardServer {
       Object.assign(this.tradingSystem.strategyConfig, {
         stopLossPercent: params.stopLossPercent,
         takeProfitPercent: params.takeProfitPercent,
+        maxSignalRangePercent: params.maxSignalRangePercent,
         trailingStopPercent: params.trailingStopPercent,
         buyThreshold: params.buyThreshold,
         sellThreshold: params.sellThreshold,
@@ -1243,6 +1252,7 @@ class DashboardServer {
           Object.assign(strategy.config, {
             stopLossPercent: params.stopLossPercent,
             takeProfitPercent: params.takeProfitPercent,
+            maxSignalRangePercent: params.maxSignalRangePercent,
             trailingStopPercent: params.trailingStopPercent,
             buyThreshold: params.buyThreshold,
             sellThreshold: params.sellThreshold,

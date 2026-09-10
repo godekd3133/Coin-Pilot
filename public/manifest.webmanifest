@@ -1,0 +1,20 @@
+{
+  "name": "CoinPilot 과매도 반응 스캘핑",
+  "short_name": "CoinPilot",
+  "description": "모의투자·실제투자 모드, 검증 게이트, 포트폴리오와 시장 상태를 관리하는 CoinPilot 거래 운영 대시보드",
+  "lang": "ko-KR",
+  "start_url": "/?source=pwa",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#f7f4ee",
+  "theme_color": "#1268d6",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

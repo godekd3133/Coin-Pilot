@@ -12,6 +12,14 @@ export default function createAccountRoutes(server) {
       res.json({
         isRunning: server.tradingSystem.isRunning,
         mode: server.tradingSystem.dryRun ? 'DRY_RUN' : 'LIVE',
+        strategyMode: server.tradingSystem.strategyMode,
+        maxPositions: server.tradingSystem.maxPositions,
+        entryDelayMs: server.tradingSystem.isScalpingMode
+          ? [server.tradingSystem.entryDelayMinMs, server.tradingSystem.entryDelayMaxMs]
+          : null,
+        lossCircuitBreaker: typeof server.tradingSystem.getLossCircuitBreakerStatus === 'function'
+          ? server.tradingSystem.getLossCircuitBreakerStatus('strict')
+          : null,
         targetCoins: server.tradingSystem.targetCoins || [server.tradingSystem.config.targetCoin],
         lastUpdate: new Date().toISOString()
       });

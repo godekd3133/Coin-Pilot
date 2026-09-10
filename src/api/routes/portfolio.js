@@ -116,6 +116,42 @@ export default function createPortfolioRoutes(server) {
     }
   });
 
+  // 독립 forward paper validation ledger
+  router.get('/paper-validation', async (req, res) => {
+    try {
+      if (typeof server.tradingSystem.getPaperValidationStatus !== 'function') {
+        return res.json({ available: false, active: false, eligible: false, reason: 'unsupported' });
+      }
+      return res.json(await server.tradingSystem.getPaperValidationStatus());
+    } catch (error) {
+      return res.status(500).json({ available: false, active: false, eligible: false, error: error.message });
+    }
+  });
+
+  router.post('/paper-validation/start', async (req, res) => {
+    try {
+      if (typeof server.tradingSystem.startPaperValidationSession !== 'function') {
+        return res.status(400).json({ success: false, error: 'paper validation을 지원하지 않습니다' });
+      }
+      const status = await server.tradingSystem.startPaperValidationSession(req.body || {});
+      return res.json({ success: true, status });
+    } catch (error) {
+      return res.status(400).json({ success: false, error: error.message });
+    }
+  });
+
+  router.post('/paper-validation/stop', async (req, res) => {
+    try {
+      if (typeof server.tradingSystem.stopPaperValidationSession !== 'function') {
+        return res.status(400).json({ success: false, error: 'paper validation을 지원하지 않습니다' });
+      }
+      const status = await server.tradingSystem.stopPaperValidationSession();
+      return res.json({ success: true, status });
+    } catch (error) {
+      return res.status(400).json({ success: false, error: error.message });
+    }
+  });
+
   // 자산 추이 저장 (자동 호출)
   router.post('/portfolio/snapshot', async (req, res) => {
     try {
@@ -176,6 +212,10 @@ export default function createPortfolioRoutes(server) {
 
       if (history.length > 8640) {
         history = history.slice(-8640);
+      }
+
+      if (typeof server.tradingSystem.recordPaperValidationSnapshot === 'function') {
+        await server.tradingSystem.recordPaperValidationSnapshot('dashboard_snapshot');
       }
 
       fs.writeFileSync(historyFile, JSON.stringify(history, null, 2), 'utf8');

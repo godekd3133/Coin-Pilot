@@ -1,10 +1,26 @@
 import express from 'express';
+import fs from 'fs';
 
 /**
  * 거래 관련 라우트 (분석, 매수/매도, 스마트 트레이딩, 번들)
  */
 export default function createTradingRoutes(server) {
   const router = express.Router();
+
+  // 마지막 읽기 전용 스캘핑 워크포워드 검증 결과
+  router.get('/scalping-validation', (req, res) => {
+    const reportFile = 'scalping_validation.json';
+    if (!fs.existsSync(reportFile)) {
+      return res.json({ available: false, promoted: false, results: [] });
+    }
+
+    try {
+      const report = JSON.parse(fs.readFileSync(reportFile, 'utf8'));
+      return res.json({ available: true, ...report });
+    } catch (error) {
+      return res.status(500).json({ available: false, promoted: false, error: error.message });
+    }
+  });
 
   // 코인 분석 (애매한 신호 포함)
   router.get('/coin-analysis', async (req, res) => {
@@ -50,6 +66,82 @@ export default function createTradingRoutes(server) {
             });
           }
         }
+      }
+
+      // 자동매매와 동일한 반등 계약을 대시보드에서도 보여준다.
+      // 전략 인스턴스의 makeDecision()을 호출하면 신호 식별자를 소비할 수
+      // 있으므로, 순수 기술적 분석만 사용해 표시용 결과를 만든다.
+      if (server.tradingSystem.isScalpingMode) {
+        const targetCoins = server.tradingSystem.targetCoins || [];
+        const tickers = await server.tradingSystem.upbit.getTicker(targetCoins);
+        const recommendations = [];
+
+        for (const ticker of tickers || []) {
+          const coin = ticker.market;
+          try {
+            const candles = await server.tradingSystem.upbit.getMinuteCandles(
+              coin,
+              server.tradingSystem.candleUnit,
+              server.tradingSystem.candleCount
+            );
+            const analysis = server.tradingSystem.buildTechnicalAnalysis(candles);
+            const rebound = analysis?.indicators?.rebound;
+            if (!rebound?.available) continue;
+
+            const holding = holdings.get(coin);
+            const hasPosition = !!holding;
+            let action = 'WAIT';
+            if (rebound.reboundConfirmed && !hasPosition) action = 'BUY_DELAYED';
+            if (hasPosition) action = 'HOLD';
+
+            recommendations.push({
+              coin,
+              action,
+              category: action === 'BUY_DELAYED' ? 'OVERSOLD_REBOUND' : 'SCALPING_WAIT',
+              currentPrice: ticker.trade_price,
+              confidence: rebound.reboundConfirmed ? 80 : 0,
+              reason: rebound.reboundConfirmed
+                ? `과매도 후 반등 확인, ${server.tradingSystem.entryDelayMinMs}~${server.tradingSystem.entryDelayMaxMs}ms 지연 재검증 예정`
+                : rebound.oversold
+                  ? '과매도 확인 - 양봉 반등과 RSI 회복 대기'
+                  : '과매도 반응 신호 없음',
+              indicators: {
+                rsi: rebound.rsi?.toFixed(2),
+                previousRsi: rebound.previousRsi?.toFixed(2),
+                rsiRecovery: rebound.rsiRecovery?.toFixed(2),
+                reboundPercent: rebound.priceChangePercent?.toFixed(2),
+                reboundConfirmed: rebound.reboundConfirmed
+              },
+              hasPosition,
+              avgPrice: holding?.avgPrice,
+              profitPercent: hasPosition && holding.avgPrice
+                ? (((ticker.trade_price - holding.avgPrice) / holding.avgPrice) * 100).toFixed(2)
+                : null
+            });
+          } catch {
+            // 개별 마켓 표시 오류는 전체 대시보드 응답을 막지 않는다.
+          }
+        }
+
+        recommendations.sort((a, b) => {
+          if (a.action === 'BUY_DELAYED' && b.action !== 'BUY_DELAYED') return -1;
+          if (a.action !== 'BUY_DELAYED' && b.action === 'BUY_DELAYED') return 1;
+          return 0;
+        });
+
+        return res.json({
+          strategyMode: server.tradingSystem.strategyMode,
+          recommendations,
+          analyzedCoins: targetCoins.length,
+          totalMarkets: targetCoins.length,
+          krwBalance,
+          categories: {
+            OVERSOLD_REBOUND: '과매도 후 반등 확인 - 지연 재검증 대상',
+            SCALPING_WAIT: '과매도 반응 대기'
+          },
+          note: '표시용 분석이며 실제 주문은 자동매매 루프에서 지연 후 다시 검증합니다.',
+          timestamp: new Date().toISOString()
+        });
       }
 
       // 전체 KRW 마켓에서 기회 탐색
