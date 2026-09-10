@@ -220,13 +220,17 @@ export function normalizeAdvice(value, metadata = {}) {
 export function buildLocalEvidenceBrief(event, providerFailures = []) {
   const snapshot = event?.snapshot || {};
   const indicators = snapshot.indicators || snapshot;
+  const rebound = indicators.rebound || snapshot.rebound || {};
   const rsi = Number(indicators.rsi ?? snapshot.rsi);
-  const volumeRatio = Number(indicators.volumeRatio ?? snapshot.volumeRatio);
+  const volumeRatio = Number(indicators.volumeRatio ?? rebound.volumeRatio ?? snapshot.volumeRatio);
+  const closeStrength = Number(indicators.closeStrength ?? rebound.closeStrength ?? snapshot.closeStrength);
   const freshness = snapshot.freshness || snapshot.candleFreshness || {};
   const regime = snapshot.marketRegime || {};
   const facts = [];
   if (Number.isFinite(rsi)) facts.push(`RSI ${rsi.toFixed(2)}`);
   if (Number.isFinite(volumeRatio)) facts.push(`거래량 배수 ${volumeRatio.toFixed(2)}`);
+  if (Number.isFinite(closeStrength)) facts.push(`종가 강도 ${closeStrength.toFixed(2)}`);
+  if (rebound.reboundConfirmed === true) facts.push('반등 확정');
   if (freshness.valid === false) facts.push(`캔들 freshness 실패 ${freshness.reason || 'unknown'}`);
   if (regime.confirmed === false) facts.push('시장 regime 미통과');
   if (event?.action) facts.push(`설정 전략 판정 ${event.action}`);

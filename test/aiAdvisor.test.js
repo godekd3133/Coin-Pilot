@@ -191,4 +191,18 @@ test('provider가 모두 unavailable이면 AI 결과를 위조하지 않고 loca
   const directBrief = buildLocalEvidenceBrief({ coin: 'KRW-ETH', type: 'SELL_SIGNAL', action: 'SELL' }, []);
   assert.equal(directBrief.mode, 'LOCAL_EVIDENCE_ONLY');
   assert.equal(directBrief.action, 'WAIT');
+
+  const nestedBrief = buildLocalEvidenceBrief({
+    coin: 'KRW-XRP',
+    type: 'BUY_SIGNAL',
+    snapshot: {
+      indicators: {
+        rsi: 31,
+        rebound: { volumeRatio: 1.9, closeStrength: 0.88, reboundConfirmed: true }
+      }
+    }
+  });
+  assert.match(nestedBrief.rationale, /거래량 배수 1\.90/);
+  assert.match(nestedBrief.rationale, /종가 강도 0\.88/);
+  assert.match(nestedBrief.rationale, /반등 확정/);
 });
