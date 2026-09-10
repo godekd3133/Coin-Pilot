@@ -15,6 +15,9 @@ import createMarketRoutes from './routes/market.js';
 import createOptimizationRoutes from './routes/optimization.js';
 import createConfigRoutes from './routes/config.js';
 import createTradingRoutes from './routes/trading.js';
+import createAiRoutes from './routes/ai.js';
+import AIAdvisorService from '../ai/aiAdvisorService.js';
+import MonitoringSessionService from '../ai/monitoringSessionService.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -27,6 +30,19 @@ class DashboardServer {
     this.port = port;
     this.tradingSystem = tradingSystem;
     this.logger = new Logger('debug');
+
+    // AI 자문은 로컬 구독 CLI를 호출하는 읽기 전용 계층이다. 이 서비스는
+    // 주문 객체나 기존 전략 설정을 참조만 하며 자동주문 경로를 소유하지
+    // 않는다.
+    this.aiAdvisor = new AIAdvisorService({
+      workspaceRoot: PROJECT_ROOT,
+      config: tradingSystem?.config
+    });
+    this.monitoringSessions = new MonitoringSessionService({
+      workspaceRoot: PROJECT_ROOT,
+      config: tradingSystem?.config,
+      advisor: this.aiAdvisor
+    });
 
     // HTTP 서버 및 Socket.io 초기화
     this.httpServer = createServer(this.app);
@@ -63,6 +79,19 @@ class DashboardServer {
     };
     this.optimizationTimer = null;
     this.loadOptimizationState();
+
+    if (this.tradingSystem?.setAnalysisCallback) {
+      this.tradingSystem.setAnalysisCallback((cycle) => this.monitoringSessions.ingestCycle(cycle));
+    }
+    this.monitoringSessions.setUpdateCallback((update) => {
+      if (!this.io) return;
+      const eventName = update.type === 'consultation'
+        ? 'ai-consultation'
+        : update.type === 'session'
+          ? 'ai-session-update'
+          : 'ai-monitoring-event';
+      this.io.emit(eventName, update);
+    });
 
     this.setupMiddleware();
     this.setupRoutes();
@@ -212,6 +241,7 @@ class DashboardServer {
     this.app.use('/api', createOptimizationRoutes(this));
     this.app.use('/api', createConfigRoutes(this));
     this.app.use('/api', createTradingRoutes(this));
+    this.app.use('/api', createAiRoutes(this));
 
     // ========================================
     // 추가 라우트 (dashboardServer 전용)
@@ -701,6 +731,7 @@ class DashboardServer {
 
           // 5분 내 동일 제안 중복 방지
           if (!lastEmit || Date.now() - lastEmit > 5 * 60 * 1000) {
+            this.monitoringSessions.ingestBundle(bundle).catch(() => undefined);
             this.io.emit('new-signal', {
               type: 'bundle',
               bundle,
@@ -908,6 +939,7 @@ class DashboardServer {
         const newsKey = news.title.substring(0, 50);
 
         if (!this.lastBreakingNews.has(newsKey)) {
+          this.monitoringSessions.ingestNews(news).catch(() => undefined);
           this.io.emit('breaking-news', {
             title: news.title,
             source: news.source,
@@ -935,6 +967,7 @@ class DashboardServer {
     if (this.tradingSystem?.setTradeCallback) {
       this.tradingSystem.setTradeCallback((tradeInfo) => {
         this.emitTradeNotification(tradeInfo);
+        this.monitoringSessions.ingestTrade(tradeInfo).catch(() => undefined);
       });
       console.log('   🔔 자동매매 알림 콜백 설정됨');
     }

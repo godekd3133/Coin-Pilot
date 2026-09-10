@@ -159,6 +159,15 @@ function createConfig() {
     // 투자 비율 (최적화 파라미터 우선)
     investmentRatio: optimalParams?.investmentRatio || parseFloat(process.env.INVESTMENT_RATIO) || 0.05,
 
+    // AI 자문은 ChatGPT/Claude API key가 아니라 로컬 구독 CLI 세션을
+    // 사용한다. 자문 결과는 기록/표시만 하고 주문 실행에는 연결하지 않는다.
+    aiAdvisorEnabled: process.env.AI_ADVISOR_ENABLED !== 'false',
+    aiAdvisorTimeoutMs: parseInt(process.env.AI_ADVISOR_TIMEOUT_MS) || 15000,
+    aiMonitoringFile: process.env.AI_MONITORING_FILE || '',
+    aiCodexBin: process.env.AI_CODEX_BIN || 'codex',
+    aiClaudeBin: process.env.AI_CLAUDE_BIN || 'claude',
+    aiGptModel: process.env.AI_GPT_MODEL || '',
+    aiClaudeModel: process.env.AI_CLAUDE_MODEL || '',
     // 체크 간격 (드라이 모드일 때 더 짧게)
     checkInterval: dryRun
       ? parseInt(process.env.CHECK_INTERVAL_DRY) || 30000  // 드라이: 30초

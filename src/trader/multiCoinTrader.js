@@ -77,6 +77,9 @@ class MultiCoinTrader {
 
     // 거래 알림 콜백 (대시보드에서 설정)
     this.onTradeCallback = null;
+    // 분석 결과를 대시보드/AI 모니터링으로 전달하는 읽기 전용 콜백.
+    // 이 콜백은 주문 결정에 참여하지 않으며, 거래 루프를 기다리게 하지 않는다.
+    this.onAnalysisCallback = null;
   }
 
   /**
@@ -84,6 +87,26 @@ class MultiCoinTrader {
    */
   setTradeCallback(callback) {
     this.onTradeCallback = callback;
+  }
+
+  /**
+   * 분석 cycle을 읽기 전용 소비자에게 전달한다.
+   * AI 자문이나 UI 알림이 실패해도 기존 자동매매 경로에는 영향을 주지
+   * 않도록 callback을 fire-and-forget으로 실행한다.
+   */
+  setAnalysisCallback(callback) {
+    this.onAnalysisCallback = typeof callback === 'function' ? callback : null;
+  }
+
+  notifyAnalysisCycle(cycleInfo) {
+    if (!this.onAnalysisCallback) return;
+    try {
+      Promise.resolve(this.onAnalysisCallback(cycleInfo)).catch(error => {
+        console.error('분석 모니터링 콜백 오류:', error.message);
+      });
+    } catch (error) {
+      console.error('분석 모니터링 콜백 오류:', error.message);
+    }
   }
 
   /**
@@ -750,6 +773,19 @@ class MultiCoinTrader {
 
     // 4. 점수 기준으로 정렬 (매수 우선순위)
     coinAnalyses.sort((a, b) => b.decision.scores.total - a.decision.scores.total);
+
+    // AI monitoring은 동일한 분석 snapshot을 관찰할 뿐, 아래의 기존
+    // executeOrder() 흐름과 decision 객체를 변경하지 않는다. 특히
+    // 설정값 기반 BUY/SELL 자동 실행은 이 callback과 완전히 분리된다.
+    this.notifyAnalysisCycle({
+      type: 'monitoring-cycle',
+      source: 'trading_cycle',
+      timestamp: now.toISOString(),
+      mode: this.dryRun ? 'DRY_RUN' : 'LIVE',
+      krwBalance,
+      currentPositions: this.getCurrentPositionCount(),
+      analyses: coinAnalyses
+    });
 
     // 5. 상위 코인부터 매매 실행
     console.log('\n📊 코인별 분석 결과 (점수 순):');
