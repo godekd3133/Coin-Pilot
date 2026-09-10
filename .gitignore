@@ -22,6 +22,7 @@ backtest_results*.json
 scalping_validation*.json
 scalping_portfolio_validation*.json
 scalping_variant_study*.json
+.cap-study-candles.json
 optimization_history.json
 optimal_config.json
 

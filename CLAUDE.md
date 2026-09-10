@@ -6,6 +6,44 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Upbit cryptocurrency automated trading system with multi-coin support, backtesting, genetic algorithm optimization, real-time notifications, and web dashboard. Written in Node.js with ES modules. Supports analyzing all 230+ KRW market coins with `TARGET_COINS=ALL`.
 
+## Default Strategy Contract
+
+The default runtime mode is `oversold_reaction_scalping`. It scans the most liquid KRW markets (up to `SCALP_MAX_MARKETS`), analyzes completed 1-minute candles, and only produces a BUY candidate when the immediately previous completed candle (default `SCALP_OVERSOLD_LOOKBACK=1`) was RSI-oversold and the latest completed candle is a bullish rebound with RSI recovery. A 3-candle reaction window remains an explicit holdout candidate, not an assumed improvement. `MultiCoinTrader.confirmScalpingEntry()` waits 1-5 seconds, fetches ticker/candles again, checks the newest candle timestamp against `maxCandleAgeSeconds`, and cancels the entry if the snapshot is missing/stale, the signal changes, retraces, or runs too far upward to chase. The default is DRY_RUN, averaging is disabled, and the legacy news/optimization/backtest loops are disabled in this mode because their score-based contract is not the scalping contract. The adaptive freshness default is 90 seconds for 1-minute candles; a positive `SCALP_MAX_CANDLE_AGE_SECONDS` is stored in the paper config snapshot. Freshness telemetry distinguishes initial `analysis` blocks from delayed `entry_confirmation` blocks, preserves observed age statistics, records insufficient candle data separately from stale snapshots, and retains per-market observed/stale counts for diagnostic review. Insufficient candle responses must not be mistaken for stale feeds when considering market exclusion.
+
+Open positions have an independent ticker-based risk monitor (`SCALP_RISK_CHECK_INTERVAL_MS`, default 1 second) for stop-loss, take-profit, and max-hold exits. It covers both strict positions and diagnostic paper shadow books; it is a safety/latency path, not profitability evidence. If a complete ticker response is unavailable beyond `SCALP_MAX_RISK_DATA_GAP_SECONDS` (default 30 seconds), the loop stops fail-closed and marks forward continuity invalid instead of pretending that max-hold protection remained active. Paper promotion still requires the historical and forward gates. The optional `momentum_breakout` signal profile is a separate diagnostic contract; it does not relax the default RSI-rebound profile and cannot authorize live orders without a matching fixed-config holdout.
+
+The forward-paper runner also has a research-only `PAPER_SMOKE_MARKETS=FRESH_FROM_LEDGER` mode. With `PAPER_SMOKE_FRESHNESS_LEDGER` it selects previously observed markets that meet the configured minimum observation count and freshness-block-rate ceiling, preserves source order, and fails closed when no market qualifies. This is a reproducible data-quality cohort comparison; it does not mutate the default universe, runtime filters, or live-order gate.
+
+Optional break-even/trailing protection (`SCALP_BREAK_EVEN_*`, `SCALP_TRAILING_*`) is disabled when its activation trigger is zero. Its break-even floor is cost-adjusted for two fees and adverse exit slippage; a raw entry-price stop is not considered break-even. It must be evaluated as a separate fixed-config holdout and forward-shadow cohort before enabling; the live risk monitor, backtest, and shadow books share the same conservative protection contract.
+
+`SCALP_MIN_SIGNAL_RANGE_PERCENT` is a separate opt-in lower volatility floor. It rejects a completed rebound candle whose high-low range is too small to support the target; keep it at zero until a fixed-config holdout and forward cohort justify enabling it.
+
+The optional process-wide loss circuit breaker (`SCALP_LOSS_CIRCUIT_BREAKER_COUNT`, `SCALP_LOSS_CIRCUIT_BREAKER_WINDOW_MINUTES`, `SCALP_LOSS_CIRCUIT_BREAKER_COOLDOWN_MINUTES`) is disabled by default with count `0`. When enabled, strict paper/live entries and each diagnostic shadow book stop opening new positions after the configured number of losses in the sliding window. Strict paper state is persisted as `strictRiskState.lossCircuitBreaker`; shadow state is persisted inside its own book. It is a risk brake, not profitability evidence, and must remain a separately validated candidate.
+
+The optional portfolio regime gate (`SCALP_MARKET_REGIME_ENABLED`) is disabled by default. When explicitly enabled, a candidate must also pass the cross-market breadth and average-return check calculated from completed candles. The synchronized portfolio backtest and live cycle must use the same fail-closed contract, and the gate remains a diagnostic candidate until a multi-market holdout supports it.
+
+The optional loss-only early exit (`SCALP_MAX_LOSING_HOLD_MINUTES`) is disabled with `0`. It exits a still-losing position after the candidate timeout while allowing profitable positions to use the normal max-hold. It is a risk hypothesis only and must be validated in the shared portfolio lane before changing runtime defaults.
+
+`SCALP_MAX_ENTRIES_PER_SIGNAL_WINDOW` is another opt-in portfolio safeguard. A positive value limits strict entries sharing the same completed-candle signal key, reducing correlated multi-market exposure when a market-wide rebound fires at once. It is disabled with `0`, persisted in the forward strict risk state, and must be compared in the shared portfolio holdout before enabling.
+
+`npm run validate:scalping` is the promotion gate. It fetches read-only minute candles, tunes only on the earlier segment, evaluates the untouched holdout segment with fees/slippage, and promotes the strategy only when every selected validation market passes the trade-count, return, profit-factor, and drawdown thresholds. A single passing market never promotes the global strategy.
+
+`npm run validate:scalping:portfolio` is a separate diagnostic lane that synchronizes multiple markets, shares one KRW balance, enforces `maxPositions`, and ranks simultaneous entries. It is useful for testing whether per-market results survive the actual portfolio allocator, but it must never write or replace `scalping_validation.json` and never authorizes live orders.
+
+For stronger evidence, run the portfolio lane with `SCALP_PORTFOLIO_VALIDATION_FOLDS>=2`; the expanding multi-fold validator requires every future fold to pass and keeps the result diagnostic-only. Reuse a fixed `SCALP_PORTFOLIO_CANDLES_FILE` when comparing candidates so timestamp drift does not become a false improvement.
+
+When stopping a paper session, persist `strictOpenPositions` and mark `endedWithOpenPositions`. Do not start a new session in the same ledger unless the user explicitly resets the isolated portfolio or passes `allowUnsettledResume=true`; this prevents unrealized positions from being silently reclassified as a new baseline.
+
+The portfolio-only `requireNextCandleBullish` candidate enters at the next candle close after verifying bullish follow-through. It is a different latency contract from the live 1–5 second revalidation and must stay diagnostic until a separate implementation and holdout decision are made.
+
+## AI Desk and long-running monitoring
+
+`src/ai/aiAdvisorService.js` is a read-only provider adapter. GPT/Codex and Claude are invoked through the locally authenticated CLI sessions (`codex` and `claude`); provider API keys must not be stored in the repository or passed from CoinPilot. The adapter strips common API-key environment variables from its child process, applies a finite timeout, and accepts only a normalized JSON opinion (`BUY`, `SELL`, `HOLD`, or `WAIT` plus confidence, rationale, risks, and invalidation).
+
+`src/ai/monitoringSessionService.js` owns persistent AI monitoring sessions, event filters, cooldowns, compact event snapshots, and consultation history in `ai_monitoring_sessions.json` (or `AI_MONITORING_FILE`). `DashboardServer` feeds it the same completed analysis cycle that the trader already uses and emits `ai-monitoring-event`, `ai-consultation`, and `ai-session-update` over Socket.io. This callback is fire-and-forget and must never mutate `decision`, strategy state, configuration, balances, or orders.
+
+The AI route is advisory-only. It must not call `executeOrder()` or interpret an AI `BUY`/`SELL` as authorization to trade. The existing settings-based `MultiCoinTrader.executeTradingCycle()` → `executeOrder()` path remains the only automated order path. Add or change AI functionality through the callback/service boundary and cover session persistence, event deduplication, provider parsing, and fail-closed behavior with tests.
+
 ## Commands
 
 ```bash
@@ -115,6 +153,8 @@ When max positions reached but a STRONG/VERY_STRONG buy signal detected:
 Rebalancing also triggers when balance insufficient but strong signal exists.
 
 ## UpbitAPI Error Handling
+
+- Every Upbit HTTP request has a finite timeout (`UPBIT_REQUEST_TIMEOUT_MS`, default 10 seconds). Read-only forward-paper cycles must fail an individual network request and continue collecting telemetry rather than waiting indefinitely on a socket. Market-analysis and position-risk clients also share a process-wide request slot so separate clients cannot self-collide with the exchange rate limit.
 
 `UpbitAPI.order()` returns structured response:
 
@@ -499,6 +539,8 @@ Key environment variables:
 - `MAX_POSITIONS` - Maximum simultaneous positions
 - `STOP_LOSS_PERCENT`, `TAKE_PROFIT_PERCENT` - Risk management
 - `RSI_PERIOD`, `RSI_OVERSOLD`, `RSI_OVERBOUGHT` - Technical indicator params
+- `SCALP_LOSS_CIRCUIT_BREAKER_COUNT` - Optional global loss count before new entries are blocked; `0` disables it
+- `SCALP_LOSS_CIRCUIT_BREAKER_WINDOW_MINUTES`, `SCALP_LOSS_CIRCUIT_BREAKER_COOLDOWN_MINUTES` - Sliding window and lock duration
 
 ## totalAssets 계산 규칙 (CRITICAL)
 
