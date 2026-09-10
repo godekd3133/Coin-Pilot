@@ -76,3 +76,16 @@ test('잘못된 provider 판단은 WAIT로 fail-closed 된다', () => {
   assert.equal(advice.confidence, 5);
   assert.match(prompt, /Return JSON only/);
 });
+
+test('실제 CLI runner는 argv prompt 뒤에 열린 stdin 때문에 timeout되지 않는다', async () => {
+  const service = new AIAdvisorService({
+    executables: { claude: process.execPath },
+    timeoutMs: 3_000
+  });
+  const result = await service.runProvider('claude', '', {
+    timeoutMs: 3_000,
+    statusArgs: ['-e', "process.stdin.resume();process.stdin.on('end',()=>console.log('STDIN_CLOSED'))"]
+  });
+
+  assert.match(result.stdout, /STDIN_CLOSED/);
+});

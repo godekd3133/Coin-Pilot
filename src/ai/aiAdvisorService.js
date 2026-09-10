@@ -346,6 +346,11 @@ export class AIAdvisorService {
         shell: false,
         windowsHide: true
       });
+      // The prompt is passed as an argv value. Closing stdin is still
+      // required by Claude Code's print mode; otherwise it waits for a
+      // second input stream and the advisor appears to hang until timeout.
+      child.stdin?.on('error', () => {});
+      child.stdin?.end();
 
       const finish = (callback, value) => {
         if (settled) return;
