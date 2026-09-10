@@ -254,6 +254,7 @@ function createConfig() {
     // AI 자문은 ChatGPT/Claude API key가 아니라 로컬 구독 CLI 세션을
     // 사용한다. 자문 결과는 기록/표시만 하고 주문 실행에는 연결하지 않는다.
     aiAdvisorEnabled: process.env.AI_ADVISOR_ENABLED !== 'false',
+    aiLocalBriefEnabled: process.env.AI_LOCAL_BRIEF_ENABLED !== 'false',
     aiAdvisorTimeoutMs: parseInt(process.env.AI_ADVISOR_TIMEOUT_MS) || 15000,
     aiMonitoringFile: process.env.AI_MONITORING_FILE || '',
     aiCodexBin: process.env.AI_CODEX_BIN || 'codex',

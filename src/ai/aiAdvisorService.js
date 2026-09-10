@@ -211,9 +211,40 @@ export function normalizeAdvice(value, metadata = {}) {
     risks,
     invalidation: truncate(source.invalidation || source.invalidationCondition || '추가 확인 필요', 360),
     provider: metadata.provider || null,
+    mode: metadata.mode || 'AI_PROVIDER',
     requestId: metadata.requestId || null,
     receivedAt: metadata.receivedAt || new Date().toISOString()
   };
+}
+
+export function buildLocalEvidenceBrief(event, providerFailures = []) {
+  const snapshot = event?.snapshot || {};
+  const indicators = snapshot.indicators || snapshot;
+  const rsi = Number(indicators.rsi ?? snapshot.rsi);
+  const volumeRatio = Number(indicators.volumeRatio ?? snapshot.volumeRatio);
+  const freshness = snapshot.freshness || snapshot.candleFreshness || {};
+  const regime = snapshot.marketRegime || {};
+  const facts = [];
+  if (Number.isFinite(rsi)) facts.push(`RSI ${rsi.toFixed(2)}`);
+  if (Number.isFinite(volumeRatio)) facts.push(`거래량 배수 ${volumeRatio.toFixed(2)}`);
+  if (freshness.valid === false) facts.push(`캔들 freshness 실패 ${freshness.reason || 'unknown'}`);
+  if (regime.confirmed === false) facts.push('시장 regime 미통과');
+  if (event?.action) facts.push(`설정 전략 판정 ${event.action}`);
+  const failureNames = providerFailures.map(result => result.providerLabel || result.provider).filter(Boolean);
+
+  return normalizeAdvice({
+    action: 'WAIT',
+    confidence: 0,
+    horizon: 'provider 연결 후 재자문',
+    rationale: `AI provider 응답이 없어 사실 요약만 남깁니다. ${event?.coin || 'MARKET'} ${event?.type || 'EVENT'} · ${facts.join(', ') || '추가 지표 없음'}. 이 결과는 AI 판단이 아닙니다.`,
+    risks: [
+      'AI provider 미연결 또는 인증 실패',
+      ...(failureNames.length > 0 ? [`실패 provider: ${failureNames.join(', ')}`] : []),
+      ...(freshness.valid === false ? ['오래되었거나 불완전한 캔들 snapshot'] : []),
+      ...(regime.confirmed === false ? ['시장 방향성 gate 미통과'] : [])
+    ].slice(0, 5),
+    invalidation: 'provider 인증·연결을 복구한 뒤 동일 이벤트에 대해 AI 자문을 다시 요청하세요.'
+  }, { provider: 'local-brief', mode: 'LOCAL_EVIDENCE_ONLY' });
 }
 
 function compactPromptValue(value) {
@@ -263,11 +294,11 @@ function stripSubscriptionApiKeys(environment = process.env) {
 function providerArgs(provider, prompt, model) {
   if (provider === 'gpt') {
     const args = [
+      '--ask-for-approval', 'never',
       'exec',
       '--ignore-user-config',
       '--ephemeral',
       '--sandbox', 'read-only',
-      '--ask-for-approval', 'never',
       '--color', 'never',
       '--json'
     ];
@@ -313,11 +344,13 @@ export class AIAdvisorService {
       gpt: options.models?.gpt || options.config?.aiGptModel || process.env.AI_GPT_MODEL || '',
       claude: options.models?.claude || options.config?.aiClaudeModel || process.env.AI_CLAUDE_MODEL || ''
     };
+    this.allowLocalBrief = options.allowLocalBrief ?? options.config?.aiLocalBriefEnabled ?? process.env.AI_LOCAL_BRIEF_ENABLED !== 'false';
     this.executables = {
       gpt: options.executables?.gpt || options.config?.aiCodexBin || process.env.AI_CODEX_BIN || 'codex',
       claude: options.executables?.claude || options.config?.aiClaudeBin || process.env.AI_CLAUDE_BIN || 'claude'
     };
     this.runner = options.runner || ((provider, prompt, runnerOptions) => this.runProvider(provider, prompt, runnerOptions));
+    this.preflightProviderStatus = options.preflightProviderStatus ?? !options.runner;
     this.statusCache = null;
     this.statusCacheAt = 0;
     this.statusCacheTtlMs = Math.max(5_000, Number(options.statusCacheTtlMs || 30_000));
@@ -432,16 +465,54 @@ export class AIAdvisorService {
     if (!event || typeof event !== 'object') throw new Error('자문할 monitoring event가 필요합니다');
 
     const requestId = randomUUID();
-    const results = await Promise.all(providers.map(item => this.askProvider(item, {
-      event,
-      context,
-      session,
-      requestId
-    })));
+    let providerStatusById = new Map();
+    if (this.preflightProviderStatus) {
+      try {
+        const status = await this.getProviderStatus();
+        providerStatusById = new Map((status.providers || []).map(item => [item.id, item]));
+      } catch {
+        // A status probe failure must not hide a usable safe runner. The
+        // provider call below remains the final authority in that case.
+      }
+    }
+
+    const results = await Promise.all(providers.map(item => {
+      const providerStatus = providerStatusById.get(item);
+      const hardNotReady = providerStatus && ['NOT_AUTHENTICATED', 'NOT_INSTALLED', 'CONFIG_ERROR', 'DISABLED'].includes(providerStatus.status);
+      if (hardNotReady) {
+        return {
+          provider: item,
+          providerLabel: AI_PROVIDER_DEFINITIONS[item].label,
+          status: 'FAILED',
+          latencyMs: 0,
+          errorCode: 'PROVIDER_NOT_READY',
+          error: providerStatus.detail || 'provider 로그인 상태를 확인해주세요.',
+          completedAt: new Date().toISOString()
+        };
+      }
+      return this.askProvider(item, {
+        event,
+        context,
+        session,
+        requestId
+      });
+    }));
+
+    const hasCompletedProvider = results.some(result => result.status === 'COMPLETED');
+    if (!hasCompletedProvider && this.allowLocalBrief) {
+      results.push({
+        provider: 'local-brief',
+        providerLabel: 'Local evidence brief',
+        status: 'FALLBACK',
+        latencyMs: 0,
+        advice: buildLocalEvidenceBrief(event, results),
+        completedAt: new Date().toISOString()
+      });
+    }
 
     return {
       requestId,
-      status: results.some(result => result.status === 'COMPLETED') ? 'COMPLETED' : 'FAILED',
+      status: hasCompletedProvider ? 'COMPLETED' : results.some(result => result.status === 'FALLBACK') ? 'DEGRADED' : 'FAILED',
       results,
       completedAt: new Date().toISOString()
     };
@@ -495,23 +566,43 @@ export class AIAdvisorService {
           authMode: loggedIn ? (provider === 'gpt' ? 'chatgpt_subscription' : 'claude_subscription') : null,
           subscriptionLabel: definition.subscriptionLabel,
           subscriptionType: typeof parsed?.subscriptionType === 'string' ? truncate(parsed.subscriptionType, 80) : null,
-          detail: loggedIn ? '로컬 구독 세션 사용 가능' : 'CLI 로그인 상태를 확인해주세요.'
+          detail: loggedIn ? '로컬 구독 세션 사용 가능' : 'CLI 로그인 상태를 확인해주세요.',
+          nextStep: loggedIn ? null : provider === 'claude' ? 'claude auth login' : 'codex login status'
         };
       } catch (error) {
+        const errorDetail = error?.detail || '';
+        const unauthenticated = provider === 'claude' &&
+          (/loggedIn["': =]+false/i.test(errorDetail) || /authMethod["': =]+none/i.test(errorDetail));
         const detail = error?.code === 'ENOENT'
           ? 'CLI가 설치되어 있지 않습니다.'
+          : unauthenticated
+            ? 'Claude CLI 로그인이 필요합니다.'
           : /config|invalid type|설정/i.test(error?.detail || '') && provider === 'gpt'
-            ? 'Codex 사용자 설정을 읽지 못했습니다. 자문 실행은 사용자 설정을 무시하는 읽기 전용 모드로 시도합니다.'
+            ? 'Codex 사용자 설정을 읽지 못했습니다. Codex 설정을 수정한 뒤 자문을 다시 시도하세요.'
             : '로그인 상태를 확인하지 못했습니다.';
+        const configurationError = provider === 'gpt' && /config|invalid type|설정/i.test(errorDetail);
         return {
           id: provider,
           label: definition.label,
           installed: error?.code !== 'ENOENT',
           ready: false,
-          status: error?.code === 'ENOENT' ? 'NOT_INSTALLED' : 'UNAVAILABLE',
+          status: error?.code === 'ENOENT'
+            ? 'NOT_INSTALLED'
+            : unauthenticated
+              ? 'NOT_AUTHENTICATED'
+              : configurationError
+                ? 'CONFIG_ERROR'
+                : 'UNAVAILABLE',
           authMode: null,
           subscriptionLabel: definition.subscriptionLabel,
-          detail
+          detail,
+          nextStep: error?.code === 'ENOENT'
+            ? `${definition.defaultExecutable} CLI 설치/경로 확인`
+            : unauthenticated
+              ? 'claude auth login'
+              : configurationError
+                ? 'Codex 설정 수정 후 codex login status'
+                : `${definition.defaultExecutable} 로그인 상태 확인`
         };
       }
     }));

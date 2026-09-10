@@ -93,7 +93,7 @@
         container.innerHTML = state.providers.providers.map(provider => {
             const statusClass = provider.ready ? 'ready' : provider.status === 'NOT_AUTHENTICATED' ? 'warn' : 'error';
             const text = provider.ready ? 'READY' : provider.status === 'NOT_AUTHENTICATED' ? 'LOGIN NEEDED' : provider.status || 'UNAVAILABLE';
-            return `<article class="ai-desk-provider ${statusClass}"><div class="ai-desk-item-head"><span class="ai-desk-name">${esc(provider.label || providerName(provider.id))}</span><span class="ai-desk-state ${statusClass}">${esc(text)}</span></div><div class="ai-desk-detail">${esc(provider.detail || provider.subscriptionLabel || '')}</div><div class="ai-desk-detail" style="margin-top:5px;font:10px/1.3 'SFMono-Regular',Consolas,monospace">${provider.ready ? 'subscription session available' : 'check local CLI login'}</div></article>`;
+            return `<article class="ai-desk-provider ${statusClass}"><div class="ai-desk-item-head"><span class="ai-desk-name">${esc(provider.label || providerName(provider.id))}</span><span class="ai-desk-state ${statusClass}">${esc(text)}</span></div><div class="ai-desk-detail">${esc(provider.detail || provider.subscriptionLabel || '')}</div><div class="ai-desk-detail" style="margin-top:5px;font:10px/1.3 'SFMono-Regular',Consolas,monospace">${provider.ready ? 'subscription session available' : esc(provider.nextStep || 'check local CLI login')}</div></article>`;
         }).join('');
     }
 
@@ -142,9 +142,18 @@
             return;
         }
         container.innerHTML = state.consultations.slice(0, 40).map(consultation => {
-            const statusClass = consultation.status === 'COMPLETED' ? 'completed' : consultation.status === 'RUNNING' ? '' : 'failed';
+            const statusClass = consultation.status === 'COMPLETED'
+                ? 'completed'
+                : consultation.status === 'DEGRADED'
+                    ? 'degraded'
+                    : consultation.status === 'RUNNING' ? '' : 'failed';
             const event = consultation.event || {};
             const results = (consultation.results || []).map(result => {
+                if (result.status === 'FALLBACK' && result.advice) {
+                    const fallback = result.advice;
+                    const risks = (fallback.risks || []).map(risk => `<li>${esc(risk)}</li>`).join('');
+                    return `<div class="ai-desk-advice"><div class="ai-desk-action wait">LOCAL<br>BRIEF</div><div class="ai-desk-rationale"><strong>AI 없음 · 사실 요약</strong><br>${esc(fallback.rationale || '')}${risks ? `<ul class="ai-desk-risks">${risks}</ul>` : ''}<div class="ai-desk-detail">${esc(fallback.invalidation || 'provider 연결 후 재자문')}</div></div></div>`;
+                }
                 if (result.status !== 'COMPLETED' || !result.advice) return `<div class="ai-desk-rationale" style="color:var(--ai-red)">${esc(providerName(result.provider))}: ${esc(result.error || '응답 실패')}</div>`;
                 const advice = result.advice;
                 const actionClass = advice.action === 'SELL' ? 'sell' : ['HOLD', 'WAIT'].includes(advice.action) ? 'wait' : '';

@@ -18,6 +18,7 @@
     "optimize": "node src/scripts/runOptimization.js",
     "dashboard": "node src/scripts/runDashboard.js",
     "dashboard:staging": "node src/scripts/runStagingDashboard.js",
+    "ai:smoke": "node src/scripts/runAiAdvisorSmoke.js",
     "test": "NODE_ENV=test node --test"
   },
   "keywords": [

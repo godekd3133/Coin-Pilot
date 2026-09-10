@@ -233,6 +233,7 @@
 .ai-desk-event.news { border-left-color: var(--ai-amber); }
 .ai-desk-consultation { border-left: 3px solid rgba(246, 240, 223, 0.24); }
 .ai-desk-consultation.completed { border-left-color: var(--ai-teal); }
+.ai-desk-consultation.degraded { border-left-color: var(--ai-amber); }
 .ai-desk-consultation.failed { border-left-color: var(--ai-red); }
 
 .ai-desk-empty {

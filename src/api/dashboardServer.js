@@ -63,6 +63,7 @@ class DashboardServer {
     this.lastSignals = new Map();        // 마지막 신호 저장 (중복 알림 방지)
     this.lastBreakingNews = new Set();   // 마지막 속보 ID (중복 방지)
     this.notificationInterval = null;    // 알림 모니터링 인터벌
+    this.notificationInitialTimer = null;
 
     // 뉴스 누적 저장소 (서버 시작 이후 모든 뉴스 누적)
     this.accumulatedNews = [];           // 누적된 전체 뉴스
@@ -717,7 +718,10 @@ class DashboardServer {
     }, 30000);
 
     // 서버 시작 5초 후 첫 번째 체크
-    setTimeout(() => this.checkAndEmitNotifications(), 5000);
+    this.notificationInitialTimer = setTimeout(() => {
+      this.notificationInitialTimer = null;
+      this.checkAndEmitNotifications();
+    }, 5000);
   }
 
   /**
@@ -1292,6 +1296,10 @@ class DashboardServer {
     if (this.notificationInterval) {
       clearInterval(this.notificationInterval);
       this.notificationInterval = null;
+    }
+    if (this.notificationInitialTimer) {
+      clearTimeout(this.notificationInitialTimer);
+      this.notificationInitialTimer = null;
     }
 
     if (this.server) {

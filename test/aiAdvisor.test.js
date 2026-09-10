@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   AIAdvisorService,
+  buildLocalEvidenceBrief,
   buildAdvisorPrompt,
   normalizeAdvice,
   parseAdviceResponse
@@ -88,4 +89,106 @@ test('실제 CLI runner는 argv prompt 뒤에 열린 stdin 때문에 timeout되�
   });
 
   assert.match(result.stdout, /STDIN_CLOSED/);
+});
+
+test('명백한 미로그인은 모델 호출 전에 즉시 PROVIDER_NOT_READY로 종료한다', async () => {
+  let runnerCalled = false;
+  const service = new AIAdvisorService({
+    preflightProviderStatus: true,
+    allowLocalBrief: false,
+    runner: async () => {
+      runnerCalled = true;
+      throw new Error('runner must not be called');
+    }
+  });
+  service.statusCache = {
+    enabled: true,
+    providers: [{
+      id: 'claude',
+      status: 'NOT_AUTHENTICATED',
+      detail: 'Claude CLI 로그인이 필요합니다.'
+    }]
+  };
+  service.statusCacheAt = Date.now();
+
+  const result = await service.ask({
+    provider: 'claude',
+    event: { type: 'BUY_SIGNAL', coin: 'KRW-BTC' }
+  });
+
+  assert.equal(runnerCalled, false);
+  assert.equal(result.status, 'FAILED');
+  assert.equal(result.results[0].errorCode, 'PROVIDER_NOT_READY');
+  assert.match(result.results[0].error, /로그인/);
+});
+
+test('Codex 설정 파싱 오류도 반복적인 20초 timeout 대신 즉시 차단한다', async () => {
+  let runnerCalled = false;
+  const service = new AIAdvisorService({
+    preflightProviderStatus: true,
+    runner: async () => {
+      runnerCalled = true;
+      throw new Error('runner must not be called');
+    }
+  });
+  service.statusCache = {
+    enabled: true,
+    providers: [{
+      id: 'gpt',
+      status: 'CONFIG_ERROR',
+      detail: 'Codex 사용자 설정을 읽지 못했습니다.'
+    }]
+  };
+  service.statusCacheAt = Date.now();
+
+  const result = await service.ask({
+    provider: 'gpt',
+    event: { type: 'SELL_SIGNAL', coin: 'KRW-ETH' }
+  });
+
+  assert.equal(runnerCalled, false);
+  assert.equal(result.results[0].errorCode, 'PROVIDER_NOT_READY');
+  assert.match(result.results[0].error, /Codex/);
+});
+
+test('provider가 모두 unavailable이면 AI 결과를 위조하지 않고 local evidence brief로 degraded 된다', async () => {
+  const service = new AIAdvisorService({
+    preflightProviderStatus: true,
+    runner: async () => { throw new Error('runner must not be called'); }
+  });
+  service.statusCache = {
+    enabled: true,
+    providers: [
+      { id: 'gpt', status: 'CONFIG_ERROR', detail: 'Codex 설정 오류' },
+      { id: 'claude', status: 'NOT_AUTHENTICATED', detail: 'Claude 로그인 필요' }
+    ]
+  };
+  service.statusCacheAt = Date.now();
+
+  const result = await service.ask({
+    provider: 'both',
+    event: {
+      type: 'BUY_SIGNAL',
+      action: 'BUY',
+      coin: 'KRW-BTC',
+      snapshot: {
+        indicators: { rsi: 28.4, volumeRatio: 1.7 },
+        freshness: { valid: true },
+        marketRegime: { confirmed: true }
+      }
+    }
+  });
+
+  const fallback = result.results.find(item => item.provider === 'local-brief');
+  assert.equal(result.status, 'DEGRADED');
+  assert.equal(fallback.status, 'FALLBACK');
+  assert.equal(fallback.advice.mode, 'LOCAL_EVIDENCE_ONLY');
+  assert.equal(fallback.advice.action, 'WAIT');
+  assert.equal(fallback.advice.confidence, 0);
+  assert.match(fallback.advice.rationale, /AI provider 응답이 없어/);
+  assert.ok(fallback.advice.risks.length > 0);
+
+  const directBrief = buildLocalEvidenceBrief({ coin: 'KRW-ETH', type: 'SELL_SIGNAL', action: 'SELL' }, []);
+  assert.equal(directBrief.mode, 'LOCAL_EVIDENCE_ONLY');
+  assert.equal(directBrief.action, 'WAIT');
 });
