@@ -8,6 +8,10 @@ logs/
 
 # Portfolio & trading data (sensitive)
 dry_portfolio.json
+paper_validation.json
+.paper-smoke/
+.paper-forward*/
+.staging-runtime/
 initial_seed_money.json
 portfolio_history.json
 ai_monitoring_sessions.json
@@ -15,6 +19,9 @@ ai_monitoring_sessions.json.tmp-*
 
 # Backtest/optimization results (can be regenerated)
 backtest_results*.json
+scalping_validation*.json
+scalping_portfolio_validation*.json
+scalping_variant_study*.json
 optimization_history.json
 optimal_config.json
 

@@ -21,10 +21,10 @@ async function getMultipleMinuteCandles(upbit, market, unit, totalCount) {
       let candles;
       if (to) {
         candles = await upbit.requestWithRetry(async () => {
-          const response = await axios.get(
-            `https://api.upbit.com/v1/candles/minutes/${unit}`,
-            { params: { market, count, to } }
-          );
+            const response = await axios.get(
+              `https://api.upbit.com/v1/candles/minutes/${unit}`,
+              upbit.getRequestConfig({ params: { market, count, to } })
+            );
           return response.data;
         });
       } else {

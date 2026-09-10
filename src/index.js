@@ -29,11 +29,11 @@ async function getMultipleMinuteCandles(upbit, market, unit, totalCount) {
     try {
       let candles;
       if (to) {
-        candles = await upbit.requestWithRetry(async () => {
-          const response = await axios.get(
-            `https://api.upbit.com/v1/candles/minutes/${unit}`,
-            { params: { market, count, to } }
-          );
+          candles = await upbit.requestWithRetry(async () => {
+            const response = await axios.get(
+              `https://api.upbit.com/v1/candles/minutes/${unit}`,
+            upbit.getRequestConfig({ params: { market, count, to } })
+            );
           return response.data;
         });
       } else {
@@ -88,14 +88,32 @@ function loadOptimalConfig() {
   return null;
 }
 
+function envNumber(name, fallback) {
+  const value = Number(process.env[name]);
+  return Number.isFinite(value) ? value : fallback;
+}
+
+function redactConfigForLog(config) {
+  const safeConfig = { ...config };
+  delete safeConfig.accessKey;
+  delete safeConfig.secretKey;
+  return safeConfig;
+}
+
 // 설정 객체 생성
 function createConfig() {
   const dryRun = process.env.DRY_RUN !== 'false';
+  const strategyMode = process.env.TRADING_STRATEGY || 'oversold_reaction_scalping';
+  const isScalpingMode = strategyMode === 'oversold_reaction_scalping';
 
   // 최적화된 파라미터 로드 (있으면 사용, 없으면 기본값)
-  const optimalParams = loadOptimalConfig();
+  // 기존 종합점수 전략으로 생성된 파라미터는 스캘핑 반등 계약과 호환되지
+  // 않으므로 새 전략에서는 무시한다.
+  const optimalParams = isScalpingMode ? null : loadOptimalConfig();
 
   return {
+    strategyMode,
+    isScalpingMode,
     // API 키
     accessKey: process.env.UPBIT_ACCESS_KEY || '',
     secretKey: process.env.UPBIT_SECRET_KEY || '',
@@ -109,18 +127,26 @@ function createConfig() {
         : ['KRW-BTC', 'KRW-ETH', 'KRW-XRP'],
     analyzeAllCoins: process.env.TARGET_COINS === 'ALL',
 
-    maxPositions: 99999, // 무제한 포지션 (공격적 모드)
-    portfolioAllocation: parseFloat(process.env.PORTFOLIO_ALLOCATION) || 0.5,
+    maxPositions: parseInt(
+      isScalpingMode ? process.env.SCALP_MAX_POSITIONS : process.env.MAX_POSITIONS
+    ) || (isScalpingMode ? 3 : 99999),
+    portfolioAllocation: parseFloat(
+      isScalpingMode ? process.env.SCALP_PORTFOLIO_ALLOCATION : process.env.PORTFOLIO_ALLOCATION
+    ) || (isScalpingMode ? 0.1 : 0.5),
 
     investmentAmount: parseInt(process.env.INVESTMENT_AMOUNT) || 50000,
-    stopLossPercent: optimalParams?.stopLossPercent || parseFloat(process.env.STOP_LOSS_PERCENT) || 5,
-    takeProfitPercent: optimalParams?.takeProfitPercent || parseFloat(process.env.TAKE_PROFIT_PERCENT) || 10,
+    stopLossPercent: isScalpingMode
+      ? parseFloat(process.env.SCALP_STOP_LOSS_PERCENT) || 1.2
+      : (optimalParams?.stopLossPercent || parseFloat(process.env.STOP_LOSS_PERCENT) || 5),
+    takeProfitPercent: isScalpingMode
+      ? parseFloat(process.env.SCALP_TAKE_PROFIT_PERCENT) || 1.8
+      : (optimalParams?.takeProfitPercent || parseFloat(process.env.TAKE_PROFIT_PERCENT) || 10),
 
     // 기술적 분석 설정 (최적화 파라미터 우선)
     // RSI
-    rsiPeriod: optimalParams?.rsiPeriod || parseInt(process.env.RSI_PERIOD) || 14,
-    rsiOversold: optimalParams?.rsiOversold || parseInt(process.env.RSI_OVERSOLD) || 30,
-    rsiOverbought: optimalParams?.rsiOverbought || parseInt(process.env.RSI_OVERBOUGHT) || 70,
+    rsiPeriod: optimalParams?.rsiPeriod || parseInt(isScalpingMode ? process.env.SCALP_RSI_PERIOD : process.env.RSI_PERIOD) || parseInt(process.env.RSI_PERIOD) || 14,
+    rsiOversold: optimalParams?.rsiOversold || parseInt(isScalpingMode ? process.env.SCALP_RSI_OVERSOLD : process.env.RSI_OVERSOLD) || parseInt(process.env.RSI_OVERSOLD) || 30,
+    rsiOverbought: optimalParams?.rsiOverbought || parseInt(isScalpingMode ? process.env.SCALP_RSI_OVERBOUGHT : process.env.RSI_OVERBOUGHT) || parseInt(process.env.RSI_OVERBOUGHT) || 70,
     // MACD
     macdFast: optimalParams?.macdFast || parseInt(process.env.MACD_FAST) || 12,
     macdSlow: optimalParams?.macdSlow || parseInt(process.env.MACD_SLOW) || 26,
@@ -132,8 +158,11 @@ function createConfig() {
     emaShort: optimalParams?.emaShort || parseInt(process.env.EMA_SHORT) || 10,
     emaMid: optimalParams?.emaMid || parseInt(process.env.EMA_MID) || 30,
     emaLong: optimalParams?.emaLong || parseInt(process.env.EMA_LONG) || 60,
-    // 트레일링 스탑
-    trailingStopPercent: optimalParams?.trailingStopPercent || parseFloat(process.env.TRAILING_STOP_PERCENT) || 3,
+    // 트레일링 스탑: legacy strategy keeps its old setting; scalping uses
+    // the opt-in protective-exit setting below.
+    trailingStopPercent: isScalpingMode
+      ? envNumber('SCALP_TRAILING_STOP_PERCENT', 0)
+      : (optimalParams?.trailingStopPercent || parseFloat(process.env.TRAILING_STOP_PERCENT) || 3),
     // 거래량
     volumeMultiplier: optimalParams?.volumeMultiplier || parseFloat(process.env.VOLUME_MULTIPLIER) || 1.5,
     volumePeriod: optimalParams?.volumePeriod || parseInt(process.env.VOLUME_PERIOD) || 20,
@@ -150,14 +179,77 @@ function createConfig() {
     buyOnly: process.env.BUY_ONLY === 'true',
 
     // 기존 포지션에 추가 매수 허용 (기본: true, STRONG 이상 신호에서 추가 매수)
-    allowAveraging: process.env.ALLOW_AVERAGING !== 'false',
+    allowAveraging: isScalpingMode
+      ? process.env.SCALP_ALLOW_AVERAGING === 'true'
+      : process.env.ALLOW_AVERAGING !== 'false',
 
     // 가중치 설정 (최적화 파라미터 우선)
     technicalWeight: optimalParams?.technicalWeight || parseFloat(process.env.TECHNICAL_WEIGHT) || 0.6,
     newsWeight: optimalParams?.technicalWeight ? (1 - optimalParams.technicalWeight) : (parseFloat(process.env.NEWS_WEIGHT) || 0.4),
 
     // 투자 비율 (최적화 파라미터 우선)
-    investmentRatio: optimalParams?.investmentRatio || parseFloat(process.env.INVESTMENT_RATIO) || 0.05,
+    investmentRatio: isScalpingMode
+      ? parseFloat(process.env.SCALP_INVESTMENT_RATIO) || 0.02
+      : (optimalParams?.investmentRatio || parseFloat(process.env.INVESTMENT_RATIO) || 0.05),
+
+    // 과매도 반응 스캘핑 설정
+    candleUnit: isScalpingMode
+      ? parseInt(process.env.SCALP_CANDLE_UNIT) || 1
+      : parseInt(process.env.CANDLE_UNIT) || 5,
+    candleCount: isScalpingMode
+      ? parseInt(process.env.SCALP_CANDLE_COUNT) || 120
+      : parseInt(process.env.CANDLE_COUNT) || 200,
+    // 0 uses the candle-unit-aware safety default (90s for 1-minute candles).
+    maxCandleAgeSeconds: isScalpingMode
+      ? envNumber('SCALP_MAX_CANDLE_AGE_SECONDS', 0)
+      : 0,
+    oversoldLookback: parseInt(process.env.SCALP_OVERSOLD_LOOKBACK) || 1,
+    minReboundPercent: parseFloat(process.env.SCALP_MIN_REBOUND_PERCENT) || 0.15,
+    minRsiRecovery: parseFloat(process.env.SCALP_MIN_RSI_RECOVERY) || 2,
+    minVolumeRatio: envNumber('SCALP_MIN_VOLUME_RATIO', 1.0),
+    volumeLookback: parseInt(process.env.SCALP_VOLUME_LOOKBACK) || 20,
+    minCloseStrength: envNumber('SCALP_MIN_CLOSE_STRENGTH', 0.65),
+    trendPeriod: parseInt(process.env.SCALP_TREND_PERIOD) || 30,
+    trendSlopeLookback: parseInt(process.env.SCALP_TREND_SLOPE_LOOKBACK) || 3,
+    minTrendSlopePercent: envNumber('SCALP_MIN_TREND_SLOPE_PERCENT', -0.2),
+    requirePreviousHighBreak: process.env.SCALP_REQUIRE_PREVIOUS_HIGH_BREAK !== 'false',
+    maxSignalRangePercent: envNumber('SCALP_MAX_SIGNAL_RANGE_PERCENT', 0),
+    minSignalRangePercent: envNumber('SCALP_MIN_SIGNAL_RANGE_PERCENT', 0),
+    marketRegimeEnabled: process.env.SCALP_MARKET_REGIME_ENABLED === 'true',
+    marketRegimeLookback: parseInt(process.env.SCALP_MARKET_REGIME_LOOKBACK) || 5,
+    marketRegimeMinBreadth: envNumber('SCALP_MARKET_REGIME_MIN_BREADTH', 0.5),
+    marketRegimeMinReturnPercent: envNumber('SCALP_MARKET_REGIME_MIN_RETURN_PERCENT', -0.2),
+    requireReboundBelowOverbought: process.env.SCALP_REQUIRE_REBOUND_BELOW_OVERBOUGHT === 'true',
+    signalProfile: process.env.SCALP_SIGNAL_PROFILE || 'rsi_rebound',
+    entryDelayMinMs: parseInt(process.env.SCALP_ENTRY_DELAY_MIN_MS) || 1000,
+    entryDelayMaxMs: parseInt(process.env.SCALP_ENTRY_DELAY_MAX_MS) || 5000,
+    maxEntryRetracePercent: parseFloat(process.env.SCALP_MAX_ENTRY_RETRACE_PERCENT) || 0.25,
+    maxEntryChasePercent: parseFloat(process.env.SCALP_MAX_ENTRY_CHASE_PERCENT) || 0.35,
+    // Optional protective exits. Zero trigger keeps the fixed stop/take
+    // contract; enable only after an independent holdout study.
+    breakEvenTriggerPercent: envNumber('SCALP_BREAK_EVEN_TRIGGER_PERCENT', 0),
+    breakEvenOffsetPercent: envNumber('SCALP_BREAK_EVEN_OFFSET_PERCENT', 0.05),
+    trailingActivationPercent: envNumber('SCALP_TRAILING_ACTIVATION_PERCENT', 0),
+    maxHoldMinutes: parseFloat(process.env.SCALP_MAX_HOLD_MINUTES) || 30,
+    maxLosingHoldMinutes: envNumber('SCALP_MAX_LOSING_HOLD_MINUTES', 0),
+    maxEntriesPerSignalWindow: parseInt(process.env.SCALP_MAX_ENTRIES_PER_SIGNAL_WINDOW) || 0,
+    positionRiskCheckIntervalMs: parseInt(process.env.SCALP_RISK_CHECK_INTERVAL_MS) || 1000,
+    maxRiskDataGapSeconds: envNumber('SCALP_MAX_RISK_DATA_GAP_SECONDS', 30),
+    cooldownAfterLossMinutes: parseFloat(process.env.SCALP_COOLDOWN_AFTER_LOSS_MINUTES) || 15,
+    maxConsecutiveLosses: parseInt(process.env.SCALP_MAX_CONSECUTIVE_LOSSES) || 3,
+    // 0 disables the process-wide sliding-window circuit breaker.
+    lossCircuitBreakerCount: parseInt(process.env.SCALP_LOSS_CIRCUIT_BREAKER_COUNT) || 0,
+    lossCircuitBreakerWindowMinutes: envNumber('SCALP_LOSS_CIRCUIT_BREAKER_WINDOW_MINUTES', 30),
+    lossCircuitBreakerCooldownMinutes: envNumber('SCALP_LOSS_CIRCUIT_BREAKER_COOLDOWN_MINUTES', 60),
+    paperValidationMinDays: parseInt(process.env.SCALP_PAPER_MIN_DAYS) || 7,
+    paperValidationMinTrades: parseInt(process.env.SCALP_PAPER_MIN_TRADES) || 20,
+    paperValidationMinReturnPercent: envNumber('SCALP_PAPER_MIN_RETURN_PERCENT', 0.2),
+    paperValidationMaxDrawdownPercent: envNumber('SCALP_PAPER_MAX_DRAWDOWN_PERCENT', 15),
+    paperValidationMaxHeartbeatGapMinutes: envNumber('SCALP_PAPER_MAX_HEARTBEAT_GAP_MINUTES', 15),
+    maxScalpMarkets: parseInt(process.env.SCALP_MAX_MARKETS) || 20,
+    upbitRequestTimeoutMs: parseInt(process.env.UPBIT_REQUEST_TIMEOUT_MS) || 10000,
+    requireValidationPassForLive: process.env.SCALP_REQUIRE_VALIDATION_PASS !== 'false',
+    useNews: !isScalpingMode,
 
     // AI 자문은 ChatGPT/Claude API key가 아니라 로컬 구독 CLI 세션을
     // 사용한다. 자문 결과는 기록/표시만 하고 주문 실행에는 연결하지 않는다.
@@ -168,10 +260,11 @@ function createConfig() {
     aiClaudeBin: process.env.AI_CLAUDE_BIN || 'claude',
     aiGptModel: process.env.AI_GPT_MODEL || '',
     aiClaudeModel: process.env.AI_CLAUDE_MODEL || '',
+
     // 체크 간격 (드라이 모드일 때 더 짧게)
     checkInterval: dryRun
-      ? parseInt(process.env.CHECK_INTERVAL_DRY) || 30000  // 드라이: 30초
-      : parseInt(process.env.CHECK_INTERVAL) || 60000,     // 실전: 1분
+      ? parseInt(process.env.CHECK_INTERVAL_DRY) || (isScalpingMode ? 5000 : 30000)
+      : parseInt(process.env.CHECK_INTERVAL) || (isScalpingMode ? 5000 : 60000),
 
     // 백테스팅 간격 (드라이 모드에서만)
     backtestInterval: parseInt(process.env.BACKTEST_INTERVAL) || 3600000, // 1시간
@@ -190,17 +283,15 @@ function createConfig() {
 // 시작 배너 출력
 function printBanner() {
   console.log('\n' + '='.repeat(80));
-  console.log('🤖 다중 코인 자동매매 시스템');
+  console.log('🤖 과매도 반응 스캘핑 자동투자 시스템');
   console.log('='.repeat(80));
   console.log('');
   console.log('주요 기능:');
   console.log('  1. 다중 코인 동시 거래');
-  console.log('  2. 기술적 분석 (RSI, MACD, 볼린저밴드, 이동평균)');
-  console.log('  3. 뉴스 감성 분석');
-  console.log('  4. 자동 손절/익절');
-  console.log('  5. 백테스팅 기반 전략 검증 (드라이 모드)');
-  console.log('  6. 🆕 지속적 파라미터 최적화 (유전 알고리즘)');
-  console.log('  7. 웹 대시보드 모니터링');
+  console.log('  2. 완료 1분봉 기준 RSI 과매도 반등 확인');
+  console.log('  3. 반등 확인 후 1~5초 지연 재검증 진입');
+  console.log('  4. 스캘핑 손절/익절/최대 보유시간 관리');
+  console.log('  5. 모의투자 기본 및 웹 대시보드 모니터링');
   console.log('');
   console.log('='.repeat(80));
   console.log('');
@@ -209,17 +300,27 @@ function printBanner() {
 // 설정 정보 출력
 function printConfig(config) {
   console.log('⚙️  설정 정보:');
+  console.log(`  전략: ${config.strategyMode}`);
   console.log(`  모드: ${config.dryRun ? '🧪 모의투자' : '💰 실전투자'}`);
 
   console.log(`  분석 대상: ${config.targetCoins.length}개 코인`);
 
-  console.log(`  포지션 제한: 무제한 (공격적 모드)`);
+  console.log(`  포지션 제한: ${config.maxPositions}개`);
   console.log(`  포트폴리오 할당: ${(config.portfolioAllocation * 100).toFixed(0)}%`);
-  console.log(`  투자 금액: ${config.investmentAmount.toLocaleString()} 원`);
+  console.log(`  투자 비율: ${(config.investmentRatio * 100).toFixed(1)}%`);
   console.log(`  손절률: ${config.stopLossPercent}%`);
   console.log(`  익절률: ${config.takeProfitPercent}%`);
   console.log(`  체크 간격: ${config.checkInterval / 1000}초`);
-  console.log(`  뉴스 체크 간격: ${config.newsCheckInterval / 1000}초`);
+  if (config.isScalpingMode) {
+    console.log(`  반등 캔들: ${config.candleUnit}분봉 / ${config.candleCount}개`);
+    console.log(`  진입 지연: ${config.entryDelayMinMs}~${config.entryDelayMaxMs}ms`);
+    console.log(`  스캔 마켓: 최대 ${config.maxScalpMarkets}개`);
+    console.log(`  동일 신호창 동시 진입 상한: ${config.maxEntriesPerSignalWindow > 0 ? `${config.maxEntriesPerSignalWindow}개` : '비활성화'}`);
+    console.log(`  전역 손실 회로차단기: ${config.lossCircuitBreakerCount > 0 ? `${config.lossCircuitBreakerCount}회/${config.lossCircuitBreakerWindowMinutes}분 → ${config.lossCircuitBreakerCooldownMinutes}분 차단` : '비활성화'}`);
+    console.log(`  뉴스 분석: 비활성화 (초단기 반응 전용)`);
+  } else {
+    console.log(`  뉴스 체크 간격: ${config.newsCheckInterval / 1000}초`);
+  }
 
   if (config.dryRun) {
     console.log(`  시드 머니: ${config.dryRunSeedMoney.toLocaleString()} 원`);
@@ -575,12 +676,30 @@ async function main() {
         .filter(m => m.market.startsWith('KRW-'))
         .map(m => m.market);
 
-      config.targetCoins = krwMarkets;
-      console.log(`✅ ${krwMarkets.length}개 KRW 마켓 로드 완료`);
+      if (config.isScalpingMode) {
+        // 1분봉을 수십~수백 마켓에 동시에 요청하면 신호 확인보다
+        // API 대기열이 길어질 수 있으므로 유동성 상위 마켓만 스캔한다.
+        const tickers = await upbit.getTicker(krwMarkets);
+        config.targetCoins = [...tickers]
+          .filter(ticker => Number.isFinite(ticker?.acc_trade_price_24h))
+          .sort((a, b) => b.acc_trade_price_24h - a.acc_trade_price_24h)
+          .slice(0, config.maxScalpMarkets)
+          .map(ticker => ticker.market);
+
+        if (config.targetCoins.length === 0) {
+          throw new Error('유동성 상위 스캘핑 마켓을 찾지 못했습니다.');
+        }
+        console.log(`✅ ${krwMarkets.length}개 KRW 마켓 중 유동성 상위 ${config.targetCoins.length}개 스캔`);
+      } else {
+        config.targetCoins = krwMarkets;
+        console.log(`✅ ${krwMarkets.length}개 KRW 마켓 로드 완료`);
+      }
     } catch (error) {
       console.error('❌ 마켓 목록 로드 실패:', error.message);
       // 실패 시 기본 코인으로 폴백
-      config.targetCoins = ['KRW-BTC', 'KRW-ETH', 'KRW-XRP', 'KRW-SOL', 'KRW-DOGE'];
+      config.targetCoins = config.isScalpingMode
+        ? ['KRW-BTC', 'KRW-ETH', 'KRW-XRP']
+        : ['KRW-BTC', 'KRW-ETH', 'KRW-XRP', 'KRW-SOL', 'KRW-DOGE'];
       console.log('⚠️ 기본 코인으로 대체:', config.targetCoins.join(', '));
     }
   }
@@ -589,7 +708,7 @@ async function main() {
 
   // 로거 초기화
   const logger = new Logger(config.logLevel);
-  logger.info('다중 코인 자동매매 시스템 시작', { config });
+  logger.info('다중 코인 자동매매 시스템 시작', { config: redactConfigForLog(config) });
 
   // 오래된 로그 정리
   logger.cleanOldLogs(7);
@@ -604,16 +723,20 @@ async function main() {
     dashboardServer.start();
   }
 
-  // 드라이 모드일 때 백테스팅 및 검증 시스템
+  // 스캘핑 모드에서는 기존 종합점수 전략용 백테스트/최적화가
+  // 반등 전략 파라미터를 오염시키지 않도록 실행하지 않는다.
   let backtestTimer = null;
   let optimizationTimer = null;
 
-  if (config.dryRun) {
+  if (config.dryRun && !config.isScalpingMode) {
     backtestTimer = startBacktestingLoop(config, logger, trader);
   }
 
-  // 지속적 최적화 시스템 (항상 실행)
-  optimizationTimer = startOptimizationLoop(config, logger);
+  if (!config.isScalpingMode) {
+    optimizationTimer = startOptimizationLoop(config, logger);
+  } else {
+    console.log('ℹ️  스캘핑 모드: 기존 종합점수 백테스트/유전 최적화 루프는 비활성화됩니다.');
+  }
 
   // 종료 핸들러 설정
   setupExitHandlers(trader, dashboardServer, backtestTimer, optimizationTimer, logger);
@@ -623,14 +746,16 @@ async function main() {
   console.log('  - Ctrl+C를 눌러 언제든지 종료할 수 있습니다.');
   console.log('  - 로그는 logs/ 디렉토리에 저장됩니다.');
   console.log('  - 웹 대시보드: http://localhost:' + config.dashboardPort);
-  if (config.dryRun) {
+  if (config.dryRun && !config.isScalpingMode) {
     console.log('  - 백테스팅 결과: backtest_results_*.json 파일 확인');
     console.log('  - 백테스팅 간격: ' + (config.backtestInterval / 60000) + '분마다');
   }
-  console.log('  - 최적화 결과: optimal_config.json 파일 확인');
-  console.log('  - 최적화 간격: ' + (config.dryRun ?
-    ((parseInt(process.env.OPTIMIZATION_INTERVAL_DRY) || 21600000) / 3600000) :
-    ((parseInt(process.env.OPTIMIZATION_INTERVAL) || 86400000) / 3600000)) + '시간마다');
+  if (!config.isScalpingMode) {
+    console.log('  - 최적화 결과: optimal_config.json 파일 확인');
+    console.log('  - 최적화 간격: ' + (config.dryRun ?
+      ((parseInt(process.env.OPTIMIZATION_INTERVAL_DRY) || 21600000) / 3600000) :
+      ((parseInt(process.env.OPTIMIZATION_INTERVAL) || 86400000) / 3600000)) + '시간마다');
+  }
   console.log('');
   console.log('─'.repeat(80));
 

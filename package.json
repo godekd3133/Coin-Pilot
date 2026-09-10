@@ -1,16 +1,24 @@
 {
   "name": "coin-pilot",
   "version": "2.0.0",
-  "description": "AI-powered cryptocurrency automated trading system for Upbit with multi-coin support, genetic algorithm optimization, and real-time web dashboard",
+  "description": "Oversold-reaction scalping auto-trader for Upbit with delayed rebound confirmation and a real-time dashboard",
   "main": "src/index.js",
   "type": "module",
   "scripts": {
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
     "backtest": "node src/scripts/runBacktest.js",
+    "validate:scalping": "node src/scripts/validateScalping.js",
+    "validate:scalping:fixed": "SCALP_VALIDATION_FIXED=true node src/scripts/validateScalping.js",
+    "validate:scalping:portfolio": "node src/scripts/validatePortfolio.js",
+    "compare:scalping": "node src/scripts/compareScalpingVariants.js",
+    "validate:shadow": "node src/scripts/validateShadowCandidate.js",
+    "paper:smoke": "node src/scripts/runPaperSmoke.js",
+    "paper:forward": "PAPER_FORWARD_MODE=true node src/scripts/runPaperSmoke.js",
     "optimize": "node src/scripts/runOptimization.js",
     "dashboard": "node src/scripts/runDashboard.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "dashboard:staging": "node src/scripts/runStagingDashboard.js",
+    "test": "NODE_ENV=test node --test"
   },
   "keywords": [
     "upbit",

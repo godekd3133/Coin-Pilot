@@ -385,7 +385,7 @@ class ParameterOptimizer {
           candles = await upbitAPI.requestWithRetry(async () => {
             const response = await axios.get(
               `https://api.upbit.com/v1/candles/minutes/${unit}`,
-              { params: { market, count, to } }
+              upbitAPI.getRequestConfig({ params: { market, count, to } })
             );
             return response.data;
           });

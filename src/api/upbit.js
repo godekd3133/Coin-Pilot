@@ -3,11 +3,23 @@ import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import { v4 as uuidv4 } from 'uuid';
 
+// MultiCoinTrader owns separate market and risk clients. A module-level slot
+// prevents those clients from independently exceeding the exchange request
+// budget inside one Node process.
+let sharedRateLimitTail = Promise.resolve();
+let sharedNextRequestAt = 0;
+let sharedBackoffUntil = 0;
+
 class UpbitAPI {
-  constructor(accessKey, secretKey) {
+  constructor(accessKey, secretKey, options = {}) {
     this.accessKey = accessKey;
     this.secretKey = secretKey;
     this.baseURL = 'https://api.upbit.com/v1';
+    const configuredTimeout = options.requestTimeoutMs ?? process.env.UPBIT_REQUEST_TIMEOUT_MS;
+    const parsedTimeout = Number(configuredTimeout);
+    this.requestTimeoutMs = Number.isFinite(parsedTimeout) && parsedTimeout > 0
+      ? parsedTimeout
+      : 10_000;
     this.lastRequestTime = 0;
     this.minRequestInterval = 100; // 최소 100ms 간격 (초당 10회 - Upbit 제한)
 
@@ -18,15 +30,34 @@ class UpbitAPI {
   }
 
   /**
+   * 모든 Upbit HTTP 요청에 유한한 timeout을 강제한다.
+   * 응답이 오지 않는 소켓 때문에 forward paper cycle 전체가 멈추지 않도록
+   * 네트워크 경계에서 실패를 반환하게 한다.
+   */
+  getRequestConfig(config = {}) {
+    return {
+      ...config,
+      timeout: this.requestTimeoutMs
+    };
+  }
+
+  /**
    * Rate limiting을 위한 대기
    */
   async waitForRateLimit() {
-    const now = Date.now();
-    const elapsed = now - this.lastRequestTime;
-    if (elapsed < this.minRequestInterval) {
-      await new Promise(resolve => setTimeout(resolve, this.minRequestInterval - elapsed));
-    }
-    this.lastRequestTime = Date.now();
+    const scheduled = sharedRateLimitTail.then(async () => {
+      const now = Date.now();
+      const waitMs = Math.max(0, sharedNextRequestAt - now, sharedBackoffUntil - now);
+      if (waitMs > 0) await new Promise(resolve => setTimeout(resolve, waitMs));
+      const requestStartedAt = Date.now();
+      // Upbit's published ceiling is 10 requests/sec; keep a 120ms slot so
+      // client/risk requests and scheduler jitter do not sit exactly on the
+      // boundary and trigger avoidable 429 responses.
+      sharedNextRequestAt = requestStartedAt + Math.max(120, this.minRequestInterval);
+      this.lastRequestTime = requestStartedAt;
+    });
+    sharedRateLimitTail = scheduled.catch(() => {});
+    await scheduled;
   }
 
   /**
@@ -104,7 +135,16 @@ class UpbitAPI {
 
         // Rate limit - 재시도
         if (status === 429) {
-          const waitTime = Math.pow(2, attempt) * 1000;
+          const retryAfterHeader = error.response?.headers?.['retry-after'];
+          const retryAfterSeconds = Number(retryAfterHeader);
+          const retryAfterMs = Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0
+            ? retryAfterSeconds * 1000
+            : 0;
+          const waitTime = Math.max(
+            retryAfterMs,
+            Math.pow(2, attempt) * 2000 + Math.floor(Math.random() * 250)
+          );
+          sharedBackoffUntil = Math.max(sharedBackoffUntil, Date.now() + waitTime);
           console.log(`Rate limited. Waiting ${waitTime}ms before retry (${attempt + 1}/${maxRetries})`);
           await new Promise(resolve => setTimeout(resolve, waitTime));
           continue;
@@ -119,7 +159,7 @@ class UpbitAPI {
         }
 
         // 네트워크 에러 - 재시도
-        if (error.code === 'ECONNRESET' || error.code === 'ETIMEDOUT' || error.code === 'ENOTFOUND') {
+        if (['ECONNRESET', 'ETIMEDOUT', 'ENOTFOUND', 'EPIPE', 'ECONNABORTED', 'EAI_AGAIN', 'ENETRESET'].includes(error.code)) {
           if (attempt < maxRetries - 1) {
             const waitTime = Math.pow(2, attempt) * 1000;
             console.log(`Network error (${error.code}). Waiting ${waitTime}ms before retry (${attempt + 1}/${maxRetries})`);
@@ -196,7 +236,10 @@ class UpbitAPI {
    */
   async getMarkets() {
     try {
-      const response = await axios.get(`${this.baseURL}/market/all`);
+      const response = await axios.get(
+        `${this.baseURL}/market/all`,
+        this.getRequestConfig()
+      );
       return response.data;
     } catch (error) {
       console.error('Error fetching markets:', error.message);
@@ -214,9 +257,9 @@ class UpbitAPI {
     return this.requestWithRetry(async () => {
       const response = await axios.get(
         `${this.baseURL}/candles/minutes/${unit}`,
-        {
+        this.getRequestConfig({
           params: { market, count }
-        }
+        })
       );
       return response.data;
     });
@@ -227,9 +270,9 @@ class UpbitAPI {
    */
   async getDayCandles(market, count = 200) {
     return this.requestWithRetry(async () => {
-      const response = await axios.get(`${this.baseURL}/candles/days`, {
+      const response = await axios.get(`${this.baseURL}/candles/days`, this.getRequestConfig({
         params: { market, count }
-      });
+      }));
       return response.data;
     });
   }
@@ -240,9 +283,9 @@ class UpbitAPI {
   async getTicker(markets) {
     const marketString = Array.isArray(markets) ? markets.join(',') : markets;
     return this.requestWithRetry(async () => {
-      const response = await axios.get(`${this.baseURL}/ticker`, {
+      const response = await axios.get(`${this.baseURL}/ticker`, this.getRequestConfig({
         params: { markets: marketString }
-      });
+      }));
       return response.data;
     });
   }
@@ -253,9 +296,9 @@ class UpbitAPI {
   async getAccounts() {
     return this.requestWithRetry(async () => {
       const token = this.generateToken();
-      const response = await axios.get(`${this.baseURL}/accounts`, {
+      const response = await axios.get(`${this.baseURL}/accounts`, this.getRequestConfig({
         headers: { Authorization: `Bearer ${token}` }
-      });
+      }));
       return response.data;
     });
   }
@@ -267,10 +310,10 @@ class UpbitAPI {
     return this.requestWithRetry(async () => {
       const query = { market };
       const token = this.generateToken(query);
-      const response = await axios.get(`${this.baseURL}/orders/chance`, {
+      const response = await axios.get(`${this.baseURL}/orders/chance`, this.getRequestConfig({
         params: query,
         headers: { Authorization: `Bearer ${token}` }
-      });
+      }));
       return response.data;
     });
   }
@@ -305,9 +348,9 @@ class UpbitAPI {
     try {
       await this.waitForRateLimit();
       const token = this.generateToken(query);
-      const response = await axios.post(`${this.baseURL}/orders`, query, {
+      const response = await axios.post(`${this.baseURL}/orders`, query, this.getRequestConfig({
         headers: { Authorization: `Bearer ${token}` }
-      });
+      }));
       return { success: true, data: response.data };
     } catch (error) {
       const parsedError = this.parseApiError(error);
@@ -338,9 +381,9 @@ class UpbitAPI {
         try {
           await this.waitForRateLimit();
           const retryToken = this.generateToken(query);
-          const retryResponse = await axios.post(`${this.baseURL}/orders`, query, {
+          const retryResponse = await axios.post(`${this.baseURL}/orders`, query, this.getRequestConfig({
             headers: { Authorization: `Bearer ${retryToken}` }
-          });
+          }));
           return { success: true, data: retryResponse.data };
         } catch (retryError) {
           const retryParsedError = this.parseApiError(retryError);
@@ -359,10 +402,10 @@ class UpbitAPI {
     return this.requestWithRetry(async () => {
       const query = { uuid };
       const token = this.generateToken(query);
-      const response = await axios.delete(`${this.baseURL}/order`, {
+      const response = await axios.delete(`${this.baseURL}/order`, this.getRequestConfig({
         params: query,
         headers: { Authorization: `Bearer ${token}` }
-      });
+      }));
       return response.data;
     });
   }
@@ -374,10 +417,10 @@ class UpbitAPI {
     return this.requestWithRetry(async () => {
       const query = { market, state };
       const token = this.generateToken(query);
-      const response = await axios.get(`${this.baseURL}/orders`, {
+      const response = await axios.get(`${this.baseURL}/orders`, this.getRequestConfig({
         params: query,
         headers: { Authorization: `Bearer ${token}` }
-      });
+      }));
       return response.data;
     });
   }
@@ -389,10 +432,10 @@ class UpbitAPI {
     return this.requestWithRetry(async () => {
       const query = { uuid };
       const token = this.generateToken(query);
-      const response = await axios.get(`${this.baseURL}/order`, {
+      const response = await axios.get(`${this.baseURL}/order`, this.getRequestConfig({
         params: query,
         headers: { Authorization: `Bearer ${token}` }
-      });
+      }));
       return response.data;
     });
   }

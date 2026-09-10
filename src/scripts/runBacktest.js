@@ -29,7 +29,7 @@ async function getMultipleMinuteCandles(upbit, market, unit, totalCount) {
           const axios = (await import('axios')).default;
           const response = await axios.get(
             `https://api.upbit.com/v1/candles/minutes/${unit}`,
-            { params: { market, count, to } }
+            upbit.getRequestConfig({ params: { market, count, to } })
           );
           return response.data;
         });
