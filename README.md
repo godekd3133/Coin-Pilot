@@ -107,6 +107,7 @@ AI 자문은 다음 경계를 지킵니다.
 - session 생성 시 이벤트 종류, 코인 필터, 동일 이벤트 재자문 간격, 자동 자문 여부, 결과 평가 시점(기본 5분)을 정할 수 있습니다. 비용과 호출량을 관리하기 위해 기본 cooldown은 300초입니다.
 - 실제 provider 응답은 기준 이벤트 가격과 평가 시점 이후 처음 관측된 같은 코인 가격에 자동 대조됩니다. `BUY`/`SELL`은 중립 구간(기본 ±0.1%)을 제외하고 `HIT`/`MISS`/`FLAT`으로, `HOLD`/`WAIT`는 `CALM`/`ABSTAINED`로 별도 집계합니다. local brief·실패 응답·신선하지 않은 snapshot·가격이 없는 이벤트는 provider 적중률에 섞지 않습니다.
 - 실제 응답이 한 provider뿐이면 `singleProvider`로 제한 표시하고 consensus 표본으로 세지 않습니다. 두 provider 이상이 같은 방향으로 응답한 경우에만 `quorum=true`인 consensus를 별도로 평가합니다.
+- 기존 전략 event가 `BUY`/`SELL`인데 AI가 `WAIT`/`HOLD`를 반환하면 directional hit-rate와 별도로 `VETO_GOOD`(손실 회피), `VETO_MISSED_OPPORTUNITY`(상승 기회 회피), `VETO_FLAT`을 집계합니다. AI를 방향 예측기뿐 아니라 위험 veto로 평가하기 위한 지표입니다.
 - 대시보드와 `GET /api/ai/effectiveness`에서 실제 응답률, provider별 지연·평가 표본·적중률, 평가 대기 건수를 확인할 수 있습니다. 최소 20개 평가 표본 전에는 `sufficientEvidence=false`로 표시되며, 이 지표도 주문 승인이나 수익성 보장을 의미하지 않습니다.
 
 로컬 CLI가 먼저 로그인되어 있어야 합니다. ChatGPT 구독과 OpenAI API 사용은 별도 결제 체계이므로, ChatGPT 구독을 API key로 오인해 앱에 넣지 않습니다. [OpenAI 공식 billing 안내](https://help.openai.com/en/articles/9039756)를 확인하고, 현재 provider 로그인 상태는 AI Desk의 연결 상태 카드에서 다시 확인하세요.
@@ -151,6 +152,19 @@ npm run paper:smoke
 ```
 
 종료 시 출력되는 `aiMonitoring.effectiveness`와 별도 원장의 `GET /api/ai/effectiveness`가 실제 응답률·지연·평가 표본을 보여줍니다. 실제 매매 효용을 주장하려면 stale/가격 없는 이벤트를 제외한 평가 표본이 최소 20개 쌓여야 하며, 짧은 smoke나 synthetic fixture는 연결성 증거일 뿐입니다.
+
+고정 candle cache에서 실제 provider를 historical replay하려면 다음을 사용합니다. 이 결과는 주문·wallet·live gate에 연결되지 않는 research-only report입니다.
+
+```bash
+AI_REPLAY_CANDLES_FILE=.cap-study-candles.json \
+AI_REPLAY_MAX_SAMPLES=20 \
+AI_REPLAY_HORIZON_CANDLES=5 \
+AI_REPLAY_PROVIDER=gpt \
+AI_REPLAY_OUTPUT_FILE=/tmp/coinpilot-ai-historical-replay.json \
+npm run ai:replay -- --require-provider
+```
+
+Replay는 방향성 `HIT/MISS`와 함께 기존 BUY/SELL signal을 AI가 WAIT/HOLD로 막았을 때의 `VETO_GOOD`/`VETO_MISSED_OPPORTUNITY`를 별도로 집계합니다. historical replay의 결과도 live 효용이나 promotion 근거로 자동 승격하지 않습니다.
 
 장기 forward paper는 `npm run paper:forward`로 실행합니다. 첫 실행은 `.paper-forward/`에 새 시드로 시작하고, 이후 같은 폴더로 재실행하면 기존 활성 세션을 이어갑니다. 프로세스가 비정상 종료되어 heartbeat가 오래된 경우에도 forward 모드는 기존 ledger를 새로 만들지 않고 같은 세션을 복구하지만, 기록된 공백이 `SCALP_PAPER_MAX_HEARTBEAT_GAP_MINUTES`를 넘으면 승격 자격은 자동 보류됩니다. 의도적인 `Ctrl+C` 종료 후에는 새 세션으로 다시 시작하며, 실전 주문은 호출하지 않습니다. 이 세션이 최소 7일·20회 청산·수익률·MDD·연속 관찰 게이트를 모두 통과해야 forward paper 승격 후보가 됩니다. strict 진입과 별도로 soft 후보는 shadow 장부에만 기록되어 완화 후보의 참고 손익/PF를 관찰합니다.
 
@@ -245,6 +259,12 @@ portfolio 진단에서만 `requireNextCandleBullish` 후보도 비교할 수 있
 | `PAPER_AI_EVALUATION_MINUTES` | 5 | paper AI monitoring의 미래 가격 평가 시점(분) |
 | `PAPER_AI_STOP_WAIT_MS` | 35000 | smoke 종료 시 진행 중 provider 호출을 기다리는 최대 시간(ms) |
 | `PAPER_AI_MONITORING_FILE` | output dir 아래 | paper AI monitoring 원장 경로 override |
+| `AI_REPLAY_CANDLES_FILE` | `.cap-study-candles.json` | historical replay 고정 candle cache |
+| `AI_REPLAY_MAX_SAMPLES` | 20 | replay provider 호출 최대 후보 수 |
+| `AI_REPLAY_HORIZON_CANDLES` | 5 | 후보 이후 미래 가격을 확인할 candle 수 |
+| `AI_REPLAY_MIN_SPACING_CANDLES` | 5 | 인접 후보 중복을 줄이는 최소 간격 |
+| `AI_REPLAY_PROVIDER` | gpt | historical replay provider |
+| `AI_REPLAY_OUTPUT_FILE` | `/tmp/coinpilot-ai-historical-replay.json` | replay 결과 report 경로 |
 | `RSI_PERIOD` | 14 | RSI 기간 |
 | `RSI_OVERSOLD` | 30 | RSI 과매도 기준 |
 | `RSI_OVERBOUGHT` | 70 | RSI 과매수 기준 |
