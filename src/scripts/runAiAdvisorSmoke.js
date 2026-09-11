@@ -5,6 +5,7 @@ dotenv.config();
 
 const requireProvider = process.argv.includes('--require-provider');
 const providerSelection = process.env.AI_SMOKE_PROVIDERS || 'both';
+const envNumber = (value, fallback) => Number.isFinite(Number(value)) ? Number(value) : fallback;
 const advisor = new AIAdvisorService({
   timeoutMs: Number(process.env.AI_ADVISOR_TIMEOUT_MS) || 30_000
 });
@@ -34,7 +35,14 @@ const providerStatus = await advisor.getProviderStatus({ force: true });
 const consultation = await advisor.ask({
   provider: providerSelection,
   event,
-  context: { mode: 'DRY_RUN', source: 'synthetic_fixture' },
+  context: {
+    mode: 'DRY_RUN',
+    source: 'synthetic_fixture',
+    evaluation: {
+      horizonMinutes: envNumber(process.env.AI_EVALUATION_MINUTES, 5),
+      neutralBandPercent: envNumber(process.env.AI_EVALUATION_NEUTRAL_BAND_PERCENT, 0.3)
+    }
+  },
   session: { name: 'AI efficacy smoke', horizon: 'short-term' }
 });
 

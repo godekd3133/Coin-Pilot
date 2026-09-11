@@ -2,6 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 
 const DEFAULT_TIMEOUT_MS = 30_000;
+const DEFAULT_EVALUATION_MINUTES = 5;
+const DEFAULT_EVALUATION_NEUTRAL_BAND_PERCENT = 0.3;
 const MAX_OUTPUT_CHARS = 80_000;
 const MAX_RATIONALE_CHARS = 1_200;
 const MAX_RISK_CHARS = 280;
@@ -61,6 +63,20 @@ function normalizeConfidence(value) {
 function normalizeAction(value) {
   const key = String(value ?? '').trim().toUpperCase();
   return ACTION_ALIASES[key] || 'WAIT';
+}
+
+function resolveEvaluationMinutes(value, fallback = DEFAULT_EVALUATION_MINUTES) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) && numeric > 0
+    ? Math.max(1, Math.min(1_440, Math.round(numeric)))
+    : fallback;
+}
+
+function resolveNeutralBandPercent(value, fallback = DEFAULT_EVALUATION_NEUTRAL_BAND_PERCENT) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) && numeric >= 0
+    ? Math.max(0, Math.min(10, numeric))
+    : fallback;
 }
 
 /**
@@ -308,6 +324,11 @@ function compactPromptValue(value) {
 }
 
 export function buildAdvisorPrompt({ event, context = {}, session = {} }) {
+  const evaluation = context?.evaluation || {};
+  const evaluationMinutes = resolveEvaluationMinutes(
+    evaluation.horizonMinutes ?? evaluation.evaluationMinutes ?? session.evaluationMinutes
+  );
+  const neutralBandPercent = resolveNeutralBandPercent(evaluation.neutralBandPercent);
   const payload = {
     event: compactPromptValue(event),
     context: compactPromptValue(context),
@@ -321,7 +342,8 @@ export function buildAdvisorPrompt({ event, context = {}, session = {} }) {
     'You are a read-only trading decision advisor inside CoinPilot.',
     'This is market commentary, not an order request. Never place an order, call an exchange API, alter strategy settings, or imply that your answer was executed.',
     'Use only the supplied snapshot. If evidence is incomplete or stale, choose WAIT and explain why.',
-    'For a fresh BUY_SIGNAL with reboundConfirmed=true, evaluate the confirmed BUY candidate directly rather than defaulting to WAIT merely because this is advisory. Choose BUY only when the supplied evidence plausibly exceeds the neutral band after transaction costs; choose WAIT only when a concrete contradiction, rejection reason, stale/incomplete input, or insufficient net movement remains.',
+    `The outcome evaluator treats price movement within ±${neutralBandPercent}% over ${evaluationMinutes} minute(s) as cost-neutral after fees and slippage. Do not choose BUY or SELL for a move that is only inside this band; require evidence that plausibly clears this exact threshold.`,
+    'For a fresh BUY_SIGNAL with reboundConfirmed=true, evaluate the confirmed BUY candidate directly rather than defaulting to WAIT merely because this is advisory. Choose BUY only when the supplied evidence plausibly exceeds the stated neutral band after transaction costs; choose WAIT only when a concrete contradiction, rejection reason, stale/incomplete input, or insufficient net movement remains.',
     'For a fresh SELL_SIGNAL with a confirmed sell condition, apply the same independent cost-aware judgment. Do not mirror event.action blindly.',
     'Return JSON only with exactly these fields: action (BUY|SELL|HOLD|WAIT), confidence (0..100), horizon, rationale, risks (array of strings), invalidation.',
     'A BUY or SELL is an advisory opinion only. The existing settings-based automation remains the sole automated execution path.',
@@ -392,6 +414,12 @@ export class AIAdvisorService {
     const configuredEnabled = options.enabled ?? options.config?.aiAdvisorEnabled ?? process.env.AI_ADVISOR_ENABLED !== 'false';
     this.enabled = configuredEnabled !== false;
     this.timeoutMs = Math.max(3_000, Number(options.timeoutMs || options.config?.aiAdvisorTimeoutMs || process.env.AI_ADVISOR_TIMEOUT_MS || DEFAULT_TIMEOUT_MS));
+    this.evaluationMinutes = resolveEvaluationMinutes(
+      options.evaluationMinutes ?? options.config?.aiEvaluationMinutes ?? process.env.AI_EVALUATION_MINUTES
+    );
+    this.evaluationNeutralBandPercent = resolveNeutralBandPercent(
+      options.evaluationNeutralBandPercent ?? options.config?.aiEvaluationNeutralBandPercent ?? process.env.AI_EVALUATION_NEUTRAL_BAND_PERCENT
+    );
     this.models = {
       gpt: options.models?.gpt || options.config?.aiGptModel || process.env.AI_GPT_MODEL || '',
       claude: options.models?.claude || options.config?.aiClaudeModel || process.env.AI_CLAUDE_MODEL || ''
@@ -530,6 +558,14 @@ export class AIAdvisorService {
     if (!event || typeof event !== 'object') throw new Error('자문할 monitoring event가 필요합니다');
 
     const requestId = randomUUID();
+    const promptContext = {
+      ...context,
+      evaluation: {
+        ...(context.evaluation || {}),
+        horizonMinutes: context.evaluation?.horizonMinutes ?? session.evaluationMinutes ?? this.evaluationMinutes,
+        neutralBandPercent: context.evaluation?.neutralBandPercent ?? this.evaluationNeutralBandPercent
+      }
+    };
     let providerStatusById = new Map();
     if (this.preflightProviderStatus) {
       try {
@@ -564,7 +600,7 @@ export class AIAdvisorService {
       }
       return this.askProvider(item, {
         event,
-        context,
+        context: promptContext,
         session,
         requestId
       }).then(result => canAttemptWithConfigWarning && result.status === 'COMPLETED'

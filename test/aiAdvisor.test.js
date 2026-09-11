@@ -89,6 +89,24 @@ test('잘못된 provider 판단은 WAIT로 fail-closed 된다', () => {
   assert.match(prompt, /confirmed BUY/);
   assert.match(prompt, /transaction costs/i);
   assert.match(prompt, /WAIT only when/i);
+  assert.match(prompt, /±0\.3% over 5 minute/);
+});
+
+test('자문 prompt와 evaluator가 같은 비용중립 기준을 사용한다', () => {
+  const prompt = buildAdvisorPrompt({
+    event: { type: 'BUY_SIGNAL', action: 'BUY', coin: 'KRW-BTC' },
+    context: { evaluation: { horizonMinutes: 30, neutralBandPercent: 0.45 } }
+  });
+
+  assert.match(prompt, /±0\.45% over 30 minute/);
+  assert.equal(
+    scoreAdviceOutcome({ action: 'BUY', confidence: 80 }, 0.44, 0.45, 'BUY').verdict,
+    'FLAT'
+  );
+  assert.equal(
+    scoreAdviceOutcome({ action: 'BUY', confidence: 80 }, 0.46, 0.45, 'BUY').verdict,
+    'HIT'
+  );
 });
 
 test('실제 CLI runner는 열린 stdin 때문에 timeout되지 않는다', async () => {

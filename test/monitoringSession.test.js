@@ -178,8 +178,10 @@ test('필터에서 탈락한 반등 후보도 선택형 REBOUND_CANDIDATE event�
 
 test('실제 provider 자문은 미래 가격과 대조되어 effectiveness로 누적된다', async () => {
   const file = path.join(os.tmpdir(), `coinpilot-ai-effectiveness-${Date.now()}-${Math.random()}.json`);
+  const advisorCalls = [];
   const advisor = {
-    async ask() {
+    async ask(options) {
+      advisorCalls.push(options);
       return {
         requestId: 'effectiveness-request',
         status: 'COMPLETED',
@@ -229,6 +231,10 @@ test('실제 provider 자문은 미래 가격과 대조되어 effectiveness로 �
       analyses: [makeAnalysis('effectiveness-1', 'BUY')]
     });
     await new Promise(resolve => setImmediate(resolve));
+
+    assert.equal(advisorCalls.length, 1);
+    assert.equal(advisorCalls[0].context.evaluation.horizonMinutes, 5);
+    assert.equal(advisorCalls[0].context.evaluation.neutralBandPercent, 0.1);
 
     const future = makeAnalysis('effectiveness-2', 'BUY');
     future.currentPrice = 101;

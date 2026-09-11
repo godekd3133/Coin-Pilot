@@ -1080,7 +1080,11 @@ export class MonitoringSessionService {
           event: selectedEvent,
           context: {
             latestSnapshot: this.state.latestSnapshot,
-            recentEvents: this.state.events.slice(-8)
+            recentEvents: this.state.events.slice(-8),
+            evaluation: {
+              horizonMinutes: session?.evaluationMinutes ?? this.defaultEvaluationMinutes,
+              neutralBandPercent: this.evaluationNeutralBandPercent
+            }
           },
           session: session || {}
         });

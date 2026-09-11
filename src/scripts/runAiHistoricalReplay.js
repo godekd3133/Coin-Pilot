@@ -97,6 +97,7 @@ async function main() {
   const horizonCandles = Math.max(1, Math.floor(number(process.env.AI_REPLAY_HORIZON_CANDLES, 5)));
   const minimumSpacingCandles = Math.max(1, Math.floor(number(process.env.AI_REPLAY_MIN_SPACING_CANDLES, 5)));
   const neutralBandPercent = Math.max(0, number(process.env.AI_REPLAY_NEUTRAL_BAND_PERCENT, 0.3));
+  const confirmedOnly = process.env.AI_REPLAY_CONFIRMED_ONLY === 'true';
   const marketsFilter = (process.env.AI_REPLAY_MARKETS || '').split(',').map(item => item.trim().toUpperCase()).filter(Boolean);
   const raw = JSON.parse(fs.readFileSync(candleFile, 'utf8'));
   const markets = marketsFilter.length > 0 ? marketsFilter : Object.keys(raw).filter(key => key.startsWith('KRW-'));
@@ -122,7 +123,9 @@ async function main() {
       horizonCandles,
       minimumSpacingCandles
     });
-    return result.candidates.map(candidate => ({ market, ...candidate }));
+    return result.candidates
+      .filter(candidate => !confirmedOnly || candidate.rebound?.reboundConfirmed === true)
+      .map(candidate => ({ market, ...candidate }));
   }).sort((a, b) => String(a.timestamp).localeCompare(String(b.timestamp)));
   const selected = candidates.slice(0, maxSamples);
   if (selected.length === 0) throw new Error('고정 candle window에서 replay 후보를 찾지 못했습니다.');
@@ -139,7 +142,11 @@ async function main() {
       context: {
         mode: 'HISTORICAL_REPLAY',
         source: candleFile,
-        warning: '과거 고정 candle window replay입니다. 이 결과는 live/promotion 증거가 아닙니다.'
+        warning: '과거 고정 candle window replay입니다. 이 결과는 live/promotion 증거가 아닙니다.',
+        evaluation: {
+          horizonMinutes: horizonCandles * number(process.env.SCALP_VALIDATION_CANDLE_UNIT, 1),
+          neutralBandPercent
+        }
       },
       session: { name: 'AI historical replay', horizon: `${horizonCandles} candles` }
     });
@@ -178,6 +185,7 @@ async function main() {
     selectedSamples: selected.length,
     horizonCandles,
     minimumSpacingCandles,
+    confirmedOnly,
     neutralBandPercent,
     runtimeConfig: baseConfig,
     responseCount: rows.length,
