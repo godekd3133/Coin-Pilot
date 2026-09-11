@@ -79,7 +79,7 @@ test('잘못된 provider 판단은 WAIT로 fail-closed 된다', () => {
   assert.match(prompt, /Return JSON only/);
 });
 
-test('실제 CLI runner는 argv prompt 뒤에 열린 stdin 때문에 timeout되지 않는다', async () => {
+test('실제 CLI runner는 열린 stdin 때문에 timeout되지 않는다', async () => {
   const service = new AIAdvisorService({
     executables: { claude: process.execPath },
     timeoutMs: 3_000
@@ -90,6 +90,17 @@ test('실제 CLI runner는 argv prompt 뒤에 열린 stdin 때문에 timeout되�
   });
 
   assert.match(result.stdout, /STDIN_CLOSED/);
+});
+
+test('장기 snapshot prompt는 argv 제한 대신 provider stdin으로 전달되고 종료된다', async () => {
+  const service = new AIAdvisorService({
+    executables: { claude: process.execPath },
+    argumentBuilder: () => ['-e', "let data='';process.stdin.on('data',chunk=>data+=chunk);process.stdin.on('end',()=>process.stdout.write(data))"],
+    timeoutMs: 3_000
+  });
+  const result = await service.runProvider('claude', 'LONG_SNAPSHOT_PROMPT', { timeoutMs: 3_000 });
+
+  assert.equal(result.stdout, 'LONG_SNAPSHOT_PROMPT');
 });
 
 test('명백한 미로그인은 모델 호출 전에 즉시 PROVIDER_NOT_READY로 종료한다', async () => {

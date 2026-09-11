@@ -343,12 +343,12 @@ function providerArgs(provider, prompt, model) {
       '--json'
     ];
     if (model) args.push('--model', model);
-    args.push(prompt);
+    args.push('-');
     return args;
   }
 
   const args = [
-    '-p', prompt,
+    '-p',
     '--output-format', 'json',
     '--no-session-persistence',
     '--permission-mode', 'plan',
@@ -389,6 +389,7 @@ export class AIAdvisorService {
       gpt: options.executables?.gpt || options.config?.aiCodexBin || process.env.AI_CODEX_BIN || 'codex',
       claude: options.executables?.claude || options.config?.aiClaudeBin || process.env.AI_CLAUDE_BIN || 'claude'
     };
+    this.argumentBuilder = options.argumentBuilder || providerArgs;
     this.runner = options.runner || ((provider, prompt, runnerOptions) => this.runProvider(provider, prompt, runnerOptions));
     this.preflightProviderStatus = options.preflightProviderStatus ?? !options.runner;
     this.statusCache = null;
@@ -405,7 +406,7 @@ export class AIAdvisorService {
 
   async runProvider(provider, prompt, { timeoutMs = this.timeoutMs, statusArgs = null } = {}) {
     const executable = this.executables[provider];
-    const args = statusArgs || providerArgs(provider, prompt, this.models[provider]);
+    const args = statusArgs || this.argumentBuilder(provider, prompt, this.models[provider]);
     const environment = stripSubscriptionApiKeys();
 
     return new Promise((resolve, reject) => {
@@ -419,10 +420,11 @@ export class AIAdvisorService {
         shell: false,
         windowsHide: true
       });
-      // The prompt is passed as an argv value. Closing stdin is still
-      // required by Claude Code's print mode; otherwise it waits for a
-      // second input stream and the advisor appears to hang until timeout.
+      // Prompts are sent through stdin to avoid OS argv-size limits. Closing
+      // stdin is required by Claude Code's print mode; otherwise it waits
+      // for a second input stream and appears to hang until timeout.
       child.stdin?.on('error', () => {});
+      if (!statusArgs && prompt) child.stdin?.write(prompt);
       child.stdin?.end();
 
       const finish = (callback, value) => {
