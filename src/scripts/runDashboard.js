@@ -35,7 +35,8 @@ export function createMockTrader() {
     useNews: false,
     enableDashboard: true,
     virtualPortfolioFile: `${mockStoragePrefix}.dry_portfolio.json`,
-    paperValidationFile: `${mockStoragePrefix}.paper_validation.json`
+    paperValidationFile: `${mockStoragePrefix}.paper_validation.json`,
+    aiMonitoringFile: `${mockStoragePrefix}.ai_monitoring_sessions.json`
   });
 
   // Dashboard-only mode must be deterministic and must never touch Upbit.

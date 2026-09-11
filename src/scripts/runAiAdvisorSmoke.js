@@ -6,7 +6,7 @@ dotenv.config();
 const requireProvider = process.argv.includes('--require-provider');
 const providerSelection = process.env.AI_SMOKE_PROVIDERS || 'both';
 const advisor = new AIAdvisorService({
-  timeoutMs: Number(process.env.AI_ADVISOR_TIMEOUT_MS) || 20_000
+  timeoutMs: Number(process.env.AI_ADVISOR_TIMEOUT_MS) || 30_000
 });
 
 const event = {
@@ -49,6 +49,16 @@ console.log(JSON.stringify({
   providerSelection,
   effectiveAiResponse: actualProviderCompleted === true,
   consultationStatus: consultation.status,
+  consensus: consultation.consensus
+    ? {
+        action: consultation.consensus.action,
+        confidence: consultation.consensus.confidence,
+        providerCount: consultation.consensus.providerCount,
+        quorum: consultation.consensus.quorum === true,
+        singleProvider: consultation.consensus.singleProvider === true,
+        conflict: consultation.consensus.conflict === true
+      }
+    : null,
   providers: providerStatus.providers?.map(provider => ({
     id: provider.id,
     status: provider.status,

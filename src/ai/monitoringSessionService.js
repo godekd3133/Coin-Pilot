@@ -5,6 +5,10 @@ import { randomUUID } from 'node:crypto';
 const SCHEMA_VERSION = 1;
 const DEFAULT_MAX_EVENTS = 240;
 const DEFAULT_MAX_CONSULTATIONS = 160;
+const DEFAULT_EVALUATION_MINUTES = 5;
+const DEFAULT_NEUTRAL_BAND_PERCENT = 0.1;
+const DEFAULT_MINIMUM_EVALUATION_SAMPLES = 20;
+const DEFAULT_MAX_PRICE_OBSERVATIONS = 5_000;
 const EVENT_TYPES = new Set([
   'BUY_SIGNAL',
   'SELL_SIGNAL',
@@ -23,6 +27,107 @@ function truncate(value, maxLength) {
 function numberOrNull(value) {
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
+}
+
+function timestampMs(value) {
+  const parsed = Date.parse(value || '');
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function resolveEvaluationMinutes(value, fallback = DEFAULT_EVALUATION_MINUTES) {
+  const parsed = Number(value);
+  const resolved = Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+  return Math.max(1, Math.min(1_440, Math.round(resolved)));
+}
+
+function resolveNeutralBandPercent(value, fallback = DEFAULT_NEUTRAL_BAND_PERCENT) {
+  const parsed = Number(value);
+  const resolved = Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+  return Math.max(0, Math.min(10, resolved));
+}
+
+function normalizeAdviceAction(value) {
+  const action = String(value || '').trim().toUpperCase();
+  return ['BUY', 'SELL', 'HOLD', 'WAIT'].includes(action) ? action : 'WAIT';
+}
+
+function scoreAdviceOutcome(advice, priceChangePercent, neutralBandPercent = DEFAULT_NEUTRAL_BAND_PERCENT) {
+  const action = normalizeAdviceAction(advice?.action);
+  const move = numberOrNull(priceChangePercent);
+  const neutralBand = resolveNeutralBandPercent(neutralBandPercent);
+  if (move === null) {
+    return {
+      action,
+      confidence: numberOrNull(advice?.confidence),
+      verdict: 'NOT_EVALUABLE',
+      signedMovePercent: null,
+      priceChangePercent: null,
+      score: null
+    };
+  }
+
+  if (action === 'BUY' || action === 'SELL') {
+    const signedMovePercent = action === 'BUY' ? move : -move;
+    const verdict = Math.abs(move) <= neutralBand
+      ? 'FLAT'
+      : signedMovePercent > 0 ? 'HIT' : 'MISS';
+    return {
+      action,
+      confidence: numberOrNull(advice?.confidence),
+      verdict,
+      signedMovePercent,
+      priceChangePercent: move,
+      score: verdict === 'HIT' ? 1 : verdict === 'MISS' ? -1 : 0
+    };
+  }
+
+  return {
+    action,
+    confidence: numberOrNull(advice?.confidence),
+    verdict: Math.abs(move) <= neutralBand ? 'CALM' : 'ABSTAINED',
+    signedMovePercent: null,
+    priceChangePercent: move,
+    score: null
+  };
+}
+
+function buildPendingEvaluation(event, session, defaults) {
+  const baselinePrice = numberOrNull(event?.price ?? event?.snapshot?.currentPrice);
+  const baselineAt = event?.timestamp || null;
+  const freshness = event?.snapshot?.freshness || event?.snapshot?.candleFreshness || {};
+  const snapshotValid = freshness.valid !== false;
+  const evaluationMinutes = resolveEvaluationMinutes(
+    session?.evaluationMinutes,
+    defaults.evaluationMinutes
+  );
+  const baselineTimestamp = timestampMs(baselineAt);
+  const targetAt = baselineTimestamp === null
+    ? null
+    : new Date(baselineTimestamp + evaluationMinutes * 60_000).toISOString();
+  return {
+    status: snapshotValid && baselinePrice !== null && baselinePrice > 0 && baselineTimestamp !== null ? 'PENDING' : 'NOT_EVALUABLE',
+    coin: event?.coin ? String(event.coin).toUpperCase() : null,
+    snapshotValid,
+    baselinePrice,
+    baselineAt,
+    decisionPrice: null,
+    decisionAt: null,
+    adviceLatencySeconds: null,
+    targetAt,
+    horizonMinutes: evaluationMinutes,
+    neutralBandPercent: defaults.neutralBandPercent,
+    outcomePrice: null,
+    outcomeAt: null,
+    observedAfterMinutes: null,
+    priceChangePercent: null,
+    verdicts: [],
+    reason: !snapshotValid
+      ? `snapshot 신선도 실패(${freshness.reason || 'invalid'})로 평가하지 않습니다.`
+      : baselinePrice === null || baselinePrice <= 0 || baselineTimestamp === null
+        ? '기준 가격 또는 기준 시간이 없어 미래 가격 대조를 수행할 수 없습니다.'
+      : null,
+    evaluatedAt: null
+  };
 }
 
 function compactObject(value, maxKeys = 30) {
@@ -258,6 +363,7 @@ function emptyState() {
     latestSnapshot: null,
     events: [],
     consultations: [],
+    priceObservations: [],
     sessions: []
   };
 }
@@ -270,6 +376,18 @@ export class MonitoringSessionService {
     this.advisor = options.advisor;
     this.maxEvents = Math.max(40, Number(options.maxEvents || DEFAULT_MAX_EVENTS));
     this.maxConsultations = Math.max(40, Number(options.maxConsultations || DEFAULT_MAX_CONSULTATIONS));
+    this.maxPriceObservations = Math.max(500, Number(options.maxPriceObservations || DEFAULT_MAX_PRICE_OBSERVATIONS));
+    this.defaultEvaluationMinutes = resolveEvaluationMinutes(
+      options.defaultEvaluationMinutes ?? options.config?.aiEvaluationMinutes ?? process.env.AI_EVALUATION_MINUTES,
+      DEFAULT_EVALUATION_MINUTES
+    );
+    this.evaluationNeutralBandPercent = resolveNeutralBandPercent(
+      options.evaluationNeutralBandPercent ?? options.config?.aiEvaluationNeutralBandPercent ?? process.env.AI_EVALUATION_NEUTRAL_BAND_PERCENT,
+      DEFAULT_NEUTRAL_BAND_PERCENT
+    );
+    this.minimumEvaluationSamples = Math.max(1, Math.min(10_000, Number(
+      options.minimumEvaluationSamples ?? options.config?.aiEvaluationMinSamples ?? process.env.AI_EVALUATION_MIN_SAMPLES
+    ) || DEFAULT_MINIMUM_EVALUATION_SAMPLES));
     this.onUpdate = null;
     this.pendingConsultations = new Map();
     this.ingestQueue = Promise.resolve();
@@ -292,11 +410,18 @@ export class MonitoringSessionService {
           }))
           : [],
         consultations: Array.isArray(saved.consultations) ? saved.consultations.slice(-this.maxConsultations) : [],
+        priceObservations: Array.isArray(saved.priceObservations)
+          ? saved.priceObservations.slice(-this.maxPriceObservations).filter(observation =>
+            observation && typeof observation === 'object' && observation.coin &&
+            numberOrNull(observation.price) !== null && timestampMs(observation.timestamp) !== null
+          )
+          : [],
         sessions: Array.isArray(saved.sessions) ? saved.sessions.map(session => ({
           ...session,
           providers: normalizeProviderValue(session.providers),
           eventTypes: normalizeEventTypes(session.eventTypes),
           coins: normalizeCoins(session.coins),
+          evaluationMinutes: resolveEvaluationMinutes(session.evaluationMinutes, this.defaultEvaluationMinutes),
           seenEventKeys: Array.isArray(session.seenEventKeys) ? session.seenEventKeys : [],
           lastConsultByEventKey: session.lastConsultByEventKey && typeof session.lastConsultByEventKey === 'object'
             ? session.lastConsultByEventKey
@@ -349,6 +474,140 @@ export class MonitoringSessionService {
       .map(session => this.publicSession(session));
   }
 
+  getEffectiveness({ sessionId = null } = {}) {
+    const consultations = this.state.consultations.filter(consultation =>
+      !sessionId || consultation.sessionId === sessionId
+    );
+    const providerStats = new Map();
+    const ensureStats = (source, label, type = 'provider') => {
+      if (!providerStats.has(source)) {
+        providerStats.set(source, {
+          source,
+          label,
+          type,
+          attempted: 0,
+          completed: 0,
+          failed: 0,
+          evaluated: 0,
+          directionalPredictions: 0,
+          hits: 0,
+          misses: 0,
+          flat: 0,
+          calm: 0,
+          abstained: 0,
+          latencyMsTotal: 0,
+          signedMovePercentTotal: 0
+        });
+      }
+      return providerStats.get(source);
+    };
+
+    let actualProviderAttempts = 0;
+    let actualProviderCompletions = 0;
+    let evaluatedConsultations = 0;
+    let pendingEvaluations = 0;
+    let notEvaluableConsultations = 0;
+
+    for (const consultation of consultations) {
+      for (const result of Array.isArray(consultation.results) ? consultation.results : []) {
+        if (!result?.provider || result.provider === 'local-brief') continue;
+        const stats = ensureStats(result.provider, result.providerLabel || result.provider);
+        stats.attempted += 1;
+        actualProviderAttempts += 1;
+        if (result.status === 'COMPLETED' && result.advice) {
+          stats.completed += 1;
+          actualProviderCompletions += 1;
+          stats.latencyMsTotal += Number(result.latencyMs) || 0;
+        } else {
+          stats.failed += 1;
+        }
+      }
+
+      const evaluation = consultation.evaluation;
+      if (evaluation?.status === 'COMPLETED') {
+        evaluatedConsultations += 1;
+        for (const verdict of evaluation.verdicts || []) {
+          const stats = ensureStats(
+            verdict.source,
+            verdict.providerLabel || verdict.source,
+            verdict.source === 'consensus' ? 'consensus' : 'provider'
+          );
+          stats.evaluated += 1;
+          const signedMove = numberOrNull(verdict.signedMovePercent);
+          if (signedMove !== null) stats.signedMovePercentTotal += signedMove;
+          if (verdict.verdict === 'HIT') {
+            stats.hits += 1;
+            stats.directionalPredictions += 1;
+          } else if (verdict.verdict === 'MISS') {
+            stats.misses += 1;
+            stats.directionalPredictions += 1;
+          } else if (verdict.verdict === 'FLAT') {
+            stats.flat += 1;
+            stats.directionalPredictions += 1;
+          } else if (verdict.verdict === 'CALM') {
+            stats.calm += 1;
+          } else if (verdict.verdict === 'ABSTAINED') {
+            stats.abstained += 1;
+          }
+        }
+      } else if (evaluation?.status === 'PENDING') {
+        pendingEvaluations += 1;
+      } else if (evaluation?.status === 'NOT_EVALUABLE') {
+        notEvaluableConsultations += 1;
+      }
+    }
+
+    const toPublicStats = stats => {
+      const scored = stats.hits + stats.misses;
+      const outcomeEligible = stats.evaluated > 0;
+      return {
+        ...stats,
+        completionRate: stats.attempted > 0 ? stats.completed / stats.attempted : null,
+        averageLatencyMs: stats.completed > 0 ? Math.round(stats.latencyMsTotal / stats.completed) : null,
+        hitRate: scored > 0 ? stats.hits / scored : null,
+        averageSignedMovePercent: stats.directionalPredictions > 0
+          ? stats.signedMovePercentTotal / stats.directionalPredictions
+          : null,
+        sufficientEvidence: outcomeEligible && stats.evaluated >= this.minimumEvaluationSamples
+      };
+    };
+
+    const publicStats = Object.fromEntries([...providerStats.entries()]
+      .map(([source, stats]) => [source, toPublicStats(stats)]));
+    const outcomeEligibleConsultations = evaluatedConsultations + pendingEvaluations;
+    return {
+      sessionId,
+      generatedAt: new Date().toISOString(),
+      totalConsultations: consultations.length,
+      actualProviderAttempts,
+      actualProviderCompletions,
+      actualProviderCompletionRate: actualProviderAttempts > 0
+        ? actualProviderCompletions / actualProviderAttempts
+        : null,
+      evaluatedConsultations,
+      pendingEvaluations,
+      notEvaluableConsultations,
+      evaluationCoverageRate: outcomeEligibleConsultations > 0
+        ? evaluatedConsultations / outcomeEligibleConsultations
+        : null,
+      providerStats: publicStats,
+      method: {
+        horizonMinutes: this.defaultEvaluationMinutes,
+        neutralBandPercent: this.evaluationNeutralBandPercent,
+        minimumEvaluationSamples: this.minimumEvaluationSamples,
+        hitDefinition: 'BUY/SELL 방향이 neutral band를 넘어 미래 기준 시점 가격과 일치하면 HIT',
+        waitDefinition: 'HOLD/WAIT는 방향 예측이 아니므로 CALM/ABSTAINED로 별도 집계',
+        source: '동일 event의 기준 가격과 horizon 이후 첫 관측 가격'
+      },
+      sufficientEvidence: Object.values(publicStats).some(stats => stats.sufficientEvidence === true),
+      evidenceWarning: Object.keys(publicStats).length === 0
+        ? '실제 provider 응답이 없어 평가할 표본이 없습니다.'
+        : evaluatedConsultations < this.minimumEvaluationSamples
+          ? `아직 ${this.minimumEvaluationSamples}개 평가 표본이 필요합니다. 현재 ${evaluatedConsultations}개입니다.`
+          : null
+    };
+  }
+
   getSnapshot({ limit = 40, sessionId = null } = {}) {
     const safeLimit = Math.max(1, Math.min(200, Number(limit) || 40));
     const events = this.state.events
@@ -364,7 +623,8 @@ export class MonitoringSessionService {
       latestSnapshot: this.state.latestSnapshot,
       sessions: this.getSessions(),
       events,
-      consultations
+      consultations,
+      effectiveness: this.getEffectiveness({ sessionId })
     };
   }
 
@@ -392,6 +652,7 @@ export class MonitoringSessionService {
       coins: normalizeCoins(input.coins),
       autoConsult: input.autoConsult !== false,
       cooldownSeconds: Math.max(30, Math.min(86_400, Number(input.cooldownSeconds) || 300)),
+      evaluationMinutes: resolveEvaluationMinutes(input.evaluationMinutes, this.defaultEvaluationMinutes),
       horizon: truncate(input.horizon || 'short-term', 80),
       createdAt: now,
       startedAt: now,
@@ -466,6 +727,8 @@ export class MonitoringSessionService {
       marketRegime: compactObject(cycle.marketRegime, 12),
       analyses: analyses.slice(0, 80).map(compactAnalysis)
     };
+    this.recordPriceObservations(analyses, timestamp);
+    this.evaluatePendingConsultations();
     const events = analyses.map(analysis => eventFromAnalysis(analysis, timestamp)).filter(Boolean);
     const result = this._ingestEvents(events);
     this.state.updatedAt = new Date().toISOString();
@@ -475,6 +738,158 @@ export class MonitoringSessionService {
       // Keep the live loop alive; the API can still expose in-memory state.
     }
     return result;
+  }
+
+  recordPriceObservations(analyses = [], timestamp) {
+    const observationTimestamp = timestamp || new Date().toISOString();
+    if (timestampMs(observationTimestamp) === null) return;
+    for (const analysis of Array.isArray(analyses) ? analyses : []) {
+      const coin = String(analysis?.coin || '').trim().toUpperCase();
+      const price = numberOrNull(analysis?.currentPrice);
+      if (!coin || price === null || price <= 0) continue;
+      const previous = this.state.priceObservations.at(-1);
+      if (previous?.coin === coin && previous.timestamp === observationTimestamp) {
+        previous.price = price;
+        continue;
+      }
+      this.state.priceObservations.push({ coin, price, timestamp: observationTimestamp });
+    }
+    this.state.priceObservations = this.state.priceObservations.slice(-this.maxPriceObservations);
+  }
+
+  actualProviderResults(consultation) {
+    return (Array.isArray(consultation?.results) ? consultation.results : [])
+      .filter(result => result?.provider && result.provider !== 'local-brief' && result.status === 'COMPLETED' && result.advice);
+  }
+
+  findEvaluationObservation(evaluation) {
+    const targetTimestamp = timestampMs(evaluation?.targetAt);
+    if (targetTimestamp === null) return null;
+    const coin = String(evaluation.coin || '').toUpperCase();
+    return this.state.priceObservations.find(observation =>
+      observation.coin === coin && timestampMs(observation.timestamp) !== null &&
+      timestampMs(observation.timestamp) >= targetTimestamp
+    ) || null;
+  }
+
+  findLatestPriceObservation(coin, atMs) {
+    const normalizedCoin = String(coin || '').toUpperCase();
+    if (!normalizedCoin || !Number.isFinite(atMs)) return null;
+    return this.state.priceObservations
+      .filter(observation => observation.coin === normalizedCoin)
+      .filter(observation => {
+        const observedAt = timestampMs(observation.timestamp);
+        return observedAt !== null && observedAt <= atMs;
+      })
+      .sort((a, b) => timestampMs(b.timestamp) - timestampMs(a.timestamp))[0] || null;
+  }
+
+  refreshConsultationEvaluation(consultation) {
+    if (!consultation?.evaluation || consultation.status === 'RUNNING') return false;
+    const evaluation = consultation.evaluation;
+    if (evaluation.snapshotValid === false) {
+      const reason = evaluation.reason || 'snapshot 신선도가 유효하지 않아 결과를 평가하지 않습니다.';
+      if (evaluation.status !== 'NOT_EVALUABLE' || evaluation.reason !== reason) {
+        evaluation.status = 'NOT_EVALUABLE';
+        evaluation.reason = reason;
+        evaluation.evaluatedAt = new Date().toISOString();
+        return true;
+      }
+      return false;
+    }
+    const actualResults = this.actualProviderResults(consultation);
+    if (actualResults.length === 0) {
+      if (evaluation.status !== 'NOT_EVALUABLE' || evaluation.reason !== '실제 AI provider 응답이 없어 결과를 평가하지 않습니다.') {
+        evaluation.status = 'NOT_EVALUABLE';
+        evaluation.reason = '실제 AI provider 응답이 없어 결과를 평가하지 않습니다.';
+        evaluation.evaluatedAt = new Date().toISOString();
+        return true;
+      }
+      return false;
+    }
+    if (evaluation.baselinePrice === null || evaluation.baselinePrice <= 0 || timestampMs(evaluation.baselineAt) === null) {
+      evaluation.status = 'NOT_EVALUABLE';
+      evaluation.reason = '기준 가격 또는 기준 시간이 없어 미래 가격 대조를 수행할 수 없습니다.';
+      evaluation.evaluatedAt = new Date().toISOString();
+      return true;
+    }
+
+    if (!evaluation.decisionAt || evaluation.decisionPrice === null) {
+      const completedTimestamp = timestampMs(consultation.completedAt);
+      const decisionObservation = this.findLatestPriceObservation(evaluation.coin, completedTimestamp);
+      evaluation.decisionPrice = numberOrNull(decisionObservation?.price) ?? evaluation.baselinePrice;
+      evaluation.decisionAt = decisionObservation?.timestamp || evaluation.baselineAt;
+      const eventTimestamp = timestampMs(evaluation.baselineAt);
+      const decisionTimestamp = timestampMs(evaluation.decisionAt);
+      evaluation.adviceLatencySeconds = eventTimestamp === null || decisionTimestamp === null
+        ? null
+        : Math.max(0, (decisionTimestamp - eventTimestamp) / 1_000);
+      const targetTimestamp = timestampMs(evaluation.decisionAt);
+      evaluation.targetAt = targetTimestamp === null
+        ? null
+        : new Date(targetTimestamp + evaluation.horizonMinutes * 60_000).toISOString();
+    }
+
+    const observation = this.findEvaluationObservation(evaluation);
+    if (!observation) {
+      evaluation.status = 'PENDING';
+      return false;
+    }
+
+    const outcomePrice = numberOrNull(observation.price);
+    const decisionPrice = numberOrNull(evaluation.decisionPrice);
+    const priceChangePercent = outcomePrice === null || decisionPrice === null || decisionPrice === 0
+      ? null
+      : ((outcomePrice - decisionPrice) / decisionPrice) * 100;
+    const verdicts = actualResults.map(result => ({
+      source: result.provider,
+      providerLabel: result.providerLabel || result.provider,
+      ...scoreAdviceOutcome(result.advice, priceChangePercent, evaluation.neutralBandPercent)
+    }));
+    if (consultation.consensus && consultation.consensus.providerCount > 0 && consultation.consensus.quorum === true) {
+      verdicts.push({
+        source: 'consensus',
+        providerLabel: 'Provider consensus',
+        ...scoreAdviceOutcome(consultation.consensus, priceChangePercent, evaluation.neutralBandPercent)
+      });
+    }
+
+    const baselineTimestamp = timestampMs(evaluation.baselineAt);
+    const outcomeTimestamp = timestampMs(observation.timestamp);
+    evaluation.status = 'COMPLETED';
+    evaluation.outcomePrice = outcomePrice;
+    evaluation.outcomeAt = observation.timestamp;
+    evaluation.observedAfterMinutes = outcomeTimestamp === null || baselineTimestamp === null
+      ? null
+      : (outcomeTimestamp - baselineTimestamp) / 60_000;
+    evaluation.priceChangePercent = priceChangePercent;
+    evaluation.verdicts = verdicts;
+    evaluation.reason = null;
+    evaluation.evaluatedAt = new Date().toISOString();
+    return true;
+  }
+
+  evaluatePendingConsultations() {
+    const changedConsultations = [];
+    for (const consultation of this.state.consultations) {
+      if (consultation.evaluation?.status !== 'PENDING') continue;
+      if (this.refreshConsultationEvaluation(consultation)) {
+        changedConsultations.push(consultation);
+      }
+    }
+    if (changedConsultations.length > 0) {
+      this.state.updatedAt = new Date().toISOString();
+      try {
+        this.saveState();
+      } catch {
+        // Keep the in-memory evaluation available even when persistence is
+        // temporarily unavailable; the next cycle can retry the write.
+      }
+      for (const consultation of changedConsultations) {
+        this.emitUpdate('consultation', { consultation: { ...consultation } });
+      }
+    }
+    return changedConsultations.length > 0;
   }
 
   ingestNews(news) {
@@ -554,7 +969,7 @@ export class MonitoringSessionService {
       type: EVENT_TYPES.has(String(eventInput?.type).toUpperCase()) ? String(eventInput.type).toUpperCase() : 'REBOUND_CANDIDATE',
       action: ['BUY', 'SELL'].includes(String(eventInput?.action).toUpperCase()) ? String(eventInput.action).toUpperCase() : 'WAIT',
       coin: eventInput?.coin ? String(eventInput.coin).toUpperCase() : null,
-      price: numberOrNull(eventInput?.price),
+      price: numberOrNull(eventInput?.price ?? eventInput?.snapshot?.currentPrice),
       confidence: eventInput?.confidence ?? null,
       signalStrength: eventInput?.signalStrength || null,
       reason: truncate(eventInput?.reason || '사용자 지정 자문 이벤트', 240),
@@ -597,6 +1012,10 @@ export class MonitoringSessionService {
       results: [],
       consensus: null,
       error: null,
+      evaluation: buildPendingEvaluation(selectedEvent, session, {
+        evaluationMinutes: this.defaultEvaluationMinutes,
+        neutralBandPercent: this.evaluationNeutralBandPercent
+      }),
       event: selectedEvent
     };
     this.state.consultations.push(consultation);
@@ -635,6 +1054,7 @@ export class MonitoringSessionService {
         consultation.error = truncate(error?.message || error, 500);
       }
       consultation.completedAt = new Date().toISOString();
+      this.refreshConsultationEvaluation(consultation);
       this.state.updatedAt = consultation.completedAt;
       try {
         this.saveState();
@@ -642,6 +1062,10 @@ export class MonitoringSessionService {
         // Keep the completed result in memory and expose the error via status.
       }
       this.emitUpdate('consultation', { consultation: { ...consultation } });
+      // The future price observation may have arrived while the provider was
+      // still running. Re-evaluate immediately so effectiveness does not wait
+      // for an unrelated later market cycle.
+      this.evaluatePendingConsultations();
       return { ...consultation };
     })().finally(() => {
       this.pendingConsultations.delete(pendingKey);

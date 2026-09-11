@@ -9,6 +9,11 @@ import {
   parseAdviceResponse
 } from '../src/ai/aiAdvisorService.js';
 
+test('구독 CLI의 변동하는 초기 응답 시간을 감당하는 기본 timeout을 사용한다', () => {
+  const service = new AIAdvisorService({ runner: async () => ({ stdout: '{}' }) });
+  assert.equal(service.timeoutMs, 30_000);
+});
+
 test('provider envelope와 markdown 안의 JSON 판단을 안전하게 추출한다', () => {
   const raw = [
     JSON.stringify({ type: 'thread.started', thread_id: 'hidden' }),
@@ -138,6 +143,7 @@ test('Codex 설정 파싱 오류도 반복적인 20초 timeout 대신 즉시 차
   let runnerCalled = false;
   const service = new AIAdvisorService({
     preflightProviderStatus: true,
+    gptIgnoreUserConfig: false,
     runner: async () => {
       runnerCalled = true;
       throw new Error('runner must not be called');
@@ -148,7 +154,8 @@ test('Codex 설정 파싱 오류도 반복적인 20초 timeout 대신 즉시 차
     providers: [{
       id: 'gpt',
       status: 'CONFIG_ERROR',
-      detail: 'Codex 사용자 설정을 읽지 못했습니다.'
+      detail: 'Codex 사용자 설정을 읽지 못했습니다.',
+      canAttemptWithoutUserConfig: false
     }]
   };
   service.statusCacheAt = Date.now();
@@ -161,6 +168,50 @@ test('Codex 설정 파싱 오류도 반복적인 20초 timeout 대신 즉시 차
   assert.equal(runnerCalled, false);
   assert.equal(result.results[0].errorCode, 'PROVIDER_NOT_READY');
   assert.match(result.results[0].error, /Codex/);
+});
+
+test('Codex 사용자 설정 오류가 있어도 격리 실행 경로는 실제 provider 호출을 시도한다', async () => {
+  let runnerCalled = false;
+  const service = new AIAdvisorService({
+    preflightProviderStatus: true,
+    runner: async (provider) => {
+      runnerCalled = provider === 'gpt';
+      return {
+        stdout: JSON.stringify({
+          action: 'WAIT',
+          confidence: 60,
+          horizon: 'smoke',
+          rationale: '격리 실행 provider 응답',
+          risks: [],
+          invalidation: 'snapshot 변경'
+        })
+      };
+    }
+  });
+  service.statusCache = {
+    enabled: true,
+    providers: [{
+      id: 'gpt',
+      status: 'CONFIG_ERROR',
+      ready: false,
+      detail: 'Codex 사용자 설정을 읽지 못했습니다.',
+      canAttemptWithoutUserConfig: true
+    }]
+  };
+  service.statusCacheAt = Date.now();
+
+  const result = await service.ask({
+    provider: 'gpt',
+    event: { type: 'BUY_SIGNAL', coin: 'KRW-BTC' }
+  });
+
+  assert.equal(runnerCalled, true);
+  assert.equal(result.status, 'COMPLETED');
+  assert.equal(result.results[0].status, 'COMPLETED');
+  assert.equal(result.results[0].advice.action, 'WAIT');
+  assert.equal(result.results[0].configWarning, true);
+  assert.equal(service.statusCache.providers[0].status, 'READY_WITH_CONFIG_WARNING');
+  assert.equal(service.statusCache.providers[0].ready, true);
 });
 
 test('provider가 모두 unavailable이면 AI 결과를 위조하지 않고 local evidence brief로 degraded 된다', async () => {
@@ -237,4 +288,16 @@ test('provider 의견이 충돌하면 consensus는 안전하게 WAIT가 된다',
   assert.equal(conflict.agreementRatio, 0.5);
   assert.equal(conflict.conflict, true);
   assert.match(conflict.rationale, /일치하지 않습니다/);
+});
+
+test('단일 provider 의견은 두 provider 합의로 과장되지 않는다', () => {
+  const single = aggregateAdvice([
+    { provider: 'gpt', providerLabel: 'GPT', status: 'COMPLETED', advice: { action: 'BUY', confidence: 90 } }
+  ]);
+
+  assert.equal(single.action, 'BUY');
+  assert.equal(single.providerCount, 1);
+  assert.equal(single.quorum, false);
+  assert.equal(single.singleProvider, true);
+  assert.match(single.rationale, /단일 provider/);
 });

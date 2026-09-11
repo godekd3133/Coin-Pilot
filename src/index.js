@@ -235,6 +235,7 @@ function createConfig() {
     maxEntriesPerSignalWindow: parseInt(process.env.SCALP_MAX_ENTRIES_PER_SIGNAL_WINDOW) || 0,
     positionRiskCheckIntervalMs: parseInt(process.env.SCALP_RISK_CHECK_INTERVAL_MS) || 1000,
     maxRiskDataGapSeconds: envNumber('SCALP_MAX_RISK_DATA_GAP_SECONDS', 30),
+    maxAnalysisDataGapSeconds: envNumber('SCALP_MAX_ANALYSIS_DATA_GAP_SECONDS', 60),
     cooldownAfterLossMinutes: parseFloat(process.env.SCALP_COOLDOWN_AFTER_LOSS_MINUTES) || 15,
     maxConsecutiveLosses: parseInt(process.env.SCALP_MAX_CONSECUTIVE_LOSSES) || 3,
     // 0 disables the process-wide sliding-window circuit breaker.
@@ -255,12 +256,16 @@ function createConfig() {
     // 사용한다. 자문 결과는 기록/표시만 하고 주문 실행에는 연결하지 않는다.
     aiAdvisorEnabled: process.env.AI_ADVISOR_ENABLED !== 'false',
     aiLocalBriefEnabled: process.env.AI_LOCAL_BRIEF_ENABLED !== 'false',
-    aiAdvisorTimeoutMs: parseInt(process.env.AI_ADVISOR_TIMEOUT_MS) || 15000,
+    aiAdvisorTimeoutMs: parseInt(process.env.AI_ADVISOR_TIMEOUT_MS) || 30000,
     aiMonitoringFile: process.env.AI_MONITORING_FILE || '',
     aiCodexBin: process.env.AI_CODEX_BIN || 'codex',
+    aiCodexIgnoreUserConfig: process.env.AI_CODEX_IGNORE_USER_CONFIG !== 'false',
     aiClaudeBin: process.env.AI_CLAUDE_BIN || 'claude',
     aiGptModel: process.env.AI_GPT_MODEL || '',
     aiClaudeModel: process.env.AI_CLAUDE_MODEL || '',
+    aiEvaluationMinutes: envNumber('AI_EVALUATION_MINUTES', 5),
+    aiEvaluationNeutralBandPercent: envNumber('AI_EVALUATION_NEUTRAL_BAND_PERCENT', 0.1),
+    aiEvaluationMinSamples: parseInt(process.env.AI_EVALUATION_MIN_SAMPLES) || 20,
 
     // 체크 간격 (드라이 모드일 때 더 짧게)
     checkInterval: dryRun

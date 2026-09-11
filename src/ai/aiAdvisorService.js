@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 
-const DEFAULT_TIMEOUT_MS = 15_000;
+const DEFAULT_TIMEOUT_MS = 30_000;
 const MAX_OUTPUT_CHARS = 80_000;
 const MAX_RATIONALE_CHARS = 1_200;
 const MAX_RISK_CHARS = 280;
@@ -232,24 +232,34 @@ export function aggregateAdvice(results = []) {
   const [winningAction, winningCount] = ranked[0];
   const agreementRatio = winningCount / completed.length;
   const conflict = completed.length > 1 && agreementRatio < 1;
+  const singleProvider = completed.length === 1;
+  const quorum = completed.length >= 2 && !conflict;
   const averageConfidence = Math.round(completed.reduce((sum, result) => sum + normalizeConfidence(result.advice.confidence), 0) / completed.length);
   const providerNames = completed.map(result => `${result.providerLabel || result.provider}=${normalizeAction(result.advice.action)}`);
 
   return {
     ...normalizeAdvice({
       action: conflict ? 'WAIT' : winningAction,
-      confidence: conflict ? Math.min(50, Math.round(averageConfidence * agreementRatio)) : averageConfidence,
+      confidence: conflict
+        ? Math.min(50, Math.round(averageConfidence * agreementRatio))
+        : singleProvider ? Math.min(60, averageConfidence) : averageConfidence,
       horizon: conflict ? 'provider 의견 일치 후 재자문' : completed[0].advice.horizon,
       rationale: conflict
         ? `provider 의견이 일치하지 않습니다: ${providerNames.join(', ')}. 충돌 중에는 관망합니다.`
-        : `provider ${completed.length}개 의견 일치: ${providerNames.join(', ')}.`,
-      risks: conflict ? ['provider 의견 불일치', '단일 합의로 판단하지 않음'] : [],
+        : singleProvider
+          ? `단일 provider 의견입니다: ${providerNames.join(', ')}. 다른 provider 합의가 없어 확신을 제한합니다.`
+          : `provider ${completed.length}개 의견 일치: ${providerNames.join(', ')}.`,
+      risks: conflict
+        ? ['provider 의견 불일치', '단일 합의로 판단하지 않음']
+        : singleProvider ? ['단일 provider 응답', '다른 provider 합의 없음'] : [],
       invalidation: conflict ? 'provider 의견이 일치하는 새 snapshot을 다시 확인하세요.' : completed[0].advice.invalidation
     }, { provider: 'consensus', mode: 'AI_CONSENSUS' }),
     agreementRatio,
     providerCount: completed.length,
     providers: completed.map(result => result.provider),
-    conflict
+    conflict,
+    quorum,
+    singleProvider
   };
 }
 
@@ -331,17 +341,17 @@ function stripSubscriptionApiKeys(environment = process.env) {
   return next;
 }
 
-function providerArgs(provider, prompt, model) {
+function providerArgs(provider, prompt, model, { ignoreUserConfig = true } = {}) {
   if (provider === 'gpt') {
-    const args = [
-      '--ask-for-approval', 'never',
-      'exec',
-      '--ignore-user-config',
+    const args = ['--ask-for-approval', 'never', 'exec'];
+    if (ignoreUserConfig) args.push('--ignore-user-config');
+    args.push(
       '--ephemeral',
+      '--ignore-rules',
       '--sandbox', 'read-only',
       '--color', 'never',
       '--json'
-    ];
+    );
     if (model) args.push('--model', model);
     args.push('-');
     return args;
@@ -389,6 +399,12 @@ export class AIAdvisorService {
       gpt: options.executables?.gpt || options.config?.aiCodexBin || process.env.AI_CODEX_BIN || 'codex',
       claude: options.executables?.claude || options.config?.aiClaudeBin || process.env.AI_CLAUDE_BIN || 'claude'
     };
+    // The application invocation intentionally isolates Codex from a broken
+    // user config. Keep the warning visible, but do not let `codex login
+    // status` block an execution path that can still authenticate and answer.
+    this.gptIgnoreUserConfig = options.gptIgnoreUserConfig ??
+      options.config?.aiCodexIgnoreUserConfig ??
+      process.env.AI_CODEX_IGNORE_USER_CONFIG !== 'false';
     this.argumentBuilder = options.argumentBuilder || providerArgs;
     this.runner = options.runner || ((provider, prompt, runnerOptions) => this.runProvider(provider, prompt, runnerOptions));
     this.preflightProviderStatus = options.preflightProviderStatus ?? !options.runner;
@@ -406,7 +422,12 @@ export class AIAdvisorService {
 
   async runProvider(provider, prompt, { timeoutMs = this.timeoutMs, statusArgs = null } = {}) {
     const executable = this.executables[provider];
-    const args = statusArgs || this.argumentBuilder(provider, prompt, this.models[provider]);
+    const args = statusArgs || this.argumentBuilder(
+      provider,
+      prompt,
+      this.models[provider],
+      { ignoreUserConfig: provider === 'gpt' && this.gptIgnoreUserConfig }
+    );
     const environment = stripSubscriptionApiKeys();
 
     return new Promise((resolve, reject) => {
@@ -520,7 +541,14 @@ export class AIAdvisorService {
 
     const results = await Promise.all(providers.map(item => {
       const providerStatus = providerStatusById.get(item);
-      const hardNotReady = providerStatus && ['NOT_AUTHENTICATED', 'NOT_INSTALLED', 'CONFIG_ERROR', 'DISABLED'].includes(providerStatus.status);
+      const canAttemptWithConfigWarning = item === 'gpt' &&
+        this.gptIgnoreUserConfig === true &&
+        providerStatus?.status === 'CONFIG_ERROR' &&
+        providerStatus?.canAttemptWithoutUserConfig !== false;
+      const hardNotReady = providerStatus && (
+        ['NOT_AUTHENTICATED', 'NOT_INSTALLED', 'DISABLED'].includes(providerStatus.status) ||
+        (providerStatus.status === 'CONFIG_ERROR' && !canAttemptWithConfigWarning)
+      );
       if (hardNotReady) {
         return {
           provider: item,
@@ -537,8 +565,20 @@ export class AIAdvisorService {
         context,
         session,
         requestId
-      });
+      }).then(result => canAttemptWithConfigWarning && result.status === 'COMPLETED'
+        ? {
+            ...result,
+            configWarning: true,
+            warning: 'Codex 사용자 설정 오류는 남아 있지만 격리 실행 경로로 provider 응답을 확인합니다.'
+          }
+        : result);
     }));
+
+    for (const result of results) {
+      if (result.status === 'COMPLETED' && result.configWarning === true) {
+        this.markProviderExecutionVerified(result.provider);
+      }
+    }
 
     const hasCompletedProvider = results.some(result => result.status === 'COMPLETED');
     if (!hasCompletedProvider && this.allowLocalBrief) {
@@ -559,6 +599,17 @@ export class AIAdvisorService {
       consensus: aggregateAdvice(results),
       completedAt: new Date().toISOString()
     };
+  }
+
+  markProviderExecutionVerified(provider, verifiedAt = new Date().toISOString()) {
+    const status = this.statusCache?.providers?.find(item => item.id === provider);
+    if (!status || provider !== 'gpt' || status.status !== 'CONFIG_ERROR') return;
+    status.ready = true;
+    status.status = 'READY_WITH_CONFIG_WARNING';
+    status.authMode = 'chatgpt_subscription';
+    status.executionVerifiedAt = verifiedAt;
+    status.detail = 'Codex 사용자 설정에는 경고가 있지만 격리 실행 경로에서 provider 응답을 확인했습니다.';
+    status.nextStep = 'Codex 사용자 설정은 별도로 정리할 수 있습니다. 현재 자문 실행은 가능합니다.';
   }
 
   async getProviderStatus({ force = false } = {}) {
@@ -610,7 +661,8 @@ export class AIAdvisorService {
           subscriptionLabel: definition.subscriptionLabel,
           subscriptionType: typeof parsed?.subscriptionType === 'string' ? truncate(parsed.subscriptionType, 80) : null,
           detail: loggedIn ? '로컬 구독 세션 사용 가능' : 'CLI 로그인 상태를 확인해주세요.',
-          nextStep: loggedIn ? null : provider === 'claude' ? 'claude auth login' : 'codex login status'
+          nextStep: loggedIn ? null : provider === 'claude' ? 'claude auth login' : 'codex login status',
+          canAttemptWithoutUserConfig: provider === 'gpt' && this.gptIgnoreUserConfig === true
         };
       } catch (error) {
         const errorDetail = error?.detail || '';
@@ -639,6 +691,7 @@ export class AIAdvisorService {
           authMode: null,
           subscriptionLabel: definition.subscriptionLabel,
           detail,
+          canAttemptWithoutUserConfig: provider === 'gpt' && configurationError && this.gptIgnoreUserConfig === true,
           nextStep: error?.code === 'ENOENT'
             ? `${definition.defaultExecutable} CLI 설치/경로 확인`
             : unauthenticated

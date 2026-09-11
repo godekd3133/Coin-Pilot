@@ -162,3 +162,146 @@ test('기존 리밸런싱 제안도 선택 가능한 monitoring event로 보존�
   assert.equal(event.coin, 'KRW-BTC');
   assert.equal(event.snapshot.totalScore, 88);
 });
+
+test('실제 provider 자문은 미래 가격과 대조되어 effectiveness로 누적된다', async () => {
+  const file = path.join(os.tmpdir(), `coinpilot-ai-effectiveness-${Date.now()}-${Math.random()}.json`);
+  const advisor = {
+    async ask() {
+      return {
+        requestId: 'effectiveness-request',
+        status: 'COMPLETED',
+        results: [{
+          provider: 'gpt',
+          providerLabel: 'GPT / Codex',
+          status: 'COMPLETED',
+          latencyMs: 120,
+          advice: {
+            action: 'BUY',
+            confidence: 80,
+            horizon: '5분',
+            rationale: '반등 지속 예상',
+            risks: [],
+            invalidation: '저점 재이탈'
+          }
+        }],
+        consensus: {
+          provider: 'consensus',
+          action: 'BUY',
+          confidence: 80,
+          providerCount: 1,
+          conflict: false
+        }
+      };
+    }
+  };
+
+  try {
+    const service = new MonitoringSessionService({
+      stateFile: file,
+      advisor,
+      defaultEvaluationMinutes: 5,
+      evaluationNeutralBandPercent: 0.1,
+      minimumEvaluationSamples: 1
+    });
+    service.createSession({
+      name: 'effectiveness test',
+      providers: ['gpt'],
+      eventTypes: ['BUY_SIGNAL'],
+      autoConsult: true,
+      evaluationMinutes: 5
+    });
+
+    await service.ingestCycle({
+      timestamp: '2026-09-11T00:00:00.000Z',
+      analyses: [makeAnalysis('effectiveness-1', 'BUY')]
+    });
+    await new Promise(resolve => setImmediate(resolve));
+
+    const future = makeAnalysis('effectiveness-2', 'BUY');
+    future.currentPrice = 101;
+    future.decision.action = 'HOLD';
+    future.decision.details.rebound.reboundConfirmed = false;
+    future.technicalAnalysis.indicators.rebound.reboundConfirmed = false;
+    await service.ingestCycle({
+      timestamp: '2026-09-11T00:05:01.000Z',
+      analyses: [future]
+    });
+    await new Promise(resolve => setImmediate(resolve));
+
+    const snapshot = service.getSnapshot({ limit: 20 });
+    assert.equal(snapshot.consultations.length, 1);
+    assert.equal(snapshot.consultations[0].evaluation.status, 'COMPLETED');
+    assert.equal(snapshot.consultations[0].evaluation.verdicts[0].verdict, 'HIT');
+    assert.equal(snapshot.consultations[0].evaluation.priceChangePercent, 1);
+
+    const effectiveness = service.getEffectiveness();
+    assert.equal(effectiveness.evaluatedConsultations, 1);
+    assert.equal(effectiveness.providerStats.gpt.evaluated, 1);
+    assert.equal(effectiveness.providerStats.gpt.hits, 1);
+    assert.equal(effectiveness.providerStats.gpt.misses, 0);
+    assert.equal(effectiveness.providerStats.gpt.hitRate, 1);
+    assert.equal(effectiveness.providerStats.gpt.sufficientEvidence, true);
+    assert.equal(effectiveness.providerStats.consensus, undefined);
+
+    const reloaded = new MonitoringSessionService({
+      stateFile: file,
+      advisor,
+      defaultEvaluationMinutes: 5,
+      evaluationNeutralBandPercent: 0.1,
+      minimumEvaluationSamples: 1
+    });
+    const restored = reloaded.getSnapshot({ limit: 20 });
+    assert.equal(restored.consultations[0].evaluation.status, 'COMPLETED');
+    assert.equal(restored.effectiveness.providerStats.gpt.hits, 1);
+  } finally {
+    for (const candidate of [file, `${file}.tmp-${process.pid}`]) {
+      if (fs.existsSync(candidate)) fs.unlinkSync(candidate);
+    }
+  }
+});
+
+test('신선하지 않은 snapshot은 AI가 WAIT해도 efficacy 표본에서 제외된다', async () => {
+  const file = path.join(os.tmpdir(), `coinpilot-ai-stale-efficacy-${Date.now()}-${Math.random()}.json`);
+  const advisor = {
+    async ask() {
+      return {
+        requestId: 'stale-request',
+        status: 'COMPLETED',
+        results: [{
+          provider: 'gpt',
+          status: 'COMPLETED',
+          advice: { action: 'WAIT', confidence: 90, rationale: 'stale input', risks: [], invalidation: 'refresh' }
+        }]
+      };
+    }
+  };
+
+  try {
+    const service = new MonitoringSessionService({ stateFile: file, advisor, defaultEvaluationMinutes: 5 });
+    const event = service.addManualEvent({
+      type: 'BUY_SIGNAL',
+      action: 'BUY',
+      coin: 'KRW-BTC',
+      price: 100,
+      timestamp: '2026-09-11T00:00:00.000Z',
+      snapshot: { freshness: { valid: false, reason: 'stale_candle_snapshot' } }
+    });
+    const session = service.createSession({ providers: ['gpt'], eventTypes: ['BUY_SIGNAL'], autoConsult: false });
+
+    await service.requestConsultation({ sessionId: session.id, eventId: event.id, provider: 'gpt' });
+    const future = makeAnalysis('stale-future', 'HOLD');
+    future.currentPrice = 101;
+    future.decision.details.rebound.reboundConfirmed = false;
+    future.technicalAnalysis.indicators.rebound.reboundConfirmed = false;
+    await service.ingestCycle({ timestamp: '2026-09-11T00:05:01.000Z', analyses: [future] });
+
+    const snapshot = service.getSnapshot({ limit: 20 });
+    assert.equal(snapshot.consultations[0].evaluation.status, 'NOT_EVALUABLE');
+    assert.match(snapshot.consultations[0].evaluation.reason, /신선|stale/i);
+    assert.equal(service.getEffectiveness().evaluatedConsultations, 0);
+  } finally {
+    for (const candidate of [file, `${file}.tmp-${process.pid}`]) {
+      if (fs.existsSync(candidate)) fs.unlinkSync(candidate);
+    }
+  }
+});

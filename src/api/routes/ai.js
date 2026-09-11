@@ -32,12 +32,19 @@ function validateSessionInput(body = {}) {
     throw new Error('cooldownSeconds는 30~86400 범위여야 합니다');
   }
 
+  const hasEvaluationMinutes = body.evaluationMinutes !== undefined;
+  const evaluationMinutes = hasEvaluationMinutes ? Number(body.evaluationMinutes) : null;
+  if (hasEvaluationMinutes && (!Number.isFinite(evaluationMinutes) || evaluationMinutes < 1 || evaluationMinutes > 1_440)) {
+    throw new Error('evaluationMinutes는 1~1440 범위여야 합니다');
+  }
+
   return {
     ...body,
     name: name || 'CoinPilot AI 모니터링',
     eventTypes,
     autoConsult: parseBoolean(body.autoConsult, true),
-    cooldownSeconds
+    cooldownSeconds,
+    ...(hasEvaluationMinutes ? { evaluationMinutes } : {})
   };
 }
 
@@ -74,6 +81,11 @@ export default function createAiRoutes(server) {
       sessionId: req.query.sessionId ? String(req.query.sessionId) : null
     });
     return res.json({ consultations: snapshot.consultations, updatedAt: snapshot.updatedAt });
+  });
+
+  router.get('/ai/effectiveness', (req, res) => {
+    const sessionId = req.query.sessionId ? String(req.query.sessionId) : null;
+    return res.json(sessions.getEffectiveness({ sessionId }));
   });
 
   router.get('/ai/sessions', (req, res) => {
