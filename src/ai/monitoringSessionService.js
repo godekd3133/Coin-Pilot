@@ -570,7 +570,6 @@ export class MonitoringSessionService {
           } else if (verdict.verdict === 'FLAT') {
             stats.flat += 1;
             stats.directionalPredictions += 1;
-            stats.actionableEvaluations += 1;
           } else if (verdict.verdict === 'CALM') {
             stats.calm += 1;
           } else if (verdict.verdict === 'ABSTAINED') {
@@ -586,7 +585,6 @@ export class MonitoringSessionService {
           }
           if (verdict.vetoVerdict === 'VETO_FLAT') {
             stats.vetoFlat += 1;
-            stats.actionableEvaluations += 1;
           }
         }
       } else if (evaluation?.status === 'PENDING') {
@@ -636,7 +634,7 @@ export class MonitoringSessionService {
         horizonMinutes: this.defaultEvaluationMinutes,
         neutralBandPercent: this.evaluationNeutralBandPercent,
         minimumEvaluationSamples: this.minimumEvaluationSamples,
-        actionableSampleDefinition: '실제 provider의 BUY/SELL 결과 또는 기존 BUY/SELL signal에 대한 WAIT/HOLD veto만 충분성 표본으로 집계',
+        actionableSampleDefinition: '비중립 실제 provider BUY/SELL 결과(HIT/MISS) 또는 비중립 기존 BUY/SELL WAIT/HOLD veto(VETO_GOOD/MISSED_OPPORTUNITY)만 충분성 표본으로 집계',
         hitDefinition: 'BUY/SELL 방향이 neutral band를 넘어 미래 기준 시점 가격과 일치하면 HIT',
         waitDefinition: 'HOLD/WAIT는 방향 예측이 아니므로 CALM/ABSTAINED로 별도 집계',
         source: '동일 event의 기준 가격과 horizon 이후 첫 관측 가격'
@@ -645,7 +643,7 @@ export class MonitoringSessionService {
       evidenceWarning: Object.keys(publicStats).length === 0
         ? '실제 provider 응답이 없어 평가할 표본이 없습니다.'
         : maximumActionableEvaluations < this.minimumEvaluationSamples
-          ? `아직 ${this.minimumEvaluationSamples}개 방향성/veto 평가 표본이 필요합니다. 현재 ${maximumActionableEvaluations}개입니다.`
+          ? `아직 ${this.minimumEvaluationSamples}개 비중립 방향성/veto 평가 표본이 필요합니다. 현재 ${maximumActionableEvaluations}개입니다.`
           : null
     };
   }

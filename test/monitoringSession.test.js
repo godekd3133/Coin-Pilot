@@ -325,7 +325,7 @@ test('신선하지 않은 snapshot은 AI가 WAIT해도 efficacy 표본에서 제
   }
 });
 
-test('CALM-only rebound 후보는 충분한 실효성 표본으로 승격되지 않는다', async () => {
+test('CALM-only 또는 VETO_FLAT 표본은 충분한 실효성 표본으로 승격되지 않는다', async () => {
   const file = path.join(os.tmpdir(), `coinpilot-ai-calm-only-${Date.now()}-${Math.random()}.json`);
   const advisor = {
     async ask() {
@@ -350,12 +350,12 @@ test('CALM-only rebound 후보는 충분한 실효성 표본으로 승격되지 
     });
     const session = service.createSession({
       providers: ['gpt'],
-      eventTypes: ['REBOUND_CANDIDATE'],
+      eventTypes: ['BUY_SIGNAL'],
       autoConsult: false
     });
     const event = service.addManualEvent({
-      type: 'REBOUND_CANDIDATE',
-      action: 'WAIT',
+      type: 'BUY_SIGNAL',
+      action: 'BUY',
       coin: 'KRW-BTC',
       price: 100,
       timestamp: '2026-09-11T00:00:00.000Z',
@@ -376,6 +376,7 @@ test('CALM-only rebound 후보는 충분한 실효성 표본으로 승격되지 
     assert.equal(effectiveness.evaluatedConsultations, 1);
     assert.equal(effectiveness.providerStats.gpt.evaluated, 1);
     assert.equal(effectiveness.providerStats.gpt.calm, 1);
+    assert.equal(effectiveness.providerStats.gpt.vetoFlat, 1);
     assert.equal(effectiveness.providerStats.gpt.actionableEvaluations, 0);
     assert.equal(effectiveness.providerStats.gpt.sufficientEvidence, false);
     assert.equal(effectiveness.sufficientEvidence, false);
