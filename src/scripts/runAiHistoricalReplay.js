@@ -25,6 +25,7 @@ function summarizeRows(rows) {
       vetoGood: 0,
       vetoMissedOpportunity: 0,
       vetoFlat: 0,
+      vetoImpactPercentTotal: 0,
       signedMovePercentTotal: 0,
       directionalCount: 0
     };
@@ -37,6 +38,7 @@ function summarizeRows(rows) {
     if (row.vetoVerdict === 'VETO_GOOD') current.vetoGood += 1;
     if (row.vetoVerdict === 'VETO_MISSED_OPPORTUNITY') current.vetoMissedOpportunity += 1;
     if (row.vetoVerdict === 'VETO_FLAT') current.vetoFlat += 1;
+    if (Number.isFinite(row.vetoImpactPercent)) current.vetoImpactPercentTotal += row.vetoImpactPercent;
     if (Number.isFinite(row.signedMovePercent)) {
       current.signedMovePercentTotal += row.signedMovePercent;
       current.directionalCount += 1;
@@ -49,8 +51,10 @@ function summarizeRows(rows) {
     current.averageSignedMovePercent = current.directionalCount > 0
       ? current.signedMovePercentTotal / current.directionalCount
       : null;
+    current.vetoNetImpactPercent = current.vetoImpactPercentTotal;
     delete current.signedMovePercentTotal;
     delete current.directionalCount;
+    delete current.vetoImpactPercentTotal;
   }
   return summary;
 }
@@ -168,6 +172,7 @@ async function main() {
         confidence: scored.confidence,
         verdict: scored.verdict,
         vetoVerdict: scored.vetoVerdict,
+        vetoImpactPercent: scored.vetoImpactPercent,
         priceChangePercent: scored.priceChangePercent,
         signedMovePercent: scored.signedMovePercent,
         latencyMs: result.latencyMs

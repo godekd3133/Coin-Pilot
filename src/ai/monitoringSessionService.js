@@ -58,13 +58,22 @@ function scoreAdviceOutcome(advice, priceChangePercent, neutralBandPercent = DEF
   const move = numberOrNull(priceChangePercent);
   const neutralBand = resolveNeutralBandPercent(neutralBandPercent);
   const sourceAction = normalizeAdviceAction(eventAction);
+  let vetoImpactPercent = null;
   const vetoVerdict = move !== null && (action === 'WAIT' || action === 'HOLD') &&
     (sourceAction === 'BUY' || sourceAction === 'SELL')
     ? (() => {
       const signedMove = sourceAction === 'BUY' ? move : -move;
-      return Math.abs(signedMove) <= neutralBand
-        ? 'VETO_FLAT'
-        : signedMove < 0 ? 'VETO_GOOD' : 'VETO_MISSED_OPPORTUNITY';
+      const excessMove = Math.max(0, Math.abs(signedMove) - neutralBand);
+      if (excessMove === 0) {
+        vetoImpactPercent = 0;
+        return 'VETO_FLAT';
+      }
+      if (signedMove < 0) {
+        vetoImpactPercent = excessMove;
+        return 'VETO_GOOD';
+      }
+      vetoImpactPercent = -excessMove;
+      return 'VETO_MISSED_OPPORTUNITY';
     })()
     : null;
   if (move === null) {
@@ -75,7 +84,8 @@ function scoreAdviceOutcome(advice, priceChangePercent, neutralBandPercent = DEF
       signedMovePercent: null,
       priceChangePercent: null,
       score: null,
-      vetoVerdict: null
+      vetoVerdict: null,
+      vetoImpactPercent: null
     };
   }
 
@@ -91,7 +101,8 @@ function scoreAdviceOutcome(advice, priceChangePercent, neutralBandPercent = DEF
       signedMovePercent,
       priceChangePercent: move,
       score: verdict === 'HIT' ? 1 : verdict === 'MISS' ? -1 : 0,
-      vetoVerdict: null
+      vetoVerdict: null,
+      vetoImpactPercent: null
     };
   }
 
@@ -102,7 +113,8 @@ function scoreAdviceOutcome(advice, priceChangePercent, neutralBandPercent = DEF
     signedMovePercent: null,
     priceChangePercent: move,
     score: null,
-    vetoVerdict
+    vetoVerdict,
+    vetoImpactPercent
   };
 }
 
@@ -519,6 +531,7 @@ export class MonitoringSessionService {
           vetoGood: 0,
           vetoMissedOpportunity: 0,
           vetoFlat: 0,
+          vetoImpactPercentTotal: 0,
           latencyMsTotal: 0,
           signedMovePercentTotal: 0
         });
@@ -586,6 +599,9 @@ export class MonitoringSessionService {
           if (verdict.vetoVerdict === 'VETO_FLAT') {
             stats.vetoFlat += 1;
           }
+          if (Number.isFinite(Number(verdict.vetoImpactPercent))) {
+            stats.vetoImpactPercentTotal += Number(verdict.vetoImpactPercent);
+          }
         }
       } else if (evaluation?.status === 'PENDING') {
         pendingEvaluations += 1;
@@ -604,6 +620,10 @@ export class MonitoringSessionService {
         hitRate: scored > 0 ? stats.hits / scored : null,
         averageSignedMovePercent: stats.directionalPredictions > 0
           ? stats.signedMovePercentTotal / stats.directionalPredictions
+          : null,
+        vetoNetImpactPercent: stats.vetoImpactPercentTotal,
+        vetoNonFlatSuccessRate: (stats.vetoGood + stats.vetoMissedOpportunity) > 0
+          ? stats.vetoGood / (stats.vetoGood + stats.vetoMissedOpportunity)
           : null,
         sufficientEvidence: outcomeEligible && stats.actionableEvaluations >= this.minimumEvaluationSamples
       };
@@ -635,6 +655,7 @@ export class MonitoringSessionService {
         neutralBandPercent: this.evaluationNeutralBandPercent,
         minimumEvaluationSamples: this.minimumEvaluationSamples,
         actionableSampleDefinition: '비중립 실제 provider BUY/SELL 결과(HIT/MISS) 또는 비중립 기존 BUY/SELL WAIT/HOLD veto(VETO_GOOD/MISSED_OPPORTUNITY)만 충분성 표본으로 집계',
+        vetoImpactDefinition: 'VETO_GOOD은 neutral band 초과 손실 회피를 양수, VETO_MISSED_OPPORTUNITY는 neutral band 초과 기회손실을 음수로 합산',
         hitDefinition: 'BUY/SELL 방향이 neutral band를 넘어 미래 기준 시점 가격과 일치하면 HIT',
         waitDefinition: 'HOLD/WAIT는 방향 예측이 아니므로 CALM/ABSTAINED로 별도 집계',
         source: '동일 event의 기준 가격과 horizon 이후 첫 관측 가격'
