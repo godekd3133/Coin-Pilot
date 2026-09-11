@@ -23,7 +23,13 @@ const event = {
       previousRsi: 24.1,
       rsiRecovery: 4.3,
       volumeRatio: 1.7,
-      closeStrength: 0.82
+      closeStrength: 0.82,
+      rebound: {
+        reboundConfirmed: true,
+        reboundPriceChangePercent: 0.9,
+        signalRangePercent: 1.1
+      },
+      expectedMovePercent: 0.9
     },
     freshness: { valid: true, ageSeconds: 18 },
     marketRegime: { confirmed: true, breadth: 0.62, averageReturnPercent: 0.14 }
