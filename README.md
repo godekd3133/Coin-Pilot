@@ -251,7 +251,7 @@ portfolio 진단에서만 `requireNextCandleBullish` 후보도 비교할 수 있
 | `AI_GPT_MODEL` | CLI 기본값 | GPT 자문에 사용할 선택적 모델 override |
 | `AI_CLAUDE_MODEL` | CLI 기본값 | Claude 자문에 사용할 선택적 모델 override |
 | `AI_EVALUATION_MINUTES` | 5 | 실제 provider 자문과 미래 가격을 대조할 기준 시간(분) |
-| `AI_EVALUATION_NEUTRAL_BAND_PERCENT` | 0.1 | 방향 적중/실패에서 제외할 중립 가격 변동 폭(%) |
+| `AI_EVALUATION_NEUTRAL_BAND_PERCENT` | 0.3 | 왕복 fee·adverse slippage를 고려해 방향 적중/실패에서 제외할 중립 가격 변동 폭(%) |
 | `AI_EVALUATION_MIN_SAMPLES` | 20 | AI 실효성을 충분한 표본으로 표시하기 위한 최소 평가 수 |
 | `PAPER_AI_MONITORING` | false | paper smoke에 AI monitoring session을 명시적으로 연결 |
 | `PAPER_AI_PROVIDERS` | gpt | paper AI monitoring에 사용할 provider 목록 |
