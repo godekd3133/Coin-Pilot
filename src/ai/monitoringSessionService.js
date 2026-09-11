@@ -248,11 +248,16 @@ function eventFromAnalysis(analysis, timestamp) {
   if (!analysis?.coin) return null;
   const action = String(analysis.decision?.action || 'HOLD').toUpperCase();
   const rebound = analysis.decision?.details?.rebound || analysis.technicalAnalysis?.indicators?.rebound;
+  const reboundCandidate = rebound?.available === true && (
+    rebound.reboundConfirmed === true ||
+    rebound.previousWasOversold === true ||
+    rebound.currentWasOversold === true
+  );
   const type = action === 'BUY'
     ? 'BUY_SIGNAL'
     : action === 'SELL'
       ? 'SELL_SIGNAL'
-      : rebound?.reboundConfirmed === true
+      : reboundCandidate
         ? 'REBOUND_CANDIDATE'
         : null;
   if (!type) return null;

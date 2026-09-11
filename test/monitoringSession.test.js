@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import MonitoringSessionService, { eventFromBundle } from '../src/ai/monitoringSessionService.js';
+import MonitoringSessionService, { eventFromAnalysis, eventFromBundle } from '../src/ai/monitoringSessionService.js';
 
 function makeAnalysis(signalKey, action = 'BUY') {
   return {
@@ -161,6 +161,19 @@ test('기존 리밸런싱 제안도 선택 가능한 monitoring event로 보존�
   assert.equal(event.action, 'BUY');
   assert.equal(event.coin, 'KRW-BTC');
   assert.equal(event.snapshot.totalScore, 88);
+});
+
+test('필터에서 탈락한 반등 후보도 선택형 REBOUND_CANDIDATE event로 보존된다', () => {
+  const analysis = makeAnalysis('candidate-rejected', 'HOLD');
+  analysis.decision.details.rebound.reboundConfirmed = false;
+  analysis.decision.details.rebound.previousWasOversold = true;
+  analysis.decision.details.rebound.rejectionReasons = ['volume_confirmation_failed'];
+
+  const event = eventFromAnalysis(analysis, '2026-09-11T00:00:00.000Z');
+
+  assert.equal(event.type, 'REBOUND_CANDIDATE');
+  assert.equal(event.action, 'WAIT');
+  assert.deepEqual(event.snapshot.indicators.rebound.rejectionReasons, ['volume_confirmation_failed']);
 });
 
 test('실제 provider 자문은 미래 가격과 대조되어 effectiveness로 누적된다', async () => {
