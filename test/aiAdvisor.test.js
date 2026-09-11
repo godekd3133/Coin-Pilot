@@ -90,6 +90,7 @@ test('잘못된 provider 판단은 WAIT로 fail-closed 된다', () => {
   assert.match(prompt, /transaction costs/i);
   assert.match(prompt, /WAIT only when/i);
   assert.match(prompt, /±0\.3% over 5 minute/);
+  assert.match(prompt, /do not assume unseen follow-through/i);
 });
 
 test('자문 prompt와 evaluator가 같은 비용중립 기준을 사용한다', () => {
