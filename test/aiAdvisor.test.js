@@ -78,11 +78,17 @@ test('GPT와 Claude 자문은 주문 경로 없이 독립적으로 실행된다'
 
 test('잘못된 provider 판단은 WAIT로 fail-closed 된다', () => {
   const advice = normalizeAdvice({ action: 'unexpected', confidence: 5, rationale: '불확실' }, { provider: 'gpt' });
-  const prompt = buildAdvisorPrompt({ event: { type: 'SELL_SIGNAL', coin: 'KRW-ETH' } });
+  const prompt = buildAdvisorPrompt({
+    event: { type: 'BUY_SIGNAL', action: 'BUY', coin: 'KRW-ETH', snapshot: { freshness: { valid: true }, indicators: { rebound: { reboundConfirmed: true } } } },
+    context: { evaluation: { horizonMinutes: 5, neutralBandPercent: 0.3 } }
+  });
 
   assert.equal(advice.action, 'WAIT');
   assert.equal(advice.confidence, 5);
   assert.match(prompt, /Return JSON only/);
+  assert.match(prompt, /confirmed BUY/);
+  assert.match(prompt, /transaction costs/i);
+  assert.match(prompt, /WAIT only when/i);
 });
 
 test('실제 CLI runner는 열린 stdin 때문에 timeout되지 않는다', async () => {

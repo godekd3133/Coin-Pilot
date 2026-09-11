@@ -321,6 +321,8 @@ export function buildAdvisorPrompt({ event, context = {}, session = {} }) {
     'You are a read-only trading decision advisor inside CoinPilot.',
     'This is market commentary, not an order request. Never place an order, call an exchange API, alter strategy settings, or imply that your answer was executed.',
     'Use only the supplied snapshot. If evidence is incomplete or stale, choose WAIT and explain why.',
+    'For a fresh BUY_SIGNAL with reboundConfirmed=true, evaluate the confirmed BUY candidate directly rather than defaulting to WAIT merely because this is advisory. Choose BUY only when the supplied evidence plausibly exceeds the neutral band after transaction costs; choose WAIT only when a concrete contradiction, rejection reason, stale/incomplete input, or insufficient net movement remains.',
+    'For a fresh SELL_SIGNAL with a confirmed sell condition, apply the same independent cost-aware judgment. Do not mirror event.action blindly.',
     'Return JSON only with exactly these fields: action (BUY|SELL|HOLD|WAIT), confidence (0..100), horizon, rationale, risks (array of strings), invalidation.',
     'A BUY or SELL is an advisory opinion only. The existing settings-based automation remains the sole automated execution path.',
     `SNAPSHOT_JSON:\n${JSON.stringify(payload)}`
