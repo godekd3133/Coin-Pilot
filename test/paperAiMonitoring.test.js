@@ -67,7 +67,6 @@ test('paper AI monitoring은 명시적으로 켰을 때만 분석 callback과 �
         PAPER_AI_MONITORING: 'true',
         PAPER_AI_MONITORING_FILE: stateFile,
         PAPER_AI_PROVIDERS: 'gpt',
-        PAPER_AI_EVENTS: 'BUY_SIGNAL',
         PAPER_AI_EVALUATION_MINUTES: '1',
         PAPER_AI_COOLDOWN_SECONDS: '30'
       },
@@ -77,7 +76,7 @@ test('paper AI monitoring은 명시적으로 켰을 때만 분석 callback과 �
     assert.ok(monitor);
     assert.equal(typeof callback, 'function');
     assert.deepEqual(monitor.session.providers, ['gpt']);
-    assert.deepEqual(monitor.session.eventTypes, ['BUY_SIGNAL']);
+    assert.deepEqual(monitor.session.eventTypes, ['REBOUND_CANDIDATE', 'BUY_SIGNAL', 'SELL_SIGNAL']);
     assert.equal(monitor.session.evaluationMinutes, 1);
 
     await callback({
