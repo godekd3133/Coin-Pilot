@@ -104,7 +104,10 @@ AI 자문은 다음 경계를 지킵니다.
 - GPT는 `codex` CLI, Claude는 `claude` CLI를 사용하며 앱에 provider API key를 저장하지 않습니다.
 - AI 응답은 `BUY`/`SELL`/`HOLD`/`WAIT` 의견과 근거·위험·무효화 조건으로만 기록됩니다.
 - AI 의견은 주문으로 자동 변환되지 않습니다. 설정값 기반 기존 `executeOrder()` 자동 매수·매도 경로는 그대로 독립 실행됩니다.
-- session 생성 시 이벤트 종류, 코인 필터, 동일 이벤트 재자문 간격, 자동 자문 여부를 정할 수 있습니다. 비용과 호출량을 관리하기 위해 기본 cooldown은 300초입니다.
+- session 생성 시 이벤트 종류, 코인 필터, 동일 이벤트 재자문 간격, 자동 자문 여부, 결과 평가 시점(기본 5분)을 정할 수 있습니다. 비용과 호출량을 관리하기 위해 기본 cooldown은 300초입니다.
+- 실제 provider 응답은 기준 이벤트 가격과 평가 시점 이후 처음 관측된 같은 코인 가격에 자동 대조됩니다. `BUY`/`SELL`은 중립 구간(기본 ±0.1%)을 제외하고 `HIT`/`MISS`/`FLAT`으로, `HOLD`/`WAIT`는 `CALM`/`ABSTAINED`로 별도 집계합니다. local brief·실패 응답·신선하지 않은 snapshot·가격이 없는 이벤트는 provider 적중률에 섞지 않습니다.
+- 실제 응답이 한 provider뿐이면 `singleProvider`로 제한 표시하고 consensus 표본으로 세지 않습니다. 두 provider 이상이 같은 방향으로 응답한 경우에만 `quorum=true`인 consensus를 별도로 평가합니다.
+- 대시보드와 `GET /api/ai/effectiveness`에서 실제 응답률, provider별 지연·평가 표본·적중률, 평가 대기 건수를 확인할 수 있습니다. 최소 20개 평가 표본 전에는 `sufficientEvidence=false`로 표시되며, 이 지표도 주문 승인이나 수익성 보장을 의미하지 않습니다.
 
 로컬 CLI가 먼저 로그인되어 있어야 합니다. ChatGPT 구독과 OpenAI API 사용은 별도 결제 체계이므로, ChatGPT 구독을 API key로 오인해 앱에 넣지 않습니다. [OpenAI 공식 billing 안내](https://help.openai.com/en/articles/9039756)를 확인하고, 현재 provider 로그인 상태는 AI Desk의 연결 상태 카드에서 다시 확인하세요.
 
@@ -113,6 +116,7 @@ AI 자문은 다음 경계를 지킵니다.
 ```text
 GET  /api/ai/providers
 GET  /api/ai/monitoring?limit=40
+GET  /api/ai/effectiveness
 GET  /api/ai/sessions
 POST /api/ai/sessions
 POST /api/ai/sessions/:id/pause
@@ -212,12 +216,16 @@ portfolio 진단에서만 `requireNextCandleBullish` 후보도 비교할 수 있
 | `SCALP_VALIDATION_MIN_TRAINING_PROFIT_FACTOR` | 1 | 학습 구간 최소 profit factor |
 | `SCALP_VALIDATION_MIN_TRAINING_RETURN_PERCENT` | 0 | 학습 구간 최소 수익률 (%) |
 | `AI_ADVISOR_ENABLED` | true | 구독 CLI 기반 읽기 전용 AI 자문 활성화 여부 |
-| `AI_ADVISOR_TIMEOUT_MS` | 15000 | provider 한 곳의 자문 응답 최대 대기 시간(ms) |
+| `AI_ADVISOR_TIMEOUT_MS` | 30000 | provider 한 곳의 자문 응답 최대 대기 시간(ms); 구독 CLI의 초기화 지연 변동을 포함 |
+| `AI_CODEX_IGNORE_USER_CONFIG` | true | 사용자 Codex 설정 파싱 오류가 있어도 앱의 격리 실행 경로를 시도할지 여부 |
 | `AI_MONITORING_FILE` | `ai_monitoring_sessions.json` | 장기 모니터링 session/이벤트/자문 이력 파일 |
 | `AI_CODEX_BIN` | `codex` | GPT/Codex CLI 실행 파일 경로 |
 | `AI_CLAUDE_BIN` | `claude` | Claude CLI 실행 파일 경로 |
 | `AI_GPT_MODEL` | CLI 기본값 | GPT 자문에 사용할 선택적 모델 override |
 | `AI_CLAUDE_MODEL` | CLI 기본값 | Claude 자문에 사용할 선택적 모델 override |
+| `AI_EVALUATION_MINUTES` | 5 | 실제 provider 자문과 미래 가격을 대조할 기준 시간(분) |
+| `AI_EVALUATION_NEUTRAL_BAND_PERCENT` | 0.1 | 방향 적중/실패에서 제외할 중립 가격 변동 폭(%) |
+| `AI_EVALUATION_MIN_SAMPLES` | 20 | AI 실효성을 충분한 표본으로 표시하기 위한 최소 평가 수 |
 | `RSI_PERIOD` | 14 | RSI 기간 |
 | `RSI_OVERSOLD` | 30 | RSI 과매도 기준 |
 | `RSI_OVERBOUGHT` | 70 | RSI 과매수 기준 |

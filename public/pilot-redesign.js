@@ -46,6 +46,7 @@
             sessions: [],
             events: [],
             consultations: [],
+            effectiveness: null,
             loading: false
         },
         settings: null,
@@ -301,6 +302,7 @@
                 <div class="pilot-ai-grid">
                     <div class="pilot-ai-column">
                         <section class="pilot-panel"><div class="pilot-ai-panel-header"><div><h2 class="pilot-panel-title">구독 provider</h2><p class="pilot-panel-subtitle">로컬 로그인 세션의 현재 상태</p></div><span class="pilot-status-pill is-warning" id="pilot-ai-provider-policy">API key 미사용</span></div><div class="pilot-ai-panel-body"><div id="pilot-ai-providers" class="pilot-ai-providers"><div class="pilot-ai-empty">provider 상태를 확인하는 중입니다.</div></div><div class="pilot-inline-note"><i class="ph ph-info" aria-hidden="true"></i><span>GPT는 Codex CLI, Claude는 Claude CLI의 인증 상태만 사용합니다.</span></div></div></section>
+                        <section class="pilot-panel"><div class="pilot-ai-panel-header"><div><h2 class="pilot-panel-title">자문 실효성</h2><p class="pilot-panel-subtitle">실제 provider 응답만 미래 가격과 대조합니다.</p></div><span class="pilot-status-pill is-warning" id="pilot-ai-effectiveness-state">표본 대기</span></div><div class="pilot-ai-panel-body"><div id="pilot-ai-effectiveness" class="pilot-ai-effectiveness"><div class="pilot-ai-empty">실제 provider 자문과 평가 시점 이후 가격이 쌓이면 지표가 표시됩니다.</div></div></div></section>
                         <section class="pilot-panel"><div class="pilot-ai-panel-header"><div><h2 class="pilot-panel-title">장기 모니터링 세션</h2><p class="pilot-panel-subtitle">중지·일시정지·재개와 이력을 보존합니다.</p></div><span class="pilot-status-pill" id="pilot-ai-session-count">0 active</span></div><div class="pilot-ai-panel-body"><div id="pilot-ai-sessions" class="pilot-ai-session-list"><div class="pilot-ai-empty">아직 모니터링 세션이 없습니다.</div></div></div></section>
                 <section class="pilot-panel"><div class="pilot-ai-panel-header"><div><h2 class="pilot-panel-title">새 세션 열기</h2><p class="pilot-panel-subtitle">이벤트와 자동 자문 간격을 직접 선택합니다.</p></div></div><div class="pilot-ai-panel-body"><form class="pilot-ai-session-form" id="pilot-ai-session-form"><label class="pilot-ai-form-label">세션 이름<input class="pilot-ai-form-input" id="pilot-ai-session-name" maxlength="80" value="시장 이벤트 자문" placeholder="예: BTC 반등 감시"></label><div class="pilot-ai-form-label">provider<div class="pilot-ai-check-grid"><label class="pilot-ai-check"><input type="checkbox" name="pilot-ai-provider" value="gpt" checked> GPT / Codex</label><label class="pilot-ai-check"><input type="checkbox" name="pilot-ai-provider" value="claude" checked> Claude</label></div></div><div class="pilot-ai-form-label">감시 이벤트<div class="pilot-ai-check-grid"><label class="pilot-ai-check"><input type="checkbox" name="pilot-ai-event" value="BUY_SIGNAL" checked> 매수 신호</label><label class="pilot-ai-check"><input type="checkbox" name="pilot-ai-event" value="SELL_SIGNAL" checked> 매도 신호</label><label class="pilot-ai-check"><input type="checkbox" name="pilot-ai-event" value="REBOUND_CANDIDATE"> 반등 후보</label><label class="pilot-ai-check"><input type="checkbox" name="pilot-ai-event" value="BREAKING_NEWS"> 속보</label><label class="pilot-ai-check"><input type="checkbox" name="pilot-ai-event" value="BUNDLE_SUGGESTION"> 리밸런싱 제안</label><label class="pilot-ai-check"><input type="checkbox" name="pilot-ai-event" value="TRADE_EXECUTED"> 체결 알림</label></div></div><label class="pilot-ai-form-label">코인 필터 <small>선택 사항 · BTC 또는 KRW-BTC</small><input class="pilot-ai-form-input" id="pilot-ai-session-coins" placeholder="전체 코인 감시"></label><div class="pilot-field-row"><label class="pilot-ai-form-label">재자문 간격 (초)<input class="pilot-ai-form-input" id="pilot-ai-cooldown" type="number" min="30" max="86400" step="30" value="300"></label><label class="pilot-ai-form-label">자동 자문<label class="pilot-ai-check"><input id="pilot-ai-auto-consult" type="checkbox" checked> 이벤트 즉시 요청</label></label></div><button class="pilot-button is-primary" type="submit"><i class="ph ph-broadcast" aria-hidden="true"></i> 장기 모니터링 시작</button><div class="pilot-inline-note"><i class="ph ph-database" aria-hidden="true"></i><span>세션·이벤트·자문 결과는 <code>ai_monitoring_sessions.json</code>에 기록됩니다.</span></div></form></div></section>
                     </div>
@@ -318,6 +320,14 @@
         if (newsNav) newsNav.insertAdjacentHTML('beforebegin', '<button type="button" class="pilot-nav-button" data-pilot-view="ai"><i class="ph ph-sparkle" aria-hidden="true"></i><span>AI 자문</span></button>');
         const newsPage = root.querySelector('[data-pilot-page="news"]');
         if (newsPage) newsPage.insertAdjacentHTML('beforebegin', aiDeskMarkup());
+        const aiForm = byId('pilot-ai-session-form');
+        const cooldownRow = byId('pilot-ai-cooldown')?.closest('.pilot-field-row');
+        if (aiForm && cooldownRow && !byId('pilot-ai-evaluation-minutes')) {
+            const evaluationLabel = document.createElement('label');
+            evaluationLabel.className = 'pilot-ai-form-label';
+            evaluationLabel.innerHTML = '평가 시점 (분)<input class="pilot-ai-form-input" id="pilot-ai-evaluation-minutes" type="number" min="1" max="1440" step="1" value="5">';
+            cooldownRow.parentElement.insertBefore(evaluationLabel, cooldownRow.nextSibling);
+        }
     }
 
     function activateView(view) {
@@ -338,10 +348,56 @@
             return;
         }
         container.innerHTML = status.providers.map(provider => {
-            const stateClass = provider.ready ? 'is-ready' : provider.status === 'NOT_AUTHENTICATED' ? 'is-warning' : 'is-error';
-            const stateText = provider.ready ? 'READY' : provider.status === 'NOT_AUTHENTICATED' ? 'LOGIN NEEDED' : provider.status || 'UNAVAILABLE';
-            return `<article class="pilot-ai-provider ${stateClass}"><div class="pilot-ai-provider-head"><span class="pilot-ai-provider-name">${escapeHtml(provider.label || aiProviderLabel(provider.id))}</span><span class="pilot-ai-provider-state ${stateClass}">${escapeHtml(stateText)}</span></div><div class="pilot-ai-provider-detail">${escapeHtml(provider.detail || provider.subscriptionLabel || '')}</div><div class="pilot-ai-provider-detail" style="margin-top:4px;font-family:'SFMono-Regular',Consolas,monospace;font-size:10px">${provider.ready ? 'subscription session available' : 'check local CLI login'}</div></article>`;
+            const configWarning = provider.status === 'READY_WITH_CONFIG_WARNING' ||
+                (provider.status === 'CONFIG_ERROR' && provider.canAttemptWithoutUserConfig === true);
+            const stateClass = configWarning ? 'is-warning' : provider.ready ? 'is-ready' : provider.status === 'NOT_AUTHENTICATED' ? 'is-warning' : 'is-error';
+            const stateText = provider.status === 'READY_WITH_CONFIG_WARNING'
+                ? 'READY · CONFIG WARN'
+                : provider.status === 'CONFIG_ERROR' && provider.canAttemptWithoutUserConfig === true
+                    ? 'TRYABLE · CONFIG WARN'
+                    : provider.ready ? 'READY' : provider.status === 'NOT_AUTHENTICATED' ? 'LOGIN NEEDED' : provider.status || 'UNAVAILABLE';
+            const nextStep = provider.status === 'CONFIG_ERROR' && provider.canAttemptWithoutUserConfig === true
+                ? '격리 실행을 시도합니다. 첫 실제 응답 후 READY로 확인됩니다.'
+                : provider.ready && !configWarning ? 'subscription session available' : provider.nextStep || 'check local CLI login';
+            return `<article class="pilot-ai-provider ${stateClass}"><div class="pilot-ai-provider-head"><span class="pilot-ai-provider-name">${escapeHtml(provider.label || aiProviderLabel(provider.id))}</span><span class="pilot-ai-provider-state ${stateClass}">${escapeHtml(stateText)}</span></div><div class="pilot-ai-provider-detail">${escapeHtml(provider.detail || provider.subscriptionLabel || '')}</div><div class="pilot-ai-provider-detail" style="margin-top:4px;font-family:'SFMono-Regular',Consolas,monospace;font-size:10px">${escapeHtml(nextStep)}</div></article>`;
         }).join('');
+    }
+
+    function renderAiEffectiveness(effectiveness) {
+        const container = byId('pilot-ai-effectiveness');
+        const statePill = byId('pilot-ai-effectiveness-state');
+        if (!container) return;
+        const evidenceReady = effectiveness?.sufficientEvidence === true;
+        if (statePill) {
+            statePill.textContent = evidenceReady ? '검증 표본 충족' : '표본 부족';
+            statePill.className = `pilot-status-pill ${evidenceReady ? 'is-ready' : 'is-warning'}`;
+        }
+        if (!effectiveness) {
+            container.innerHTML = '<div class="pilot-ai-empty">실효성 지표를 불러오지 못했습니다.</div>';
+            return;
+        }
+        const stats = Object.values(effectiveness.providerStats || {});
+        const providerStats = stats.filter(stat => stat.type === 'provider');
+        const statMarkup = stats.length
+            ? stats.map(stat => {
+                const hitRate = stat.hitRate === null || stat.hitRate === undefined ? '-' : `${(number(stat.hitRate) * 100).toFixed(1)}%`;
+                const latency = stat.averageLatencyMs === null || stat.averageLatencyMs === undefined ? '-' : `${(number(stat.averageLatencyMs) / 1000).toFixed(1)}s`;
+                const resultLine = stat.type === 'consensus'
+                    ? `평가 ${stat.evaluated || 0} · 적중 ${stat.hits || 0} · 실패 ${stat.misses || 0}`
+                    : `응답 ${stat.completed || 0}/${stat.attempted || 0} · 평가 ${stat.evaluated || 0} · 지연 ${latency}`;
+                return `<div class="pilot-ai-effectiveness-row"><div><strong>${escapeHtml(stat.label || stat.source)}</strong><span>${escapeHtml(resultLine)}</span></div><b>${escapeHtml(hitRate)}</b></div>`;
+            }).join('')
+            : '<div class="pilot-ai-empty">아직 실제 provider 응답이 없습니다.</div>';
+        const coverage = effectiveness.evaluationCoverageRate === null || effectiveness.evaluationCoverageRate === undefined
+            ? '-'
+            : `${(number(effectiveness.evaluationCoverageRate) * 100).toFixed(1)}%`;
+        const completion = effectiveness.actualProviderCompletionRate === null || effectiveness.actualProviderCompletionRate === undefined
+            ? '-'
+            : `${(number(effectiveness.actualProviderCompletionRate) * 100).toFixed(1)}%`;
+        const warning = effectiveness.evidenceWarning
+            ? `<div class="pilot-inline-note"><i class="ph ph-warning" aria-hidden="true"></i><span>${escapeHtml(effectiveness.evidenceWarning)}</span></div>`
+            : '';
+        container.innerHTML = `<div class="pilot-ai-effectiveness-summary"><div><strong>${escapeHtml(String(effectiveness.actualProviderCompletions || 0))}</strong><span>실제 응답</span></div><div><strong>${escapeHtml(String(effectiveness.evaluatedConsultations || 0))}</strong><span>평가 완료</span></div><div><strong>${escapeHtml(coverage)}</strong><span>평가 커버리지</span></div><div><strong>${escapeHtml(completion)}</strong><span>응답 성공률</span></div></div><div class="pilot-ai-effectiveness-list">${statMarkup}</div>${providerStats.length ? '<div class="pilot-inline-note"><i class="ph ph-chart-line-up" aria-hidden="true"></i><span>적중률은 BUY/SELL 방향 예측만 집계하며, HOLD/WAIT는 CALM/ABSTAINED로 분리합니다.</span></div>' : ''}${warning}`;
     }
 
     function renderAiSessions(sessions) {
@@ -365,7 +421,7 @@
                 : session.status === 'PAUSED'
                     ? `<button type="button" class="pilot-button" data-pilot-ai-session-action="resume" data-session-id="${session.id}">재개</button><button type="button" class="pilot-button is-danger" data-pilot-ai-session-action="stop" data-session-id="${session.id}">종료</button>`
                     : '';
-            return `<article class="pilot-ai-session ${statusClass}"><div class="pilot-ai-session-head"><span class="pilot-ai-session-name">${escapeHtml(session.name)}</span><span class="pilot-ai-provider-state ${session.status === 'RUNNING' ? 'is-ready' : session.status === 'PAUSED' ? 'is-warning' : 'is-error'}">${statusText}</span></div><div class="pilot-ai-session-meta">${escapeHtml(providers)}<br>${escapeHtml(events)}<br>${escapeHtml(coins)} · 이벤트 ${session.eventCount || 0} · 자문 ${session.consultationCount || 0}</div><div class="pilot-ai-session-meta">시작 ${escapeHtml(formatDateTime(session.startedAt))} · 마지막 이벤트 ${escapeHtml(formatDateTime(session.lastEventAt))}</div><div class="pilot-ai-actions">${actions}</div></article>`;
+            return `<article class="pilot-ai-session ${statusClass}"><div class="pilot-ai-session-head"><span class="pilot-ai-session-name">${escapeHtml(session.name)}</span><span class="pilot-ai-provider-state ${session.status === 'RUNNING' ? 'is-ready' : session.status === 'PAUSED' ? 'is-warning' : 'is-error'}">${statusText}</span></div><div class="pilot-ai-session-meta">${escapeHtml(providers)}<br>${escapeHtml(events)}<br>${escapeHtml(coins)} · 이벤트 ${session.eventCount || 0} · 자문 ${session.consultationCount || 0} · 평가 ${session.evaluationMinutes || 5}분</div><div class="pilot-ai-session-meta">시작 ${escapeHtml(formatDateTime(session.startedAt))} · 마지막 이벤트 ${escapeHtml(formatDateTime(session.lastEventAt))}</div><div class="pilot-ai-actions">${actions}</div></article>`;
         }).join('');
     }
 
@@ -395,19 +451,37 @@
             return;
         }
         container.innerHTML = consultations.slice(0, 40).map(consultation => {
-            const stateClass = consultation.status === 'COMPLETED' ? 'is-completed' : consultation.status === 'RUNNING' ? '' : 'is-failed';
+            const stateClass = consultation.status === 'COMPLETED'
+                ? 'is-completed'
+                : consultation.status === 'DEGRADED'
+                    ? 'is-degraded'
+                    : consultation.status === 'RUNNING' ? '' : 'is-failed';
             const event = consultation.event || {};
             const coin = event.coin ? symbolOf(event.coin) : 'MARKET';
             const results = (consultation.results || []).map(result => {
+                if (result.status === 'FALLBACK' && result.advice) {
+                    const fallback = result.advice;
+                    const risks = (fallback.risks || []).map(risk => `<li>${escapeHtml(risk)}</li>`).join('');
+                    return `<div class="pilot-ai-consultation-result"><div class="pilot-ai-advice-action is-wait">LOCAL<br>BRIEF</div><div class="pilot-ai-rationale"><strong>AI 없음 · 사실 요약</strong><br>${escapeHtml(fallback.rationale || '')}${risks ? `<ul class="pilot-ai-risks">${risks}</ul>` : ''}<div class="pilot-ai-consultation-meta">${escapeHtml(fallback.invalidation || 'provider 연결 후 재자문')}</div></div></div>`;
+                }
                 if (result.status !== 'COMPLETED' || !result.advice) return `<div class="pilot-ai-rationale" style="color:var(--sl-red)">${escapeHtml(aiProviderLabel(result.provider))}: ${escapeHtml(result.error || '응답 실패')}</div>`;
                 const advice = result.advice;
                 const actionClass = advice.action === 'SELL' ? 'is-sell' : ['HOLD', 'WAIT'].includes(advice.action) ? 'is-wait' : '';
                 const risks = (advice.risks || []).map(risk => `<li>${escapeHtml(risk)}</li>`).join('');
-                return `<div class="pilot-ai-consultation-result"><div class="pilot-ai-advice-action ${actionClass}">${escapeHtml(advice.action)}<br><small>${number(advice.confidence)}%</small></div><div class="pilot-ai-rationale"><strong>${escapeHtml(aiProviderLabel(result.provider))}</strong> · ${escapeHtml(advice.horizon || '')}<br>${escapeHtml(advice.rationale || '')}${risks ? `<ul class="pilot-ai-risks">${risks}</ul>` : ''}<div class="pilot-ai-consultation-meta">무효화 조건: ${escapeHtml(advice.invalidation || '추가 확인 필요')}</div></div></div>`;
+                const configWarning = result.configWarning ? '<div class="pilot-ai-consultation-meta">Codex 사용자 설정 경고 · 격리 실행으로 응답 확인</div>' : '';
+                return `<div class="pilot-ai-consultation-result"><div class="pilot-ai-advice-action ${actionClass}">${escapeHtml(advice.action)}<br><small>${number(advice.confidence)}%</small></div><div class="pilot-ai-rationale"><strong>${escapeHtml(aiProviderLabel(result.provider))}</strong> · ${escapeHtml(advice.horizon || '')}<br>${escapeHtml(advice.rationale || '')}${risks ? `<ul class="pilot-ai-risks">${risks}</ul>` : ''}<div class="pilot-ai-consultation-meta">무효화 조건: ${escapeHtml(advice.invalidation || '추가 확인 필요')}</div>${configWarning}</div></div>`;
             }).join('');
             const pending = consultation.status === 'RUNNING' ? '<div class="pilot-ai-rationale">응답을 기다리는 중…</div>' : '';
             const error = consultation.error ? `<div class="pilot-ai-rationale" style="color:var(--sl-red)">${escapeHtml(consultation.error)}</div>` : '';
-            return `<article class="pilot-ai-consultation ${stateClass}"><div class="pilot-ai-consultation-head"><span class="pilot-ai-event-title">${escapeHtml(coin)} · ${escapeHtml(aiEventLabels[event.type] || event.type || '자문')}</span><span class="pilot-ai-provider-state ${stateClass === 'is-completed' ? 'is-ready' : stateClass === 'is-failed' ? 'is-error' : 'is-warning'}">${escapeHtml(consultation.status || '-')}</span></div><div class="pilot-ai-consultation-meta">${escapeHtml(formatDateTime(consultation.createdAt))} · ${(consultation.providerSelection || []).map(aiProviderLabel).map(escapeHtml).join(' + ')}${consultation.auto ? ' · 자동 자문' : ' · 수동 자문'}</div>${results || pending || error}</article>`;
+            const evaluation = consultation.evaluation;
+            const evaluationMarkup = evaluation?.status === 'COMPLETED'
+                ? `<div class="pilot-ai-evaluation"><strong>실효성 평가</strong><span>${escapeHtml(`${number(evaluation.horizonMinutes, 5)}분 후 ${number(evaluation.priceChangePercent).toFixed(2)}%`)}</span><span>${(evaluation.verdicts || []).map(verdict => `${escapeHtml(verdict.providerLabel || verdict.source)} ${escapeHtml(verdict.verdict)}`).join(' · ')}</span></div>`
+                : evaluation?.status === 'PENDING'
+                    ? '<div class="pilot-ai-evaluation is-pending"><strong>실효성 평가 대기</strong><span>평가 시점 이후 동일 코인 가격을 기다리는 중</span></div>'
+                    : evaluation?.status === 'NOT_EVALUABLE'
+                        ? `<div class="pilot-ai-evaluation is-pending"><strong>실효성 평가 제외</strong><span>${escapeHtml(evaluation.reason || '기준 가격 또는 실제 provider 응답 없음')}</span></div>`
+                        : '';
+            return `<article class="pilot-ai-consultation ${stateClass}"><div class="pilot-ai-consultation-head"><span class="pilot-ai-event-title">${escapeHtml(coin)} · ${escapeHtml(aiEventLabels[event.type] || event.type || '자문')}</span><span class="pilot-ai-provider-state ${stateClass === 'is-completed' ? 'is-ready' : stateClass === 'is-failed' ? 'is-error' : 'is-warning'}">${escapeHtml(consultation.status || '-')}</span></div><div class="pilot-ai-consultation-meta">${escapeHtml(formatDateTime(consultation.createdAt))} · ${(consultation.providerSelection || []).map(aiProviderLabel).map(escapeHtml).join(' + ')}${consultation.auto ? ' · 자동 자문' : ' · 수동 자문'}</div>${results || pending || error}${evaluationMarkup}</article>`;
         }).join('');
     }
 
@@ -416,9 +490,11 @@
         state.ai.sessions = snapshot.sessions || [];
         state.ai.events = snapshot.events || [];
         state.ai.consultations = snapshot.consultations || [];
+        state.ai.effectiveness = snapshot.effectiveness || null;
         renderAiSessions(state.ai.sessions);
         renderAiEvents(state.ai.events);
         renderAiConsultations(state.ai.consultations);
+        renderAiEffectiveness(state.ai.effectiveness);
         setText('pilot-ai-sync', snapshot.updatedAt ? `동기화 ${formatDateTime(snapshot.updatedAt)}` : '동기화 -');
         setText('pilot-ai-snapshot-time', snapshot.latestSnapshot?.timestamp ? `snapshot ${formatTime(snapshot.latestSnapshot.timestamp, true)}` : 'snapshot 대기');
     }
@@ -456,6 +532,7 @@
                     eventTypes,
                     coins: byId('pilot-ai-session-coins')?.value || '',
                     cooldownSeconds: number(byId('pilot-ai-cooldown')?.value, 300),
+                    evaluationMinutes: number(byId('pilot-ai-evaluation-minutes')?.value, 5),
                     autoConsult: byId('pilot-ai-auto-consult')?.checked !== false
                 })
             });
@@ -483,7 +560,15 @@
         try {
             const result = await requestJSON('/ai/consult', { method: 'POST', body: JSON.stringify({ eventId, provider }) });
             if (result?.consultation) handleAiConsultationUpdate(result.consultation);
-            showToast(result?.consultation?.status === 'COMPLETED' ? 'AI 자문 결과를 받았습니다' : 'AI 자문이 완료되지 않았습니다', result?.consultation?.status === 'COMPLETED' ? 'success' : 'warning');
+            const consultationStatus = result?.consultation?.status;
+            showToast(
+                consultationStatus === 'COMPLETED'
+                    ? 'AI 자문 결과를 받았습니다'
+                    : consultationStatus === 'DEGRADED'
+                        ? 'provider 미연결 · 사실 기반 WAIT 브리프를 저장했습니다'
+                        : 'AI 자문이 완료되지 않았습니다',
+                consultationStatus === 'COMPLETED' ? 'success' : 'warning'
+            );
         } catch (error) {
             showToast(`AI 자문 실패: ${error.message}`, 'error');
         }

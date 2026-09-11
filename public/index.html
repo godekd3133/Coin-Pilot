@@ -5069,7 +5069,15 @@
                 return;
             }
             handleAiConsultationUpdate(result.consultation);
-            showToast(result.consultation.status === 'COMPLETED' ? 'AI 자문 결과를 받았습니다' : 'AI 자문이 완료되지 않았습니다', result.consultation.status === 'COMPLETED' ? 'success' : 'error');
+            const consultationStatus = result.consultation.status;
+            showToast(
+                consultationStatus === 'COMPLETED'
+                    ? 'AI 자문 결과를 받았습니다'
+                    : consultationStatus === 'DEGRADED'
+                        ? 'provider 미연결 · 사실 기반 WAIT 브리프를 저장했습니다'
+                        : 'AI 자문이 완료되지 않았습니다',
+                consultationStatus === 'COMPLETED' ? 'success' : 'warning'
+            );
         }
 
         function handleAiMonitoringEvent(event) {

@@ -2389,6 +2389,82 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
     gap: 9px;
 }
 
+.pilot-ai-effectiveness {
+    display: grid;
+    gap: 10px;
+}
+
+.pilot-ai-effectiveness-summary {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 7px;
+}
+
+.pilot-ai-effectiveness-summary > div {
+    padding: 9px 7px;
+    border: 1px solid var(--sl-line);
+    border-radius: 8px;
+    background: #fbfbf9;
+    text-align: center;
+}
+
+.pilot-ai-effectiveness-summary strong {
+    display: block;
+    color: var(--sl-ink);
+    font-family: "SFMono-Regular", Consolas, monospace;
+    font-size: 15px;
+}
+
+.pilot-ai-effectiveness-summary span {
+    display: block;
+    margin-top: 3px;
+    color: var(--sl-muted);
+    font-size: 10px;
+}
+
+.pilot-ai-effectiveness-list {
+    display: grid;
+    gap: 6px;
+}
+
+.pilot-ai-effectiveness-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 8px 9px;
+    border: 1px solid var(--sl-line);
+    border-radius: 8px;
+    background: #fff;
+}
+
+.pilot-ai-effectiveness-row > div {
+    min-width: 0;
+}
+
+.pilot-ai-effectiveness-row strong,
+.pilot-ai-effectiveness-row span {
+    display: block;
+}
+
+.pilot-ai-effectiveness-row strong {
+    color: var(--sl-ink);
+    font-size: 11px;
+}
+
+.pilot-ai-effectiveness-row span {
+    margin-top: 3px;
+    color: var(--sl-muted);
+    font-size: 10px;
+}
+
+.pilot-ai-effectiveness-row b {
+    flex: 0 0 auto;
+    color: var(--sl-green);
+    font-family: "SFMono-Regular", Consolas, monospace;
+    font-size: 12px;
+}
+
 .pilot-ai-provider {
     min-height: 108px;
     padding: 12px;
@@ -2542,6 +2618,7 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
 .pilot-ai-event.is-sell { border-left-color: var(--sl-red); }
 .pilot-ai-event.is-news { border-left-color: var(--sl-amber); }
 .pilot-ai-consultation.is-completed { border-left-color: var(--sl-green); }
+.pilot-ai-consultation.is-degraded { border-left-color: var(--sl-amber); }
 .pilot-ai-consultation.is-failed { border-left-color: var(--sl-red); }
 
 .pilot-ai-actions {
@@ -2586,6 +2663,33 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
     line-height: 1.55;
 }
 
+.pilot-ai-evaluation {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px 10px;
+    margin-top: 10px;
+    padding: 8px 9px;
+    border: 1px solid #b9decf;
+    border-radius: 7px;
+    background: #f4fbf7;
+    color: var(--sl-green);
+    font-size: 10px;
+}
+
+.pilot-ai-evaluation strong {
+    font-family: "SFMono-Regular", Consolas, monospace;
+    font-size: 9px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.pilot-ai-evaluation.is-pending {
+    border-color: var(--sl-line);
+    background: var(--sl-surface-2);
+    color: var(--sl-muted);
+}
+
 .pilot-ai-risks {
     margin: 6px 0 0 16px;
     color: var(--sl-muted);
@@ -2616,6 +2720,10 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
     .pilot-ai-providers,
     .pilot-ai-check-grid {
         grid-template-columns: 1fr;
+    }
+
+    .pilot-ai-effectiveness-summary {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 }
 
