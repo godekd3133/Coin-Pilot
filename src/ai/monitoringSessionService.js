@@ -595,6 +595,7 @@ export class MonitoringSessionService {
       createdAt: new Date().toISOString(),
       completedAt: null,
       results: [],
+      consensus: null,
       error: null,
       event: selectedEvent
     };
@@ -627,6 +628,7 @@ export class MonitoringSessionService {
         consultation.status = response.status || 'FAILED';
         consultation.requestId = response.requestId || null;
         consultation.results = Array.isArray(response.results) ? response.results : [];
+        consultation.consensus = response.consensus || null;
         consultation.error = response.error || null;
       } catch (error) {
         consultation.status = 'FAILED';

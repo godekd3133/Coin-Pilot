@@ -217,6 +217,42 @@ export function normalizeAdvice(value, metadata = {}) {
   };
 }
 
+export function aggregateAdvice(results = []) {
+  const completed = results.filter(result =>
+    result?.status === 'COMPLETED' && result.advice && result.provider !== 'local-brief'
+  );
+  if (completed.length === 0) return null;
+
+  const counts = new Map();
+  for (const result of completed) {
+    const action = normalizeAction(result.advice.action);
+    counts.set(action, (counts.get(action) || 0) + 1);
+  }
+  const ranked = [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  const [winningAction, winningCount] = ranked[0];
+  const agreementRatio = winningCount / completed.length;
+  const conflict = completed.length > 1 && agreementRatio < 1;
+  const averageConfidence = Math.round(completed.reduce((sum, result) => sum + normalizeConfidence(result.advice.confidence), 0) / completed.length);
+  const providerNames = completed.map(result => `${result.providerLabel || result.provider}=${normalizeAction(result.advice.action)}`);
+
+  return {
+    ...normalizeAdvice({
+      action: conflict ? 'WAIT' : winningAction,
+      confidence: conflict ? Math.min(50, Math.round(averageConfidence * agreementRatio)) : averageConfidence,
+      horizon: conflict ? 'provider 의견 일치 후 재자문' : completed[0].advice.horizon,
+      rationale: conflict
+        ? `provider 의견이 일치하지 않습니다: ${providerNames.join(', ')}. 충돌 중에는 관망합니다.`
+        : `provider ${completed.length}개 의견 일치: ${providerNames.join(', ')}.`,
+      risks: conflict ? ['provider 의견 불일치', '단일 합의로 판단하지 않음'] : [],
+      invalidation: conflict ? 'provider 의견이 일치하는 새 snapshot을 다시 확인하세요.' : completed[0].advice.invalidation
+    }, { provider: 'consensus', mode: 'AI_CONSENSUS' }),
+    agreementRatio,
+    providerCount: completed.length,
+    providers: completed.map(result => result.provider),
+    conflict
+  };
+}
+
 export function buildLocalEvidenceBrief(event, providerFailures = []) {
   const snapshot = event?.snapshot || {};
   const indicators = snapshot.indicators || snapshot;
@@ -518,6 +554,7 @@ export class AIAdvisorService {
       requestId,
       status: hasCompletedProvider ? 'COMPLETED' : results.some(result => result.status === 'FALLBACK') ? 'DEGRADED' : 'FAILED',
       results,
+      consensus: aggregateAdvice(results),
       completedAt: new Date().toISOString()
     };
   }

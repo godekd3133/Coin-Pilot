@@ -267,6 +267,22 @@
 .ai-desk-action.wait { background: rgba(246, 240, 223, 0.08); color: var(--ai-muted); }
 .ai-desk-rationale { color: var(--ai-ink); font-size: 12px; line-height: 1.55; }
 .ai-desk-risks { margin: 6px 0 0 16px; color: var(--ai-muted); font-size: 11px; }
+.ai-desk-consensus {
+    margin-top: 11px;
+    padding: 10px;
+    border: 1px solid rgba(111, 225, 187, 0.32);
+    border-radius: 8px;
+    background: rgba(111, 225, 187, 0.08);
+    color: var(--ai-ink);
+    font-size: 11px;
+    line-height: 1.5;
+}
+
+.ai-desk-consensus.conflict {
+    border-color: rgba(255, 209, 102, 0.42);
+    background: rgba(255, 209, 102, 0.08);
+}
+
 .ai-desk-note { margin-top: 10px; color: var(--ai-muted); font: 10px/1.5 "SFMono-Regular", Consolas, monospace; }
 
 @media (max-width: 900px) {

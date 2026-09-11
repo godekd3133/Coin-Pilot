@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   AIAdvisorService,
+  aggregateAdvice,
   buildLocalEvidenceBrief,
   buildAdvisorPrompt,
   normalizeAdvice,
@@ -205,4 +206,24 @@ test('provider가 모두 unavailable이면 AI 결과를 위조하지 않고 loca
   assert.match(nestedBrief.rationale, /거래량 배수 1\.90/);
   assert.match(nestedBrief.rationale, /종가 강도 0\.88/);
   assert.match(nestedBrief.rationale, /반등 확정/);
+});
+
+test('provider 의견이 충돌하면 consensus는 안전하게 WAIT가 된다', () => {
+  const shared = { horizon: '1시간', confidence: 80, invalidation: '신호 무효화' };
+  const agreement = aggregateAdvice([
+    { provider: 'gpt', providerLabel: 'GPT', status: 'COMPLETED', advice: { ...shared, action: 'BUY' } },
+    { provider: 'claude', providerLabel: 'Claude', status: 'COMPLETED', advice: { ...shared, action: 'BUY' } }
+  ]);
+  const conflict = aggregateAdvice([
+    { provider: 'gpt', providerLabel: 'GPT', status: 'COMPLETED', advice: { ...shared, action: 'BUY' } },
+    { provider: 'claude', providerLabel: 'Claude', status: 'COMPLETED', advice: { ...shared, action: 'SELL' } }
+  ]);
+
+  assert.equal(agreement.action, 'BUY');
+  assert.equal(agreement.agreementRatio, 1);
+  assert.equal(agreement.conflict, false);
+  assert.equal(conflict.action, 'WAIT');
+  assert.equal(conflict.agreementRatio, 0.5);
+  assert.equal(conflict.conflict, true);
+  assert.match(conflict.rationale, /일치하지 않습니다/);
 });

@@ -160,7 +160,11 @@
                 const risks = (advice.risks || []).map(risk => `<li>${esc(risk)}</li>`).join('');
                 return `<div class="ai-desk-advice"><div class="ai-desk-action ${actionClass}">${esc(advice.action)}<br><small>${n(advice.confidence)}%</small></div><div class="ai-desk-rationale"><strong>${esc(providerName(result.provider))}</strong> · ${esc(advice.horizon || '')}<br>${esc(advice.rationale || '')}${risks ? `<ul class="ai-desk-risks">${risks}</ul>` : ''}<div class="ai-desk-detail">무효화 조건: ${esc(advice.invalidation || '추가 확인 필요')}</div></div></div>`;
             }).join('');
-            return `<article class="ai-desk-consultation ${statusClass}"><div class="ai-desk-item-head"><span class="ai-desk-event-title">${esc(event.coin ? symbol(event.coin) : 'MARKET')} · ${esc(labels[event.type] || event.type || '자문')}</span><span class="ai-desk-state ${statusClass === 'completed' ? 'ready' : statusClass === 'failed' ? 'error' : 'warn'}">${esc(consultation.status || '-')}</span></div><div class="ai-desk-consultation-meta">${esc(time(consultation.createdAt))} · ${(consultation.providerSelection || []).map(providerName).map(esc).join(' + ')}${consultation.auto ? ' · 자동 자문' : ' · 수동 자문'}</div>${results || (consultation.status === 'RUNNING' ? '<div class="ai-desk-rationale">응답을 기다리는 중…</div>' : '')}${consultation.error ? `<div class="ai-desk-rationale" style="color:var(--ai-red)">${esc(consultation.error)}</div>` : ''}</article>`;
+            const consensus = consultation.consensus;
+            const consensusHtml = consensus
+                ? `<div class="ai-desk-consensus ${consensus.conflict ? 'conflict' : ''}"><strong>${consensus.conflict ? '⚠ 의견 충돌 · 관망' : `합의 ${esc(consensus.action)}`}</strong> · ${n(consensus.providerCount)}개 provider · 일치율 ${Math.round(n(consensus.agreementRatio) * 100)}%<br>${esc(consensus.rationale || '')}</div>`
+                : '';
+            return `<article class="ai-desk-consultation ${statusClass}"><div class="ai-desk-item-head"><span class="ai-desk-event-title">${esc(event.coin ? symbol(event.coin) : 'MARKET')} · ${esc(labels[event.type] || event.type || '자문')}</span><span class="ai-desk-state ${statusClass === 'completed' ? 'ready' : statusClass === 'failed' ? 'error' : 'warn'}">${esc(consultation.status || '-')}</span></div><div class="ai-desk-consultation-meta">${esc(time(consultation.createdAt))} · ${(consultation.providerSelection || []).map(providerName).map(esc).join(' + ')}${consultation.auto ? ' · 자동 자문' : ' · 수동 자문'}</div>${consensusHtml}${results || (consultation.status === 'RUNNING' ? '<div class="ai-desk-rationale">응답을 기다리는 중…</div>' : '')}${consultation.error ? `<div class="ai-desk-rationale" style="color:var(--ai-red)">${esc(consultation.error)}</div>` : ''}</article>`;
         }).join('');
     }
 
@@ -226,7 +230,15 @@
                 state.consultations = [result.consultation, ...state.consultations.filter(item => item.id !== result.consultation.id)].slice(0, 80);
                 renderConsultations();
             }
-            toast(result?.consultation?.status === 'COMPLETED' ? 'AI 자문 결과를 받았습니다' : 'AI 자문이 완료되지 않았습니다', result?.consultation?.status === 'COMPLETED' ? 'success' : 'warning');
+            const consultationStatus = result?.consultation?.status;
+            toast(
+                consultationStatus === 'COMPLETED'
+                    ? 'AI 자문 결과를 받았습니다'
+                    : consultationStatus === 'DEGRADED'
+                        ? 'provider 미연결 · 사실 기반 WAIT 브리프를 저장했습니다'
+                        : 'AI 자문이 완료되지 않았습니다',
+                consultationStatus === 'COMPLETED' ? 'success' : 'warning'
+            );
         } catch (error) {
             toast(`AI 자문 실패: ${error.message}`, 'error');
         }
