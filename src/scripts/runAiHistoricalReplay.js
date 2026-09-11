@@ -96,7 +96,7 @@ async function main() {
   const maxSamples = Math.max(1, Math.floor(number(process.env.AI_REPLAY_MAX_SAMPLES, 20)));
   const horizonCandles = Math.max(1, Math.floor(number(process.env.AI_REPLAY_HORIZON_CANDLES, 5)));
   const minimumSpacingCandles = Math.max(1, Math.floor(number(process.env.AI_REPLAY_MIN_SPACING_CANDLES, 5)));
-  const neutralBandPercent = Math.max(0, number(process.env.AI_REPLAY_NEUTRAL_BAND_PERCENT, 0.1));
+  const neutralBandPercent = Math.max(0, number(process.env.AI_REPLAY_NEUTRAL_BAND_PERCENT, 0.3));
   const marketsFilter = (process.env.AI_REPLAY_MARKETS || '').split(',').map(item => item.trim().toUpperCase()).filter(Boolean);
   const raw = JSON.parse(fs.readFileSync(candleFile, 'utf8'));
   const markets = marketsFilter.length > 0 ? marketsFilter : Object.keys(raw).filter(key => key.startsWith('KRW-'));

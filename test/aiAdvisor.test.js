@@ -312,4 +312,8 @@ test('WAIT veto는 원래 BUY/SELL 신호의 회피 효과를 별도로 판정�
   assert.equal(avoidedLoss.vetoVerdict, 'VETO_GOOD');
   assert.equal(missedGain.vetoVerdict, 'VETO_MISSED_OPPORTUNITY');
   assert.equal(flat.vetoVerdict, 'VETO_FLAT');
+  assert.equal(
+    scoreAdviceOutcome({ action: 'WAIT', confidence: 90 }, 0.1035, undefined, 'BUY').vetoVerdict,
+    'VETO_FLAT'
+  );
 });

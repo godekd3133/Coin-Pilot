@@ -6,7 +6,9 @@ const SCHEMA_VERSION = 1;
 const DEFAULT_MAX_EVENTS = 240;
 const DEFAULT_MAX_CONSULTATIONS = 160;
 const DEFAULT_EVALUATION_MINUTES = 5;
-const DEFAULT_NEUTRAL_BAND_PERCENT = 0.1;
+// Default neutral band reflects two exchange fees plus adverse slippage
+// (0.05% fee and 0.10% slippage on each side), not raw price noise alone.
+const DEFAULT_NEUTRAL_BAND_PERCENT = 0.3;
 const DEFAULT_MINIMUM_EVALUATION_SAMPLES = 20;
 const DEFAULT_MAX_PRICE_OBSERVATIONS = 5_000;
 const EVENT_TYPES = new Set([

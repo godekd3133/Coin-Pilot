@@ -41,7 +41,7 @@ export function createPaperAiMonitor({
     aiEvaluationNeutralBandPercent: numericEnv(
       env,
       'PAPER_AI_EVALUATION_NEUTRAL_BAND_PERCENT',
-      config.aiEvaluationNeutralBandPercent ?? 0.1
+      config.aiEvaluationNeutralBandPercent ?? 0.3
     ),
     aiEvaluationMinSamples: numericEnv(env, 'PAPER_AI_EVALUATION_MIN_SAMPLES', config.aiEvaluationMinSamples ?? 20)
   };

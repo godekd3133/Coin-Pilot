@@ -264,7 +264,7 @@ function createConfig() {
     aiGptModel: process.env.AI_GPT_MODEL || '',
     aiClaudeModel: process.env.AI_CLAUDE_MODEL || '',
     aiEvaluationMinutes: envNumber('AI_EVALUATION_MINUTES', 5),
-    aiEvaluationNeutralBandPercent: envNumber('AI_EVALUATION_NEUTRAL_BAND_PERCENT', 0.1),
+    aiEvaluationNeutralBandPercent: envNumber('AI_EVALUATION_NEUTRAL_BAND_PERCENT', 0.3),
     aiEvaluationMinSamples: parseInt(process.env.AI_EVALUATION_MIN_SAMPLES) || 20,
 
     // 체크 간격 (드라이 모드일 때 더 짧게)
