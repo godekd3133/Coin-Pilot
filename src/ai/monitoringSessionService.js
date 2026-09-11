@@ -711,6 +711,20 @@ export class MonitoringSessionService {
     return result;
   }
 
+  async waitForPendingConsultations(timeoutMs = 30_000) {
+    const pending = [...this.pendingConsultations.values()];
+    if (pending.length === 0) return { pendingCount: 0, timedOut: false };
+    let timer = null;
+    const timedOut = await Promise.race([
+      Promise.allSettled(pending).then(() => false),
+      new Promise(resolve => {
+        timer = setTimeout(() => resolve(true), Math.max(0, Number(timeoutMs) || 30_000));
+      })
+    ]);
+    if (timer) clearTimeout(timer);
+    return { pendingCount: pending.length, timedOut };
+  }
+
   ingestCycle(cycle = {}) {
     return this.enqueue(() => this._ingestCycle(cycle));
   }

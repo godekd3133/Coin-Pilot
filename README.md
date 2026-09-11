@@ -139,6 +139,19 @@ POST /api/paper-validation/stop
 
 격리 smoke가 필요하면 `npm run paper:smoke`를 사용합니다. 기본 60초 동안 `PAPER_SMOKE_MARKETS`를 읽기 전용으로 분석하고 `.paper-smoke/` 아래에 가상 포트폴리오와 paper ledger를 저장합니다. 기존 `dry_portfolio.json`은 읽거나 수정하지 않습니다. 이 smoke는 연결·상태 저장 검증용이며, 7일 수익성 승격 증거로 사용하지 않습니다.
 
+실제 DRY_RUN 분석 이벤트를 AI 자문과 함께 관찰하려면 다음처럼 선택형 paper AI monitoring을 켤 수 있습니다. 이 모드는 별도 `ai_monitoring_sessions.json`에 provider 응답과 미래 가격 평가를 저장하며, AI 의견을 주문에 연결하지 않습니다. provider 호출 비용과 지연을 의도적으로 발생시키므로 기본값은 꺼져 있습니다.
+
+```bash
+PAPER_AI_MONITORING=true \
+PAPER_AI_PROVIDERS=gpt \
+PAPER_AI_EVENTS=BUY_SIGNAL,SELL_SIGNAL \
+PAPER_SMOKE_SECONDS=600 \
+PAPER_SMOKE_OUTPUT_DIR=/tmp/coinpilot-ai-paper-smoke \
+npm run paper:smoke
+```
+
+종료 시 출력되는 `aiMonitoring.effectiveness`와 별도 원장의 `GET /api/ai/effectiveness`가 실제 응답률·지연·평가 표본을 보여줍니다. 실제 매매 효용을 주장하려면 stale/가격 없는 이벤트를 제외한 평가 표본이 최소 20개 쌓여야 하며, 짧은 smoke나 synthetic fixture는 연결성 증거일 뿐입니다.
+
 장기 forward paper는 `npm run paper:forward`로 실행합니다. 첫 실행은 `.paper-forward/`에 새 시드로 시작하고, 이후 같은 폴더로 재실행하면 기존 활성 세션을 이어갑니다. 프로세스가 비정상 종료되어 heartbeat가 오래된 경우에도 forward 모드는 기존 ledger를 새로 만들지 않고 같은 세션을 복구하지만, 기록된 공백이 `SCALP_PAPER_MAX_HEARTBEAT_GAP_MINUTES`를 넘으면 승격 자격은 자동 보류됩니다. 의도적인 `Ctrl+C` 종료 후에는 새 세션으로 다시 시작하며, 실전 주문은 호출하지 않습니다. 이 세션이 최소 7일·20회 청산·수익률·MDD·연속 관찰 게이트를 모두 통과해야 forward paper 승격 후보가 됩니다. strict 진입과 별도로 soft 후보는 shadow 장부에만 기록되어 완화 후보의 참고 손익/PF를 관찰합니다.
 
 Forward 상태의 `lossCircuitBreaker`는 현재 손실 횟수, 차단 여부, 남은 차단 시간과 설정값을 보여줍니다. 회로차단기가 진입을 막은 횟수는 telemetry에 별도로 기록되며, strict 실현손익이나 live 승격 조건을 우회하지 않습니다.
@@ -226,6 +239,12 @@ portfolio 진단에서만 `requireNextCandleBullish` 후보도 비교할 수 있
 | `AI_EVALUATION_MINUTES` | 5 | 실제 provider 자문과 미래 가격을 대조할 기준 시간(분) |
 | `AI_EVALUATION_NEUTRAL_BAND_PERCENT` | 0.1 | 방향 적중/실패에서 제외할 중립 가격 변동 폭(%) |
 | `AI_EVALUATION_MIN_SAMPLES` | 20 | AI 실효성을 충분한 표본으로 표시하기 위한 최소 평가 수 |
+| `PAPER_AI_MONITORING` | false | paper smoke에 AI monitoring session을 명시적으로 연결 |
+| `PAPER_AI_PROVIDERS` | gpt | paper AI monitoring에 사용할 provider 목록 |
+| `PAPER_AI_EVENTS` | `BUY_SIGNAL,SELL_SIGNAL` | paper AI monitoring 대상 event 목록 |
+| `PAPER_AI_EVALUATION_MINUTES` | 5 | paper AI monitoring의 미래 가격 평가 시점(분) |
+| `PAPER_AI_STOP_WAIT_MS` | 35000 | smoke 종료 시 진행 중 provider 호출을 기다리는 최대 시간(ms) |
+| `PAPER_AI_MONITORING_FILE` | output dir 아래 | paper AI monitoring 원장 경로 override |
 | `RSI_PERIOD` | 14 | RSI 기간 |
 | `RSI_OVERSOLD` | 30 | RSI 과매도 기준 |
 | `RSI_OVERBOUGHT` | 70 | RSI 과매수 기준 |

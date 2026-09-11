@@ -44,6 +44,8 @@ The portfolio-only `requireNextCandleBullish` candidate enters at the next candl
 
 If only one provider responds, the aggregate is marked `singleProvider` with `quorum=false`; it must not be presented or evaluated as a two-provider consensus. Only matching completed responses from at least two providers create `quorum=true` consensus evidence.
 
+`src/ai/paperAiMonitoring.js` provides an opt-in bridge for `runPaperSmoke.js`: only `PAPER_AI_MONITORING=true` attaches an isolated monitoring session to the trader's read-only analysis callback. It defaults to GPT-only to avoid silently multiplying provider calls, writes under the smoke output directory unless overridden, drains in-flight consultations on shutdown, and never changes `executeOrder()` or the paper strategy decision.
+
 The AI route is advisory-only. It must not call `executeOrder()` or interpret an AI `BUY`/`SELL` as authorization to trade. The existing settings-based `MultiCoinTrader.executeTradingCycle()` → `executeOrder()` path remains the only automated order path. Add or change AI functionality through the callback/service boundary and cover session persistence, event deduplication, provider parsing, outcome evaluation, and fail-closed behavior with tests.
 
 ## Commands

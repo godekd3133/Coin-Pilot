@@ -4,6 +4,7 @@ import path from 'path';
 import MultiCoinTrader from '../trader/multiCoinTrader.js';
 import UpbitAPI from '../api/upbit.js';
 import { selectFreshMarketCohort } from '../research/marketQuality.js';
+import { createPaperAiMonitor } from '../ai/paperAiMonitoring.js';
 
 dotenv.config();
 
@@ -152,6 +153,11 @@ async function main() {
   if (markets.length === 0) throw new Error('paper forward 대상 KRW 마켓이 없습니다.');
   const config = buildConfig(portfolioFile, paperFile, markets);
   const trader = new MultiCoinTrader(config);
+  const paperAiMonitor = createPaperAiMonitor({
+    trader,
+    config,
+    outputDir
+  });
   const originalConsoleLog = console.log.bind(console);
   const quietForward = forwardMode && process.env.PAPER_FORWARD_VERBOSE !== 'true';
   let statusTimer = null;
@@ -241,8 +247,10 @@ async function main() {
       trader.stop();
       try {
         const status = await trader.stopPaperValidationSession();
+        const aiEffectiveness = paperAiMonitor ? await paperAiMonitor.stop() : null;
         if (statusTimer) clearInterval(statusTimer);
         originalConsoleLog(`\n🛑 forward paper 세션 중지: ${status.state}`);
+        if (aiEffectiveness) originalConsoleLog(`🧠 AI monitoring 세션 중지: ${aiEffectiveness.evaluatedConsultations}개 평가 표본`);
       } finally {
         process.exit(0);
       }
@@ -258,6 +266,7 @@ async function main() {
   }
 
   const status = await trader.stopPaperValidationSession();
+  const aiEffectiveness = paperAiMonitor ? await paperAiMonitor.stop() : null;
   originalConsoleLog(JSON.stringify({
     state: status.state,
     elapsedDays: status.elapsedDays,
@@ -268,7 +277,14 @@ async function main() {
     snapshotCount: status.snapshotCount,
     telemetry: status.telemetry,
     isolatedPortfolioFile: portfolioFile,
-    paperLedgerFile: paperFile
+    paperLedgerFile: paperFile,
+    aiMonitoring: paperAiMonitor
+      ? {
+          stateFile: paperAiMonitor.stateFile,
+          sessionId: paperAiMonitor.session.id,
+          effectiveness: aiEffectiveness
+        }
+      : null
   }, null, 2));
 }
 
