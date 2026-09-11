@@ -349,6 +349,56 @@ function calculateReboundAtIndex(candles, index, rsiSeries, config) {
   };
 }
 
+/**
+ * Collect historical oversold/rebound candidate snapshots without simulating
+ * orders. This is a research-only input lane for replaying an AI advisory
+ * model against a fixed candle window; it must not replace the live strategy
+ * or authorize orders.
+ */
+export function collectScalpingCandidates(rawCandles, config = {}, options = {}) {
+  const resolvedConfig = { ...DEFAULT_CONFIG, ...config };
+  const candles = normalizeHistoricalCandles(rawCandles);
+  const featureCache = createScalpingFeatureCache(candles);
+  const featureSet = featureCache.get(resolvedConfig);
+  const rsiSeries = featureSet.rsiSeries;
+  const minimumHistory = resolvedConfig.rsiPeriod + Math.max(2, Math.floor(number(resolvedConfig.oversoldLookback, 1)));
+  const horizonCandles = Math.max(1, Math.floor(number(options.horizonCandles, 5)));
+  const minimumSpacingCandles = Math.max(1, Math.floor(number(options.minimumSpacingCandles, 5)));
+  const candidates = [];
+  let lastCandidateIndex = -Infinity;
+
+  for (let index = minimumHistory; index + horizonCandles < candles.length; index += 1) {
+    if (index - lastCandidateIndex < minimumSpacingCandles) continue;
+    const rebound = calculateReboundAtIndex(candles, index, rsiSeries, resolvedConfig, featureSet);
+    if (!rebound?.available || (!rebound.previousWasOversold && !rebound.currentWasOversold)) continue;
+
+    const currentPrice = getClose(candles[index]);
+    const futurePrice = getClose(candles[index + horizonCandles]);
+    if (!Number.isFinite(currentPrice) || currentPrice <= 0 || !Number.isFinite(futurePrice) || futurePrice <= 0) continue;
+
+    const timestamp = rebound.candleTime || candles[index]?.candle_date_time_utc || candles[index]?.timestamp || null;
+    candidates.push({
+      index,
+      timestamp,
+      candle: candles[index],
+      futureCandle: candles[index + horizonCandles],
+      currentPrice,
+      futurePrice,
+      priceChangePercent: ((futurePrice - currentPrice) / currentPrice) * 100,
+      rebound
+    });
+    lastCandidateIndex = index;
+  }
+
+  return {
+    candles,
+    candidates,
+    horizonCandles,
+    minimumSpacingCandles,
+    source: 'fixed_historical_candle_replay'
+  };
+}
+
 function calculateDrawdown(equityCurve) {
   let peak = 0;
   let maxDrawdown = 0;

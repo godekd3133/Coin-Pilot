@@ -8,6 +8,7 @@ import {
   normalizeAdvice,
   parseAdviceResponse
 } from '../src/ai/aiAdvisorService.js';
+import { scoreAdviceOutcome } from '../src/ai/monitoringSessionService.js';
 
 test('구독 CLI의 변동하는 초기 응답 시간을 감당하는 기본 timeout을 사용한다', () => {
   const service = new AIAdvisorService({ runner: async () => ({ stdout: '{}' }) });
@@ -300,4 +301,15 @@ test('단일 provider 의견은 두 provider 합의로 과장되지 않는다', 
   assert.equal(single.quorum, false);
   assert.equal(single.singleProvider, true);
   assert.match(single.rationale, /단일 provider/);
+});
+
+test('WAIT veto는 원래 BUY/SELL 신호의 회피 효과를 별도로 판정한다', () => {
+  const avoidedLoss = scoreAdviceOutcome({ action: 'WAIT', confidence: 90 }, -0.5, 0.1, 'BUY');
+  const missedGain = scoreAdviceOutcome({ action: 'WAIT', confidence: 90 }, 0.5, 0.1, 'BUY');
+  const flat = scoreAdviceOutcome({ action: 'WAIT', confidence: 90 }, 0.03, 0.1, 'BUY');
+
+  assert.equal(avoidedLoss.verdict, 'ABSTAINED');
+  assert.equal(avoidedLoss.vetoVerdict, 'VETO_GOOD');
+  assert.equal(missedGain.vetoVerdict, 'VETO_MISSED_OPPORTUNITY');
+  assert.equal(flat.vetoVerdict, 'VETO_FLAT');
 });

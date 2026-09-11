@@ -51,10 +51,20 @@ function normalizeAdviceAction(value) {
   return ['BUY', 'SELL', 'HOLD', 'WAIT'].includes(action) ? action : 'WAIT';
 }
 
-function scoreAdviceOutcome(advice, priceChangePercent, neutralBandPercent = DEFAULT_NEUTRAL_BAND_PERCENT) {
+function scoreAdviceOutcome(advice, priceChangePercent, neutralBandPercent = DEFAULT_NEUTRAL_BAND_PERCENT, eventAction = null) {
   const action = normalizeAdviceAction(advice?.action);
   const move = numberOrNull(priceChangePercent);
   const neutralBand = resolveNeutralBandPercent(neutralBandPercent);
+  const sourceAction = normalizeAdviceAction(eventAction);
+  const vetoVerdict = move !== null && (action === 'WAIT' || action === 'HOLD') &&
+    (sourceAction === 'BUY' || sourceAction === 'SELL')
+    ? (() => {
+      const signedMove = sourceAction === 'BUY' ? move : -move;
+      return Math.abs(signedMove) <= neutralBand
+        ? 'VETO_FLAT'
+        : signedMove < 0 ? 'VETO_GOOD' : 'VETO_MISSED_OPPORTUNITY';
+    })()
+    : null;
   if (move === null) {
     return {
       action,
@@ -62,7 +72,8 @@ function scoreAdviceOutcome(advice, priceChangePercent, neutralBandPercent = DEF
       verdict: 'NOT_EVALUABLE',
       signedMovePercent: null,
       priceChangePercent: null,
-      score: null
+      score: null,
+      vetoVerdict: null
     };
   }
 
@@ -77,7 +88,8 @@ function scoreAdviceOutcome(advice, priceChangePercent, neutralBandPercent = DEF
       verdict,
       signedMovePercent,
       priceChangePercent: move,
-      score: verdict === 'HIT' ? 1 : verdict === 'MISS' ? -1 : 0
+      score: verdict === 'HIT' ? 1 : verdict === 'MISS' ? -1 : 0,
+      vetoVerdict: null
     };
   }
 
@@ -87,7 +99,8 @@ function scoreAdviceOutcome(advice, priceChangePercent, neutralBandPercent = DEF
     verdict: Math.abs(move) <= neutralBand ? 'CALM' : 'ABSTAINED',
     signedMovePercent: null,
     priceChangePercent: move,
-    score: null
+    score: null,
+    vetoVerdict
   };
 }
 
@@ -500,6 +513,9 @@ export class MonitoringSessionService {
           flat: 0,
           calm: 0,
           abstained: 0,
+          vetoGood: 0,
+          vetoMissedOpportunity: 0,
+          vetoFlat: 0,
           latencyMsTotal: 0,
           signedMovePercentTotal: 0
         });
@@ -554,6 +570,9 @@ export class MonitoringSessionService {
           } else if (verdict.verdict === 'ABSTAINED') {
             stats.abstained += 1;
           }
+          if (verdict.vetoVerdict === 'VETO_GOOD') stats.vetoGood += 1;
+          if (verdict.vetoVerdict === 'VETO_MISSED_OPPORTUNITY') stats.vetoMissedOpportunity += 1;
+          if (verdict.vetoVerdict === 'VETO_FLAT') stats.vetoFlat += 1;
         }
       } else if (evaluation?.status === 'PENDING') {
         pendingEvaluations += 1;
@@ -863,13 +882,13 @@ export class MonitoringSessionService {
     const verdicts = actualResults.map(result => ({
       source: result.provider,
       providerLabel: result.providerLabel || result.provider,
-      ...scoreAdviceOutcome(result.advice, priceChangePercent, evaluation.neutralBandPercent)
+      ...scoreAdviceOutcome(result.advice, priceChangePercent, evaluation.neutralBandPercent, consultation.event?.action)
     }));
     if (consultation.consensus && consultation.consensus.providerCount > 0 && consultation.consensus.quorum === true) {
       verdicts.push({
         source: 'consensus',
         providerLabel: 'Provider consensus',
-        ...scoreAdviceOutcome(consultation.consensus, priceChangePercent, evaluation.neutralBandPercent)
+        ...scoreAdviceOutcome(consultation.consensus, priceChangePercent, evaluation.neutralBandPercent, consultation.event?.action)
       });
     }
 
@@ -1102,6 +1121,7 @@ export {
   eventFromNews,
   eventFromTrade,
   eventFromBundle,
+  scoreAdviceOutcome,
   normalizeEventTypes,
   normalizeCoins,
   normalizeProviderValue

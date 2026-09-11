@@ -17,8 +17,10 @@
     "paper:forward": "PAPER_FORWARD_MODE=true node src/scripts/runPaperSmoke.js",
     "optimize": "node src/scripts/runOptimization.js",
     "dashboard": "node src/scripts/runDashboard.js",
+    "dashboard:paper": "node src/scripts/runPaperDashboard.js",
     "dashboard:staging": "node src/scripts/runStagingDashboard.js",
     "ai:smoke": "node src/scripts/runAiAdvisorSmoke.js",
+    "ai:replay": "node src/scripts/runAiHistoricalReplay.js",
     "test": "NODE_ENV=test node --test"
   },
   "keywords": [
