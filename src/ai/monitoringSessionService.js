@@ -509,6 +509,7 @@ export class MonitoringSessionService {
           completed: 0,
           failed: 0,
           evaluated: 0,
+          actionableEvaluations: 0,
           directionalPredictions: 0,
           hits: 0,
           misses: 0,
@@ -561,20 +562,32 @@ export class MonitoringSessionService {
           if (verdict.verdict === 'HIT') {
             stats.hits += 1;
             stats.directionalPredictions += 1;
+            stats.actionableEvaluations += 1;
           } else if (verdict.verdict === 'MISS') {
             stats.misses += 1;
             stats.directionalPredictions += 1;
+            stats.actionableEvaluations += 1;
           } else if (verdict.verdict === 'FLAT') {
             stats.flat += 1;
             stats.directionalPredictions += 1;
+            stats.actionableEvaluations += 1;
           } else if (verdict.verdict === 'CALM') {
             stats.calm += 1;
           } else if (verdict.verdict === 'ABSTAINED') {
             stats.abstained += 1;
           }
-          if (verdict.vetoVerdict === 'VETO_GOOD') stats.vetoGood += 1;
-          if (verdict.vetoVerdict === 'VETO_MISSED_OPPORTUNITY') stats.vetoMissedOpportunity += 1;
-          if (verdict.vetoVerdict === 'VETO_FLAT') stats.vetoFlat += 1;
+          if (verdict.vetoVerdict === 'VETO_GOOD') {
+            stats.vetoGood += 1;
+            stats.actionableEvaluations += 1;
+          }
+          if (verdict.vetoVerdict === 'VETO_MISSED_OPPORTUNITY') {
+            stats.vetoMissedOpportunity += 1;
+            stats.actionableEvaluations += 1;
+          }
+          if (verdict.vetoVerdict === 'VETO_FLAT') {
+            stats.vetoFlat += 1;
+            stats.actionableEvaluations += 1;
+          }
         }
       } else if (evaluation?.status === 'PENDING') {
         pendingEvaluations += 1;
@@ -585,7 +598,7 @@ export class MonitoringSessionService {
 
     const toPublicStats = stats => {
       const scored = stats.hits + stats.misses;
-      const outcomeEligible = stats.evaluated > 0;
+      const outcomeEligible = stats.actionableEvaluations > 0;
       return {
         ...stats,
         completionRate: stats.attempted > 0 ? stats.completed / stats.attempted : null,
@@ -594,12 +607,14 @@ export class MonitoringSessionService {
         averageSignedMovePercent: stats.directionalPredictions > 0
           ? stats.signedMovePercentTotal / stats.directionalPredictions
           : null,
-        sufficientEvidence: outcomeEligible && stats.evaluated >= this.minimumEvaluationSamples
+        sufficientEvidence: outcomeEligible && stats.actionableEvaluations >= this.minimumEvaluationSamples
       };
     };
 
     const publicStats = Object.fromEntries([...providerStats.entries()]
       .map(([source, stats]) => [source, toPublicStats(stats)]));
+    const maximumActionableEvaluations = Object.values(publicStats)
+      .reduce((maximum, stats) => Math.max(maximum, stats.actionableEvaluations || 0), 0);
     const outcomeEligibleConsultations = evaluatedConsultations + pendingEvaluations;
     return {
       sessionId,
@@ -621,6 +636,7 @@ export class MonitoringSessionService {
         horizonMinutes: this.defaultEvaluationMinutes,
         neutralBandPercent: this.evaluationNeutralBandPercent,
         minimumEvaluationSamples: this.minimumEvaluationSamples,
+        actionableSampleDefinition: '실제 provider의 BUY/SELL 결과 또는 기존 BUY/SELL signal에 대한 WAIT/HOLD veto만 충분성 표본으로 집계',
         hitDefinition: 'BUY/SELL 방향이 neutral band를 넘어 미래 기준 시점 가격과 일치하면 HIT',
         waitDefinition: 'HOLD/WAIT는 방향 예측이 아니므로 CALM/ABSTAINED로 별도 집계',
         source: '동일 event의 기준 가격과 horizon 이후 첫 관측 가격'
@@ -628,8 +644,8 @@ export class MonitoringSessionService {
       sufficientEvidence: Object.values(publicStats).some(stats => stats.sufficientEvidence === true),
       evidenceWarning: Object.keys(publicStats).length === 0
         ? '실제 provider 응답이 없어 평가할 표본이 없습니다.'
-        : evaluatedConsultations < this.minimumEvaluationSamples
-          ? `아직 ${this.minimumEvaluationSamples}개 평가 표본이 필요합니다. 현재 ${evaluatedConsultations}개입니다.`
+        : maximumActionableEvaluations < this.minimumEvaluationSamples
+          ? `아직 ${this.minimumEvaluationSamples}개 방향성/veto 평가 표본이 필요합니다. 현재 ${maximumActionableEvaluations}개입니다.`
           : null
     };
   }

@@ -324,3 +324,65 @@ test('신선하지 않은 snapshot은 AI가 WAIT해도 efficacy 표본에서 제
     }
   }
 });
+
+test('CALM-only rebound 후보는 충분한 실효성 표본으로 승격되지 않는다', async () => {
+  const file = path.join(os.tmpdir(), `coinpilot-ai-calm-only-${Date.now()}-${Math.random()}.json`);
+  const advisor = {
+    async ask() {
+      return {
+        requestId: 'calm-only-request',
+        status: 'COMPLETED',
+        results: [{
+          provider: 'gpt',
+          status: 'COMPLETED',
+          advice: { action: 'WAIT', confidence: 90, rationale: '확정 신호 아님', risks: [], invalidation: '확정 반등 필요' }
+        }]
+      };
+    }
+  };
+
+  try {
+    const service = new MonitoringSessionService({
+      stateFile: file,
+      advisor,
+      defaultEvaluationMinutes: 5,
+      minimumEvaluationSamples: 1
+    });
+    const session = service.createSession({
+      providers: ['gpt'],
+      eventTypes: ['REBOUND_CANDIDATE'],
+      autoConsult: false
+    });
+    const event = service.addManualEvent({
+      type: 'REBOUND_CANDIDATE',
+      action: 'WAIT',
+      coin: 'KRW-BTC',
+      price: 100,
+      timestamp: '2026-09-11T00:00:00.000Z',
+      snapshot: { freshness: { valid: true, ageSeconds: 2 } }
+    });
+
+    await service.requestConsultation({ sessionId: session.id, eventId: event.id, provider: 'gpt' });
+    const future = makeAnalysis('calm-only-future', 'HOLD');
+    future.currentPrice = 100.1;
+    future.decision.details.rebound.reboundConfirmed = false;
+    future.technicalAnalysis.indicators.rebound.reboundConfirmed = false;
+    await service.ingestCycle({
+      timestamp: '2026-09-11T00:05:01.000Z',
+      analyses: [future]
+    });
+
+    const effectiveness = service.getEffectiveness();
+    assert.equal(effectiveness.evaluatedConsultations, 1);
+    assert.equal(effectiveness.providerStats.gpt.evaluated, 1);
+    assert.equal(effectiveness.providerStats.gpt.calm, 1);
+    assert.equal(effectiveness.providerStats.gpt.actionableEvaluations, 0);
+    assert.equal(effectiveness.providerStats.gpt.sufficientEvidence, false);
+    assert.equal(effectiveness.sufficientEvidence, false);
+    assert.match(effectiveness.evidenceWarning, /방향성\/veto/);
+  } finally {
+    for (const candidate of [file, `${file}.tmp-${process.pid}`]) {
+      if (fs.existsSync(candidate)) fs.unlinkSync(candidate);
+    }
+  }
+});
