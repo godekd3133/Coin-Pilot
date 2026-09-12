@@ -275,6 +275,7 @@ function eventFromAnalysis(analysis, timestamp) {
   if (!analysis?.coin) return null;
   const action = String(analysis.decision?.action || 'HOLD').toUpperCase();
   const rebound = analysis.decision?.details?.rebound || analysis.technicalAnalysis?.indicators?.rebound;
+  if (analysis.decision?.details?.signalAlreadyProcessed === true) return null;
   const reboundCandidate = rebound?.available === true && (
     rebound.reboundConfirmed === true ||
     rebound.previousWasOversold === true ||

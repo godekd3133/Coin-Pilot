@@ -170,7 +170,13 @@ class OversoldReactionStrategy extends TradingStrategy {
     }
 
     if (!this.consumeSignal(rebound.signalKey)) {
-      return this.holdDecision('동일 완료 캔들 신호는 이미 처리됨', rebound);
+      return {
+        ...this.holdDecision('동일 완료 캔들 신호는 이미 처리됨', rebound),
+        details: {
+          rebound,
+          signalAlreadyProcessed: true
+        }
+      };
     }
 
     const reboundScore = Math.min(

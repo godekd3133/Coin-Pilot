@@ -176,6 +176,12 @@ test('필터에서 탈락한 반등 후보도 선택형 REBOUND_CANDIDATE event�
   assert.deepEqual(event.snapshot.indicators.rebound.rejectionReasons, ['volume_confirmation_failed']);
 });
 
+test('이미 소비된 signal은 AI monitoring event로 중복 투영하지 않는다', () => {
+  const analysis = makeAnalysis('already-processed', 'HOLD');
+  analysis.decision.details.signalAlreadyProcessed = true;
+  assert.equal(eventFromAnalysis(analysis, '2026-09-12T00:00:00.000Z'), null);
+});
+
 test('실제 provider 자문은 미래 가격과 대조되어 effectiveness로 누적된다', async () => {
   const file = path.join(os.tmpdir(), `coinpilot-ai-effectiveness-${Date.now()}-${Math.random()}.json`);
   const advisorCalls = [];

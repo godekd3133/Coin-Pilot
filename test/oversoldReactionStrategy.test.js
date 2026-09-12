@@ -41,6 +41,7 @@ test('과매도 반등 조건을 충족한 첫 신호만 BUY가 된다', () => {
   const duplicate = strategy.makeDecision(analysis(), { score: 0 }, 100.25);
   assert.equal(duplicate.action, 'HOLD');
   assert.match(duplicate.reason, /이미 처리됨/);
+  assert.equal(duplicate.details.signalAlreadyProcessed, true);
 });
 
 test('momentum_breakout 프로파일은 과매도 없이 추세·고가 돌파 BUY를 만들 수 있다', () => {
