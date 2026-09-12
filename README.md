@@ -161,6 +161,8 @@ shadow/loose 진단 장부에만 미청산 포지션이 남은 경우에도 `end
 
 격리 smoke가 필요하면 `npm run paper:smoke`를 사용합니다. 기본 60초 동안 `PAPER_SMOKE_MARKETS`를 읽기 전용으로 분석하고 `.paper-smoke/` 아래에 가상 포트폴리오와 paper ledger를 저장합니다. 기존 `dry_portfolio.json`은 읽거나 수정하지 않습니다. 이 smoke는 연결·상태 저장 검증용이며, 7일 수익성 승격 증거로 사용하지 않습니다.
 
+동일 호스트에서 여러 `paper:forward` 또는 AI paper smoke를 동시에 실행하지 마세요. 각 Node 프로세스의 내부 요청 슬롯은 프로세스 사이에서 공유되지 않으므로 Upbit 공용 rate budget이 겹쳐 `stale_candle_snapshot`이 늘고 해당 원장이 효능·수익성 표본으로 부적합해질 수 있습니다. 실행기는 다른 살아 있는 paper owner를 발견하면 `PAPER_CONCURRENT_SESSION`으로 market resolution 전에 fail-closed하며, 새 process 사이의 startup race도 `.paper-session.lock`으로 막습니다. 장기 forward를 종료한 뒤 새 세션을 별도 출력 디렉터리에서 시작하고, 동시 실험이 불가피하면 `PAPER_ALLOW_CONCURRENT_SESSIONS=true`를 명시한 진단 실행으로만 사용한 뒤 freshness와 `analysisDataHealth`를 먼저 확인합니다.
+
 실제 DRY_RUN 분석 이벤트를 AI 자문과 함께 관찰하려면 다음처럼 선택형 paper AI monitoring을 켤 수 있습니다. 이 모드는 별도 `ai_monitoring_sessions.json`에 provider 응답과 미래 가격 평가를 저장하며, AI 의견을 주문에 연결하지 않습니다. provider 호출 비용과 지연을 의도적으로 발생시키므로 기본값은 꺼져 있습니다.
 
 ```bash
@@ -284,6 +286,7 @@ portfolio 진단에서만 `requireNextCandleBullish` 후보도 비교할 수 있
 | `PAPER_SMOKE_FRESHNESS_LEDGER` | 미설정 | freshness 코호트 기준으로 읽을 이전 격리 paper ledger 경로 |
 | `PAPER_SMOKE_MIN_FRESHNESS_OBSERVATIONS` | 100 | 코호트 선택에 필요한 시장별 최소 freshness 관측 수 |
 | `PAPER_SMOKE_MAX_STALE_RATE` | 0.05 | 코호트 선택에서 허용하는 freshness 차단률 상한(0~1) |
+| `PAPER_ALLOW_CONCURRENT_SESSIONS` | false | 다른 살아 있는 paper session이 있어도 실행하는 명시적 진단 예외; efficacy/승격 표본에는 사용하지 않음 |
 | `SCALP_VALIDATION_MIN_TRAINING_TRADES` | 3 | 학습 구간 최소 거래 수 |
 | `SCALP_VALIDATION_MIN_TRAINING_PROFIT_FACTOR` | 1 | 학습 구간 최소 profit factor |
 | `SCALP_VALIDATION_MIN_TRAINING_RETURN_PERCENT` | 0 | 학습 구간 최소 수익률 (%) |
