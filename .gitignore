@@ -11,6 +11,7 @@ dry_portfolio.json
 paper_validation.json
 .paper-smoke/
 .paper-forward*/
+.paper-session.lock
 .staging-runtime/
 initial_seed_money.json
 portfolio_history.json

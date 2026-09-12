@@ -4,6 +4,10 @@ import path from 'path';
 import MultiCoinTrader from '../trader/multiCoinTrader.js';
 import UpbitAPI from '../api/upbit.js';
 import { selectFreshMarketCohort } from '../research/marketQuality.js';
+import {
+  acquirePaperSessionLock,
+  assertNoConcurrentPaperSessions
+} from '../research/paperSessionConcurrency.js';
 import { createPaperAiMonitor } from '../ai/paperAiMonitoring.js';
 
 dotenv.config();
@@ -149,6 +153,15 @@ async function main() {
   assertSufficientStorage(outputDir, number(process.env.SCALP_PAPER_MIN_STORAGE_MIB, 1024));
   const portfolioFile = path.join(outputDir, 'dry_portfolio.json');
   const paperFile = path.join(outputDir, 'paper_validation.json');
+  const paperSessionLock = acquirePaperSessionLock({
+    workspaceRoot: process.cwd(),
+    allowConcurrent: process.env.PAPER_ALLOW_CONCURRENT_SESSIONS === 'true'
+  });
+  assertNoConcurrentPaperSessions({
+    workspaceRoot: process.cwd(),
+    currentLedgerFile: paperFile,
+    allowConcurrent: process.env.PAPER_ALLOW_CONCURRENT_SESSIONS === 'true'
+  });
   const durationSeconds = Math.max(10, number(process.env.PAPER_SMOKE_SECONDS, 60));
   const markets = await resolveMarkets();
   if (markets.length === 0) throw new Error('paper forward 대상 KRW 마켓이 없습니다.');
@@ -253,6 +266,7 @@ async function main() {
         originalConsoleLog(`\n🛑 forward paper 세션 중지: ${status.state}`);
         if (aiEffectiveness) originalConsoleLog(`🧠 AI monitoring 세션 중지: ${aiEffectiveness.evaluatedConsultations}개 평가 표본`);
       } finally {
+        paperSessionLock.release();
         process.exit(0);
       }
     };
@@ -287,6 +301,7 @@ async function main() {
         }
       : null
   }, null, 2));
+  paperSessionLock.release();
 }
 
 main().catch(error => {
