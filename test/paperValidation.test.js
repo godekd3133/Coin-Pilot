@@ -313,6 +313,7 @@ test('strict paper 청산 거래는 프로세스 재시작 후에도 ledger에�
     assert.equal(withOpenPosition.strictEvaluation.activePositions, 1);
     const closedTrade = strategy.closePosition(102, '재시작 복원 테스트');
     trader.recordPaperStrictTrade('KRW-BTC', closedTrade, 'CLOSE');
+    assert.equal(trader.paperValidation.strictTrades.at(-1).type, 'CLOSE');
     assert.deepEqual(trader.paperValidation.strictOpenPositions, [], 'strict close must clear the persisted open snapshot');
     assert.deepEqual(JSON.parse(fs.readFileSync(ledger, 'utf8')).strictOpenPositions, []);
     const sameProcess = await trader.getPaperValidationStatus();
@@ -336,6 +337,41 @@ test('strict paper 청산 거래는 프로세스 재시작 후에도 ledger에�
     assert.ok(restored.realizedProfit > 0);
   } finally {
     for (const file of [ledger, portfolio, `${portfolio}.reload`]) {
+      if (fs.existsSync(file)) fs.unlinkSync(file);
+    }
+  }
+});
+
+test('구버전 strict ledger의 BUY type CLOSE 항목은 메모리에서 close schema로 읽힌다', () => {
+  const suffix = `coinpilot-strict-schema-${Date.now()}`;
+  const ledger = path.join(os.tmpdir(), `${suffix}.json`);
+  const portfolio = path.join(os.tmpdir(), `${suffix}-portfolio.json`);
+  fs.writeFileSync(ledger, JSON.stringify({
+    strictTrades: [{
+      type: 'BUY',
+      action: 'CLOSE',
+      coin: 'KRW-BTC',
+      id: 1,
+      exitTime: new Date().toISOString(),
+      profit: 4,
+      profitPercent: 0.02
+    }]
+  }), 'utf8');
+
+  try {
+    const trader = new MultiCoinTrader({
+      strategyMode: 'oversold_reaction_scalping',
+      targetCoins: ['KRW-BTC'],
+      dryRun: true,
+      dryRunSeedMoney: 1_000_000,
+      useNews: false,
+      virtualPortfolioFile: portfolio,
+      paperValidationFile: ledger
+    });
+    assert.equal(trader.paperValidation.strictTrades[0].type, 'CLOSE');
+    assert.ok(trader.paperValidation.strictTradeSchemaMigratedAt);
+  } finally {
+    for (const file of [ledger, portfolio]) {
       if (fs.existsSync(file)) fs.unlinkSync(file);
     }
   }

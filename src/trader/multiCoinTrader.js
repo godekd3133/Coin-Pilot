@@ -28,6 +28,10 @@ import {
   recordAnalysisDataSuccess,
   resolveMaxAnalysisDataGapSeconds
 } from '../risk/analysisDataHealth.js';
+import {
+  calculateTradeReturnConfidence,
+  evaluateStatisticalConfidenceGate
+} from '../backtest/scalpingBacktest.js';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
@@ -895,6 +899,20 @@ class MultiCoinTrader {
 
     try {
       const data = JSON.parse(fs.readFileSync(this.paperValidationFile, 'utf8'));
+      let strictTradeSchemaMigrated = false;
+      if (Array.isArray(data.strictTrades)) {
+        data.strictTrades = data.strictTrades.map(trade => {
+          const isClose = trade?.action === 'CLOSE' || trade?.action === 'PARTIAL_CLOSE';
+          if (isClose && trade.type !== 'CLOSE') {
+            strictTradeSchemaMigrated = true;
+            return { ...trade, type: 'CLOSE' };
+          }
+          return trade;
+        });
+        if (strictTradeSchemaMigrated) {
+          data.strictTradeSchemaMigratedAt = new Date().toISOString();
+        }
+      }
       const cooldownAfterLossMinutes = Number(this.config.cooldownAfterLossMinutes) || 15;
       const maxConsecutiveLosses = Number(this.config.maxConsecutiveLosses) || 3;
       const cooldownUntilByCoin = {};
@@ -1128,6 +1146,7 @@ class MultiCoinTrader {
 
     strictTrades.push({
       ...trade,
+      type: action === 'CLOSE' || action === 'PARTIAL_CLOSE' ? 'CLOSE' : trade.type,
       action,
       coin,
       entryTime,
@@ -2321,6 +2340,16 @@ class MultiCoinTrader {
     const baselineAssets = Number(session.baselineAssets) || 0;
     const returnPercent = baselineAssets > 0 ? ((currentAssets / baselineAssets) - 1) * 100 : 0;
     const thresholds = session.thresholds || {};
+    const strictTradeConfidence = calculateTradeReturnConfidence(startedTrades);
+    const strictConfidenceGate = evaluateStatisticalConfidenceGate({
+      tradeReturnConfidence: strictTradeConfidence
+    }, {
+      required: true,
+      minimumTrades: Number(thresholds.minTrades) || 20,
+      minimumLowerBoundPercent: Number.isFinite(Number(thresholds.minConfidenceLowerBoundPercent))
+        ? Number(thresholds.minConfidenceLowerBoundPercent)
+        : 0
+    });
     const interruptions = Array.isArray(session.interruptions) ? session.interruptions : [];
     const maxHeartbeatGapMinutes = Number(thresholds.maxHeartbeatGapMinutes) || 15;
     const maxAllowedHeartbeatGapMs = maxHeartbeatGapMinutes * 60 * 1000;
@@ -2344,6 +2373,7 @@ class MultiCoinTrader {
       configComparison.consistent === true &&
       elapsedDays >= (Number(thresholds.minDays) || 7) &&
       startedTrades.length >= (Number(thresholds.minTrades) || 20) &&
+      strictConfidenceGate.passed &&
       returnPercent >= (Number(thresholds.minReturnPercent) || 0.2) &&
       maxDrawdownPercent <= (Number(thresholds.maxDrawdownPercent) || 15);
     const telemetry = session.telemetry || null;
@@ -2468,6 +2498,8 @@ class MultiCoinTrader {
       lastSnapshotAt: snapshots.at(-1)?.timestamp || session.startedAt,
       strictLedgerTradeCount: strictLedgerTrades.length,
       strictRiskState: session.strictRiskState || null,
+      strictTradeConfidence,
+      strictConfidenceGate,
       signalWindow: this.getStrictSignalWindowStatus(),
       lossCircuitBreaker: strictLossCircuitBreaker,
       strictEvaluation: {
@@ -2478,6 +2510,8 @@ class MultiCoinTrader {
         winningTrades: strictWinningTrades,
         losingTrades: strictLosingTrades,
         winRate: startedTrades.length > 0 ? (strictWinningTrades / startedTrades.length) * 100 : null,
+        tradeReturnConfidence: strictTradeConfidence,
+        confidenceGate: strictConfidenceGate,
         lossCircuitBreaker: strictLossCircuitBreaker,
         note: '현재 프로세스의 strict 전략 포지션 snapshot입니다. 청산 전 손익은 currentAssets/returnPercent에 평가손익으로 반영됩니다.'
       },

@@ -1204,6 +1204,26 @@
 
     function renderPaperDetail() {
         const status = state.paper; const target = byId('pilot-paper-detail'); if (!target) return;
+        let confidenceTarget = byId('pilot-paper-confidence');
+        if (!confidenceTarget) {
+            confidenceTarget = document.createElement('div');
+            confidenceTarget.id = 'pilot-paper-confidence';
+            confidenceTarget.className = 'pilot-inline-note pilot-paper-confidence';
+            target.insertAdjacentElement('afterend', confidenceTarget);
+        }
+        if (!status?.available) {
+            confidenceTarget.innerHTML = '<i class="ph ph-shield-warning" aria-hidden="true"></i><span>strict 수익 신뢰도: paper 세션이 없어 판정할 수 없습니다.</span>';
+        } else {
+            const confidence = status.strictTradeConfidence || status.strictEvaluation?.tradeReturnConfidence || {};
+            const gate = status.strictConfidenceGate || status.strictEvaluation?.confidenceGate || {};
+            const sampleCount = number(confidence.sampleCount);
+            const minimumTrades = number(gate.minimumTrades, number(status.thresholds?.minTrades, 20));
+            const lowerBound = confidence.lowerBoundPercent === null || confidence.lowerBoundPercent === undefined
+                ? '표본 부족'
+                : `${number(confidence.lowerBoundPercent).toFixed(2)}%`;
+            const gateLabel = gate.passed === true ? '통과' : '보류';
+            confidenceTarget.innerHTML = `<i class="ph ph-shield-warning" aria-hidden="true"></i><span>strict 수익 신뢰도: <strong>${escapeHtml(gateLabel)}</strong> · 표본 ${sampleCount}/${minimumTrades}건 · 95% 하한 ${escapeHtml(lowerBound)} · 실현손익은 충분한 표본 전까지 승격되지 않습니다.</span>`;
+        }
         if (!status?.available) { setText('pilot-paper-meta', '세션 없음 · 기존 모의 포트폴리오를 자동 초기화하지 않습니다.'); target.innerHTML = '<div class="pilot-paper-status"><div class="pilot-paper-status-head"><strong class="pilot-paper-state is-stopped">PAPER 세션 없음</strong><span class="pilot-status-pill is-warning">시작 필요</span></div><div class="pilot-paper-meta">현재 상태 기준으로 시작하거나 새 시드로 초기화할 수 있습니다. 초기화는 기존 dry portfolio 데이터를 덮어쓸 수 있으므로 실행 전 확인합니다.</div><div class="pilot-paper-actions"><button type="button" class="pilot-button" data-pilot-action="start-paper">현재 상태 기준 시작</button><button type="button" class="pilot-button is-danger" data-pilot-action="start-paper-reset">새 시드로 초기화 후 시작</button></div></div>'; return; }
         const paperState = status.state || (status.active ? 'RUNNING' : 'STOPPED'); const paperClass = paperState === 'PASS' ? 'is-pass' : paperState === 'STOPPED' ? 'is-stopped' : ''; const riskMonitor = status.riskMonitor || {}; const riskLabel = riskMonitor.failClosed ? '중지 필요' : riskMonitor.currentOutageDurationSeconds > 0 ? '재시도 중' : '정상'; const riskGap = number(riskMonitor.currentOutageDurationSeconds); const analysisHealth = status.analysisDataHealth || {}; const analysisGap = number(analysisHealth.currentGapDurationSeconds); const analysisIncomplete = number(status.telemetry?.analysisIncompleteCycles); const analysisLabel = analysisHealth.failClosed ? '중지 필요' : analysisGap > 0 ? `재시도 중 (${analysisGap.toFixed(1)}초)` : analysisIncomplete > 0 ? `부분 cycle ${analysisIncomplete}회` : '정상'; const signalAvailability = status.signalAvailability || {}; const signalLabel = status.marketQuiet ? '시장 정적 · 과매도 반등 후보 없음' : status.filterStarvation ? '필터 고착 후보 감지' : '반등 후보 집계 중'; const signalSummary = `${signalLabel} · 과매도 ${number(signalAvailability.oversoldObservations)}회 · strict 후보 ${number(signalAvailability.strictReboundCandidates)}회 · 확인 ${number(signalAvailability.strictConfirmedCandidates)}회`; const heartbeat = status.updatedAt || status.heartbeatAt || status.lastHeartbeat; const observerNote = status.readOnlyObserver ? ' · 읽기 전용 관찰' : ''; setText('pilot-paper-meta', `시작 ${formatDateTime(status.startedAt)} · 마지막 갱신 ${formatDateTime(heartbeat)}${observerNote}`);
         const paperActions = status.readOnlyObserver

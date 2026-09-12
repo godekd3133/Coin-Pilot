@@ -113,10 +113,16 @@ function tradeReturnPercent(trade) {
     return Number(explicitProfitPercent);
   }
   const investAmount = Number(trade?.investAmount);
-  const netProfit = Number(trade?.netProfit);
+  const netProfit = Number(trade?.netProfit ?? trade?.profit ?? trade?.profitAmount);
   return Number.isFinite(investAmount) && investAmount > 0 && Number.isFinite(netProfit)
     ? (netProfit / investAmount) * 100
     : null;
+}
+
+function isClosedTrade(trade) {
+  return trade?.type === 'CLOSE' ||
+    trade?.action === 'CLOSE' ||
+    trade?.action === 'PARTIAL_CLOSE';
 }
 
 /**
@@ -127,7 +133,7 @@ function tradeReturnPercent(trade) {
  */
 export function calculateTradeReturnConfidence(trades = []) {
   const returns = (Array.isArray(trades) ? trades : [])
-    .filter(trade => trade?.type === 'CLOSE')
+    .filter(isClosedTrade)
     .map(tradeReturnPercent)
     .filter(value => Number.isFinite(value));
   const sampleCount = returns.length;

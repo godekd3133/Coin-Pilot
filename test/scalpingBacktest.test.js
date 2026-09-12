@@ -207,6 +207,12 @@ test('거래별 95% 신뢰도 하한은 소표본 양수를 승격 근거로 만
   assert.equal(legacyTradeFallback.meanReturnPercent, 5);
   assert.equal(legacyTradeFallback.lowerBoundPercent, 5);
 
+  const paperLedgerClose = calculateTradeReturnConfidence([
+    { type: 'BUY', action: 'CLOSE', investAmount: 100, profit: 4, profitPercent: null }
+  ]);
+  assert.equal(paperLedgerClose.sampleCount, 1);
+  assert.equal(paperLedgerClose.meanReturnPercent, 4);
+
   const metrics = { tradeReturnConfidence: stableTrades };
   assert.equal(evaluateStatisticalConfidenceGate(metrics, {
     required: true,
