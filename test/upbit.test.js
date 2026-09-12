@@ -40,6 +40,12 @@ test('Upbit 시세 요청은 무한 대기를 막기 위한 timeout을 전달한
   assert.ok(requestConfig.timeout > 0);
 });
 
+test('동시 read-only 실험은 요청 간격을 늘려 공개 API rate limit 여유를 확보할 수 있다', () => {
+  const api = new UpbitAPI('', '', { minRequestIntervalMs: 250 });
+  assert.equal(api.minRequestInterval, 250);
+  assert.equal(api.queueInterval, 250);
+});
+
 test('분석 클라이언트와 리스크 클라이언트가 요청 슬롯을 공유한다', async () => {
   const marketApi = new UpbitAPI('', '');
   const riskApi = new UpbitAPI('', '');

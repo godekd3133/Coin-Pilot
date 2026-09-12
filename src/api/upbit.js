@@ -21,12 +21,16 @@ class UpbitAPI {
       ? parsedTimeout
       : 10_000;
     this.lastRequestTime = 0;
-    this.minRequestInterval = 100; // 최소 100ms 간격 (초당 10회 - Upbit 제한)
+    const configuredRequestInterval = options.minRequestIntervalMs ?? process.env.UPBIT_MIN_REQUEST_INTERVAL_MS;
+    const parsedRequestInterval = Number(configuredRequestInterval);
+    this.minRequestInterval = Number.isFinite(parsedRequestInterval) && parsedRequestInterval > 0
+      ? Math.max(100, parsedRequestInterval)
+      : 100; // 최소 100ms 간격 (초당 10회 - Upbit 제한)
 
     // 요청 큐 시스템
     this.requestQueue = [];
     this.isProcessingQueue = false;
-    this.queueInterval = 120; // 큐 처리 간격 (120ms = 초당 약 8회, 여유분 포함)
+    this.queueInterval = Math.max(120, this.minRequestInterval); // 초당 약 8회 이하, 여유분 포함
   }
 
   /**
