@@ -2,6 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   calculateQualityScore,
+  calculateTradeReturnConfidence,
+  createScalpingFeatureCache,
+  evaluateStatisticalConfidenceGate,
   simulateScalping,
   simulateScalpingPortfolio,
   tuneScalpingParameters,
@@ -67,6 +70,51 @@ test('스캘핑 시뮬레이터가 수수료를 포함한 지연 반등 수익�
   assert.equal(result.trades.at(-1).reason, 'TAKE_PROFIT');
 });
 
+test('튜닝 feature cache는 uncached 시뮬레이션과 같은 거래 결과를 재사용한다', () => {
+  const config = {
+    slippage: 0,
+    rsiOversold: 30,
+    rsiOverbought: 70,
+    minVolumeRatio: 1,
+    minCloseStrength: 0.65,
+    minTrendSlopePercent: -0.2
+  };
+  const candles = syntheticRebound();
+  const featureCache = createScalpingFeatureCache(candles);
+  const uncached = simulateScalping(candles, config, { useFeatureCache: false });
+  const cached = simulateScalping(candles, config, { featureCache });
+
+  assert.deepEqual(cached.trades, uncached.trades);
+  assert.deepEqual(cached.metrics, uncached.metrics);
+  // Threshold-only changes share the same precomputed RSI/rolling features.
+  simulateScalping(candles, { ...config, minReboundPercent: 0.5 }, { featureCache });
+  assert.equal(featureCache.size(), 1);
+});
+
+test('feature cache는 대체 signal profile의 지표 결과도 보존한다', () => {
+  const candles = syntheticRebound();
+  for (const signalProfile of ['bb_reclaim', 'trend_rebound', 'momentum_breakout']) {
+    const config = {
+      signalProfile,
+      slippage: 0,
+      rsiOversold: 30,
+      rsiOverbought: 70,
+      emaPeriod: 2,
+      bbPeriod: 5,
+      trendPeriod: 4,
+      trendSlopeLookback: 1,
+      minVolumeRatio: 0,
+      minCloseStrength: 0,
+      minTrendSlopePercent: -100
+    };
+    const featureCache = createScalpingFeatureCache(candles);
+    const uncached = simulateScalping(candles, config, { useFeatureCache: false });
+    const cached = simulateScalping(candles, config, { featureCache });
+    assert.deepEqual(cached.trades, uncached.trades, signalProfile);
+    assert.deepEqual(cached.metrics, uncached.metrics, signalProfile);
+  }
+});
+
 test('튜너는 후보 파라미터를 모두 평가하고 최고 품질 결과를 반환한다', () => {
   const tuning = tuneScalpingParameters(
     syntheticRebound(),
@@ -83,6 +131,25 @@ test('튜너는 후보 파라미터를 모두 평가하고 최고 품질 결과�
   assert.equal(tuning.candidateCount, 4);
   assert.equal(tuning.topCandidates.length, 4);
   assert.ok(tuning.best.result.metrics);
+});
+
+test('tuned holdout 후보 상한은 full pool과 선택 수를 분리해 기록한다', () => {
+  const tuning = tuneScalpingParameters(
+    syntheticRebound(),
+    { initialBalance: 1_000_000, slippage: 0 },
+    {
+      rsiOversold: [25, 30],
+      minReboundPercent: [0.1, 0.15],
+      minRsiRecovery: [1],
+      stopLossPercent: [1.2],
+      takeProfitPercent: [1.8]
+    },
+    { maxCandidates: 2 }
+  );
+
+  assert.equal(tuning.candidatePoolCount, 4);
+  assert.equal(tuning.candidateCount, 2);
+  assert.equal(tuning.candidateSelectionLimited, true);
 });
 
 test('워크포워드 검증은 데이터가 부족하면 승격하지 않는다', () => {
@@ -113,6 +180,58 @@ test('튜닝 점수는 손실 후보의 거래 수를 보너스로 보상하지 
 
   assert.ok(losingCandidate < noTrade);
   assert.ok(profitableCandidate > noTrade);
+});
+
+test('거래별 95% 신뢰도 하한은 소표본 양수를 승격 근거로 만들지 않는다', () => {
+  const oneTrade = calculateTradeReturnConfidence([
+    { type: 'OPEN', investAmount: 100 },
+    { type: 'CLOSE', investAmount: 100, netProfit: 2, profitPercent: 2 }
+  ]);
+  assert.equal(oneTrade.sampleCount, 1);
+  assert.equal(oneTrade.lowerBoundPercent, null);
+
+  const stableTrades = calculateTradeReturnConfidence([
+    { type: 'CLOSE', investAmount: 100, netProfit: 2, profitPercent: 2 },
+    { type: 'CLOSE', investAmount: 100, netProfit: 2, profitPercent: 2 },
+    { type: 'CLOSE', investAmount: 100, netProfit: 2, profitPercent: 2 },
+    { type: 'CLOSE', investAmount: 100, netProfit: 2, profitPercent: 2 }
+  ]);
+  assert.equal(stableTrades.sampleCount, 4);
+  assert.equal(stableTrades.meanReturnPercent, 2);
+  assert.equal(stableTrades.lowerBoundPercent, 2);
+
+  const legacyTradeFallback = calculateTradeReturnConfidence([
+    { type: 'CLOSE', investAmount: 100, netProfit: 5, profitPercent: null },
+    { type: 'CLOSE', investAmount: 100, netProfit: 5 },
+  ]);
+  assert.equal(legacyTradeFallback.meanReturnPercent, 5);
+  assert.equal(legacyTradeFallback.lowerBoundPercent, 5);
+
+  const metrics = { tradeReturnConfidence: stableTrades };
+  assert.equal(evaluateStatisticalConfidenceGate(metrics, {
+    required: true,
+    minimumTrades: 4,
+    minimumLowerBoundPercent: 0
+  }).passed, true);
+  assert.equal(evaluateStatisticalConfidenceGate(metrics, {
+    required: true,
+    minimumTrades: 5,
+    minimumLowerBoundPercent: 0
+  }).passed, false);
+  assert.equal(evaluateStatisticalConfidenceGate(metrics, {
+    required: false,
+    minimumTrades: 20,
+    minimumLowerBoundPercent: 0
+  }).passed, true);
+  const unavailableGate = evaluateStatisticalConfidenceGate({
+    tradeReturnConfidence: oneTrade
+  }, {
+    required: true,
+    minimumTrades: 1,
+    minimumLowerBoundPercent: 0
+  });
+  assert.equal(unavailableGate.lowerBoundPercent, null);
+  assert.equal(unavailableGate.passed, false);
 });
 
 test('백테스트도 신호 캔들 변동폭 상한을 동일하게 적용한다', () => {

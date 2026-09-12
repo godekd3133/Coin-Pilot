@@ -65,6 +65,158 @@ function number(value, fallback = 0) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+const STATISTICAL_CONFIDENCE_LEVEL = 0.95;
+const ONE_SIDED_T_CRITICAL_95 = Object.freeze([
+  0,
+  6.314,
+  2.920,
+  2.353,
+  2.132,
+  2.015,
+  1.943,
+  1.895,
+  1.860,
+  1.833,
+  1.812,
+  1.796,
+  1.782,
+  1.771,
+  1.761,
+  1.753,
+  1.746,
+  1.740,
+  1.734,
+  1.729,
+  1.725,
+  1.721,
+  1.717,
+  1.714,
+  1.711,
+  1.708,
+  1.706,
+  1.703,
+  1.701,
+  1.699,
+  1.697
+]);
+
+function oneSidedTCritical95(sampleCount) {
+  const degreesOfFreedom = Math.max(1, Math.floor(Number(sampleCount) || 0) - 1);
+  if (degreesOfFreedom < 1) return null;
+  return ONE_SIDED_T_CRITICAL_95[degreesOfFreedom] || 1.645;
+}
+
+function tradeReturnPercent(trade) {
+  const explicitProfitPercent = trade?.profitPercent;
+  if (explicitProfitPercent !== null && explicitProfitPercent !== undefined &&
+    Number.isFinite(Number(explicitProfitPercent))) {
+    return Number(explicitProfitPercent);
+  }
+  const investAmount = Number(trade?.investAmount);
+  const netProfit = Number(trade?.netProfit);
+  return Number.isFinite(investAmount) && investAmount > 0 && Number.isFinite(netProfit)
+    ? (netProfit / investAmount) * 100
+    : null;
+}
+
+/**
+ * Estimate a conservative one-sided lower confidence bound for the mean
+ * closed-trade return. This is a screening guard, not a claim of statistical
+ * independence or real-world profitability; the forward paper ledger and
+ * exchange settlement remain separate acceptance lanes.
+ */
+export function calculateTradeReturnConfidence(trades = []) {
+  const returns = (Array.isArray(trades) ? trades : [])
+    .filter(trade => trade?.type === 'CLOSE')
+    .map(tradeReturnPercent)
+    .filter(value => Number.isFinite(value));
+  const sampleCount = returns.length;
+  if (sampleCount === 0) {
+    return {
+      method: 'one_sided_t_mean',
+      confidenceLevel: STATISTICAL_CONFIDENCE_LEVEL,
+      sampleCount: 0,
+      meanReturnPercent: null,
+      standardDeviationPercent: null,
+      standardErrorPercent: null,
+      tCritical: null,
+      lowerBoundPercent: null
+    };
+  }
+
+  const meanReturnPercent = returns.reduce((sum, value) => sum + value, 0) / sampleCount;
+  if (sampleCount < 2) {
+    return {
+      method: 'one_sided_t_mean',
+      confidenceLevel: STATISTICAL_CONFIDENCE_LEVEL,
+      sampleCount,
+      meanReturnPercent,
+      standardDeviationPercent: null,
+      standardErrorPercent: null,
+      tCritical: null,
+      lowerBoundPercent: null
+    };
+  }
+
+  const squaredDeviation = returns.reduce(
+    (sum, value) => sum + Math.pow(value - meanReturnPercent, 2),
+    0
+  );
+  const standardDeviationPercent = Math.sqrt(squaredDeviation / (sampleCount - 1));
+  const standardErrorPercent = standardDeviationPercent / Math.sqrt(sampleCount);
+  const tCritical = oneSidedTCritical95(sampleCount);
+  return {
+    method: 'one_sided_t_mean',
+    confidenceLevel: STATISTICAL_CONFIDENCE_LEVEL,
+    sampleCount,
+    meanReturnPercent,
+    standardDeviationPercent,
+    standardErrorPercent,
+    tCritical,
+    lowerBoundPercent: meanReturnPercent - (tCritical * standardErrorPercent)
+  };
+}
+
+/**
+ * Evaluate the optional promotion confidence gate against one metrics object.
+ * When `required` is false the result is explicitly marked as advisory so a
+ * diagnostic study cannot be mistaken for a confidence-approved report.
+ */
+export function evaluateStatisticalConfidenceGate(
+  metrics,
+  {
+    required = false,
+    minimumTrades = 20,
+    minimumLowerBoundPercent = 0
+  } = {}
+) {
+  const confidence = metrics?.tradeReturnConfidence || calculateTradeReturnConfidence([]);
+  const sampleCount = Number(confidence.sampleCount) || 0;
+  const lowerBoundPercent = confidence.lowerBoundPercent === null || confidence.lowerBoundPercent === undefined
+    ? null
+    : Number.isFinite(Number(confidence.lowerBoundPercent))
+    ? Number(confidence.lowerBoundPercent)
+    : null;
+  const normalizedMinimumTrades = Math.max(1, Math.floor(number(minimumTrades, 20)));
+  const normalizedMinimumLowerBoundPercent = number(minimumLowerBoundPercent, 0);
+  const passed = required !== true || (
+    sampleCount >= normalizedMinimumTrades &&
+    lowerBoundPercent !== null &&
+    lowerBoundPercent >= normalizedMinimumLowerBoundPercent
+  );
+  return {
+    required: required === true,
+    method: confidence.method,
+    confidenceLevel: confidence.confidenceLevel,
+    minimumTrades: normalizedMinimumTrades,
+    minimumLowerBoundPercent: normalizedMinimumLowerBoundPercent,
+    sampleCount,
+    meanReturnPercent: confidence.meanReturnPercent,
+    lowerBoundPercent,
+    passed
+  };
+}
+
 function candleTime(candle, fallback) {
   const raw = candle?.candle_date_time_utc || candle?.candle_date_time_kst || candle?.timestamp;
   const parsed = raw instanceof Date ? raw.getTime() : new Date(raw || 0).getTime();
@@ -141,30 +293,212 @@ function calculateRsiSeries(candles, period) {
   return values;
 }
 
-function calculateReboundAtIndex(candles, index, rsiSeries, config) {
+function calculateBandAtIndex(closes, endIndex, period, stdDev) {
+  const normalizedPeriod = Math.max(1, Math.floor(number(period, 20)));
+  const startIndex = Math.max(0, endIndex - normalizedPeriod + 1);
+  const length = endIndex - startIndex + 1;
+  if (endIndex < 0 || length < normalizedPeriod) return null;
+
+  let sum = 0;
+  let squaredSum = 0;
+  for (let index = startIndex; index <= endIndex; index += 1) {
+    const price = closes[index];
+    sum += price;
+  }
+  const middle = sum / length;
+  for (let index = startIndex; index <= endIndex; index += 1) {
+    squaredSum += Math.pow(closes[index] - middle, 2);
+  }
+  const variance = squaredSum / length;
+  const deviation = Math.sqrt(variance);
+  return {
+    lower: middle - deviation * stdDev,
+    upper: middle + deviation * stdDev
+  };
+}
+
+function calculateWindowEma(closes, endIndex, period) {
+  const normalizedPeriod = Math.max(1, Math.floor(number(period, 20)));
+  const startIndex = Math.max(0, endIndex - normalizedPeriod + 1);
+  const length = endIndex - startIndex + 1;
+  if (endIndex < 0 || length < normalizedPeriod) return null;
+
+  const multiplier = 2 / (normalizedPeriod + 1);
+  let value = closes[startIndex];
+  for (let index = startIndex + 1; index <= endIndex; index += 1) {
+    value = (closes[index] - value) * multiplier + value;
+  }
+  return value;
+}
+
+/**
+ * Precompute the candle-local features that do not change across most tuning
+ * candidates. The previous implementation recalculated short rolling windows
+ * inside every candidate simulation, making a 20,736-candidate grid needlessly
+ * expensive. Thresholds and signal profiles remain evaluated per candidate;
+ * only their shared inputs are cached here.
+ */
+function buildReboundFeatureSet(candles, config) {
+  const resolvedConfig = { ...DEFAULT_CONFIG, ...config };
+  const closes = candles.map(getClose);
+  const opens = candles.map(getOpen);
+  const highs = candles.map(getHigh);
+  const lows = candles.map(getLow);
+  const volumes = candles.map(candle => number(candle?.candle_acc_trade_volume, NaN));
+  const rsiSeries = calculateRsiSeries(candles, resolvedConfig.rsiPeriod);
+  const volumeLookback = Math.max(1, Math.floor(number(resolvedConfig.volumeLookback, 20)));
+  const bbPeriod = Math.max(1, Math.floor(number(resolvedConfig.bbPeriod, 20)));
+  const bbStdDev = number(resolvedConfig.bbStdDev, 2);
+  const emaPeriod = Math.max(1, Math.floor(number(resolvedConfig.emaPeriod, 20)));
+  const trendPeriod = Math.max(1, Math.floor(number(resolvedConfig.trendPeriod, 30)));
+  const trendSlopeLookback = Math.max(1, Math.floor(number(resolvedConfig.trendSlopeLookback, 3)));
+  const closePrefix = [0];
+  for (const close of closes) closePrefix.push(closePrefix.at(-1) + close);
+
+  const points = candles.map((candle, index) => {
+    const previousClose = index > 0 ? closes[index - 1] : null;
+    const currentClose = closes[index];
+    const currentOpen = opens[index];
+    const currentHigh = highs[index];
+    const currentLow = lows[index];
+    const candleRange = currentHigh - currentLow;
+    const priceChangePercent = previousClose > 0
+      ? ((currentClose - previousClose) / previousClose) * 100
+      : null;
+    const signalRangePercent = previousClose > 0 && Number.isFinite(candleRange)
+      ? (candleRange / previousClose) * 100
+      : null;
+    const closeStrength = candleRange > 0 ? (currentClose - currentLow) / candleRange : 1;
+    const volumeStart = Math.max(0, index - volumeLookback);
+    const volumeHistory = volumes.slice(volumeStart, index).filter(Number.isFinite);
+    const averageVolume = volumeHistory.length > 0
+      ? volumeHistory.reduce((sum, volume) => sum + volume, 0) / volumeHistory.length
+      : 0;
+    const currentVolume = volumes[index];
+    const volumeRatio = Number.isFinite(currentVolume) && averageVolume > 0
+      ? currentVolume / averageVolume
+      : null;
+
+    let trendSlopePercent = null;
+    let trendConfirmed = true;
+    if (index >= trendPeriod + trendSlopeLookback) {
+      const currentStart = index - trendPeriod + 1;
+      const previousEnd = index - trendSlopeLookback;
+      const previousStart = previousEnd - trendPeriod + 1;
+      const currentAverage = (closePrefix[index + 1] - closePrefix[currentStart]) / trendPeriod;
+      const previousAverage = (closePrefix[previousEnd + 1] - closePrefix[previousStart]) / trendPeriod;
+      if (previousAverage > 0) {
+        trendSlopePercent = ((currentAverage - previousAverage) / previousAverage) * 100;
+        trendConfirmed = trendSlopePercent >= resolvedConfig.minTrendSlopePercent;
+      }
+    }
+
+    const currentBand = calculateBandAtIndex(closes, index, bbPeriod, bbStdDev);
+    const previousBand = calculateBandAtIndex(closes, index - 1, bbPeriod, bbStdDev);
+    const bollingerReclaim = Boolean(
+      currentBand && previousBand && index > 0 &&
+      closes[index - 1] < previousBand.lower &&
+      currentClose >= currentBand.lower &&
+      currentClose > closes[index - 1]
+    );
+    const currentEma = calculateWindowEma(closes, index, emaPeriod);
+    const previousEma = calculateWindowEma(closes, index - 1, emaPeriod);
+    const emaSlopePercent = currentEma && previousEma
+      ? ((currentEma - previousEma) / previousEma) * 100
+      : null;
+    const emaTrendConfirmed = currentEma !== null && previousEma !== null &&
+      currentClose >= currentEma && emaSlopePercent >= 0;
+
+    return {
+      currentClose,
+      previousClose,
+      currentOpen,
+      currentHigh,
+      currentLow,
+      priceChangePercent,
+      signalRangePercent,
+      closeStrength,
+      currentVolume,
+      averageVolume,
+      volumeRatio,
+      previousHigh: index > 0 ? highs[index - 1] : null,
+      bullishCandle: index > 0 && currentClose > currentOpen && currentClose > closes[index - 1],
+      trendSlopePercent,
+      trendConfirmed,
+      currentBand,
+      previousBand,
+      bollingerReclaim,
+      currentEma,
+      previousEma,
+      emaSlopePercent,
+      emaTrendConfirmed,
+      rsi: rsiSeries[index],
+      previousRsi: index > 0 ? rsiSeries[index - 1] : null
+    };
+  });
+
+  return { rsiSeries, points };
+}
+
+function featureCacheKey(config) {
+  return [
+    number(config.rsiPeriod, 14),
+    number(config.volumeLookback, 20),
+    number(config.bbPeriod, 20),
+    number(config.bbStdDev, 2),
+    number(config.emaPeriod, 20),
+    number(config.trendPeriod, 30),
+    number(config.trendSlopeLookback, 3)
+  ].join('|');
+}
+
+/**
+ * Reusable feature cache for tuning many candidates on one candle window.
+ * The cache is intentionally scoped to the caller's immutable candle window.
+ */
+export function createScalpingFeatureCache(rawCandles) {
+  const candles = normalizeHistoricalCandles(rawCandles);
+  const featureSets = new Map();
+  return {
+    candles,
+    get(config = {}) {
+      const key = featureCacheKey(config);
+      if (!featureSets.has(key)) {
+        featureSets.set(key, buildReboundFeatureSet(candles, config));
+      }
+      return featureSets.get(key);
+    },
+    size() {
+      return featureSets.size;
+    }
+  };
+}
+
+function calculateReboundAtIndex(candles, index, rsiSeries, config, featureSet = null) {
   const currentCandle = candles[index];
   const previousCandle = candles[index - 1];
-  const currentClose = getClose(currentCandle);
-  const previousClose = getClose(previousCandle);
-  const currentOpen = getOpen(currentCandle);
-  const rsi = rsiSeries[index];
-  const previousRsi = rsiSeries[index - 1];
+  const cachedPoint = featureSet?.points?.[index] || null;
+  const currentClose = cachedPoint?.currentClose ?? getClose(currentCandle);
+  const previousClose = cachedPoint?.previousClose ?? getClose(previousCandle);
+  const currentOpen = cachedPoint?.currentOpen ?? getOpen(currentCandle);
+  const rsi = cachedPoint?.rsi ?? rsiSeries[index];
+  const previousRsi = cachedPoint?.previousRsi ?? rsiSeries[index - 1];
 
   if (!Number.isFinite(rsi) || !Number.isFinite(previousRsi) || previousClose <= 0) {
     return null;
   }
 
-  const priceChangePercent = ((currentClose - previousClose) / previousClose) * 100;
+  const priceChangePercent = cachedPoint?.priceChangePercent ?? ((currentClose - previousClose) / previousClose) * 100;
   const immediateRsiRecovery = rsi - previousRsi;
-  const bullishCandle = currentClose > currentOpen && currentClose > previousClose;
-  const currentHigh = getHigh(currentCandle);
-  const currentLow = getLow(currentCandle);
+  const bullishCandle = cachedPoint?.bullishCandle ?? (currentClose > currentOpen && currentClose > previousClose);
+  const currentHigh = cachedPoint?.currentHigh ?? getHigh(currentCandle);
+  const currentLow = cachedPoint?.currentLow ?? getLow(currentCandle);
   const candleRange = currentHigh - currentLow;
   const configuredMaxSignalRangePercent = Number(config.maxSignalRangePercent);
   const configuredMinSignalRangePercent = Number(config.minSignalRangePercent);
-  const signalRangePercent = previousClose > 0 && Number.isFinite(candleRange)
+  const signalRangePercent = cachedPoint?.signalRangePercent ?? (previousClose > 0 && Number.isFinite(candleRange)
     ? (candleRange / previousClose) * 100
-    : null;
+    : null);
   const volatilityConfirmed = !Number.isFinite(configuredMaxSignalRangePercent) ||
     configuredMaxSignalRangePercent <= 0 ||
     signalRangePercent === null ||
@@ -173,56 +507,66 @@ function calculateReboundAtIndex(candles, index, rsiSeries, config) {
     configuredMinSignalRangePercent <= 0 ||
     signalRangePercent === null ||
     signalRangePercent >= configuredMinSignalRangePercent;
-  const closeStrength = candleRange > 0 ? (currentClose - currentLow) / candleRange : 1;
-  const currentVolume = number(currentCandle?.candle_acc_trade_volume, NaN);
-  const volumeHistory = candles
-    .slice(Math.max(0, index - config.volumeLookback), index)
-    .map(candle => number(candle?.candle_acc_trade_volume, NaN))
-    .filter(Number.isFinite);
-  const averageVolume = volumeHistory.length > 0
+  const closeStrength = cachedPoint?.closeStrength ?? (candleRange > 0 ? (currentClose - currentLow) / candleRange : 1);
+  const currentVolume = cachedPoint?.currentVolume ?? number(currentCandle?.candle_acc_trade_volume, NaN);
+  const volumeHistory = cachedPoint
+    ? null
+    : candles
+      .slice(Math.max(0, index - config.volumeLookback), index)
+      .map(candle => number(candle?.candle_acc_trade_volume, NaN))
+      .filter(Number.isFinite);
+  const averageVolume = cachedPoint?.averageVolume ?? (volumeHistory?.length > 0
     ? volumeHistory.reduce((sum, volume) => sum + volume, 0) / volumeHistory.length
-    : 0;
-  const volumeRatio = Number.isFinite(currentVolume) && averageVolume > 0
+    : 0);
+  const volumeRatio = cachedPoint?.volumeRatio ?? (Number.isFinite(currentVolume) && averageVolume > 0
     ? currentVolume / averageVolume
-    : null;
+    : null);
   const volumeConfirmed = volumeRatio === null || volumeRatio >= config.minVolumeRatio;
   const closeStrengthConfirmed = closeStrength >= config.minCloseStrength;
-  const previousHigh = getHigh(previousCandle);
+  const previousHigh = cachedPoint?.previousHigh ?? getHigh(previousCandle);
   const previousHighBreak = currentClose > previousHigh;
   const previousHighBreakConfirmed = !config.requirePreviousHighBreak || previousHighBreak;
-  const calculateBand = selectedCandles => {
-    const prices = selectedCandles.map(getClose);
-    if (prices.length < config.bbPeriod) return null;
-    const middle = prices.reduce((sum, price) => sum + price, 0) / prices.length;
-    const variance = prices.reduce((sum, price) => sum + Math.pow(price - middle, 2), 0) / prices.length;
-    const deviation = Math.sqrt(variance);
-    return { lower: middle - deviation * config.bbStdDev, upper: middle + deviation * config.bbStdDev };
-  };
-  const currentBand = calculateBand(candles.slice(Math.max(0, index - config.bbPeriod + 1), index + 1).reverse());
-  const previousBand = calculateBand(candles.slice(Math.max(0, index - config.bbPeriod), index).reverse());
+  let currentBand = cachedPoint?.currentBand ?? null;
+  let previousBand = cachedPoint?.previousBand ?? null;
+  if (!cachedPoint) {
+    const calculateBand = selectedCandles => {
+      const prices = selectedCandles.map(getClose);
+      if (prices.length < config.bbPeriod) return null;
+      const middle = prices.reduce((sum, price) => sum + price, 0) / prices.length;
+      const variance = prices.reduce((sum, price) => sum + Math.pow(price - middle, 2), 0) / prices.length;
+      const deviation = Math.sqrt(variance);
+      return { lower: middle - deviation * config.bbStdDev, upper: middle + deviation * config.bbStdDev };
+    };
+    currentBand = calculateBand(candles.slice(Math.max(0, index - config.bbPeriod + 1), index + 1).reverse());
+    previousBand = calculateBand(candles.slice(Math.max(0, index - config.bbPeriod), index).reverse());
+  }
   const bollingerReclaim = Boolean(
     currentBand && previousBand &&
     previousClose < previousBand.lower &&
     currentClose >= currentBand.lower &&
     currentClose > previousClose
   );
-  const calculateEma = selectedCandles => {
-    const prices = selectedCandles.map(getClose);
-    if (prices.length < config.emaPeriod) return null;
-    const multiplier = 2 / (config.emaPeriod + 1);
-    let value = prices[0];
-    for (let cursor = 1; cursor < prices.length; cursor += 1) {
-      value = (prices[cursor] - value) * multiplier + value;
-    }
-    return value;
-  };
-  const currentEma = calculateEma(candles.slice(Math.max(0, index - config.emaPeriod + 1), index + 1));
-  const previousEma = calculateEma(candles.slice(Math.max(0, index - config.emaPeriod), index));
-  const emaSlopePercent = currentEma && previousEma
+  let currentEma = cachedPoint?.currentEma ?? null;
+  let previousEma = cachedPoint?.previousEma ?? null;
+  if (!cachedPoint) {
+    const calculateEma = selectedCandles => {
+      const prices = selectedCandles.map(getClose);
+      if (prices.length < config.emaPeriod) return null;
+      const multiplier = 2 / (config.emaPeriod + 1);
+      let value = prices[0];
+      for (let cursor = 1; cursor < prices.length; cursor += 1) {
+        value = (prices[cursor] - value) * multiplier + value;
+      }
+      return value;
+    };
+    currentEma = calculateEma(candles.slice(Math.max(0, index - config.emaPeriod + 1), index + 1));
+    previousEma = calculateEma(candles.slice(Math.max(0, index - config.emaPeriod), index));
+  }
+  const emaSlopePercent = cachedPoint?.emaSlopePercent ?? (currentEma && previousEma
     ? ((currentEma - previousEma) / previousEma) * 100
-    : null;
-  const emaTrendConfirmed = currentEma !== null && previousEma !== null &&
-    currentClose >= currentEma && emaSlopePercent >= 0;
+    : null);
+  const emaTrendConfirmed = cachedPoint?.emaTrendConfirmed ?? (currentEma !== null && previousEma !== null &&
+    currentClose >= currentEma && emaSlopePercent >= 0);
   const momentumRsiConfirmed = rsi < config.rsiOverbought;
   const profileConfirmed = config.signalProfile === 'bb_reclaim'
     ? bollingerReclaim
@@ -231,9 +575,11 @@ function calculateReboundAtIndex(candles, index, rsiSeries, config) {
       : config.signalProfile === 'momentum_breakout'
         ? emaTrendConfirmed && previousHighBreak && momentumRsiConfirmed
         : true;
-  let trendSlopePercent = null;
-  let trendConfirmed = true;
-  if (index >= config.trendPeriod + config.trendSlopeLookback) {
+  let trendSlopePercent = cachedPoint?.trendSlopePercent ?? null;
+  let trendConfirmed = cachedPoint
+    ? (trendSlopePercent === null || trendSlopePercent >= config.minTrendSlopePercent)
+    : true;
+  if (!cachedPoint && index >= config.trendPeriod + config.trendSlopeLookback) {
     const currentTrendPrices = candles
       .slice(index - config.trendPeriod + 1, index + 1)
       .map(getClose);
@@ -435,6 +781,7 @@ function createMetrics({
   const netProfit = finalBalance - initialBalance;
   const totalReturnPercent = initialBalance > 0 ? (netProfit / initialBalance) * 100 : 0;
   const profitFactor = grossLoss > 0 ? grossProfit / grossLoss : grossProfit > 0 ? Infinity : 0;
+  const tradeReturnConfidence = calculateTradeReturnConfidence(closedTrades);
 
   return {
     initialBalance,
@@ -448,6 +795,7 @@ function createMetrics({
     profitFactor,
     maxDrawdownPercent: calculateDrawdown(equityCurve),
     averageTrade: closedTrades.length > 0 ? netProfit / closedTrades.length : 0,
+    tradeReturnConfidence,
     signals,
     cancelledSignals,
     fees,
@@ -629,6 +977,12 @@ function findExit(position, candle, config, timestamp) {
 export function simulateScalping(rawCandles, config = {}, simulationOptions = {}) {
   const options = { ...DEFAULT_CONFIG, ...config };
   const candles = normalizeHistoricalCandles(rawCandles);
+  const featureCache = simulationOptions.useFeatureCache === false
+    ? null
+    : simulationOptions.featureCache?.get
+      ? simulationOptions.featureCache
+      : createScalpingFeatureCache(candles);
+  const featureSet = featureCache?.get(options) || null;
   const trades = [];
   const equityCurve = [];
   let balance = options.initialBalance;
@@ -642,7 +996,7 @@ export function simulateScalping(rawCandles, config = {}, simulationOptions = {}
   let cooldownUntil = 0;
   let consecutiveLosses = 0;
   const lossCircuitBreaker = createLossCircuitBreakerState();
-  const rsiSeries = calculateRsiSeries(candles, options.rsiPeriod);
+  const rsiSeries = featureSet?.rsiSeries || calculateRsiSeries(candles, options.rsiPeriod);
 
   const minimumHistory = options.rsiPeriod + Math.max(2, Math.floor(number(options.oversoldLookback, 1)));
   const requestedStartIndex = Number(simulationOptions.startTradingIndex);
@@ -699,7 +1053,7 @@ export function simulateScalping(rawCandles, config = {}, simulationOptions = {}
           consecutiveLosses = 0;
           cooldownUntil = 0;
         }
-        const rebound = calculateReboundAtIndex(candles, index, rsiSeries, options);
+        const rebound = calculateReboundAtIndex(candles, index, rsiSeries, options, featureSet);
 
         for (const rejectionReason of rebound?.rejectionReasons || []) {
           rejectionCounts[rejectionReason] = (rejectionCounts[rejectionReason] || 0) + 1;
@@ -859,10 +1213,15 @@ function calculatePortfolioMarketRegime(group, options) {
  */
 export function simulateScalpingPortfolio(rawCandlesByMarket, config = {}, simulationOptions = {}) {
   const options = { ...DEFAULT_CONFIG, maxPositions: 3, portfolioAllocation: 0.1, ...config };
+  const suppliedFeatureCaches = simulationOptions.featureCacheByMarket || {};
   const contexts = marketEntries(rawCandlesByMarket)
     .map(([market, rawCandles]) => {
       const candles = normalizeHistoricalCandles(rawCandles);
-      const rsiSeries = calculateRsiSeries(candles, options.rsiPeriod);
+      const featureCache = suppliedFeatureCaches[market]?.get
+        ? suppliedFeatureCaches[market]
+        : createScalpingFeatureCache(candles);
+      const featureSet = featureCache.get(options);
+      const rsiSeries = featureSet.rsiSeries;
       const minimumHistory = options.rsiPeriod + Math.max(2, Math.floor(number(options.oversoldLookback, 1)));
       const requestedStartIndex = Number(simulationOptions.startTradingIndex);
       const startTradingIndex = Number.isFinite(requestedStartIndex)
@@ -872,6 +1231,7 @@ export function simulateScalpingPortfolio(rawCandlesByMarket, config = {}, simul
         market: String(market),
         candles,
         rsiSeries,
+        featureSet,
         startTradingIndex,
         position: null,
         cooldownUntil: 0,
@@ -1007,7 +1367,8 @@ export function simulateScalpingPortfolio(rawCandlesByMarket, config = {}, simul
         context.candles,
         index - 1,
         context.rsiSeries,
-        options
+        options,
+        context.featureSet
       );
       for (const rejectionReason of rebound?.rejectionReasons || []) {
         rejectionCounts[rejectionReason] = (rejectionCounts[rejectionReason] || 0) + 1;
@@ -1163,6 +1524,52 @@ function expandGrid(baseConfig, grid) {
   }, [{ ...baseConfig }]);
 }
 
+function configFingerprint(config) {
+  return JSON.stringify(Object.entries(config).sort(([a], [b]) => a.localeCompare(b)));
+}
+
+/**
+ * Optionally take a deterministic, evenly spaced research sample from the
+ * Cartesian grid. The full grid remains the default. A capped sample always
+ * includes the actual base configuration so a quick study cannot silently
+ * omit the runtime contract; reports expose both pool and selected counts.
+ */
+function selectTuningCandidates(candidates, baseConfig, maxCandidates = 0) {
+  const poolCount = candidates.length;
+  const requestedLimit = Math.floor(number(maxCandidates, 0));
+  if (requestedLimit <= 0 || requestedLimit >= poolCount) {
+    return {
+      candidates,
+      candidatePoolCount: poolCount,
+      candidateSelectionLimited: false
+    };
+  }
+
+  const limit = Math.max(1, requestedLimit);
+  const selected = [];
+  const seen = new Set();
+  const add = candidate => {
+    const fingerprint = configFingerprint(candidate);
+    if (seen.has(fingerprint) || selected.length >= limit) return;
+    seen.add(fingerprint);
+    selected.push(candidate);
+  };
+  add({ ...DEFAULT_CONFIG, ...baseConfig });
+  if (limit > selected.length) {
+    for (let offset = 0; offset < poolCount && selected.length < limit; offset += 1) {
+      const index = limit === 1
+        ? 0
+        : Math.round((offset * (poolCount - 1)) / Math.max(1, limit - 2));
+      add(candidates[Math.min(poolCount - 1, index)]);
+    }
+  }
+  return {
+    candidates: selected,
+    candidatePoolCount: poolCount,
+    candidateSelectionLimited: true
+  };
+}
+
 export const DEFAULT_TUNING_GRID = {
   signalProfile: ['rsi_rebound', 'bb_reclaim', 'trend_rebound'],
   rsiOversold: [25, 30, 35],
@@ -1195,13 +1602,19 @@ export const DEFAULT_TUNING_GRID = {
  * Tune only on the supplied training segment. The caller must evaluate the
  * selected config on a later holdout segment before promoting it.
  */
-export function tuneScalpingParameters(candles, baseConfig = {}, grid = DEFAULT_TUNING_GRID) {
-  const candidates = expandGrid({ ...DEFAULT_CONFIG, ...baseConfig }, grid);
+export function tuneScalpingParameters(candles, baseConfig = {}, grid = DEFAULT_TUNING_GRID, tuningOptions = {}) {
+  const candidateSelection = selectTuningCandidates(
+    expandGrid({ ...DEFAULT_CONFIG, ...baseConfig }, grid),
+    baseConfig,
+    tuningOptions.maxCandidates
+  );
+  const candidates = candidateSelection.candidates;
+  const featureCache = createScalpingFeatureCache(candles);
   let best = null;
   const ranked = [];
 
   for (const candidate of candidates) {
-    const result = simulateScalping(candles, candidate);
+    const result = simulateScalping(candles, candidate, { featureCache });
     ranked.push({ config: candidate, metrics: result.metrics });
     if (!best || result.metrics.qualityScore > best.result.metrics.qualityScore) {
       best = { config: candidate, result };
@@ -1211,6 +1624,8 @@ export function tuneScalpingParameters(candles, baseConfig = {}, grid = DEFAULT_
   ranked.sort((a, b) => b.metrics.qualityScore - a.metrics.qualityScore);
   return {
     candidateCount: candidates.length,
+    candidatePoolCount: candidateSelection.candidatePoolCount,
+    candidateSelectionLimited: candidateSelection.candidateSelectionLimited,
     best,
     topCandidates: ranked.slice(0, 10)
   };
@@ -1222,13 +1637,22 @@ export function tuneScalpingParameters(candles, baseConfig = {}, grid = DEFAULT_
  * asks for it; portfolio runs can pass a smaller research grid to keep the
  * cross-market study bounded.
  */
-export function tuneScalpingPortfolioParameters(candlesByMarket, baseConfig = {}, grid = DEFAULT_TUNING_GRID) {
-  const candidates = expandGrid({ ...DEFAULT_CONFIG, ...baseConfig }, grid);
+export function tuneScalpingPortfolioParameters(candlesByMarket, baseConfig = {}, grid = DEFAULT_TUNING_GRID, tuningOptions = {}) {
+  const candidateSelection = selectTuningCandidates(
+    expandGrid({ ...DEFAULT_CONFIG, ...baseConfig }, grid),
+    baseConfig,
+    tuningOptions.maxCandidates
+  );
+  const candidates = candidateSelection.candidates;
+  const featureCacheByMarket = Object.fromEntries(
+    marketEntries(candlesByMarket)
+      .map(([market, candles]) => [market, createScalpingFeatureCache(candles)])
+  );
   let best = null;
   const ranked = [];
 
   for (const candidate of candidates) {
-    const result = simulateScalpingPortfolio(candlesByMarket, candidate);
+    const result = simulateScalpingPortfolio(candlesByMarket, candidate, { featureCacheByMarket });
     ranked.push({ config: candidate, metrics: result.metrics });
     if (!best || result.metrics.qualityScore > best.result.metrics.qualityScore) {
       best = { config: candidate, result };
@@ -1238,6 +1662,8 @@ export function tuneScalpingPortfolioParameters(candlesByMarket, baseConfig = {}
   ranked.sort((a, b) => b.metrics.qualityScore - a.metrics.qualityScore);
   return {
     candidateCount: candidates.length,
+    candidatePoolCount: candidateSelection.candidatePoolCount,
+    candidateSelectionLimited: candidateSelection.candidateSelectionLimited,
     best,
     topCandidates: ranked.slice(0, 10)
   };
@@ -1293,7 +1719,8 @@ export function walkForwardValidatePortfolio(rawCandlesByMarket, baseConfig = {}
   const tuning = tuneScalpingPortfolioParameters(
     training,
     resolvedConfig,
-    options.grid || DEFAULT_TUNING_GRID
+    options.grid || DEFAULT_TUNING_GRID,
+    { maxCandidates: options.maxTuningCandidates }
   );
   const warmupLength = Math.min(
     splitIndex,
@@ -1319,24 +1746,46 @@ export function walkForwardValidatePortfolio(rawCandlesByMarket, baseConfig = {}
   const minimumTrainingTrades = options.minimumTrainingTrades ?? 3;
   const minimumTrainingProfitFactor = options.minimumTrainingProfitFactor ?? 1;
   const minimumTrainingReturnPercent = options.minimumTrainingReturnPercent ?? 0;
+  const requireStatisticalConfidence = options.requireStatisticalConfidence === true;
+  const minimumTrainingConfidenceTrades = options.minimumTrainingConfidenceTrades ?? 10;
+  const minimumValidationConfidenceTrades = options.minimumValidationConfidenceTrades ?? 20;
+  const minimumConfidenceLowerBoundPercent = options.minimumConfidenceLowerBoundPercent ?? 0;
+  const trainingConfidenceGate = evaluateStatisticalConfidenceGate(trainingMetrics, {
+    required: requireStatisticalConfidence,
+    minimumTrades: minimumTrainingConfidenceTrades,
+    minimumLowerBoundPercent: minimumConfidenceLowerBoundPercent
+  });
   const trainingGatePassed = trainingMetrics.tradeCount >= minimumTrainingTrades &&
     trainingMetrics.totalReturnPercent >= minimumTrainingReturnPercent &&
-    trainingMetrics.profitFactor >= minimumTrainingProfitFactor;
+    trainingMetrics.profitFactor >= minimumTrainingProfitFactor &&
+    trainingConfidenceGate.passed;
   const minimumValidationTrades = options.minimumValidationTrades ?? 10;
   const minimumProfitFactor = options.minimumProfitFactor ?? 1.05;
   const minimumReturnPercent = options.minimumReturnPercent ?? 0.1;
   const maximumDrawdownPercent = options.maximumDrawdownPercent ?? 15;
   const validationMetrics = validation.metrics;
+  const validationConfidenceGate = evaluateStatisticalConfidenceGate(validationMetrics, {
+    required: requireStatisticalConfidence,
+    minimumTrades: minimumValidationConfidenceTrades,
+    minimumLowerBoundPercent: minimumConfidenceLowerBoundPercent
+  });
   const validationGatePassed = validationMetrics.tradeCount >= minimumValidationTrades &&
     validationMetrics.totalReturnPercent >= minimumReturnPercent &&
     validationMetrics.profitFactor >= minimumProfitFactor &&
-    validationMetrics.maxDrawdownPercent <= maximumDrawdownPercent;
+    validationMetrics.maxDrawdownPercent <= maximumDrawdownPercent &&
+    validationConfidenceGate.passed;
 
   return {
     promoted: trainingGatePassed && validationGatePassed,
     reason: trainingGatePassed && validationGatePassed
       ? 'portfolio_walk_forward_gate_passed_diagnostic_only'
-      : !trainingGatePassed ? 'training_gate_failed' : 'portfolio_walk_forward_gate_failed',
+      : !trainingGatePassed
+        ? requireStatisticalConfidence && !trainingConfidenceGate.passed
+          ? 'training_confidence_gate_failed'
+          : 'training_gate_failed'
+        : requireStatisticalConfidence && !validationConfidenceGate.passed
+          ? 'validation_confidence_gate_failed'
+          : 'portfolio_walk_forward_gate_failed',
     marketCount,
     candleCount: shortestCandleCount,
     trainCandleCount: splitIndex,
@@ -1344,6 +1793,8 @@ export function walkForwardValidatePortfolio(rawCandlesByMarket, baseConfig = {}
     validationWarmupCandleCount: warmupLength,
     tuning: {
       candidateCount: tuning.candidateCount,
+      candidatePoolCount: tuning.candidatePoolCount,
+      candidateSelectionLimited: tuning.candidateSelectionLimited,
       bestConfig: tuning.best.config,
       metrics: trainingMetrics
     },
@@ -1356,7 +1807,17 @@ export function walkForwardValidatePortfolio(rawCandlesByMarket, baseConfig = {}
       minimumValidationTrades,
       minimumProfitFactor,
       minimumReturnPercent,
-      maximumDrawdownPercent
+      maximumDrawdownPercent,
+      statisticalConfidence: {
+        required: requireStatisticalConfidence,
+        method: 'one_sided_t_mean',
+        confidenceLevel: 0.95,
+        minimumTrainingTrades: trainingConfidenceGate.minimumTrades,
+        minimumValidationTrades: validationConfidenceGate.minimumTrades,
+        minimumLowerBoundPercent: trainingConfidenceGate.minimumLowerBoundPercent,
+        training: trainingConfidenceGate,
+        validation: validationConfidenceGate
+      }
     },
     selection: {
       skippedEntries: validation.skippedEntries,
@@ -1473,7 +1934,12 @@ export function walkForwardValidate(candles, baseConfig = {}, options = {}) {
 
   const trainingCandles = normalized.slice(0, splitIndex);
   const holdoutCandles = normalized.slice(splitIndex);
-  const tuning = tuneScalpingParameters(trainingCandles, resolvedConfig, options.grid || DEFAULT_TUNING_GRID);
+  const tuning = tuneScalpingParameters(
+    trainingCandles,
+    resolvedConfig,
+    options.grid || DEFAULT_TUNING_GRID,
+    { maxCandidates: options.maxTuningCandidates }
+  );
   // Preserve indicator state across the train/holdout boundary. Recomputing
   // RSI from the first holdout candle would create a different signal stream
   // from live trading. The warmup candles are data-only; no trade is allowed
@@ -1500,19 +1966,35 @@ export function walkForwardValidate(candles, baseConfig = {}, options = {}) {
   const minimumTrainingTrades = options.minimumTrainingTrades ?? 3;
   const minimumTrainingProfitFactor = options.minimumTrainingProfitFactor ?? 1;
   const minimumTrainingReturnPercent = options.minimumTrainingReturnPercent ?? 0;
+  const requireStatisticalConfidence = options.requireStatisticalConfidence === true;
+  const minimumTrainingConfidenceTrades = options.minimumTrainingConfidenceTrades ?? 10;
+  const minimumValidationConfidenceTrades = options.minimumValidationConfidenceTrades ?? 20;
+  const minimumConfidenceLowerBoundPercent = options.minimumConfidenceLowerBoundPercent ?? 0;
+  const trainingConfidenceGate = evaluateStatisticalConfidenceGate(trainingMetrics, {
+    required: requireStatisticalConfidence,
+    minimumTrades: minimumTrainingConfidenceTrades,
+    minimumLowerBoundPercent: minimumConfidenceLowerBoundPercent
+  });
   const trainingGatePassed = trainingMetrics.tradeCount >= minimumTrainingTrades &&
     trainingMetrics.totalReturnPercent >= minimumTrainingReturnPercent &&
-    trainingMetrics.profitFactor >= minimumTrainingProfitFactor;
+    trainingMetrics.profitFactor >= minimumTrainingProfitFactor &&
+    trainingConfidenceGate.passed;
   const minimumValidationTrades = options.minimumValidationTrades ?? 3;
   const minimumProfitFactor = options.minimumProfitFactor ?? 1;
   const minimumReturnPercent = options.minimumReturnPercent ?? 0;
   const maximumDrawdownPercent = options.maximumDrawdownPercent ?? 15;
   const validationMetrics = validation.metrics;
+  const validationConfidenceGate = evaluateStatisticalConfidenceGate(validationMetrics, {
+    required: requireStatisticalConfidence,
+    minimumTrades: minimumValidationConfidenceTrades,
+    minimumLowerBoundPercent: minimumConfidenceLowerBoundPercent
+  });
 
   const validationGatePassed = validationMetrics.tradeCount >= minimumValidationTrades &&
     validationMetrics.totalReturnPercent >= minimumReturnPercent &&
     validationMetrics.profitFactor >= minimumProfitFactor &&
-    validationMetrics.maxDrawdownPercent <= maximumDrawdownPercent;
+    validationMetrics.maxDrawdownPercent <= maximumDrawdownPercent &&
+    validationConfidenceGate.passed;
   const promoted = trainingGatePassed && validationGatePassed;
 
   return {
@@ -1520,14 +2002,20 @@ export function walkForwardValidate(candles, baseConfig = {}, options = {}) {
     reason: promoted
       ? 'walk_forward_gate_passed'
       : !trainingGatePassed
-        ? 'training_gate_failed'
-        : 'walk_forward_gate_failed',
+        ? requireStatisticalConfidence && !trainingConfidenceGate.passed
+          ? 'training_confidence_gate_failed'
+          : 'training_gate_failed'
+        : requireStatisticalConfidence && !validationConfidenceGate.passed
+          ? 'validation_confidence_gate_failed'
+          : 'walk_forward_gate_failed',
     candleCount: normalized.length,
     trainCandleCount: trainingCandles.length,
     holdoutCandleCount: holdoutCandles.length,
     validationWarmupCandleCount: warmupLength,
     tuning: {
       candidateCount: tuning.candidateCount,
+      candidatePoolCount: tuning.candidatePoolCount,
+      candidateSelectionLimited: tuning.candidateSelectionLimited,
       bestConfig: tuning.best.config,
       metrics: tuning.best.result.metrics
     },
@@ -1540,7 +2028,17 @@ export function walkForwardValidate(candles, baseConfig = {}, options = {}) {
       minimumValidationTrades,
       minimumProfitFactor,
       minimumReturnPercent,
-      maximumDrawdownPercent
+      maximumDrawdownPercent,
+      statisticalConfidence: {
+        required: requireStatisticalConfidence,
+        method: 'one_sided_t_mean',
+        confidenceLevel: 0.95,
+        minimumTrainingTrades: trainingConfidenceGate.minimumTrades,
+        minimumValidationTrades: validationConfidenceGate.minimumTrades,
+        minimumLowerBoundPercent: trainingConfidenceGate.minimumLowerBoundPercent,
+        training: trainingConfidenceGate,
+        validation: validationConfidenceGate
+      }
     }
   };
 }

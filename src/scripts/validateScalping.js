@@ -107,6 +107,7 @@ function baseConfig(candleUnit = 1) {
     maxLosingHoldMinutes: number(process.env.SCALP_MAX_LOSING_HOLD_MINUTES, 0),
     maxEntriesPerSignalWindow: number(process.env.SCALP_MAX_ENTRIES_PER_SIGNAL_WINDOW, 0),
     maxRiskDataGapSeconds: number(process.env.SCALP_MAX_RISK_DATA_GAP_SECONDS, 30),
+    maxAnalysisDataGapSeconds: number(process.env.SCALP_MAX_ANALYSIS_DATA_GAP_SECONDS, 60),
     cooldownAfterLossMinutes: number(process.env.SCALP_COOLDOWN_AFTER_LOSS_MINUTES, 15),
     maxConsecutiveLosses: number(process.env.SCALP_MAX_CONSECUTIVE_LOSSES, 3),
     lossCircuitBreakerCount: number(process.env.SCALP_LOSS_CIRCUIT_BREAKER_COUNT, 0),
@@ -123,6 +124,20 @@ async function main() {
   const markets = await selectMarkets(upbit);
   const config = { ...baseConfig(unit), candleUnit: unit };
   const fixedConfigValidation = process.env.SCALP_VALIDATION_FIXED === 'true';
+  const requireStatisticalConfidence = fixedConfigValidation &&
+    process.env.SCALP_VALIDATION_REQUIRE_STATISTICAL_CONFIDENCE !== 'false';
+  const minimumTrainingConfidenceTrades = number(
+    process.env.SCALP_VALIDATION_MIN_TRAINING_CONFIDENCE_TRADES,
+    10
+  );
+  const minimumValidationConfidenceTrades = number(
+    process.env.SCALP_VALIDATION_MIN_CONFIDENCE_TRADES,
+    20
+  );
+  const minimumConfidenceLowerBoundPercent = number(
+    process.env.SCALP_VALIDATION_MIN_CONFIDENCE_LOWER_PERCENT,
+    0
+  );
   const results = [];
 
   if (markets.length === 0) {
@@ -150,7 +165,12 @@ async function main() {
         minimumValidationTrades: number(process.env.SCALP_VALIDATION_MIN_TRADES, 10),
         minimumProfitFactor: number(process.env.SCALP_VALIDATION_MIN_PROFIT_FACTOR, 1.05),
         minimumReturnPercent: number(process.env.SCALP_VALIDATION_MIN_RETURN_PERCENT, 0.1),
-        maximumDrawdownPercent: number(process.env.SCALP_VALIDATION_MAX_DRAWDOWN, 15)
+        maximumDrawdownPercent: number(process.env.SCALP_VALIDATION_MAX_DRAWDOWN, 15),
+        maxTuningCandidates: number(process.env.SCALP_VALIDATION_MAX_CANDIDATES, 0),
+        requireStatisticalConfidence,
+        minimumTrainingConfidenceTrades,
+        minimumValidationConfidenceTrades,
+        minimumConfidenceLowerBoundPercent
       });
 
       results.push({ market, fetchedCandles: candles.length, validation });
@@ -178,6 +198,24 @@ async function main() {
     config,
     markets,
     results,
+    statisticalConfidence: {
+      required: requireStatisticalConfidence,
+      method: 'one_sided_t_mean',
+      confidenceLevel: 0.95,
+      minimumTrainingTrades: minimumTrainingConfidenceTrades,
+      minimumValidationTrades: minimumValidationConfidenceTrades,
+      minimumLowerBoundPercent: minimumConfidenceLowerBoundPercent,
+      passed: requireStatisticalConfidence
+        ? results.length === markets.length &&
+          results.length > 0 &&
+          results.every(result => {
+            const gate = result.validation?.gate?.statisticalConfidence;
+            return gate?.required === true &&
+              gate.training?.passed === true &&
+              gate.validation?.passed === true;
+          })
+        : false
+    },
     promotedMarkets: results.filter(result => result.validation?.promoted).map(result => result.market),
     promoted: results.length === markets.length &&
       results.length > 0 &&

@@ -114,6 +114,7 @@ function baseConfig() {
     maxLosingHoldMinutes: number(process.env.SCALP_MAX_LOSING_HOLD_MINUTES, 0),
     maxEntriesPerSignalWindow: number(process.env.SCALP_MAX_ENTRIES_PER_SIGNAL_WINDOW, 0),
     maxRiskDataGapSeconds: number(process.env.SCALP_MAX_RISK_DATA_GAP_SECONDS, 30),
+    maxAnalysisDataGapSeconds: number(process.env.SCALP_MAX_ANALYSIS_DATA_GAP_SECONDS, 60),
     cooldownAfterLossMinutes: number(process.env.SCALP_COOLDOWN_AFTER_LOSS_MINUTES, 15),
     maxConsecutiveLosses: number(process.env.SCALP_MAX_CONSECUTIVE_LOSSES, 3),
     lossCircuitBreakerCount: number(process.env.SCALP_LOSS_CIRCUIT_BREAKER_COUNT, 0),
@@ -206,6 +207,10 @@ async function main() {
     minimumProfitFactor: number(process.env.SCALP_VALIDATION_MIN_PROFIT_FACTOR, 1.05),
     minimumReturnPercent: number(process.env.SCALP_VALIDATION_MIN_RETURN_PERCENT, 0.1),
     maximumDrawdownPercent: number(process.env.SCALP_VALIDATION_MAX_DRAWDOWN, 15),
+    requireStatisticalConfidence: process.env.SCALP_VALIDATION_REQUIRE_STATISTICAL_CONFIDENCE !== 'false',
+    minimumTrainingConfidenceTrades: number(process.env.SCALP_VALIDATION_MIN_TRAINING_CONFIDENCE_TRADES, 10),
+    minimumValidationConfidenceTrades: number(process.env.SCALP_VALIDATION_MIN_CONFIDENCE_TRADES, 20),
+    minimumConfidenceLowerBoundPercent: number(process.env.SCALP_VALIDATION_MIN_CONFIDENCE_LOWER_PERCENT, 0),
     foldCount: foldCount || undefined,
     initialTrainRatio: number(process.env.SCALP_PORTFOLIO_INITIAL_TRAIN_RATIO, 0.5)
   };
