@@ -13,6 +13,8 @@
 
 ## Latest evidence
 
+- `maxLosingHoldMinutes` fixed-cache holdout sweep (14d BTC/ETH/XRP, 20,160 candles, `/tmp/mlh-sweep-*.json`): baseline `-0.1147%`/23 trades vs 3m `-0.1155%`, 5m `-0.1101%`, 10m `-0.1058%`/22 trades each. All negative and inside noise; every row failed the training gate. The candidate stays disabled at `0`; per the one-shot holdout rule it is now closed unless new forward evidence reopens it.
+- Cross-ledger forward aggregate (v5-v59): strict 19 closes, `-623.03 KRW` cumulative; shadow 135 closes `-16,198 KRW`, loose 138 closes `-15,823 KRW`. Relaxed cohorts lose ~3.5x more per trade — loosening filters remains disproven. All strict net loss came from 3 STOP_LOSS exits; MAX_HOLD exits drift at fee level.
 - v4 shadow: 8 closed trades, 4 wins/4 losses, `+8.90 KRW`; relaxed shadow: 6 closed trades, 3 wins/3 losses, `-26.93 KRW`. Neither is promotion evidence.
 - v5 is an isolated 20-market forward session using the timeout-hardened client. Strict, shadow, and loose cohorts remain separate; no live order path is enabled.
 - v5 strict remains at 1 close, `KRW-WLD` 593 → 585, net `-289.53 KRW` / `-1.448%`. Its shadow has 5 closes, 2 wins/3 losses, net `+114.44 KRW`; loose shadow has 4 closes, 2 wins/2 losses, net `+135.86 KRW`. The paired observations include RAY `-310.53 KRW` in roughly two minutes and MIRA `-1.18 KRW` after max hold. The mixed small sample is not profitability evidence.
