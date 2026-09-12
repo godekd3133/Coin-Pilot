@@ -159,7 +159,8 @@ export default function createPortfolioRoutes(server) {
         return res.json({ success: false, message: '거래 시스템 미초기화', dataPoints: 0 });
       }
 
-      const historyFile = path.join(PROJECT_ROOT, 'portfolio_history.json');
+      const historyFile = server.tradingSystem.portfolioHistoryFile ||
+        path.join(PROJECT_ROOT, 'portfolio_history.json');
       let history = [];
 
       if (fs.existsSync(historyFile)) {
@@ -228,7 +229,8 @@ export default function createPortfolioRoutes(server) {
   // 자산 추이 조회
   router.get('/portfolio/history', (req, res) => {
     try {
-      const historyFile = path.join(PROJECT_ROOT, 'portfolio_history.json');
+      const historyFile = server.tradingSystem.portfolioHistoryFile ||
+        path.join(PROJECT_ROOT, 'portfolio_history.json');
       const period = req.query.period || '24h';
 
       if (!fs.existsSync(historyFile)) {

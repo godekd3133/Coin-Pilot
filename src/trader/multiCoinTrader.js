@@ -21,6 +21,13 @@ import {
   recordRiskMonitorSuccess,
   resolveMaxRiskDataGapSeconds
 } from '../risk/riskMonitor.js';
+import {
+  createAnalysisDataHealthState,
+  getAnalysisDataHealthStatus,
+  recordAnalysisDataFailure,
+  recordAnalysisDataSuccess,
+  resolveMaxAnalysisDataGapSeconds
+} from '../risk/analysisDataHealth.js';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
@@ -253,10 +260,16 @@ class MultiCoinTrader {
       config.maxRiskDataGapSeconds,
       this.isScalpingMode ? 30 : 0
     );
+    this.maxAnalysisDataGapSeconds = resolveMaxAnalysisDataGapSeconds(
+      config.maxAnalysisDataGapSeconds,
+      this.isScalpingMode ? 60 : 0
+    );
+    this.config.maxAnalysisDataGapSeconds = this.maxAnalysisDataGapSeconds;
     this.positionRiskTimer = null;
     this._riskCheckInProgress = false;
     this._orderInProgress = false;
     this._stopRequested = false;
+    this.stopReason = null;
     this.cycleRequestStats = null;
     this.runtimeSignalWindowEntryCounts = new Map();
 
@@ -283,6 +296,9 @@ class MultiCoinTrader {
     this.paperValidationFile = config.paperValidationFile ||
       process.env.PAPER_VALIDATION_FILE ||
       (testStoragePrefix ? `${testStoragePrefix}.paper_validation.json` : 'paper_validation.json');
+    this.portfolioHistoryFile = config.portfolioHistoryFile ||
+      process.env.PORTFOLIO_HISTORY_FILE ||
+      'portfolio_history.json';
     // Live mode has no paper ledger, so keep its optional global circuit in
     // memory. DRY_RUN forward sessions replace this reference with their
     // persisted strictRiskState circuit through getStrictLossCircuitBreakerState().
@@ -298,6 +314,7 @@ class MultiCoinTrader {
 
     this.paperValidation = this.loadPaperValidation();
     this.riskMonitorState = createRiskMonitorState(this.paperValidation?.riskMonitor);
+    this.analysisDataHealthState = createAnalysisDataHealthState(this.paperValidation?.analysisDataHealth);
     this.restorePaperStrategyRiskState();
 
     // 동적 투자금액 설정 (비율 기반으로 단순화)
@@ -997,7 +1014,9 @@ class MultiCoinTrader {
 
   getPaperValidationConfigSnapshot() {
     const config = this.config || {};
-    const numericOrNull = value => Number.isFinite(Number(value)) ? Number(value) : null;
+    const numericOrNull = value => value === null || value === undefined || value === ''
+      ? null
+      : Number.isFinite(Number(value)) ? Number(value) : null;
     const lossCircuitConfig = resolveLossCircuitBreakerConfig(config);
     return {
       strategyMode: this.strategyMode,
@@ -1043,6 +1062,7 @@ class MultiCoinTrader {
       entryDelayMinMs: numericOrNull(config.entryDelayMinMs),
       entryDelayMaxMs: numericOrNull(config.entryDelayMaxMs),
       maxRiskDataGapSeconds: numericOrNull(this.maxRiskDataGapSeconds),
+      maxAnalysisDataGapSeconds: numericOrNull(this.maxAnalysisDataGapSeconds),
       maxEntryRetracePercent: numericOrNull(config.maxEntryRetracePercent),
       maxEntryChasePercent: numericOrNull(config.maxEntryChasePercent),
       breakEvenTriggerPercent: numericOrNull(config.breakEvenTriggerPercent),
@@ -1061,7 +1081,8 @@ class MultiCoinTrader {
     const currentSnapshot = this.getPaperValidationConfigSnapshot();
     const backwardCompatibleDefaults = {
       maxEntriesPerSignalWindow: 0,
-      maxRiskDataGapSeconds: this.isScalpingMode ? 30 : 0
+      maxRiskDataGapSeconds: this.isScalpingMode ? 30 : 0,
+      maxAnalysisDataGapSeconds: this.isScalpingMode ? 60 : 0
     };
     const keys = new Set([
       ...Object.keys(recordedSnapshot),
@@ -1288,13 +1309,28 @@ class MultiCoinTrader {
       throw new Error('실전 모드에서는 forward paper 세션을 시작할 수 없습니다.');
     }
 
-    if (this.paperValidation?.active === false && this.paperValidation.endedWithOpenPositions === true &&
+    const previousDiagnosticOpenPositions = this.getPaperDiagnosticOpenPositionSnapshot();
+    const previousContinuityInvalid = this.paperValidation?.riskMonitor?.continuityEligible === false ||
+      this.paperValidation?.analysisDataHealth?.continuityEligible === false ||
+      this.paperValidation?.continuityEligible === false;
+    const previousSessionUnsettled = this.paperValidation?.endedWithOpenPositions === true ||
+      this.paperValidation?.endedWithDiagnosticOpenPositions === true ||
+      previousDiagnosticOpenPositions.length > 0 ||
+      previousContinuityInvalid;
+    if (this.paperValidation?.active === false && previousSessionUnsettled &&
       options.reset !== true && options.allowUnsettledResume !== true) {
-      const openCoins = (this.paperValidation.strictOpenPositions || [])
+      const strictCoins = (this.paperValidation.strictOpenPositions || [])
         .map(position => position.coin)
-        .filter(Boolean)
-        .join(', ');
-      throw new Error(`이전 paper 세션이 strict 미청산 포지션(${openCoins || '확인 필요'})을 남긴 채 종료되었습니다. 새 시드 reset 또는 allowUnsettledResume=true를 명시하세요.`);
+        .filter(Boolean);
+      const diagnosticCoins = previousDiagnosticOpenPositions
+        .map(position => `${position.book}:${position.coin}`)
+        .filter(Boolean);
+      const details = [
+        strictCoins.length > 0 ? `strict 미청산 포지션(${strictCoins.join(', ')})` : null,
+        diagnosticCoins.length > 0 ? `진단 미청산 포지션(${diagnosticCoins.join(', ')})` : null,
+        previousContinuityInvalid ? '연속성 무효화' : null
+      ].filter(Boolean).join(', ');
+      throw new Error(`이전 paper 세션이 ${details || '재사용 불가 상태'}입니다. 새 출력 디렉터리를 사용하거나 reset 또는 allowUnsettledResume=true를 명시하세요.`);
     }
 
     const shouldReset = options.reset === true;
@@ -1305,9 +1341,11 @@ class MultiCoinTrader {
 
     const baselineAssets = await this.calculateTotalAssets();
     const startedAt = new Date().toISOString();
+    this.stopReason = null;
     this.riskMonitorState = createRiskMonitorState();
+    this.analysisDataHealthState = createAnalysisDataHealthState();
     this.paperValidation = {
-      schemaVersion: 3,
+      schemaVersion: 4,
       sessionId: `paper-${Date.now()}`,
       active: true,
       startedAt,
@@ -1330,6 +1368,7 @@ class MultiCoinTrader {
       },
       interruptions: [],
       riskMonitor: { ...this.riskMonitorState },
+      analysisDataHealth: { ...this.analysisDataHealthState },
       telemetry: {
         cycles: 0,
         buyCandidates: 0,
@@ -1360,12 +1399,19 @@ class MultiCoinTrader {
         shadowMarketRegimeBlockedEntries: 0,
         looseShadowMarketRegimeBlockedEntries: 0,
         shadowCandidates: 0,
+        oversoldObservations: 0,
+        strictReboundCandidates: 0,
+        strictConfirmedCandidates: 0,
         sellSignals: 0,
         holdDecisions: 0,
         reasonCounts: {},
         rejectionCounts: {},
         shadowCandidatesByCoin: {},
         lastMarketRegime: null,
+        analysisIncompleteCycles: 0,
+        analysisMissingMarkets: 0,
+        lastIncompleteAnalysis: null,
+        analysisDataHealth: { ...this.analysisDataHealthState },
         lastCycleAt: null,
         lastBuyCandidateAt: null,
         requestStats: {
@@ -1429,11 +1475,22 @@ class MultiCoinTrader {
       return { available: false, active: false };
     }
     const strictOpenPositions = this.getStrictOpenPositionSnapshot();
+    const diagnosticOpenPositions = this.getPaperDiagnosticOpenPositionSnapshot();
     this.paperValidation.strictOpenPositions = strictOpenPositions;
     this.paperValidation.endedWithOpenPositions = strictOpenPositions.length > 0;
-    this.paperValidation.stopReason = this.paperValidation.endedWithOpenPositions
-      ? 'stopped_with_unsettled_strict_positions'
-      : 'stopped_cleanly';
+    this.paperValidation.endedWithDiagnosticOpenPositions = diagnosticOpenPositions.length > 0;
+    this.paperValidation.diagnosticOpenPositionsAtStop = diagnosticOpenPositions;
+    const continuityStopReason = this.paperValidation.riskMonitor?.continuityEligible === false
+      ? 'risk_data_gap'
+      : this.paperValidation.analysisDataHealth?.continuityEligible === false
+        ? 'analysis_data_gap'
+        : null;
+    this.paperValidation.stopReason = this.stopReason || continuityStopReason ||
+      (this.paperValidation.endedWithOpenPositions
+        ? 'stopped_with_unsettled_strict_positions'
+        : diagnosticOpenPositions.length > 0
+          ? 'stopped_with_unsettled_diagnostic_positions'
+          : 'stopped_cleanly');
     this.paperValidation.active = false;
     this.paperValidation.endedAt = new Date().toISOString();
     this.savePaperValidation();
@@ -1491,6 +1548,9 @@ class MultiCoinTrader {
       shadowMarketRegimeBlockedEntries: 0,
       looseShadowMarketRegimeBlockedEntries: 0,
       shadowCandidates: 0,
+      oversoldObservations: 0,
+      strictReboundCandidates: 0,
+      strictConfirmedCandidates: 0,
       sellSignals: 0,
       holdDecisions: 0,
       reasonCounts: {},
@@ -1529,6 +1589,9 @@ class MultiCoinTrader {
     };
     telemetry.lastCandleFreshnessBlock = telemetry.lastCandleFreshnessBlock || null;
     telemetry.shadowCandidatesByCoin = telemetry.shadowCandidatesByCoin || {};
+    telemetry.oversoldObservations = Number(telemetry.oversoldObservations) || 0;
+    telemetry.strictReboundCandidates = Number(telemetry.strictReboundCandidates) || 0;
+    telemetry.strictConfirmedCandidates = Number(telemetry.strictConfirmedCandidates) || 0;
     telemetry.lastMarketRegime = telemetry.lastMarketRegime || null;
     telemetry.circuitBlockedEntries = Number(telemetry.circuitBlockedEntries) || 0;
     telemetry.candleFreshnessBlockedEntries = Number(telemetry.candleFreshnessBlockedEntries) || 0;
@@ -1574,6 +1637,15 @@ class MultiCoinTrader {
       const rebound = analysis?.decision?.details?.rebound;
       const candleFreshEnough = analysis?.candleFreshness?.valid !== false &&
         analysis?.decision?.details?.candleFreshness?.valid !== false;
+      if (candleFreshEnough && rebound?.previousWasOversold === true) {
+        telemetry.oversoldObservations += 1;
+      }
+      if (candleFreshEnough && rebound?.previousWasOversold === true && rebound.bullishCandle === true) {
+        telemetry.strictReboundCandidates += 1;
+      }
+      if (candleFreshEnough && rebound?.reboundConfirmed === true) {
+        telemetry.strictConfirmedCandidates += 1;
+      }
       const regimeAllowsEntry = this.config.marketRegimeEnabled !== true ||
         analysis?.decision?.details?.marketRegime?.confirmed === true;
       for (const rejectionReason of rebound?.rejectionReasons || []) {
@@ -1819,6 +1891,23 @@ class MultiCoinTrader {
         };
       })
       .sort((a, b) => a.coin.localeCompare(b.coin));
+  }
+
+  getPaperDiagnosticOpenPositionSnapshot() {
+    if (!this.paperValidation) return [];
+    const positions = [];
+    for (const stateKey of ['shadow', 'looseShadow']) {
+      const book = this.paperValidation[stateKey];
+      for (const [coin, position] of Object.entries(book?.positions || {})) {
+        if (!position || typeof position !== 'object') continue;
+        positions.push({
+          book: stateKey,
+          coin: position.coin || coin,
+          ...position
+        });
+      }
+    }
+    return positions.sort((a, b) => `${a.book}:${a.coin}`.localeCompare(`${b.book}:${b.coin}`));
   }
 
   /**
@@ -2115,6 +2204,9 @@ class MultiCoinTrader {
     const ownerProcessAlive = this.isProcessAlive(session.processId);
     const orphaned = session.active === true &&
       (ownerProcessAlive === false || heartbeatAgeMs > heartbeatLimitMs);
+    const orphanReason = orphaned
+      ? ownerProcessAlive === false ? 'owner_process_missing' : 'heartbeat_stale'
+      : null;
     const configComparison = this.comparePaperValidationConfig(session.configSnapshot);
     const configSnapshotComplete = session.configSnapshotComplete === true;
     const snapshots = [
@@ -2165,6 +2257,8 @@ class MultiCoinTrader {
       : (Array.isArray(session.strictOpenPositions) ? session.strictOpenPositions : []);
 
     const realizedProfit = startedTrades.reduce((sum, trade) => sum + (Number(trade.profit) || 0), 0);
+    const strictWinningTrades = startedTrades.filter(trade => Number(trade.profit) > 0).length;
+    const strictLosingTrades = startedTrades.filter(trade => Number(trade.profit) <= 0).length;
     const shadow = session.shadow || {};
     const shadowClosedTrades = Array.isArray(shadow.closedTrades) ? shadow.closedTrades : [];
     const shadowRealizedProfit = Number(shadow.realizedProfit) || 0;
@@ -2230,13 +2324,22 @@ class MultiCoinTrader {
     const interruptions = Array.isArray(session.interruptions) ? session.interruptions : [];
     const maxHeartbeatGapMinutes = Number(thresholds.maxHeartbeatGapMinutes) || 15;
     const maxAllowedHeartbeatGapMs = maxHeartbeatGapMinutes * 60 * 1000;
-    const continuityEligible = interruptions.every(interruption =>
+    const heartbeatContinuityEligible = !orphaned && interruptions.every(interruption =>
       Number(interruption.gapMs) <= maxAllowedHeartbeatGapMs
     );
     const riskMonitor = this.getRiskMonitorStatus();
+    const analysisDataHealth = this.getAnalysisDataHealthStatus();
+    const currentDiagnosticOpenPositions = this.getPaperDiagnosticOpenPositionSnapshot();
+    const endedWithOpenPositions = session.endedWithOpenPositions === true ||
+      (orphaned && strictOpenPositions.length > 0);
+    const endedWithDiagnosticOpenPositions = session.endedWithDiagnosticOpenPositions === true ||
+      ((session.active === false || orphaned) && currentDiagnosticOpenPositions.length > 0);
+    const continuityEligible = heartbeatContinuityEligible &&
+      riskMonitor.continuityEligible &&
+      analysisDataHealth.continuityEligible;
     const eligible = !orphaned &&
       continuityEligible &&
-      riskMonitor.continuityEligible &&
+      !endedWithDiagnosticOpenPositions &&
       configSnapshotComplete &&
       configComparison.consistent === true &&
       elapsedDays >= (Number(thresholds.minDays) || 7) &&
@@ -2244,7 +2347,26 @@ class MultiCoinTrader {
       returnPercent >= (Number(thresholds.minReturnPercent) || 0.2) &&
       maxDrawdownPercent <= (Number(thresholds.maxDrawdownPercent) || 15);
     const telemetry = session.telemetry || null;
-    const filterStarvation = Boolean(telemetry && telemetry.cycles >= 20 && telemetry.buyCandidates === 0);
+    const strictReboundCandidates = telemetry && Number.isFinite(Number(telemetry.strictReboundCandidates))
+      ? Number(telemetry.strictReboundCandidates)
+      : Number(telemetry?.shadowCandidates) || 0;
+    const strictConfirmedCandidates = telemetry && Number.isFinite(Number(telemetry.strictConfirmedCandidates))
+      ? Number(telemetry.strictConfirmedCandidates)
+      : 0;
+    const oversoldObservations = telemetry && Number.isFinite(Number(telemetry.oversoldObservations))
+      ? Number(telemetry.oversoldObservations)
+      : strictReboundCandidates;
+    // A quiet market (no prior oversold + bullish rebound candidates) is not
+    // filter starvation. Only show tuning guidance when a real strict
+    // rebound candidate existed, no strict candidate was confirmed, and no
+    // BUY was emitted. This prevents automatic-looking advice from turning a
+    // normal lack of setups into an unjustified parameter relaxation.
+    const filterStarvation = Boolean(telemetry && telemetry.cycles >= 20 &&
+      telemetry.buyCandidates === 0 && strictReboundCandidates > 0 &&
+      strictConfirmedCandidates === 0);
+    const marketQuiet = Boolean(telemetry && telemetry.cycles >= 20 &&
+      telemetry.buyCandidates === 0 && strictReboundCandidates === 0 &&
+      strictConfirmedCandidates === 0);
     const suggestedAdjustments = [];
     if (filterStarvation) {
       const reasonCounts = telemetry.reasonCounts || {};
@@ -2326,6 +2448,7 @@ class MultiCoinTrader {
       processId: session.processId || null,
       processAlive: ownerProcessAlive,
       elapsedDays,
+      orphanReason,
       baselineAssets,
       currentAssets,
       returnPercent,
@@ -2333,7 +2456,12 @@ class MultiCoinTrader {
       closedTradeCount: startedTrades.length,
       maxDrawdownPercent,
       baselineIncludesHoldings: session.baselineIncludesHoldings === true,
-      endedWithOpenPositions: session.endedWithOpenPositions === true,
+      endedWithOpenPositions,
+      endedWithDiagnosticOpenPositions,
+      diagnosticOpenPositions: currentDiagnosticOpenPositions,
+      diagnosticOpenPositionsAtStop: Array.isArray(session.diagnosticOpenPositionsAtStop)
+        ? session.diagnosticOpenPositionsAtStop
+        : [],
       stopReason: session.stopReason || null,
       thresholds,
       snapshotCount: snapshots.length,
@@ -2345,13 +2473,20 @@ class MultiCoinTrader {
       strictEvaluation: {
         activePositions: strictOpenPositions.length,
         positions: strictOpenPositions,
+        closedTradeCount: startedTrades.length,
+        realizedProfit,
+        winningTrades: strictWinningTrades,
+        losingTrades: strictLosingTrades,
+        winRate: startedTrades.length > 0 ? (strictWinningTrades / startedTrades.length) * 100 : null,
         lossCircuitBreaker: strictLossCircuitBreaker,
         note: '현재 프로세스의 strict 전략 포지션 snapshot입니다. 청산 전 손익은 currentAssets/returnPercent에 평가손익으로 반영됩니다.'
       },
       heartbeatAt,
       heartbeatAgeMs,
+      heartbeatContinuityEligible,
       continuityEligible,
       riskMonitor,
+      analysisDataHealth,
       interruptionCount: interruptions.length,
       maxInterruptionMinutes: interruptions.length > 0
         ? Math.max(...interruptions.map(interruption => Number(interruption.gapMs) || 0)) / 60000
@@ -2443,6 +2578,12 @@ class MultiCoinTrader {
         note: '더 완화된 후보를 별도 추적한 진단용 장부이며 strict paper 자산·승격 판정에 포함하지 않습니다.'
       },
       filterStarvation,
+      marketQuiet,
+      signalAvailability: {
+        oversoldObservations,
+        strictReboundCandidates,
+        strictConfirmedCandidates
+      },
       suggestedAdjustments
     };
   }
@@ -2578,13 +2719,15 @@ class MultiCoinTrader {
       'entryDelayMinMs',
       'entryDelayMaxMs',
       'maxRiskDataGapSeconds',
+      'maxAnalysisDataGapSeconds',
       'maxEntryRetracePercent',
       'maxEntryChasePercent',
       'maxCandleAgeSeconds'
     ];
     const reportConfig = report.config || {};
     const backwardCompatibleReportDefaults = {
-      maxRiskDataGapSeconds: 30
+      maxRiskDataGapSeconds: 30,
+      maxAnalysisDataGapSeconds: this.isScalpingMode ? 60 : 0
     };
     const missingKeys = comparableKeys.filter(key =>
       reportConfig[key] === undefined &&
@@ -2603,6 +2746,22 @@ class MultiCoinTrader {
       });
     if (configDrift.length > 0) {
       throw new Error(`실전 스캘핑 차단: validation report와 현재 runtime 설정이 다릅니다 (${configDrift.join(', ')}). fixed validation을 다시 실행하세요.`);
+    }
+
+    const confidenceSummary = report.statisticalConfidence;
+    const confidenceRowsComplete = Array.isArray(report.results) &&
+      report.results.length === report.markets.length &&
+      report.results.every(result => {
+        const gate = result.validation?.gate?.statisticalConfidence;
+        return gate?.required === true &&
+          gate.training?.passed === true &&
+          gate.validation?.passed === true;
+      });
+    if (confidenceSummary?.required !== true ||
+      confidenceSummary?.method !== 'one_sided_t_mean' ||
+      confidenceSummary?.passed !== true ||
+      !confidenceRowsComplete) {
+      throw new Error('실전 스캘핑 차단: 95% 거래수익 신뢰도 게이트가 없거나 통과하지 않았습니다. 최신 fixed validation을 다시 실행하세요.');
     }
 
     if (report.promoted !== true) {
@@ -2661,13 +2820,118 @@ class MultiCoinTrader {
     const result = this.recordRiskMonitorFailure(error);
     if (result.failClosed && this.isRunning) {
       console.error(`\n🛑 리스크 시세 공백 ${result.outageDurationSeconds.toFixed(1)}초 초과 - 신규 매매와 paper 관찰을 중지합니다.`);
-      this.stop();
+      this.stop('risk_data_gap');
     }
     return result;
   }
 
-  stop() {
+  syncAnalysisDataHealthState() {
+    if (!this.paperValidation) return;
+    this.paperValidation.analysisDataHealth = { ...this.analysisDataHealthState };
+    this.paperValidation.telemetry = this.paperValidation.telemetry || {};
+    this.paperValidation.telemetry.analysisDataHealth = { ...this.analysisDataHealthState };
+  }
+
+  getAnalysisDataHealthStatus(now = Date.now()) {
+    return getAnalysisDataHealthStatus(
+      this.analysisDataHealthState,
+      now,
+      this.maxAnalysisDataGapSeconds
+    );
+  }
+
+  /**
+   * A cycle is complete only when every configured market returned a usable
+   * analysis object. A batch ticker failure is acceptable when all individual
+   * fallbacks recover; a partial market set is not valid forward evidence.
+   */
+  recordAnalysisDataHealth(coinAnalyses = [], now = Date.now()) {
+    const expectedMarkets = [...new Set((this.targetCoins || [])
+      .map(coin => String(coin || '').trim().toUpperCase())
+      .filter(Boolean))];
+    const analyzedMarkets = new Set((Array.isArray(coinAnalyses) ? coinAnalyses : [])
+      .map(analysis => String(analysis?.coin || '').trim().toUpperCase())
+      .filter(Boolean));
+    const missingMarkets = expectedMarkets.filter(coin => !analyzedMarkets.has(coin));
+    const details = {
+      expectedMarketCount: expectedMarkets.length,
+      analyzedMarketCount: analyzedMarkets.size,
+      missingMarkets
+    };
+    if (missingMarkets.length === 0) {
+      this.analysisDataHealthState = recordAnalysisDataSuccess(
+        this.analysisDataHealthState,
+        details,
+        now
+      );
+      this.syncAnalysisDataHealthState();
+      return {
+        complete: true,
+        ...details,
+        status: this.getAnalysisDataHealthStatus(now),
+        failClosed: false
+      };
+    }
+
+    const result = recordAnalysisDataFailure(
+      this.analysisDataHealthState,
+      details,
+      now,
+      this.maxAnalysisDataGapSeconds
+    );
+    this.analysisDataHealthState = result.state;
+    this.syncAnalysisDataHealthState();
+    return {
+      complete: false,
+      ...details,
+      ...result,
+      status: this.getAnalysisDataHealthStatus(now)
+    };
+  }
+
+  recordPaperIncompleteAnalysisTelemetry(analysisHealth) {
+    if (!this.dryRun || !this.paperValidation?.active || analysisHealth?.complete === true) return;
+    const telemetry = this.paperValidation.telemetry || {};
+    telemetry.analysisIncompleteCycles = Number(telemetry.analysisIncompleteCycles) || 0;
+    telemetry.analysisMissingMarkets = Number(telemetry.analysisMissingMarkets) || 0;
+    telemetry.analysisIncompleteCycles += 1;
+    telemetry.analysisMissingMarkets += analysisHealth.missingMarkets?.length || 0;
+    telemetry.lastIncompleteAnalysis = {
+      at: new Date().toISOString(),
+      expectedMarketCount: analysisHealth.expectedMarketCount,
+      analyzedMarketCount: analysisHealth.analyzedMarketCount,
+      missingMarkets: analysisHealth.missingMarkets || [],
+      gapDurationSeconds: analysisHealth.gapDurationSeconds,
+      failClosed: analysisHealth.failClosed === true
+    };
+    telemetry.reasonCounts = telemetry.reasonCounts || {};
+    const reason = `분석 데이터 불완전 - ${analysisHealth.missingMarkets?.join(', ') || '시장 응답 없음'}`;
+    telemetry.reasonCounts[reason] = (telemetry.reasonCounts[reason] || 0) + 1;
+    telemetry.requestStats = telemetry.requestStats || {
+      batchTickerRequests: 0,
+      individualTickerRequests: 0,
+      candleRequests: 0,
+      batchTickerFailures: 0
+    };
+    const requestStats = this.cycleRequestStats || {};
+    for (const key of ['batchTickerRequests', 'individualTickerRequests', 'candleRequests', 'batchTickerFailures']) {
+      telemetry.requestStats[key] = (Number(telemetry.requestStats[key]) || 0) + (Number(requestStats[key]) || 0);
+    }
+    this.cycleRequestStats = null;
+    const now = new Date().toISOString();
+    telemetry.cycles = (Number(telemetry.cycles) || 0) + 1;
+    telemetry.lastCycleAt = now;
+    telemetry.heartbeatAt = now;
+    this.paperValidation.heartbeatAt = now;
+    telemetry.analysisDataHealth = { ...this.analysisDataHealthState };
+    this.paperValidation.telemetry = telemetry;
+    this.paperValidation.lastTelemetryPersistedAt = now;
+    this.savePaperValidation();
+  }
+
+  stop(reason = null) {
     console.log('\n⏹️  다중 코인 자동매매 시스템 중지');
+    if (reason) this.stopReason = reason;
     this._stopRequested = true;
     this.isRunning = false;
     this.stopPositionRiskMonitor();
@@ -2961,6 +3225,16 @@ class MultiCoinTrader {
       } catch (error) {
         console.error(`\n❌ ${coin} 분석 오류:`, error.message);
       }
+    }
+
+    const analysisDataHealth = this.recordAnalysisDataHealth(coinAnalyses);
+    if (!analysisDataHealth.complete) {
+      this.recordPaperIncompleteAnalysisTelemetry(analysisDataHealth);
+      if (analysisDataHealth.failClosed && this.isRunning) {
+        console.error(`\n🛑 분석 데이터 공백 ${analysisDataHealth.gapDurationSeconds.toFixed(1)}초 초과 - paper/live 관찰을 중지합니다.`);
+        this.stop('analysis_data_gap');
+      }
+      return;
     }
 
     const marketRegime = summarizeLiveMarketRegime(coinAnalyses, this.config);

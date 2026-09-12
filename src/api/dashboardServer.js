@@ -232,6 +232,23 @@ class DashboardServer {
   }
 
   setupRoutes() {
+    if (this.tradingSystem?.readOnlyObserver) {
+      this.app.use('/api', (req, res, next) => {
+        // Portfolio snapshots are allowed because the observer redirects them
+        // to its isolated history file; every other non-read request could
+        // mutate the mock wallet, config, paper session, or invoke an order.
+        if (['GET', 'HEAD', 'OPTIONS'].includes(req.method) ||
+          (req.method === 'POST' && req.path === '/portfolio/snapshot')) {
+          return next();
+        }
+        return res.status(403).json({
+          success: false,
+          readOnlyObserver: true,
+          error: '읽기 전용 forward ledger observer에서는 변경 요청을 사용할 수 없습니다.'
+        });
+      });
+    }
+
     // ========================================
     // 모듈화된 라우트 마운트
     // ========================================
@@ -328,6 +345,7 @@ class DashboardServer {
         res.json({
           isRunning: this.tradingSystem.isRunning,
           mode: this.tradingSystem.dryRun ? 'DRY_RUN' : 'LIVE',
+          readOnlyObserver: this.tradingSystem.readOnlyObserver === true,
           strategyMode: this.tradingSystem.strategyMode,
           maxPositions: this.tradingSystem.maxPositions,
           entryDelayMs: this.tradingSystem.isScalpingMode

@@ -40,6 +40,7 @@ export default function createConfigRoutes(server) {
       marketRegimeMinReturnPercent: { min: -10, max: 10, step: 0.1, label: '시장 최소 수익률 (%)', description: 'regime breadth에 포함할 마켓의 lookback 수익률 하한', category: 'Risk' },
       positionRiskCheckIntervalMs: { min: 250, max: 10000, step: 250, label: '포지션 리스크 확인 주기 (ms)', description: '열린 포지션의 손절·익절·최대보유시간을 독립 확인하는 주기', category: 'Risk' },
       maxRiskDataGapSeconds: { min: 5, max: 600, step: 5, label: '리스크 시세 공백 한도 (초)', description: '열린 포지션의 ticker 확인이 이 시간보다 끊기면 paper/live 매매를 fail-closed로 중지합니다', category: 'Risk' },
+      maxAnalysisDataGapSeconds: { min: 5, max: 600, step: 5, label: '분석 데이터 공백 한도 (초)', description: '전체 시장 분석이 불완전한 상태로 이 시간 이상 이어지면 paper/live 관찰을 fail-closed로 중지합니다', category: 'Risk' },
       maxCandleAgeSeconds: { min: 60, max: 900, step: 30, label: '최대 캔들 신선도 (초)', description: '진입 시 최신 캔들 시각이 이보다 오래되면 안전하게 진입을 차단합니다 (1분봉 기본 90초)', category: 'Risk' },
       entryDelayMinMs: { min: 1000, max: 5000, step: 100, label: '최소 진입 지연 (ms)', description: '반등 확인 후 최소 재검증 대기 시간', category: 'Scalping' },
       entryDelayMaxMs: { min: 1000, max: 5000, step: 100, label: '최대 진입 지연 (ms)', description: '반등 확인 후 최대 재검증 대기 시간', category: 'Scalping' },
@@ -286,6 +287,7 @@ export default function createConfigRoutes(server) {
           'lossCircuitBreakerCooldownMinutes',
           'positionRiskCheckIntervalMs',
           'maxRiskDataGapSeconds',
+          'maxAnalysisDataGapSeconds',
           'maxCandleAgeSeconds'
         ];
         for (const key of scalpingKeys) {
@@ -324,6 +326,10 @@ export default function createConfigRoutes(server) {
               server.tradingSystem.config.maxCandleAgeSeconds = server.tradingSystem.maxCandleAgeSeconds;
             }
           }
+        }
+        if (config.maxAnalysisDataGapSeconds !== undefined) {
+          server.tradingSystem.maxAnalysisDataGapSeconds = Math.max(5, Number(config.maxAnalysisDataGapSeconds) || 60);
+          server.tradingSystem.config.maxAnalysisDataGapSeconds = server.tradingSystem.maxAnalysisDataGapSeconds;
         }
       }
 
@@ -374,6 +380,7 @@ export default function createConfigRoutes(server) {
             : null,
           positionRiskCheckIntervalMs: server.tradingSystem.positionRiskCheckIntervalMs,
           maxRiskDataGapSeconds: server.tradingSystem.maxRiskDataGapSeconds,
+          maxAnalysisDataGapSeconds: server.tradingSystem.maxAnalysisDataGapSeconds,
           maxPositions: server.tradingSystem.maxPositions
         } : null,
         minOrderAmount: 5000
@@ -457,6 +464,7 @@ export default function createConfigRoutes(server) {
         ['lossCircuitBreakerWindowMinutes', 1, 1440],
         ['lossCircuitBreakerCooldownMinutes', 1, 1440],
         ['maxRiskDataGapSeconds', 5, 600],
+        ['maxAnalysisDataGapSeconds', 5, 600],
         ['maxCandleAgeSeconds', 60, 900]
       ];
       for (const [key, min, max] of protectedRanges) {
@@ -497,6 +505,7 @@ export default function createConfigRoutes(server) {
           'maxLosingHoldMinutes',
           'maxEntriesPerSignalWindow',
           'maxRiskDataGapSeconds',
+          'maxAnalysisDataGapSeconds',
           'maxCandleAgeSeconds'
         ];
         for (const key of protectedKeys) {
@@ -522,6 +531,10 @@ export default function createConfigRoutes(server) {
             );
             server.tradingSystem.config.maxCandleAgeSeconds = server.tradingSystem.maxCandleAgeSeconds;
           }
+        }
+        if (newConfig.maxAnalysisDataGapSeconds !== undefined) {
+          server.tradingSystem.maxAnalysisDataGapSeconds = Math.max(5, Number(newConfig.maxAnalysisDataGapSeconds) || 60);
+          server.tradingSystem.config.maxAnalysisDataGapSeconds = server.tradingSystem.maxAnalysisDataGapSeconds;
         }
       }
 

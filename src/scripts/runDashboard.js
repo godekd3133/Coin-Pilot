@@ -1,4 +1,5 @@
 import dotenv from 'dotenv';
+import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import MultiCoinTrader from '../trader/multiCoinTrader.js';
@@ -6,6 +7,92 @@ import DashboardServer from '../api/dashboardServer.js';
 import { createLossCircuitBreakerState } from '../risk/lossCircuitBreaker.js';
 
 dotenv.config();
+
+/**
+ * Attach an existing forward-paper ledger to the dashboard's deterministic
+ * trader shell without allowing the UI to mutate that ledger. The observer
+ * reads the latest persisted asset snapshot instead of querying an account or
+ * creating a second trading process, so the displayed result remains tied to
+ * the exact forward session being evaluated.
+ */
+export function attachReadOnlyPaperLedger(trader, ledgerFile) {
+  const resolvedLedgerFile = path.resolve(ledgerFile);
+  const readLedger = () => {
+    const data = JSON.parse(fs.readFileSync(resolvedLedgerFile, 'utf8'));
+    if (!data || typeof data !== 'object' || !data.sessionId) {
+      throw new Error(`유효하지 않은 paper ledger: ${resolvedLedgerFile}`);
+    }
+    return data;
+  };
+
+  const originalGetPaperValidationStatus = trader.getPaperValidationStatus.bind(trader);
+  const applyLedgerConfig = ledger => {
+    const snapshot = ledger?.configSnapshot;
+    if (!snapshot || typeof snapshot !== 'object') return;
+
+    // The observer has no strategy loop of its own, but the status endpoint
+    // still compares the current runtime snapshot with the recorded session
+    // snapshot. Mirror the recorded values so a mock-shell default cannot be
+    // reported as configuration drift for the real observed session.
+    trader.config = { ...trader.config, ...snapshot };
+    trader.strategyMode = snapshot.strategyMode || trader.strategyMode;
+    trader.isScalpingMode = trader.strategyMode === 'oversold_reaction_scalping';
+    if (Array.isArray(snapshot.targetCoins)) trader.targetCoins = [...snapshot.targetCoins];
+    for (const key of [
+      'candleUnit',
+      'candleCount',
+      'maxCandleAgeSeconds',
+      'maxRiskDataGapSeconds',
+      'maxAnalysisDataGapSeconds',
+      'maxPositions',
+      'investmentRatio',
+      'positionRiskCheckIntervalMs'
+    ]) {
+      if (snapshot[key] !== null && snapshot[key] !== undefined) {
+        trader[key] = Number(snapshot[key]);
+      }
+    }
+    trader.strategyConfig = { ...trader.strategyConfig, ...snapshot };
+  };
+
+  trader.paperValidationFile = resolvedLedgerFile;
+  trader.readOnlyObserver = true;
+  trader.portfolioHistoryFile = `${resolvedLedgerFile}.dashboard-history.json`;
+  trader.savePaperValidation = () => {};
+  trader.calculateTotalAssets = async () => {
+    const ledger = readLedger();
+    const snapshots = Array.isArray(ledger.snapshots) ? ledger.snapshots : [];
+    const latest = snapshots.at(-1);
+    const totalAssets = Number(latest?.totalAssets ?? ledger.baselineAssets);
+    return Number.isFinite(totalAssets) ? totalAssets : 0;
+  };
+  trader.getPaperValidationStatus = async () => {
+    trader.paperValidation = readLedger();
+    applyLedgerConfig(trader.paperValidation);
+    if (trader.paperValidation.riskMonitor) {
+      trader.riskMonitorState = trader.paperValidation.riskMonitor;
+    }
+    if (trader.paperValidation.analysisDataHealth) {
+      trader.analysisDataHealthState = trader.paperValidation.analysisDataHealth;
+    }
+    return {
+      ...(await originalGetPaperValidationStatus()),
+      readOnlyObserver: true
+    };
+  };
+  trader.startPaperValidationSession = async () => {
+    throw new Error('실제 forward ledger 관찰 대시보드는 읽기 전용입니다. 원본 runner에서 세션을 관리하세요.');
+  };
+  trader.stopPaperValidationSession = async () => {
+    throw new Error('실제 forward ledger 관찰 대시보드는 읽기 전용입니다. 원본 runner에서 세션을 관리하세요.');
+  };
+
+  // Fail closed if the selected ledger cannot be read before the server is
+  // exposed. This also prevents a typo from silently falling back to mock data.
+  trader.paperValidation = readLedger();
+  applyLedgerConfig(trader.paperValidation);
+  return trader;
+}
 
 export function createMockTrader() {
   const markets = ['KRW-BTC', 'KRW-ETH'];
@@ -36,6 +123,7 @@ export function createMockTrader() {
     enableDashboard: true,
     virtualPortfolioFile: `${mockStoragePrefix}.dry_portfolio.json`,
     paperValidationFile: `${mockStoragePrefix}.paper_validation.json`,
+    portfolioHistoryFile: `${mockStoragePrefix}.portfolio_history.json`,
     aiMonitoringFile: `${mockStoragePrefix}.ai_monitoring_sessions.json`
   });
 

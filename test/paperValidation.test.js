@@ -5,6 +5,116 @@ import os from 'os';
 import path from 'path';
 import MultiCoinTrader from '../src/trader/multiCoinTrader.js';
 
+test('데이터 공백 중지 원인과 미청산 shadow 상태는 다음 paper 세션에 섞이지 않는다', async () => {
+  const suffix = `coinpilot-data-gap-boundary-${Date.now()}`;
+  const ledger = path.join(os.tmpdir(), `${suffix}.json`);
+  const portfolio = path.join(os.tmpdir(), `${suffix}-portfolio.json`);
+  const trader = new MultiCoinTrader({
+    strategyMode: 'oversold_reaction_scalping',
+    targetCoins: ['KRW-BTC'],
+    dryRun: true,
+    dryRunSeedMoney: 1_000_000,
+    virtualPortfolioFile: portfolio,
+    paperValidationFile: ledger,
+    useNews: false
+  });
+  const now = new Date().toISOString();
+  const diagnosticPosition = {
+    coin: 'KRW-BTC',
+    entryPrice: 100_000_000,
+    amount: 0.0002,
+    investAmount: 20_000,
+    entryTimestamp: now,
+    signalKey: 'data-gap-signal'
+  };
+  const diagnosticBook = () => ({
+    positions: { 'KRW-BTC': { ...diagnosticPosition } },
+    closedTrades: [],
+    entryCount: 1,
+    realizedProfit: 0,
+    totalInvested: 20_000,
+    winningTrades: 0,
+    losingTrades: 0,
+    cooldownUntilByCoin: {},
+    consecutiveLossesByCoin: {},
+    lossCircuitBreaker: { lossTimestamps: [], cooldownUntil: 0 }
+  });
+
+  try {
+    trader.strategies = new Map();
+    trader.virtualPortfolio = { krwBalance: 1_000_000, holdings: new Map() };
+    trader.calculateTotalAssets = async () => 1_000_000;
+    trader.riskMonitorState = {
+      lastSuccessAt: null,
+      lastFailureAt: now,
+      currentOutageStartedAt: now,
+      lastCheckedAt: now,
+      lastFailureCode: 'ENOTFOUND',
+      lastFailureMessage: 'getaddrinfo ENOTFOUND api.upbit.com',
+      consecutiveFailures: 9,
+      totalFailures: 9,
+      outageCount: 1,
+      maxObservedGapSeconds: 31,
+      continuityEligible: false
+    };
+    trader.paperValidation = {
+      schemaVersion: 4,
+      sessionId: 'paper-data-gap-fixture',
+      active: true,
+      startedAt: new Date(Date.now() - 60_000).toISOString(),
+      endedAt: null,
+      processId: process.pid,
+      heartbeatAt: now,
+      strategyMode: trader.strategyMode,
+      strategyProfile: 'rsi_rebound',
+      targetCoins: ['KRW-BTC'],
+      configSnapshot: trader.getPaperValidationConfigSnapshot(),
+      configSnapshotComplete: true,
+      baselineAssets: 1_000_000,
+      baselineIncludesHoldings: false,
+      thresholds: { minDays: 7, minTrades: 20, minReturnPercent: 0.2, maxDrawdownPercent: 15, maxHeartbeatGapMinutes: 15 },
+      interruptions: [],
+      riskMonitor: { ...trader.riskMonitorState },
+      strictTrades: [],
+      strictRiskState: { cooldownUntilByCoin: {}, consecutiveLossesByCoin: {}, lossCircuitBreaker: { lossTimestamps: [], cooldownUntil: 0 } },
+      strictOpenPositions: [],
+      shadow: diagnosticBook(),
+      looseShadow: diagnosticBook(),
+      telemetry: { cycles: 1, heartbeatAt: now, reasonCounts: {}, rejectionCounts: {} },
+      snapshots: [{ timestamp: now, totalAssets: 1_000_000, reason: 'session_start' }]
+    };
+
+    trader.stop('risk_data_gap');
+    const stopped = await trader.stopPaperValidationSession();
+    assert.equal(stopped.active, false);
+    assert.equal(stopped.stopReason, 'risk_data_gap');
+    assert.equal(stopped.endedWithDiagnosticOpenPositions, true);
+    assert.equal(stopped.continuityEligible, false);
+
+    const resumedTrader = new MultiCoinTrader({
+      strategyMode: 'oversold_reaction_scalping',
+      targetCoins: ['KRW-BTC'],
+      dryRun: true,
+      dryRunSeedMoney: 1_000_000,
+      virtualPortfolioFile: portfolio,
+      paperValidationFile: ledger,
+      useNews: false
+    });
+    resumedTrader.strategies = new Map();
+    resumedTrader.calculateTotalAssets = async () => 1_000_000;
+    await assert.rejects(
+      () => resumedTrader.startPaperValidationSession(),
+      /미청산.*(?:shadow|진단)/i
+    );
+    resumedTrader.stopPositionRiskMonitor();
+  } finally {
+    trader.stopPositionRiskMonitor();
+    for (const file of [ledger, portfolio]) {
+      if (fs.existsSync(file)) fs.unlinkSync(file);
+    }
+  }
+});
+
 test('forward paper 세션은 기존 포트폴리오와 별도 ledger로 시작/중지된다', async () => {
   const ledger = path.join(os.tmpdir(), `coinpilot-paper-${Date.now()}.json`);
   const trader = new MultiCoinTrader({
@@ -670,6 +780,43 @@ test('오래된 캔들은 초기 분석과 지연 후 재검증에서 strict/sha
   assert.ok(status.candleFreshness.ageStats.averageAgeSeconds > 60);
 });
 
+test('stale 반등은 신호 가용성 카운터나 filter starvation 후보로 집계하지 않는다', () => {
+  const trader = new MultiCoinTrader({
+    strategyMode: 'oversold_reaction_scalping',
+    targetCoins: ['KRW-BTC'],
+    dryRun: true,
+    dryRunSeedMoney: 1_000_000,
+    useNews: false
+  });
+  trader.paperValidation = { active: true, telemetry: {} };
+  trader.savePaperValidation = () => {};
+
+  trader.recordPaperSignalTelemetry([{
+    coin: 'KRW-BTC',
+    candleFreshness: { valid: false },
+    decision: {
+      action: 'HOLD',
+      reason: 'stale candle',
+      details: {
+        candleFreshness: { valid: false },
+        rebound: {
+          available: true,
+          previousWasOversold: true,
+          bullishCandle: true,
+          reboundConfirmed: true,
+          reboundPriceChangePercent: 0.3,
+          rsiRecovery: 3,
+          rejectionReasons: []
+        }
+      }
+    }
+  }]);
+
+  assert.equal(trader.paperValidation.telemetry.oversoldObservations, 0);
+  assert.equal(trader.paperValidation.telemetry.strictReboundCandidates, 0);
+  assert.equal(trader.paperValidation.telemetry.strictConfirmedCandidates, 0);
+});
+
 test('캔들 수가 부족한 마켓은 stale과 별도의 데이터 품질 telemetry로 기록한다', async () => {
   const trader = new MultiCoinTrader({
     strategyMode: 'oversold_reaction_scalping',
@@ -798,12 +945,21 @@ test('저장된 owner 프로세스가 없으면 heartbeat 유예 전에도 orpha
     trader.paperValidation.processId = 999_999_999;
     trader.paperValidation.heartbeatAt = new Date().toISOString();
     trader.paperValidation.telemetry.heartbeatAt = trader.paperValidation.heartbeatAt;
+    trader.paperValidation.strictOpenPositions = [{ coin: 'KRW-BTC', entryPrice: 100 }];
+    trader.paperValidation.shadow.positions = {
+      'KRW-BTC': { coin: 'KRW-BTC', entryPrice: 100 }
+    };
 
     const status = await trader.getPaperValidationStatus();
     assert.equal(status.processAlive, false);
     assert.equal(status.orphaned, true);
+    assert.equal(status.orphanReason, 'owner_process_missing');
     assert.equal(status.active, false);
     assert.equal(status.state, 'STOPPED');
+    assert.equal(status.continuityEligible, false);
+    assert.equal(status.endedWithOpenPositions, true);
+    assert.equal(status.endedWithDiagnosticOpenPositions, true);
+    assert.deepEqual(status.diagnosticOpenPositions.map(position => position.coin), ['KRW-BTC']);
   } finally {
     if (fs.existsSync(ledger)) fs.unlinkSync(ledger);
   }
@@ -899,7 +1055,25 @@ test('promoted tuned report는 현재 runtime과 달라도 live 승격에 사용
     promoted: true,
     markets: ['KRW-BTC'],
     promotedMarkets: ['KRW-BTC'],
-    config: compatibleConfig
+    config: compatibleConfig,
+    statisticalConfidence: {
+      required: true,
+      method: 'one_sided_t_mean',
+      confidenceLevel: 0.95,
+      passed: true
+    },
+    results: [{
+      market: 'KRW-BTC',
+      validation: {
+        gate: {
+          statisticalConfidence: {
+            required: true,
+            training: { passed: true },
+            validation: { passed: true }
+          }
+        }
+      }
+    }]
   }));
 });
 
@@ -1125,6 +1299,7 @@ test('리스크 ticker 공백이 한도를 넘으면 paper 루프를 fail-closed
 
     assert.equal(trader.isRunning, false);
     assert.equal(trader._stopRequested, true);
+    assert.equal(trader.stopReason, 'risk_data_gap');
     assert.equal(trader.getRiskMonitorStatus().failClosed, true);
     assert.equal(trader.paperValidation.riskMonitor.continuityEligible, false);
     assert.equal(trader.paperValidation.telemetry.riskMonitor.lastFailureCode, 'ENOTFOUND');
@@ -1243,4 +1418,66 @@ test('손실이 확인된 rejection 코호트는 자동 완화 추천 대신 필
   assert.match(status.suggestedAdjustments.join(' '), /직전 고가 돌파 필터 유지/);
   assert.match(status.suggestedAdjustments.join(' '), /minVolumeRatio=1\.0 필터 유지/);
   assert.match(status.suggestedAdjustments.join(' '), /완화 금지/);
+});
+
+test('과매도 반등 후보가 없는 조용한 시장은 filter starvation으로 오탐하지 않는다', async () => {
+  const trader = new MultiCoinTrader({
+    strategyMode: 'oversold_reaction_scalping',
+    targetCoins: ['KRW-BTC'],
+    dryRun: true,
+    dryRunSeedMoney: 1_000_000,
+    useNews: false
+  });
+  trader.paperValidation = {
+    active: true,
+    startedAt: new Date(Date.now() - 60_000).toISOString(),
+    baselineAssets: 1_000_000,
+    processId: process.pid,
+    configSnapshot: trader.getPaperValidationConfigSnapshot(),
+    configSnapshotComplete: true,
+    telemetry: {
+      cycles: 20,
+      buyCandidates: 0,
+      shadowCandidates: 0,
+      oversoldObservations: 0,
+      strictReboundCandidates: 0,
+      strictConfirmedCandidates: 0,
+      sellSignals: 0,
+      holdDecisions: 20,
+      reasonCounts: { '과매도 조건 없음 - 관망': 20 },
+      rejectionCounts: { previous_rsi_not_oversold: 20 }
+    },
+    strictTrades: [],
+    strictOpenPositions: [],
+    shadow: {
+      positions: {},
+      closedTrades: [],
+      entryCount: 0,
+      realizedProfit: 0,
+      totalInvested: 0,
+      winningTrades: 0,
+      losingTrades: 0
+    },
+    looseShadow: {
+      positions: {},
+      closedTrades: [],
+      entryCount: 0,
+      realizedProfit: 0,
+      totalInvested: 0,
+      winningTrades: 0,
+      losingTrades: 0
+    }
+  };
+  trader.calculateTotalAssets = async () => 1_000_000;
+
+  const status = await trader.getPaperValidationStatus();
+
+  assert.equal(status.filterStarvation, false);
+  assert.equal(status.marketQuiet, true);
+  assert.deepEqual(status.signalAvailability, {
+    oversoldObservations: 0,
+    strictReboundCandidates: 0,
+    strictConfirmedCandidates: 0
+  });
+  assert.deepEqual(status.suggestedAdjustments, []);
 });

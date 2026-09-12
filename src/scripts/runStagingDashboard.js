@@ -27,7 +27,8 @@ const childEnv = {
   CHECK_INTERVAL_DRY: process.env.STAGING_CHECK_INTERVAL_MS || '60000',
   AI_ADVISOR_ENABLED: 'false',
   DRY_PORTFOLIO_FILE: path.join(outputRoot, 'dry_portfolio.json'),
-  PAPER_VALIDATION_FILE: path.join(outputRoot, 'paper_validation.json')
+  PAPER_VALIDATION_FILE: path.join(outputRoot, 'paper_validation.json'),
+  PORTFOLIO_HISTORY_FILE: path.join(outputRoot, 'portfolio_history.json')
 };
 
 console.log(`🧪 격리 staging 대시보드 시작`);

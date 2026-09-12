@@ -12,6 +12,7 @@ export default function createAccountRoutes(server) {
       res.json({
         isRunning: server.tradingSystem.isRunning,
         mode: server.tradingSystem.dryRun ? 'DRY_RUN' : 'LIVE',
+        readOnlyObserver: server.tradingSystem.readOnlyObserver === true,
         strategyMode: server.tradingSystem.strategyMode,
         maxPositions: server.tradingSystem.maxPositions,
         entryDelayMs: server.tradingSystem.isScalpingMode
