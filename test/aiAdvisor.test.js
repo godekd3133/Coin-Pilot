@@ -12,7 +12,57 @@ import { scoreAdviceOutcome } from '../src/ai/monitoringSessionService.js';
 
 test('구독 CLI의 변동하는 초기 응답 시간을 감당하는 기본 timeout을 사용한다', () => {
   const service = new AIAdvisorService({ runner: async () => ({ stdout: '{}' }) });
-  assert.equal(service.timeoutMs, 30_000);
+  assert.equal(service.timeoutMs, 60_000);
+});
+
+test('두 provider CLI 실행은 로컬 초기화 contention을 피하도록 순차화된다', async () => {
+  let active = 0;
+  let maximumActive = 0;
+  const order = [];
+  const service = new AIAdvisorService({
+    runner: async provider => {
+      active += 1;
+      maximumActive = Math.max(maximumActive, active);
+      order.push(`${provider}:start`);
+      await new Promise(resolve => setTimeout(resolve, 10));
+      order.push(`${provider}:end`);
+      active -= 1;
+      return { stdout: JSON.stringify({ action: 'WAIT', confidence: 50 }) };
+    }
+  });
+
+  const results = await Promise.all([
+    service.ask({ provider: 'gpt', event: { type: 'BUY_SIGNAL', action: 'BUY', coin: 'KRW-BTC' } }),
+    service.ask({ provider: 'claude', event: { type: 'BUY_SIGNAL', action: 'BUY', coin: 'KRW-ETH' } })
+  ]);
+
+  assert.equal(maximumActive, 1);
+  assert.deepEqual(order, ['gpt:start', 'gpt:end', 'claude:start', 'claude:end']);
+  assert.deepEqual(results.map(result => result.status), ['COMPLETED', 'COMPLETED']);
+});
+
+test('timeout provider는 짧은 cooldown 동안 반복 child 실행을 차단한다', async () => {
+  let calls = 0;
+  const service = new AIAdvisorService({
+    providerFailureCooldownMs: 20,
+    runner: async () => {
+      calls += 1;
+      const error = new Error('synthetic timeout');
+      error.code = 'AI_TIMEOUT';
+      throw error;
+    }
+  });
+
+  const request = { provider: 'gpt', event: { type: 'BUY_SIGNAL', action: 'BUY', coin: 'KRW-BTC' } };
+  const first = await service.ask(request);
+  const second = await service.ask(request);
+  assert.equal(first.results[0].errorCode, 'AI_TIMEOUT');
+  assert.equal(second.results[0].errorCode, 'PROVIDER_COOLDOWN');
+  assert.equal(calls, 1);
+  await new Promise(resolve => setTimeout(resolve, 25));
+  const third = await service.ask(request);
+  assert.equal(third.results[0].errorCode, 'AI_TIMEOUT');
+  assert.equal(calls, 2);
 });
 
 test('provider envelope와 markdown 안의 JSON 판단을 안전하게 추출한다', () => {

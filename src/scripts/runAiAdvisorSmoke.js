@@ -7,7 +7,7 @@ const requireProvider = process.argv.includes('--require-provider');
 const providerSelection = process.env.AI_SMOKE_PROVIDERS || 'both';
 const envNumber = (value, fallback) => Number.isFinite(Number(value)) ? Number(value) : fallback;
 const advisor = new AIAdvisorService({
-  timeoutMs: Number(process.env.AI_ADVISOR_TIMEOUT_MS) || 30_000
+  timeoutMs: Number(process.env.AI_ADVISOR_TIMEOUT_MS) || 60_000
 });
 
 const event = {

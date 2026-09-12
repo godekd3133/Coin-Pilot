@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 
-const DEFAULT_TIMEOUT_MS = 30_000;
+const DEFAULT_TIMEOUT_MS = 60_000;
+const DEFAULT_PROVIDER_FAILURE_COOLDOWN_MS = 30_000;
 const DEFAULT_EVALUATION_MINUTES = 5;
 const DEFAULT_EVALUATION_NEUTRAL_BAND_PERCENT = 0.3;
 const MAX_OUTPUT_CHARS = 80_000;
@@ -439,9 +440,38 @@ export class AIAdvisorService {
     this.argumentBuilder = options.argumentBuilder || providerArgs;
     this.runner = options.runner || ((provider, prompt, runnerOptions) => this.runProvider(provider, prompt, runnerOptions));
     this.preflightProviderStatus = options.preflightProviderStatus ?? !options.runner;
+    // Local subscription CLIs can contend while they initialize models,
+    // plugins, or their own state stores. Serialize provider executions so a
+    // healthy Claude/GPT session is not made to time out by a sibling CLI.
+    this.providerExecutionTail = Promise.resolve();
+    this.providerFailureCooldownMs = Math.max(0, Number(
+      options.providerFailureCooldownMs ?? options.config?.aiProviderFailureCooldownMs ??
+      process.env.AI_PROVIDER_FAILURE_COOLDOWN_MS ?? DEFAULT_PROVIDER_FAILURE_COOLDOWN_MS
+    ));
+    this.providerCooldownUntil = new Map();
     this.statusCache = null;
     this.statusCacheAt = 0;
     this.statusCacheTtlMs = Math.max(5_000, Number(options.statusCacheTtlMs || 30_000));
+  }
+
+  enqueueProviderExecution(work) {
+    const execution = this.providerExecutionTail.then(work, work);
+    this.providerExecutionTail = execution.catch(() => undefined);
+    return execution;
+  }
+
+  getProviderCooldownRemaining(provider) {
+    return Math.max(0, (this.providerCooldownUntil.get(provider) || 0) - Date.now());
+  }
+
+  recordProviderResult(provider, result) {
+    if (result?.status === 'COMPLETED') {
+      this.providerCooldownUntil.delete(provider);
+      return;
+    }
+    if (this.providerFailureCooldownMs > 0 && ['AI_TIMEOUT', 'AI_PROCESS_EXIT', 'AI_PROVIDER_ERROR'].includes(result?.errorCode)) {
+      this.providerCooldownUntil.set(provider, Date.now() + this.providerFailureCooldownMs);
+    }
   }
 
   getProviderDefinitions() {
@@ -578,7 +608,8 @@ export class AIAdvisorService {
       }
     }
 
-    const results = await Promise.all(providers.map(item => {
+    const results = [];
+    for (const item of providers) {
       const providerStatus = providerStatusById.get(item);
       const canAttemptWithConfigWarning = item === 'gpt' &&
         this.gptIgnoreUserConfig === true &&
@@ -589,7 +620,7 @@ export class AIAdvisorService {
         (providerStatus.status === 'CONFIG_ERROR' && !canAttemptWithConfigWarning)
       );
       if (hardNotReady) {
-        return {
+        results.push({
           provider: item,
           providerLabel: AI_PROVIDER_DEFINITIONS[item].label,
           status: 'FAILED',
@@ -597,21 +628,37 @@ export class AIAdvisorService {
           errorCode: 'PROVIDER_NOT_READY',
           error: providerStatus.detail || 'provider 로그인 상태를 확인해주세요.',
           completedAt: new Date().toISOString()
-        };
+        });
+        continue;
       }
-      return this.askProvider(item, {
+      const cooldownRemainingMs = this.getProviderCooldownRemaining(item);
+      if (cooldownRemainingMs > 0) {
+        results.push({
+          provider: item,
+          providerLabel: AI_PROVIDER_DEFINITIONS[item].label,
+          status: 'FAILED',
+          latencyMs: 0,
+          errorCode: 'PROVIDER_COOLDOWN',
+          error: `${AI_PROVIDER_DEFINITIONS[item].label} 일시 실패 후 cooldown 중입니다. ${Math.ceil(cooldownRemainingMs / 1000)}초 후 재시도합니다.`,
+          completedAt: new Date().toISOString()
+        });
+        continue;
+      }
+      const result = await this.enqueueProviderExecution(() => this.askProvider(item, {
         event,
         context: promptContext,
         session,
         requestId
-      }).then(result => canAttemptWithConfigWarning && result.status === 'COMPLETED'
+      }));
+      this.recordProviderResult(item, result);
+      results.push(canAttemptWithConfigWarning && result.status === 'COMPLETED'
         ? {
             ...result,
             configWarning: true,
             warning: 'Codex 사용자 설정 오류는 남아 있지만 격리 실행 경로로 provider 응답을 확인합니다.'
           }
         : result);
-    }));
+    }
 
     for (const result of results) {
       if (result.status === 'COMPLETED' && result.configWarning === true) {

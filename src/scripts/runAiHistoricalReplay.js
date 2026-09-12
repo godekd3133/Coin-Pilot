@@ -12,7 +12,7 @@ function number(value, fallback) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-function summarizeRows(rows) {
+export function summarizeRows(rows) {
   const summary = {};
   for (const row of rows) {
     const current = summary[row.provider] || {
@@ -59,6 +59,36 @@ function summarizeRows(rows) {
   return summary;
 }
 
+export function summarizeProviderAttempt(response = {}) {
+  const providers = (Array.isArray(response.results) ? response.results : [])
+    .filter(result => result?.provider && result.provider !== 'local-brief')
+    .map(result => ({
+      provider: result.provider,
+      providerLabel: result.providerLabel || result.provider,
+      status: result.status || 'FAILED',
+      errorCode: result.errorCode || null,
+      error: result.error || null,
+      latencyMs: Number(result.latencyMs) || 0,
+      action: result.advice?.action || null,
+      confidence: result.advice?.confidence ?? null
+    }));
+  const consensus = response.consensus && typeof response.consensus === 'object'
+    ? {
+        action: response.consensus.action || null,
+        confidence: response.consensus.confidence ?? null,
+        providerCount: Number(response.consensus.providerCount) || 0,
+        quorum: response.consensus.quorum === true,
+        conflict: response.consensus.conflict === true,
+        singleProvider: response.consensus.singleProvider === true
+      }
+    : null;
+  return {
+    status: response.status || 'FAILED',
+    providers,
+    consensus
+  };
+}
+
 function buildReplayEvent(market, candidate, sampleIndex) {
   const rebound = candidate.rebound;
   const type = rebound.reboundConfirmed ? 'BUY_SIGNAL' : 'REBOUND_CANDIDATE';
@@ -93,7 +123,7 @@ function buildReplayEvent(market, candidate, sampleIndex) {
   };
 }
 
-async function main() {
+export async function main() {
   const candleFile = path.resolve(process.env.AI_REPLAY_CANDLES_FILE || '.cap-study-candles.json');
   const outputFile = path.resolve(process.env.AI_REPLAY_OUTPUT_FILE || '/tmp/coinpilot-ai-historical-replay.json');
   const provider = process.env.AI_REPLAY_PROVIDER || 'gpt';
@@ -134,9 +164,12 @@ async function main() {
   const selected = candidates.slice(0, maxSamples);
   if (selected.length === 0) throw new Error('고정 candle window에서 replay 후보를 찾지 못했습니다.');
 
-  const advisor = new AIAdvisorService({ timeoutMs: number(process.env.AI_ADVISOR_TIMEOUT_MS, 30_000) });
+  const advisor = new AIAdvisorService({ timeoutMs: number(process.env.AI_ADVISOR_TIMEOUT_MS, 60_000) });
   const rows = [];
+  const consensusRows = [];
   const failures = [];
+  const providerFailures = [];
+  const providerAttempts = [];
   for (let index = 0; index < selected.length; index += 1) {
     const candidate = selected[index];
     const event = buildReplayEvent(candidate.market, candidate, index);
@@ -154,6 +187,25 @@ async function main() {
       },
       session: { name: 'AI historical replay', horizon: `${horizonCandles} candles` }
     });
+    const attempt = summarizeProviderAttempt(response);
+    providerAttempts.push({
+      index,
+      market: candidate.market,
+      timestamp: candidate.timestamp,
+      ...attempt
+    });
+    for (const result of attempt.providers) {
+      if (result.status !== 'COMPLETED') {
+        providerFailures.push({
+          index,
+          market: candidate.market,
+          provider: result.provider,
+          status: result.status,
+          errorCode: result.errorCode,
+          error: result.error
+        });
+      }
+    }
     const completed = (response.results || []).filter(result =>
       result.provider !== 'local-brief' && result.status === 'COMPLETED' && result.advice
     );
@@ -178,8 +230,42 @@ async function main() {
         latencyMs: result.latencyMs
       });
     }
+    if (response.consensus?.quorum === true && response.consensus.action) {
+      const scored = scoreAdviceOutcome(
+        response.consensus,
+        candidate.priceChangePercent,
+        neutralBandPercent,
+        event.action
+      );
+      consensusRows.push({
+        index,
+        market: candidate.market,
+        timestamp: candidate.timestamp,
+        eventType: event.type,
+        provider: 'consensus',
+        action: scored.action,
+        confidence: scored.confidence,
+        verdict: scored.verdict,
+        vetoVerdict: scored.vetoVerdict,
+        vetoImpactPercent: scored.vetoImpactPercent,
+        priceChangePercent: scored.priceChangePercent,
+        signedMovePercent: scored.signedMovePercent,
+        providerCount: response.consensus.providerCount,
+        latencyMs: null
+      });
+    }
     console.error(`[AI replay] ${index + 1}/${selected.length} ${candidate.market} ${event.type} ${completed.length ? 'completed' : 'failed'}`);
   }
+
+  const summary = summarizeRows([...rows, ...consensusRows]);
+  const providerAttemptCount = providerAttempts.reduce((total, attempt) => total + attempt.providers.length, 0);
+  const providerCompletionCount = providerAttempts.reduce(
+    (total, attempt) => total + attempt.providers.filter(provider => provider.status === 'COMPLETED').length,
+    0
+  );
+  const quorumCount = providerAttempts.filter(attempt => attempt.consensus?.quorum === true).length;
+  const conflictCount = providerAttempts.filter(attempt => attempt.consensus?.conflict === true).length;
+  const singleProviderCount = providerAttempts.filter(attempt => attempt.consensus?.singleProvider === true).length;
 
   const report = {
     generatedAt: new Date().toISOString(),
@@ -194,9 +280,21 @@ async function main() {
     neutralBandPercent,
     runtimeConfig: baseConfig,
     responseCount: rows.length,
+    providerAttemptCount,
+    providerCompletionCount,
+    providerFailureCount: providerFailures.length,
+    consensusResponseCount: consensusRows.length,
+    consensus: {
+      quorumCount,
+      conflictCount,
+      singleProviderCount
+    },
     failures,
-    summary: summarizeRows(rows),
+    providerFailures,
+    providerAttempts,
+    summary,
     rows,
+    consensusRows,
     note: '고정 historical candle replay이며 live order, wallet settlement, promotion gate를 대체하지 않습니다.'
   };
   fs.writeFileSync(outputFile, JSON.stringify(report, null, 2), 'utf8');
@@ -211,7 +309,9 @@ async function main() {
   if (process.argv.includes('--require-provider') && report.responseCount === 0) process.exitCode = 2;
 }
 
-main().catch(error => {
-  console.error(`❌ AI historical replay 오류: ${error.message}`);
-  process.exitCode = 1;
-});
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main().catch(error => {
+    console.error(`❌ AI historical replay 오류: ${error.message}`);
+    process.exitCode = 1;
+  });
+}

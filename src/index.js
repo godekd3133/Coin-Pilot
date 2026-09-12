@@ -256,7 +256,7 @@ function createConfig() {
     // 사용한다. 자문 결과는 기록/표시만 하고 주문 실행에는 연결하지 않는다.
     aiAdvisorEnabled: process.env.AI_ADVISOR_ENABLED !== 'false',
     aiLocalBriefEnabled: process.env.AI_LOCAL_BRIEF_ENABLED !== 'false',
-    aiAdvisorTimeoutMs: parseInt(process.env.AI_ADVISOR_TIMEOUT_MS) || 30000,
+    aiAdvisorTimeoutMs: parseInt(process.env.AI_ADVISOR_TIMEOUT_MS) || 60000,
     aiMonitoringFile: process.env.AI_MONITORING_FILE || '',
     aiCodexBin: process.env.AI_CODEX_BIN || 'codex',
     aiCodexIgnoreUserConfig: process.env.AI_CODEX_IGNORE_USER_CONFIG !== 'false',
