@@ -476,3 +476,115 @@ test('portfolio multi-fold 검증은 모든 미래 fold를 별도로 판정한�
   assert.equal(result.promoted, false);
   assert.equal(result.promotion, 'diagnostic_only_never_authorizes_live_orders');
 });
+
+function syntheticWinnerExtension(mode = 'rally') {
+  const candles = [];
+  for (let index = 0; index < 26; index += 1) {
+    const close = 120 - index;
+    candles.push(candle(index, close, close + 0.5, close + 0.5, close - 0.5));
+  }
+  candles.push(candle(26, 96, 95.2, 96.4, 95));
+  // Entry happens at the open of index 27 (96) via the delayed-entry proxy.
+  candles.push(candle(27, 96.1, 96, 96.3, 95.9));
+  if (mode === 'rally') {
+    for (let index = 28; index <= 56; index += 1) {
+      const close = 96.1 + (index - 28) * 0.018;
+      candles.push(candle(index, close, close - 0.01, close + 0.02, close - 0.03));
+    }
+    for (let index = 57; index <= 117; index += 1) {
+      const close = 96.6 + (index - 56) * 0.18;
+      candles.push(candle(index, close, close - 0.05, close + 0.05, close - 0.08));
+    }
+  } else if (mode === 'fade') {
+    for (let index = 28; index <= 60; index += 1) {
+      const close = 96.1 - (index - 28) * 0.02;
+      candles.push(candle(index, close, close + 0.01, close + 0.02, close - 0.03));
+    }
+  } else if (mode === 'dip') {
+    for (let index = 28; index <= 56; index += 1) {
+      const close = 96.1 + (index - 28) * 0.018;
+      candles.push(candle(index, close, close - 0.01, close + 0.02, close - 0.03));
+    }
+    candles.push(candle(57, 96.7, 96.6, 96.8, 96.5));
+    candles.push(candle(58, 96.75, 96.7, 96.9, 96.6));
+    // Break-even floor breach after the extension is armed.
+    candles.push(candle(59, 96.0, 96.75, 96.8, 95.9));
+    candles.push(candle(60, 95.5, 96.0, 96.1, 95.3));
+  }
+  return candles;
+}
+
+test('winner hold 연장은 max-hold 경계의 수익 포지션만 본전 스탑과 함께 연장한다', () => {
+  const baseConfig = {
+    slippage: 0,
+    stopLossPercent: 20,
+    takeProfitPercent: 50,
+    maxHoldMinutes: 30
+  };
+  const candles = syntheticWinnerExtension('rally');
+  const fixed = simulateScalping(candles, baseConfig);
+  const extended = simulateScalping(candles, {
+    ...baseConfig,
+    winnerExtendMinutes: 60
+  });
+
+  assert.equal(fixed.metrics.tradeCount, 1);
+  const fixedClose = fixed.trades.at(-1);
+  assert.equal(fixedClose.reason, 'MAX_HOLD_TIME');
+  assert.equal(fixedClose.winnerExtended, false);
+  assert.ok(fixedClose.exitPrice < 97);
+
+  assert.equal(extended.metrics.tradeCount, 1);
+  const extendedClose = extended.trades.at(-1);
+  assert.equal(extendedClose.reason, 'MAX_HOLD_TIME');
+  assert.equal(extendedClose.winnerExtended, true);
+  assert.ok(extendedClose.exitPrice > 107);
+  assert.ok(extendedClose.profitPercent > fixedClose.profitPercent + 5);
+});
+
+test('winner hold 연장의 최소 수익 기준을 넘지 못하면 기존 max-hold를 유지한다', () => {
+  const candles = syntheticWinnerExtension('rally');
+  const result = simulateScalping(candles, {
+    slippage: 0,
+    stopLossPercent: 20,
+    takeProfitPercent: 50,
+    maxHoldMinutes: 30,
+    winnerExtendMinutes: 60,
+    winnerExtendMinProfitPercent: 1.0
+  });
+
+  const close = result.trades.at(-1);
+  assert.equal(close.reason, 'MAX_HOLD_TIME');
+  assert.equal(close.winnerExtended, false);
+  assert.ok(close.exitPrice < 97);
+});
+
+test('경계에서 손실 중이면 winner hold 연장이 적용되지 않는다', () => {
+  const result = simulateScalping(syntheticWinnerExtension('fade'), {
+    slippage: 0,
+    stopLossPercent: 20,
+    takeProfitPercent: 50,
+    maxHoldMinutes: 30,
+    winnerExtendMinutes: 60
+  });
+
+  const close = result.trades.at(-1);
+  assert.equal(close.reason, 'MAX_HOLD_TIME');
+  assert.equal(close.winnerExtended, false);
+  assert.ok(close.exitPrice < 96);
+});
+
+test('연장된 포지션은 본전 스탑으로 추가 하락 대신 수익을 보존한다', () => {
+  const result = simulateScalping(syntheticWinnerExtension('dip'), {
+    slippage: 0,
+    stopLossPercent: 20,
+    takeProfitPercent: 50,
+    maxHoldMinutes: 30,
+    winnerExtendMinutes: 60
+  });
+
+  const close = result.trades.at(-1);
+  assert.equal(close.reason, 'BREAK_EVEN_STOP');
+  assert.equal(close.winnerExtended, true);
+  assert.ok(close.netProfit >= 0);
+});

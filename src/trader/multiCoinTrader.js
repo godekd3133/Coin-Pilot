@@ -207,6 +207,8 @@ class MultiCoinTrader {
       trailingStopPercent: config.trailingStopPercent,
       maxHoldMinutes: config.maxHoldMinutes,
       maxLosingHoldMinutes: config.maxLosingHoldMinutes,
+      winnerExtendMinutes: config.winnerExtendMinutes,
+      winnerExtendMinProfitPercent: config.winnerExtendMinProfitPercent,
       maxEntriesPerSignalWindow: resolveSignalWindowEntryLimit(config),
       minReboundPercent: config.minReboundPercent,
       minRsiRecovery: config.minRsiRecovery,
@@ -1067,6 +1069,8 @@ class MultiCoinTrader {
       takeProfitPercent: numericOrNull(config.takeProfitPercent),
       maxHoldMinutes: numericOrNull(config.maxHoldMinutes),
       maxLosingHoldMinutes: numericOrNull(config.maxLosingHoldMinutes ?? 0),
+      winnerExtendMinutes: numericOrNull(config.winnerExtendMinutes ?? 0),
+      winnerExtendMinProfitPercent: numericOrNull(config.winnerExtendMinProfitPercent ?? 0),
       maxEntriesPerSignalWindow: resolveSignalWindowEntryLimit(config),
       cooldownAfterLossMinutes: numericOrNull(config.cooldownAfterLossMinutes),
       maxConsecutiveLosses: numericOrNull(config.maxConsecutiveLosses),
@@ -2000,6 +2004,12 @@ class MultiCoinTrader {
     const maxLosingHoldMinutes = Number.isFinite(Number(this.config.maxLosingHoldMinutes))
       ? Number(this.config.maxLosingHoldMinutes)
       : 0;
+    const winnerExtendMinutes = Number.isFinite(Number(this.config.winnerExtendMinutes))
+      ? Number(this.config.winnerExtendMinutes)
+      : 0;
+    const winnerExtendMinProfitPercent = Number.isFinite(Number(this.config.winnerExtendMinProfitPercent))
+      ? Number(this.config.winnerExtendMinProfitPercent)
+      : 0;
     const cooldownAfterLossMinutes = Number.isFinite(Number(this.config.cooldownAfterLossMinutes))
       ? Number(this.config.cooldownAfterLossMinutes)
       : 15;
@@ -2059,7 +2069,20 @@ class MultiCoinTrader {
       }
       else if (maxHoldMinutes > 0 && Number.isFinite(entryTimestamp) &&
         nowMs - entryTimestamp >= maxHoldMinutes * 60 * 1000) {
-        exitReason = 'MAX_HOLD_TIME';
+        const holdMs = nowMs - entryTimestamp;
+        const extensionMs = winnerExtendMinutes * 60 * 1000;
+        if (extensionMs > 0 && holdMs < maxHoldMinutes * 60 * 1000 + extensionMs) {
+          if (position.winnerExtended === true) {
+            exitReason = null;
+          } else if (gainPercent >= winnerExtendMinProfitPercent) {
+            position.winnerExtended = true;
+            position.breakEvenArmed = true;
+          } else {
+            exitReason = 'MAX_HOLD_TIME';
+          }
+        } else {
+          exitReason = 'MAX_HOLD_TIME';
+        }
       }
 
       if (exitReason) {
@@ -2092,6 +2115,7 @@ class MultiCoinTrader {
           signalRangePercent: numericOrNull(position.signalRangePercent),
           entryDelayMs: numericOrNull(position.entryDelayMs),
           executionDriftPercent: numericOrNull(position.executionDriftPercent),
+          winnerExtended: position.winnerExtended === true,
           rejectionReasons: Array.isArray(position.rejectionReasons)
             ? position.rejectionReasons
             : []
@@ -2183,6 +2207,7 @@ class MultiCoinTrader {
                 ? ((currentPrice - Number(rebound.referencePrice)) / Number(rebound.referencePrice)) * 100
                 : null,
               highestPrice: currentPrice,
+              winnerExtended: false,
               breakEvenArmed: false,
               trailingArmed: false,
               rejectionReasons: Array.isArray(rebound?.rejectionReasons)
@@ -2737,6 +2762,8 @@ class MultiCoinTrader {
       'takeProfitPercent',
       'maxHoldMinutes',
       'maxLosingHoldMinutes',
+      'winnerExtendMinutes',
+      'winnerExtendMinProfitPercent',
       'maxEntriesPerSignalWindow',
       'breakEvenTriggerPercent',
       'breakEvenOffsetPercent',

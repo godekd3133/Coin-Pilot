@@ -1045,11 +1045,12 @@ test('promoted tuned report는 현재 runtime과 달라도 live 승격에 사용
     'minReboundPercent', 'minRsiRecovery', 'minVolumeRatio', 'volumeLookback',
     'minCloseStrength', 'trendPeriod', 'trendSlopeLookback', 'minTrendSlopePercent',
     'requirePreviousHighBreak', 'maxSignalRangePercent', 'minSignalRangePercent', 'maxCandleAgeSeconds', 'stopLossPercent',
-    'takeProfitPercent', 'maxHoldMinutes', 'maxLosingHoldMinutes', 'maxEntriesPerSignalWindow', 'breakEvenTriggerPercent', 'breakEvenOffsetPercent',
+    'takeProfitPercent', 'maxHoldMinutes', 'maxLosingHoldMinutes', 'winnerExtendMinutes', 'winnerExtendMinProfitPercent', 'maxEntriesPerSignalWindow', 'breakEvenTriggerPercent', 'breakEvenOffsetPercent',
     'trailingActivationPercent', 'trailingStopPercent', 'cooldownAfterLossMinutes', 'maxConsecutiveLosses',
     'marketRegimeEnabled', 'marketRegimeLookback', 'marketRegimeMinBreadth', 'marketRegimeMinReturnPercent', 'requireReboundBelowOverbought',
     'lossCircuitBreakerCount', 'lossCircuitBreakerWindowMinutes', 'lossCircuitBreakerCooldownMinutes', 'investmentRatio', 'tradingFee', 'slippage',
-    'entryDelayMinMs', 'entryDelayMaxMs', 'maxEntryRetracePercent', 'maxEntryChasePercent'
+    'entryDelayMinMs', 'entryDelayMaxMs', 'maxEntryRetracePercent', 'maxEntryChasePercent',
+    'winnerExtendMinutes', 'winnerExtendMinProfitPercent'
   ].map(key => [key, snapshot[key]]));
 
   assert.throws(

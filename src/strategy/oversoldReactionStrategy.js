@@ -36,6 +36,9 @@ class OversoldReactionStrategy extends TradingStrategy {
     this.maxEntryChasePercent = config.maxEntryChasePercent ?? 0.35;
     this.maxHoldMs = (config.maxHoldMinutes ?? 30) * 60 * 1000;
     this.maxLosingHoldMs = Math.max(0, Number(config.maxLosingHoldMinutes) || 0) * 60 * 1000;
+    // Opt-in winner hold extension. Zero keeps the fixed max-hold contract.
+    this.winnerExtendMs = Math.max(0, Number(config.winnerExtendMinutes) || 0) * 60 * 1000;
+    this.winnerExtendMinProfitPercent = Math.max(0, Number(config.winnerExtendMinProfitPercent) || 0);
     // These protections are opt-in. With zero triggers the historical fixed
     // stop/take contract remains unchanged, so a new experiment cannot alter
     // an existing paper session silently.
@@ -318,7 +321,17 @@ class OversoldReactionStrategy extends TradingStrategy {
 
     if (this.currentPosition && this.maxHoldMs > 0) {
       const entryTime = new Date(this.currentPosition.entryTime).getTime();
-      if (Number.isFinite(entryTime) && Date.now() - entryTime >= this.maxHoldMs) {
+      const holdMs = Date.now() - entryTime;
+      if (Number.isFinite(entryTime) && holdMs >= this.maxHoldMs) {
+        if (this.winnerExtendMs > 0 && holdMs < this.maxHoldMs + this.winnerExtendMs) {
+          if (this.currentPosition.winnerExtended === true) return { shouldClose: false };
+          const gainPercent = ((Number(currentPrice) - this.currentPosition.entryPrice) / this.currentPosition.entryPrice) * 100;
+          if (gainPercent >= this.winnerExtendMinProfitPercent) {
+            this.currentPosition.winnerExtended = true;
+            this.currentPosition.breakEvenArmed = true;
+            return { shouldClose: false };
+          }
+        }
         return {
           shouldClose: true,
           reason: `스캘핑 최대 보유시간 초과 (${Math.round(this.maxHoldMs / 60000)}분)`,
@@ -354,6 +367,7 @@ class OversoldReactionStrategy extends TradingStrategy {
     this.currentPosition.highestPrice = Number(price);
     this.currentPosition.breakEvenArmed = false;
     this.currentPosition.trailingArmed = false;
+    this.currentPosition.winnerExtended = false;
   }
 }
 

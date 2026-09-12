@@ -232,6 +232,8 @@ function createConfig() {
     trailingActivationPercent: envNumber('SCALP_TRAILING_ACTIVATION_PERCENT', 0),
     maxHoldMinutes: parseFloat(process.env.SCALP_MAX_HOLD_MINUTES) || 30,
     maxLosingHoldMinutes: envNumber('SCALP_MAX_LOSING_HOLD_MINUTES', 0),
+    winnerExtendMinutes: envNumber('SCALP_WINNER_EXTEND_MINUTES', 0),
+    winnerExtendMinProfitPercent: envNumber('SCALP_WINNER_EXTEND_MIN_PROFIT_PERCENT', 0),
     maxEntriesPerSignalWindow: parseInt(process.env.SCALP_MAX_ENTRIES_PER_SIGNAL_WINDOW) || 0,
     positionRiskCheckIntervalMs: parseInt(process.env.SCALP_RISK_CHECK_INTERVAL_MS) || 1000,
     maxRiskDataGapSeconds: envNumber('SCALP_MAX_RISK_DATA_GAP_SECONDS', 30),

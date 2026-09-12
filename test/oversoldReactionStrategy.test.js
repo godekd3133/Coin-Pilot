@@ -154,6 +154,42 @@ test('손실 중인 포지션만 loss-only hold timeout으로 먼저 청산한�
   assert.equal(strategy.checkPosition(100.5).shouldClose, false);
 });
 
+test('수익 포지션만 winner hold 연장으로 max-hold 경계를 넘긴다', () => {
+  const strategy = new OversoldReactionStrategy({
+    winnerExtendMinutes: 60,
+    maxHoldMinutes: 30,
+    stopLossPercent: 5,
+    takeProfitPercent: 50
+  });
+  strategy.openPosition(100, 1, 'BUY');
+  strategy.currentPosition.entryTime = new Date(Date.now() - 31 * 60 * 1000);
+
+  const extended = strategy.checkPosition(100.5);
+  assert.equal(extended.shouldClose, false);
+  assert.equal(strategy.currentPosition.winnerExtended, true);
+  assert.equal(strategy.currentPosition.breakEvenArmed, true);
+
+  const floorExit = strategy.checkPosition(100.1);
+  assert.equal(floorExit.shouldClose, true);
+  assert.equal(floorExit.type, 'BREAK_EVEN_STOP');
+});
+
+test('손실 포지션은 winner hold 연장 없이 max-hold로 청산한다', () => {
+  const strategy = new OversoldReactionStrategy({
+    winnerExtendMinutes: 60,
+    maxHoldMinutes: 30,
+    stopLossPercent: 5,
+    takeProfitPercent: 50
+  });
+  strategy.openPosition(100, 1, 'BUY');
+  strategy.currentPosition.entryTime = new Date(Date.now() - 31 * 60 * 1000);
+
+  const check = strategy.checkPosition(99.5);
+  assert.equal(check.shouldClose, true);
+  assert.equal(check.type, 'MAX_HOLD_TIME');
+  assert.equal(strategy.currentPosition.winnerExtended, false);
+});
+
 test('break-even 보호 출구는 이익 도달 뒤 고정 손절보다 높은 출구를 사용한다', () => {
   const strategy = new OversoldReactionStrategy({
     breakEvenTriggerPercent: 0.5,

@@ -74,6 +74,8 @@ function buildConfig(portfolioFile, paperFile, markets) {
     trailingStopPercent: number(process.env.SCALP_TRAILING_STOP_PERCENT, 0),
     maxHoldMinutes: number(process.env.SCALP_MAX_HOLD_MINUTES, 30),
     maxLosingHoldMinutes: number(process.env.SCALP_MAX_LOSING_HOLD_MINUTES, 0),
+    winnerExtendMinutes: number(process.env.SCALP_WINNER_EXTEND_MINUTES, 0),
+    winnerExtendMinProfitPercent: number(process.env.SCALP_WINNER_EXTEND_MIN_PROFIT_PERCENT, 0),
     maxEntriesPerSignalWindow: number(process.env.SCALP_MAX_ENTRIES_PER_SIGNAL_WINDOW, 0),
     positionRiskCheckIntervalMs: number(process.env.SCALP_RISK_CHECK_INTERVAL_MS, 1000),
     maxRiskDataGapSeconds: number(process.env.SCALP_MAX_RISK_DATA_GAP_SECONDS, 30),

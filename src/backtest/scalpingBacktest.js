@@ -37,6 +37,12 @@ const DEFAULT_CONFIG = {
   maxHoldMinutes: 30,
   // Optional loss-only time exit. Zero preserves the fixed max-hold contract.
   maxLosingHoldMinutes: 0,
+  // Optional winner hold extension. Zero preserves the fixed max-hold
+  // contract; a positive value lets a position that is still profitable at
+  // the max-hold boundary keep holding until maxHoldMinutes +
+  // winnerExtendMinutes with a cost-adjusted break-even floor.
+  winnerExtendMinutes: 0,
+  winnerExtendMinProfitPercent: 0,
   // Optional portfolio safeguard. Zero preserves the existing multi-entry
   // contract; a positive value caps entries sharing one completed-candle key.
   maxEntriesPerSignalWindow: 0,
@@ -902,6 +908,7 @@ function closePosition(position, candle, exitReason, exitPrice, config, timestam
     profitPercent: position.investAmount > 0 ? (netProfit / position.investAmount) * 100 : 0,
     entryTime: position.entryTime,
     exitTime: timestamp,
+    winnerExtended: position.winnerExtended === true,
     candleTime: candle?.candle_date_time_utc || candle?.candle_date_time_kst || null
   };
 }
@@ -969,6 +976,16 @@ function findExit(position, candle, config, timestamp) {
     return { reason: 'MAX_LOSING_HOLD_TIME', price: getClose(candle) * (1 - config.slippage) };
   }
   if (config.maxHoldMinutes > 0 && holdMs >= config.maxHoldMinutes * 60 * 1000) {
+    const extensionMs = Math.max(0, Number(config.winnerExtendMinutes) || 0) * 60 * 1000;
+    if (extensionMs > 0 && holdMs < config.maxHoldMinutes * 60 * 1000 + extensionMs) {
+      if (position.winnerExtended === true) return null;
+      const gainPercent = ((getClose(candle) - position.entryPrice) / position.entryPrice) * 100;
+      if (gainPercent >= (Number(config.winnerExtendMinProfitPercent) || 0)) {
+        position.winnerExtended = true;
+        position.breakEvenArmed = true;
+        return null;
+      }
+    }
     return { reason: 'MAX_HOLD_TIME', price: getOpen(candle) * (1 - config.slippage) };
   }
 
@@ -1092,7 +1109,8 @@ export function simulateScalping(rawCandles, config = {}, simulationOptions = {}
                 signalKey: rebound.signalKey,
                 highestPrice: entry.entryPrice,
                 breakEvenArmed: false,
-                trailingArmed: false
+                trailingArmed: false,
+                winnerExtended: false
               };
               trades.push({
                 type: 'OPEN',
@@ -1444,7 +1462,8 @@ export function simulateScalpingPortfolio(rawCandlesByMarket, config = {}, simul
         signalKey: candidate.rebound.signalKey,
         highestPrice: candidate.entry.entryPrice,
         breakEvenArmed: false,
-        trailingArmed: false
+        trailingArmed: false,
+        winnerExtended: false
       };
       candidate.context.position = position;
       candidate.context.lastSignalKey = candidate.rebound.signalKey;

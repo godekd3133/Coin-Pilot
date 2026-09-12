@@ -51,6 +51,8 @@ export default function createConfigRoutes(server) {
       trailingActivationPercent: { min: 0, max: 10, step: 0.05, label: 'Trailing 발동 (%)', description: '0은 비활성화; 수익이 이 값에 도달하면 trailing 출구를 켬', category: 'Risk' },
       maxHoldMinutes: { min: 1, max: 240, step: 1, label: '최대 보유 시간 (분)', description: '스캘핑 포지션의 최대 보유 시간', category: 'Scalping' },
       maxLosingHoldMinutes: { min: 0, max: 240, step: 1, label: '손실 포지션 조기 청산 (분)', description: '0은 비활성화; 이 시간 뒤에도 손실 중인 포지션만 먼저 청산', category: 'Risk' },
+      winnerExtendMinutes: { min: 0, max: 240, step: 1, label: '수익 포지션 홀드 연장 (분)', description: '0은 비활성화; 최대 보유 도달 시 수익 중이면 본전 스탑과 함께 이 시간만큼 연장', category: 'Risk' },
+      winnerExtendMinProfitPercent: { min: 0, max: 5, step: 0.05, label: '연장 최소 수익 (%)', description: '홀드 연장 자격을 얻는 최소 수익률 (진입가 대비)', category: 'Risk' },
       maxEntriesPerSignalWindow: { min: 0, max: 20, step: 1, label: '동일 신호창 최대 진입', description: '동일 완료 캔들 signal window의 전역 동시 진입 상한 (0은 비활성)', category: 'Risk' },
       lossCircuitBreakerCount: { min: 0, max: 20, step: 1, label: '전역 손실 차단 횟수', description: '최근 시간창 안에 이 횟수만큼 손실이 나면 모든 신규 진입을 차단 (0은 비활성)', category: 'Risk' },
       lossCircuitBreakerWindowMinutes: { min: 1, max: 1440, step: 1, label: '전역 손실 시간창 (분)', description: '손실 횟수를 누적할 최근 시간 범위', category: 'Risk' },
@@ -274,6 +276,8 @@ export default function createConfigRoutes(server) {
           'trailingStopPercent',
           'maxHoldMinutes',
           'maxLosingHoldMinutes',
+          'winnerExtendMinutes',
+          'winnerExtendMinProfitPercent',
           'maxEntriesPerSignalWindow',
           'maxSignalRangePercent',
           'minSignalRangePercent',
@@ -362,6 +366,8 @@ export default function createConfigRoutes(server) {
           trailingActivationPercent: server.tradingSystem.config?.trailingActivationPercent,
           trailingStopPercent: server.tradingSystem.config?.trailingStopPercent,
           maxLosingHoldMinutes: server.tradingSystem.config?.maxLosingHoldMinutes ?? 0,
+          winnerExtendMinutes: server.tradingSystem.config?.winnerExtendMinutes ?? 0,
+          winnerExtendMinProfitPercent: server.tradingSystem.config?.winnerExtendMinProfitPercent ?? 0,
           maxEntriesPerSignalWindow: server.tradingSystem.config?.maxEntriesPerSignalWindow ?? 0,
           maxCandleAgeSeconds: server.tradingSystem.maxCandleAgeSeconds,
           oversoldLookback: server.tradingSystem.config?.oversoldLookback,
@@ -456,6 +462,8 @@ export default function createConfigRoutes(server) {
         ['trailingActivationPercent', 0, 10],
         ['trailingStopPercent', 0, 5],
         ['maxLosingHoldMinutes', 0, 240],
+        ['winnerExtendMinutes', 0, 240],
+        ['winnerExtendMinProfitPercent', 0, 5],
         ['maxEntriesPerSignalWindow', 0, 20],
         ['marketRegimeLookback', 1, 60],
         ['marketRegimeMinBreadth', 0, 1],
@@ -503,6 +511,8 @@ export default function createConfigRoutes(server) {
           'trailingStopPercent',
           'maxHoldMinutes',
           'maxLosingHoldMinutes',
+          'winnerExtendMinutes',
+          'winnerExtendMinProfitPercent',
           'maxEntriesPerSignalWindow',
           'maxRiskDataGapSeconds',
           'maxAnalysisDataGapSeconds',
@@ -522,6 +532,12 @@ export default function createConfigRoutes(server) {
             }
             if (key === 'maxLosingHoldMinutes') {
               strategy.maxLosingHoldMs = Math.max(0, Number(newConfig[key]) || 0) * 60 * 1000;
+            }
+            if (key === 'winnerExtendMinutes') {
+              strategy.winnerExtendMs = Math.max(0, Number(newConfig[key]) || 0) * 60 * 1000;
+            }
+            if (key === 'winnerExtendMinProfitPercent') {
+              strategy.winnerExtendMinProfitPercent = Math.max(0, Number(newConfig[key]) || 0);
             }
           }
           if (key === 'maxCandleAgeSeconds') {
