@@ -137,12 +137,45 @@
         return state.actualMode !== 'LIVE';
     }
 
+    function isReadOnlyObserver() {
+        return state.paper?.readOnlyObserver === true || state.status?.readOnlyObserver === true;
+    }
+
+    function readOnlyObserverReason() {
+        return '읽기 전용 forward ledger 관찰 모드입니다. 원본 runner에서만 세션과 거래를 관리할 수 있습니다.';
+    }
+
+    function syncObserverControls() {
+        const blocked = isReadOnlyObserver();
+        const mutationSelectors = [
+            '[data-pilot-action="start-paper"]',
+            '[data-pilot-action="start-paper-reset"]',
+            '[data-pilot-action="stop-paper"]',
+            '[data-pilot-action="deposit"]',
+            '[data-pilot-action="withdraw"]',
+            '[data-pilot-action="reset-wallet"]',
+            '[data-pilot-action="save-settings"]',
+            '[data-pilot-action="run-optimization"]',
+            '[data-pilot-action="smart-buy"]',
+            '[data-pilot-action="smart-sell"]',
+            '[data-pilot-trade-submit]',
+            '[data-pilot-preset-id]'
+        ].join(',');
+        $$(mutationSelectors).forEach(button => {
+            button.disabled = blocked;
+            button.setAttribute('aria-disabled', blocked ? 'true' : 'false');
+            if (blocked) button.title = readOnlyObserverReason();
+        });
+    }
+
     function canTrade() {
+        if (isReadOnlyObserver()) return false;
         if (state.activeMode === 'paper') return isPaperMode();
         return state.actualMode === 'LIVE' && state.liveEligible;
     }
 
     function tradeBlockReason() {
+        if (isReadOnlyObserver()) return readOnlyObserverReason();
         if (state.activeMode === 'paper' && state.actualMode === 'LIVE') {
             return '현재 서버가 실제투자 모드라 모의 주문을 실행할 수 없습니다.';
         }
@@ -382,9 +415,15 @@
             ? stats.map(stat => {
                 const hitRate = stat.hitRate === null || stat.hitRate === undefined ? '-' : `${(number(stat.hitRate) * 100).toFixed(1)}%`;
                 const latency = stat.averageLatencyMs === null || stat.averageLatencyMs === undefined ? '-' : `${(number(stat.averageLatencyMs) / 1000).toFixed(1)}s`;
+                const veto = (stat.vetoGood || stat.vetoMissedOpportunity || stat.vetoFlat)
+                    ? ` · veto ${stat.vetoGood || 0}/${stat.vetoMissedOpportunity || 0}/${stat.vetoFlat || 0}`
+                    : '';
+                const vetoImpact = stat.vetoNetImpactPercent === null || stat.vetoNetImpactPercent === undefined
+                    ? ''
+                    : ` · veto net ${number(stat.vetoNetImpactPercent) >= 0 ? '+' : ''}${number(stat.vetoNetImpactPercent).toFixed(2)}%`;
                 const resultLine = stat.type === 'consensus'
-                    ? `평가 ${stat.evaluated || 0} · 적중 ${stat.hits || 0} · 실패 ${stat.misses || 0}`
-                    : `응답 ${stat.completed || 0}/${stat.attempted || 0} · 평가 ${stat.evaluated || 0} · 지연 ${latency}`;
+                    ? `평가 ${stat.evaluated || 0} · actionable ${stat.actionableEvaluations || 0} · 적중 ${stat.hits || 0} · 실패 ${stat.misses || 0}${vetoImpact}`
+                    : `응답 ${stat.completed || 0}/${stat.attempted || 0} · 평가 ${stat.evaluated || 0} · actionable ${stat.actionableEvaluations || 0} · 지연 ${latency}${veto}${vetoImpact}`;
                 return `<div class="pilot-ai-effectiveness-row"><div><strong>${escapeHtml(stat.label || stat.source)}</strong><span>${escapeHtml(resultLine)}</span></div><b>${escapeHtml(hitRate)}</b></div>`;
             }).join('')
             : '<div class="pilot-ai-empty">아직 실제 provider 응답이 없습니다.</div>';
@@ -397,7 +436,8 @@
         const warning = effectiveness.evidenceWarning
             ? `<div class="pilot-inline-note"><i class="ph ph-warning" aria-hidden="true"></i><span>${escapeHtml(effectiveness.evidenceWarning)}</span></div>`
             : '';
-        container.innerHTML = `<div class="pilot-ai-effectiveness-summary"><div><strong>${escapeHtml(String(effectiveness.actualProviderCompletions || 0))}</strong><span>실제 응답</span></div><div><strong>${escapeHtml(String(effectiveness.evaluatedConsultations || 0))}</strong><span>평가 완료</span></div><div><strong>${escapeHtml(coverage)}</strong><span>평가 커버리지</span></div><div><strong>${escapeHtml(completion)}</strong><span>응답 성공률</span></div></div><div class="pilot-ai-effectiveness-list">${statMarkup}</div>${providerStats.length ? '<div class="pilot-inline-note"><i class="ph ph-chart-line-up" aria-hidden="true"></i><span>적중률은 BUY/SELL 방향 예측만 집계하며, HOLD/WAIT는 CALM/ABSTAINED로 분리합니다.</span></div>' : ''}${warning}`;
+        const actionable = Math.max(...stats.map(stat => Number(stat.actionableEvaluations) || 0), 0);
+        container.innerHTML = `<div class="pilot-ai-effectiveness-summary"><div><strong>${escapeHtml(String(effectiveness.actualProviderCompletions || 0))}</strong><span>실제 응답</span></div><div><strong>${escapeHtml(String(effectiveness.evaluatedConsultations || 0))}</strong><span>평가 완료</span></div><div><strong>${escapeHtml(String(actionable))}</strong><span>비중립 표본</span></div><div><strong>${escapeHtml(coverage)}</strong><span>평가 커버리지</span></div><div><strong>${escapeHtml(completion)}</strong><span>응답 성공률</span></div></div><div class="pilot-ai-effectiveness-list">${statMarkup}</div>${providerStats.length ? '<div class="pilot-inline-note"><i class="ph ph-chart-line-up" aria-hidden="true"></i><span>충분성 표본은 비중립 BUY/SELL 결과 또는 VETO_GOOD/MISSED_OPPORTUNITY만 집계합니다. CALM, FLAT, VETO_FLAT은 제외합니다.</span></div>' : ''}${warning}`;
     }
 
     function renderAiSessions(sessions) {
@@ -829,12 +869,18 @@
         const account = state.account || {};
         const pnl = state.pnl || {};
         const today = state.today || {};
+        const paper = state.paper || {};
+        const paperLedgerVisible = paper.available === true &&
+            (paper.active === true || number(paper.closedTradeCount) > 0);
         const totalAssets = number(account.totalAssets || pnl.totalAssets);
         const totalProfit = number(pnl.profit);
         const todayProfit = number(today.realizedProfit);
         const statistics = Array.isArray(state.statistics) ? state.statistics : [];
-        const totalTrades = statistics.reduce((sum, row) => sum + number(row.totalTrades || row.trades || row.tradeCount), 0);
-        const wins = statistics.reduce((sum, row) => sum + number(row.winningTrades || row.wins), 0);
+        const strategyTradeCount = statistics.reduce((sum, row) => sum + number(row.totalTrades || row.trades || row.tradeCount), 0);
+        const totalTrades = paperLedgerVisible ? number(paper.closedTradeCount) : strategyTradeCount;
+        const wins = paperLedgerVisible
+            ? number(paper.strictEvaluation?.winningTrades)
+            : statistics.reduce((sum, row) => sum + number(row.winningTrades || row.wins), 0);
         const winRate = totalTrades > 0 ? (wins / totalTrades) * 100 : null;
         setText('pilot-total-assets', formatWon(totalAssets));
         setText('pilot-total-assets-caption', `${formatPercent(pnl.profitPercent)} · 기준 ${formatWon(pnl.initialSeedMoney || account.initialSeedMoney)}`);
@@ -843,7 +889,9 @@
         setText('pilot-cumulative-profit', formatSignedWon(totalProfit));
         setText('pilot-cumulative-profit-caption', formatPercent(pnl.profitPercent));
         setText('pilot-win-rate', winRate === null ? '-' : `${winRate.toFixed(1)}%`);
-        setText('pilot-trade-count-caption', `집계 거래 ${totalTrades || today.totalTrades || 0}회`);
+        setText('pilot-trade-count-caption', paperLedgerVisible
+            ? `strict paper 청산 ${totalTrades}회`
+            : `집계 거래 ${totalTrades || today.totalTrades || 0}회`);
         setText('pilot-overview-sync', state.lastSync ? `마지막 동기화 ${formatTime(state.lastSync, true)}` : '마지막 동기화 -');
         setText('pilot-trade-sync', state.lastSync ? `잔액 확인 ${formatTime(state.lastSync, true)}` : '-');
         setText('pilot-equity-source-label', state.portfolioHistory.length ? `${state.portfolioHistory.length}개 관측값` : '관측값 수집 중');
@@ -889,7 +937,7 @@
         if (!target) return;
         const trades = Array.isArray(state.trades) ? state.trades.slice(0, 6) : [];
         const activity = [];
-        if (state.paper?.active) activity.push({ time: state.paper.updatedAt || state.paper.lastHeartbeat, title: 'Forward paper 세션 관찰 중', detail: `청산 ${state.paper.closedTradeCount || 0}회 · 중단 ${state.paper.interruptions || 0}회`, value: state.paper.state || 'RUNNING' });
+        if (state.paper?.active) activity.push({ time: state.paper.updatedAt || state.paper.lastHeartbeat || state.paper.heartbeatAt, title: 'Forward paper 세션 관찰 중', detail: `청산 ${state.paper.closedTradeCount || 0}회 · 중단 ${state.paper.interruptionCount || state.paper.interruptions?.length || 0}회`, value: state.paper.state || 'RUNNING' });
         trades.forEach(trade => {
             const action = trade.type || trade.action || '기록';
             const coin = symbolOf(trade.coin);
@@ -903,11 +951,25 @@
         if (!target) return;
         const paper = state.paper || {};
         const freshness = paper.candleFreshness || {};
+        const analysisHealth = paper.analysisDataHealth || {};
         const circuit = paper.lossCircuitBreaker || state.status?.lossCircuitBreaker || {};
         const stale = number(freshness.blockedSnapshots) + number(freshness.blockedAnalyses) + number(freshness.blockedEntries);
+        const analysisGap = number(analysisHealth.currentGapDurationSeconds);
+        const analysisIncomplete = number(paper.telemetry?.analysisIncompleteCycles);
+        const analysisTone = analysisHealth.failClosed || analysisHealth.continuityEligible === false
+            ? 'danger'
+            : analysisGap > 0 || analysisIncomplete > 0 ? 'warning' : 'ok';
+        const analysisDetail = analysisHealth.failClosed
+            ? `공백 ${analysisGap.toFixed(1)}초 · 관찰 중지`
+            : analysisGap > 0
+                ? `부분 응답 재시도 · 공백 ${analysisGap.toFixed(1)}초`
+                : analysisIncomplete > 0
+                    ? `부분 cycle ${analysisIncomplete}회 기록`
+                    : '전체 대상 시장 분석 수신 정상';
         const items = [
             { title: '모드 경계', detail: state.actualMode === 'LIVE' ? '서버 실제투자 · 주문 전 검증 필요' : '서버 모의투자 · 실제 자금 미사용', tone: state.actualMode === 'LIVE' ? 'warning' : 'ok' },
             { title: '캔들 신선도', detail: stale ? `${stale}회 진입 데이터 차단 기록` : `허용 age ${formatPrice(freshness.maxAgeSeconds || 90)}초`, tone: stale ? 'warning' : 'ok' },
+            { title: '분석 데이터 완전성', detail: analysisDetail, tone: analysisTone },
             { title: '손실 회로차단기', detail: circuit.enabled ? `${circuit.lossCount || 0}/${circuit.maxLosses || 0}회 · ${circuit.coolingDown ? '차단 중' : '대기 중'}` : '비활성화', tone: circuit.coolingDown ? 'danger' : circuit.enabled ? 'warning' : 'ok' },
             { title: '연속성 게이트', detail: paper.continuityEligible === false ? '공백 기록으로 승격 보류' : paper.available ? '현재 세션 기준 확인 중' : 'paper 세션 없음', tone: paper.continuityEligible === false ? 'danger' : paper.available ? 'ok' : 'warning' }
         ];
@@ -997,14 +1059,14 @@
             const min = Math.min(seed, ...values); const max = Math.max(seed, ...values); const range = max - min || 1;
             const padding = { top: 26, right: 32, bottom: 28, left: 70 };
             const innerWidth = Math.max(10, width - padding.left - padding.right); const innerHeight = Math.max(10, height - padding.top - padding.bottom);
-            ctx.font = '11px "DM Sans", sans-serif'; ctx.lineWidth = 1; ctx.strokeStyle = 'rgba(20, 41, 73, 0.12)'; ctx.fillStyle = '#7a8698';
+            ctx.font = '11px Manrope, "Noto Sans KR", sans-serif'; ctx.lineWidth = 1; ctx.strokeStyle = 'rgba(20, 41, 73, 0.12)'; ctx.fillStyle = '#66707f';
             for (let row = 0; row <= 4; row += 1) { const y = padding.top + (row / 4) * innerHeight; ctx.beginPath(); ctx.moveTo(padding.left, y); ctx.lineTo(width - padding.right, y); ctx.stroke(); ctx.fillText(formatWon(max - (row / 4) * range, ''), 8, y + 4); }
             const pointAt = (index, value) => ({ x: padding.left + (index / Math.max(1, values.length - 1)) * innerWidth, y: padding.top + innerHeight - ((value - min) / range) * innerHeight });
             const base = pointAt(0, seed).y; ctx.setLineDash([4, 5]); ctx.strokeStyle = '#a5adb7'; ctx.beginPath(); ctx.moveTo(padding.left, base); ctx.lineTo(width - padding.right, base); ctx.stroke(); ctx.setLineDash([]);
             const coords = values.map((value, index) => pointAt(index, value)); ctx.beginPath(); coords.forEach((point, index) => index === 0 ? ctx.moveTo(point.x, point.y) : ctx.lineTo(point.x, point.y)); ctx.lineWidth = 2.5; ctx.strokeStyle = '#1268d6'; ctx.stroke();
             const last = coords[coords.length - 1];
-            if (last) { ctx.fillStyle = '#1268d6'; ctx.beginPath(); ctx.arc(last.x, last.y, 4, 0, Math.PI * 2); ctx.fill(); ctx.font = '700 12px "DM Sans", sans-serif'; ctx.fillText(formatWon(values[values.length - 1]), Math.min(width - padding.right - 105, last.x + 8), Math.max(18, last.y - 10)); }
-            ctx.fillStyle = '#7a8698'; ctx.font = '10px "DM Sans", sans-serif'; if (points[0]?.timestamp) ctx.fillText(formatTime(points[0].timestamp), padding.left, height - 8); if (points[points.length - 1]?.timestamp) ctx.fillText(formatTime(points[points.length - 1].timestamp), Math.max(padding.left, width - padding.right - 40), height - 8);
+            if (last) { ctx.fillStyle = '#1268d6'; ctx.beginPath(); ctx.arc(last.x, last.y, 4, 0, Math.PI * 2); ctx.fill(); ctx.font = '700 12px Manrope, "Noto Sans KR", sans-serif'; ctx.fillText(formatWon(values[values.length - 1]), Math.min(width - padding.right - 105, last.x + 8), Math.max(18, last.y - 10)); }
+            ctx.fillStyle = '#66707f'; ctx.font = '10px Manrope, "Noto Sans KR", sans-serif'; if (points[0]?.timestamp) ctx.fillText(formatTime(points[0].timestamp), padding.left, height - 8); if (points[points.length - 1]?.timestamp) ctx.fillText(formatTime(points[points.length - 1].timestamp), Math.max(padding.left, width - padding.right - 40), height - 8);
         });
     }
 
@@ -1017,8 +1079,8 @@
         drawCanvas(canvas, 170, (ctx, width, height) => {
             const center = width / 2; const radius = Math.min(width, height) / 2 - 12; let start = -Math.PI / 2;
             if (!total) { ctx.strokeStyle = '#dfe4ea'; ctx.lineWidth = 18; ctx.beginPath(); ctx.arc(center, center, radius, 0, Math.PI * 2); ctx.stroke(); }
-            items.forEach((item, index) => { const sweep = (item.value / total) * Math.PI * 2; ctx.beginPath(); ctx.moveTo(center, center); ctx.arc(center, center, radius, start, start + sweep); ctx.closePath(); ctx.fillStyle = index === 0 ? '#1268d6' : index === 1 ? '#0d8f68' : index === 2 ? '#e6a12d' : '#b9c0c9'; ctx.fill(); start += sweep; });
-            ctx.fillStyle = '#142949'; ctx.font = '700 15px "DM Sans", sans-serif'; ctx.textAlign = 'center'; ctx.fillText(total ? formatWon(total, '') : '0', center, center + 5); ctx.textAlign = 'left';
+            items.forEach((item, index) => { const sweep = (item.value / total) * Math.PI * 2; ctx.beginPath(); ctx.moveTo(center, center); ctx.arc(center, center, radius, start, start + sweep); ctx.closePath(); ctx.fillStyle = index === 0 ? '#1268d6' : index === 1 ? '#0a7a58' : index === 2 ? '#e6a12d' : '#b9c0c9'; ctx.fill(); start += sweep; });
+            ctx.fillStyle = '#142949'; ctx.font = '700 15px Manrope, "Noto Sans KR", sans-serif'; ctx.textAlign = 'center'; ctx.fillText(total ? formatWon(total, '') : '0', center, center + 5); ctx.textAlign = 'left';
         });
         const legend = byId('pilot-allocation-legend');
         if (!legend) return;
@@ -1033,11 +1095,11 @@
             if (!candles.length) return;
             const padding = { top: 18, right: 54, bottom: 26, left: 16 }; const innerWidth = Math.max(10, width - padding.left - padding.right); const innerHeight = Math.max(10, height - padding.top - padding.bottom);
             const high = Math.max(...candles.map(item => number(item.high)), ...candles.map(item => number(item.close))); const low = Math.min(...candles.map(item => number(item.low)), ...candles.map(item => number(item.close))); const range = high - low || 1; const y = value => padding.top + innerHeight - ((value - low) / range) * innerHeight;
-            ctx.font = '10px "DM Sans", sans-serif'; ctx.fillStyle = '#7a8698'; ctx.strokeStyle = 'rgba(20, 41, 73, 0.12)'; ctx.lineWidth = 1;
+            ctx.font = '10px Manrope, "Noto Sans KR", sans-serif'; ctx.fillStyle = '#66707f'; ctx.strokeStyle = 'rgba(20, 41, 73, 0.12)'; ctx.lineWidth = 1;
             for (let row = 0; row <= 4; row += 1) { const lineY = padding.top + (row / 4) * innerHeight; ctx.beginPath(); ctx.moveTo(padding.left, lineY); ctx.lineTo(width - padding.right, lineY); ctx.stroke(); ctx.fillText(formatPrice(high - (row / 4) * range), width - padding.right + 7, lineY + 4); }
             const step = innerWidth / candles.length; const bodyWidth = Math.max(2, Math.min(12, step * 0.62));
-            candles.forEach((candle, index) => { const x = padding.left + step * index + step / 2; const open = number(candle.open); const close = number(candle.close); const highValue = number(candle.high); const lowValue = number(candle.low); const bullish = close >= open; ctx.strokeStyle = bullish ? '#0d8f68' : '#c94b46'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(x, y(highValue)); ctx.lineTo(x, y(lowValue)); ctx.stroke(); ctx.fillStyle = bullish ? '#0d8f68' : '#c94b46'; const top = y(Math.max(open, close)); const bottom = y(Math.min(open, close)); ctx.fillRect(x - bodyWidth / 2, top, bodyWidth, Math.max(1, bottom - top)); });
-            ctx.fillStyle = '#7a8698'; if (candles[0]?.time) ctx.fillText(formatTime(candles[0].time), padding.left, height - 7); if (candles[candles.length - 1]?.time) ctx.fillText(formatTime(candles[candles.length - 1].time), Math.max(padding.left, width - padding.right - 42), height - 7);
+            candles.forEach((candle, index) => { const x = padding.left + step * index + step / 2; const open = number(candle.open); const close = number(candle.close); const highValue = number(candle.high); const lowValue = number(candle.low); const bullish = close >= open; ctx.strokeStyle = bullish ? '#0a7a58' : '#b5433e'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(x, y(highValue)); ctx.lineTo(x, y(lowValue)); ctx.stroke(); ctx.fillStyle = bullish ? '#0a7a58' : '#b5433e'; const top = y(Math.max(open, close)); const bottom = y(Math.min(open, close)); ctx.fillRect(x - bodyWidth / 2, top, bodyWidth, Math.max(1, bottom - top)); });
+            ctx.fillStyle = '#66707f'; if (candles[0]?.time) ctx.fillText(formatTime(candles[0].time), padding.left, height - 7); if (candles[candles.length - 1]?.time) ctx.fillText(formatTime(candles[candles.length - 1].time), Math.max(padding.left, width - padding.right - 42), height - 7);
         });
     }
 
@@ -1062,7 +1124,7 @@
         const target = byId('pilot-market-list'); if (!target) return;
         const list = sortedMarketPrices();
         if (!list.length) { target.innerHTML = '<div class="pilot-empty-panel"><i class="ph ph-chart-line" aria-hidden="true"></i>시세를 불러오지 못했거나 검색 결과가 없습니다.</div>'; return; }
-        target.innerHTML = `<div class="pilot-market-row" aria-hidden="true"><span class="pilot-market-row-label">마켓</span><span class="pilot-market-row-label" style="text-align:right">현재가</span><span class="pilot-market-row-label" style="text-align:right">24H</span><span class="pilot-market-row-label" style="text-align:right">거래량</span><span></span></div>${list.slice(0, 80).map(item => `<div class="pilot-market-row ${item.coin === state.selectedCoin ? 'is-selected' : ''}" data-pilot-market-row="${escapeHtml(item.coin)}"><span class="pilot-market-row-symbol">${escapeHtml(symbolOf(item.coin))}/KRW</span><span class="pilot-market-row-price">${formatPrice(item.price)}</span><span class="pilot-market-row-change ${classForValue(item.change)}">${formatPercent(item.change)}</span><span class="pilot-market-row-volume">${formatWon(item.volumeKrw)}</span><span><i class="ph ph-arrow-up-right" aria-hidden="true"></i></span></div>`).join('')}`;
+        target.innerHTML = `<div class="pilot-market-row pilot-market-row-head" aria-hidden="true"><span class="pilot-market-row-label">마켓</span><span class="pilot-market-row-label" style="text-align:right">현재가</span><span class="pilot-market-row-label" style="text-align:right">24H</span><span class="pilot-market-row-label" style="text-align:right">거래량</span><span></span></div>${list.slice(0, 80).map(item => `<div class="pilot-market-row ${item.coin === state.selectedCoin ? 'is-selected' : ''}" role="button" tabindex="0" data-pilot-market-row="${escapeHtml(item.coin)}"><span class="pilot-market-row-symbol">${escapeHtml(symbolOf(item.coin))}/KRW</span><span class="pilot-market-row-price">${formatPrice(item.price)}</span><span class="pilot-market-row-change ${classForValue(item.change)}">${formatPercent(item.change)}</span><span class="pilot-market-row-volume">${formatWon(item.volumeKrw)}</span><span><i class="ph ph-arrow-up-right" aria-hidden="true"></i></span></div>`).join('')}`;
     }
 
     function renderPortfolio() {
@@ -1105,6 +1167,36 @@
 
     function renderValidationDetail() {
         const report = state.validation; const target = byId('pilot-validation-detail'); const pill = byId('pilot-validation-status-pill'); if (!target || !pill) return;
+        let confidenceTarget = byId('pilot-validation-confidence');
+        if (!confidenceTarget) {
+            confidenceTarget = document.createElement('div');
+            confidenceTarget.id = 'pilot-validation-confidence';
+            confidenceTarget.className = 'pilot-inline-note pilot-validation-confidence';
+            target.insertAdjacentElement('afterend', confidenceTarget);
+        }
+        if (!report?.available) {
+            confidenceTarget.innerHTML = '<i class="ph ph-chart-line-up" aria-hidden="true"></i><span>거래수익 신뢰도: 리포트가 없어 판정할 수 없습니다.</span>';
+        } else {
+            const confidence = report.statisticalConfidence || {};
+            const required = confidence.required === true;
+            const passedConfidence = confidence.passed === true;
+            const statusText = !required ? '진단 전용 · 미요구' : passedConfidence ? '통과' : '보류';
+            const lowerBound = Number.isFinite(Number(confidence.minimumLowerBoundPercent))
+                ? `${Number(confidence.minimumLowerBoundPercent).toFixed(2)}%`
+                : '-';
+            const validationConfidence = (report.results || [])
+                .map(result => result.validation?.gate?.statisticalConfidence?.validation)
+                .filter(Boolean);
+            const observedLowerBounds = validationConfidence
+                .map(item => Number(item.lowerBoundPercent))
+                .filter(Number.isFinite);
+            const lowestObserved = observedLowerBounds.length > 0
+                ? `${Math.min(...observedLowerBounds).toFixed(2)}%`
+                : '표본 부족';
+            const observedTrades = validationConfidence
+                .reduce((sum, item) => sum + (Number(item.sampleCount) || 0), 0);
+            confidenceTarget.innerHTML = `<i class="ph ph-chart-line-up" aria-hidden="true"></i><span>거래수익 95% 단측 하한: <strong>${escapeHtml(statusText)}</strong> · 기준 ${escapeHtml(lowerBound)} · 관측 최저 ${escapeHtml(lowestObserved)} · holdout 표본 ${observedTrades}건 · 작은 양수 표본은 승격 근거가 아닙니다.</span>`;
+        }
         if (!report?.available) { pill.textContent = '리포트 없음'; pill.className = 'pilot-status-pill is-warning'; setText('pilot-validation-meta', '읽기 전용 워크포워드 리포트가 없습니다.'); target.innerHTML = '<div class="pilot-empty-panel"><i class="ph ph-file-dashed" aria-hidden="true"></i><div>검증 리포트가 없으면 실제 주문 승격을 판단할 수 없습니다.</div></div>'; return; }
         const results = report.results || []; const promotedMarkets = report.promotedMarkets || []; const passed = report.promoted === true; pill.textContent = passed ? '승격 가능' : '전체 보류'; pill.className = `pilot-status-pill${passed ? '' : ' is-warning'}`; setText('pilot-validation-meta', `${report.validationMode === 'fixed_config' ? '현재 설정 고정 검증' : '학습 구간 튜닝 검증'} · 생성 ${formatDateTime(report.generatedAt)} · ${report.candleCount || '-'}개 캔들`);
         target.innerHTML = `<div class="pilot-validation-detail"><div class="pilot-validation-ring ${passed ? 'is-pass' : ''}">${escapeHtml(`${promotedMarkets.length}/${results.length}`)}</div><div><div class="pilot-validation-headline">${passed ? '모든 대상 마켓이 게이트를 통과했습니다.' : '실전 승격을 보류하고 계속 관찰하세요.'}</div><div class="pilot-validation-copy">이 리포트는 실전 주문을 자동 승인하지 않습니다. paper 기간·리스크·연속성 조건을 함께 확인해야 합니다.</div></div></div><div class="pilot-validation-market-list">${results.length ? results.map(result => { const metric = result.validation?.validation; const marketPassed = result.validation?.promoted === true; return `<div class="pilot-validation-market-card ${marketPassed ? 'is-pass' : 'is-hold'}"><div class="pilot-validation-market-name"><span>${escapeHtml(result.market || '-')}</span><span class="pilot-status-pill ${marketPassed ? '' : 'is-warning'}">${marketPassed ? 'PASS' : 'HOLD'}</span></div><div class="pilot-validation-market-meta">${metric ? `수익률 ${formatPercent(metric.totalReturnPercent)} · 거래 ${metric.tradeCount || 0}회<br>승률 ${formatPercent(metric.winRate)} · PF ${Number.isFinite(metric.profitFactor) ? metric.profitFactor.toFixed(2) : '∞'} · MDD ${formatPercent(metric.maxDrawdownPercent)}` : escapeHtml(result.error || result.validation?.reason || '데이터 부족')}</div></div>`; }).join('') : '<div class="pilot-empty-panel">마켓 결과가 없습니다.</div>'}</div>`;
@@ -1113,8 +1205,21 @@
     function renderPaperDetail() {
         const status = state.paper; const target = byId('pilot-paper-detail'); if (!target) return;
         if (!status?.available) { setText('pilot-paper-meta', '세션 없음 · 기존 모의 포트폴리오를 자동 초기화하지 않습니다.'); target.innerHTML = '<div class="pilot-paper-status"><div class="pilot-paper-status-head"><strong class="pilot-paper-state is-stopped">PAPER 세션 없음</strong><span class="pilot-status-pill is-warning">시작 필요</span></div><div class="pilot-paper-meta">현재 상태 기준으로 시작하거나 새 시드로 초기화할 수 있습니다. 초기화는 기존 dry portfolio 데이터를 덮어쓸 수 있으므로 실행 전 확인합니다.</div><div class="pilot-paper-actions"><button type="button" class="pilot-button" data-pilot-action="start-paper">현재 상태 기준 시작</button><button type="button" class="pilot-button is-danger" data-pilot-action="start-paper-reset">새 시드로 초기화 후 시작</button></div></div>'; return; }
-        const paperState = status.state || (status.active ? 'RUNNING' : 'STOPPED'); const paperClass = paperState === 'PASS' ? 'is-pass' : paperState === 'STOPPED' ? 'is-stopped' : ''; const riskMonitor = status.riskMonitor || {}; const riskLabel = riskMonitor.failClosed ? '중지 필요' : riskMonitor.currentOutageDurationSeconds > 0 ? '재시도 중' : '정상'; const riskGap = number(riskMonitor.currentOutageDurationSeconds); setText('pilot-paper-meta', `시작 ${formatDateTime(status.startedAt)} · 마지막 갱신 ${formatDateTime(status.updatedAt || status.lastHeartbeat)}`);
-        target.innerHTML = `<div class="pilot-paper-status"><div class="pilot-paper-status-head"><strong class="pilot-paper-state ${paperClass}">${paperState === 'PASS' ? 'PAPER PASS' : paperState === 'RUNNING' ? 'PAPER 관찰 중' : 'PAPER 중지'}</strong><span class="pilot-status-pill ${paperState === 'PASS' ? '' : paperState === 'RUNNING' ? 'is-warning' : 'is-danger'}">${escapeHtml(paperState)}</span></div><div class="pilot-paper-meta">경과 ${number(status.elapsedDays).toFixed(2)}일 · 자산 ${formatWon(status.currentAssets)} · 수익률 ${formatPercent(status.returnPercent)}<br>청산 거래 ${status.closedTradeCount || 0}회 · 실현손익 ${formatSignedWon(status.realizedProfit)} · MDD ${formatPercent(status.maxDrawdownPercent)}<br>strict 현재 포지션 ${status.strictEvaluation?.activePositions || 0}개 · 캔들 최신성 차단 ${number(status.candleFreshness?.blockedSnapshots) + number(status.candleFreshness?.blockedAnalyses) + number(status.candleFreshness?.blockedEntries)}회<br>리스크 ticker ${escapeHtml(riskLabel)} · 연속 실패 ${number(riskMonitor.consecutiveFailures)}회 · 시세 공백 ${riskGap.toFixed(1)}초</div><div class="pilot-paper-actions"><button type="button" class="pilot-button" data-pilot-action="refresh-history">새로고침</button>${status.active ? '<button type="button" class="pilot-button is-danger" data-pilot-action="stop-paper">세션 중지</button>' : '<button type="button" class="pilot-button" data-pilot-action="start-paper">새 세션 시작</button>'}</div></div>`;
+        const paperState = status.state || (status.active ? 'RUNNING' : 'STOPPED'); const paperClass = paperState === 'PASS' ? 'is-pass' : paperState === 'STOPPED' ? 'is-stopped' : ''; const riskMonitor = status.riskMonitor || {}; const riskLabel = riskMonitor.failClosed ? '중지 필요' : riskMonitor.currentOutageDurationSeconds > 0 ? '재시도 중' : '정상'; const riskGap = number(riskMonitor.currentOutageDurationSeconds); const analysisHealth = status.analysisDataHealth || {}; const analysisGap = number(analysisHealth.currentGapDurationSeconds); const analysisIncomplete = number(status.telemetry?.analysisIncompleteCycles); const analysisLabel = analysisHealth.failClosed ? '중지 필요' : analysisGap > 0 ? `재시도 중 (${analysisGap.toFixed(1)}초)` : analysisIncomplete > 0 ? `부분 cycle ${analysisIncomplete}회` : '정상'; const signalAvailability = status.signalAvailability || {}; const signalLabel = status.marketQuiet ? '시장 정적 · 과매도 반등 후보 없음' : status.filterStarvation ? '필터 고착 후보 감지' : '반등 후보 집계 중'; const signalSummary = `${signalLabel} · 과매도 ${number(signalAvailability.oversoldObservations)}회 · strict 후보 ${number(signalAvailability.strictReboundCandidates)}회 · 확인 ${number(signalAvailability.strictConfirmedCandidates)}회`; const heartbeat = status.updatedAt || status.heartbeatAt || status.lastHeartbeat; const observerNote = status.readOnlyObserver ? ' · 읽기 전용 관찰' : ''; setText('pilot-paper-meta', `시작 ${formatDateTime(status.startedAt)} · 마지막 갱신 ${formatDateTime(heartbeat)}${observerNote}`);
+        const paperActions = status.readOnlyObserver
+            ? '<span class="pilot-status-pill">읽기 전용 관찰</span>'
+            : status.active
+                ? '<button type="button" class="pilot-button is-danger" data-pilot-action="stop-paper">세션 중지</button>'
+                : '<button type="button" class="pilot-button" data-pilot-action="start-paper">새 세션 시작</button>';
+        target.innerHTML = `<div class="pilot-paper-status"><div class="pilot-paper-status-head"><strong class="pilot-paper-state ${paperClass}">${paperState === 'PASS' ? 'PAPER PASS' : paperState === 'RUNNING' ? 'PAPER 관찰 중' : 'PAPER 중지'}</strong><span class="pilot-status-pill ${paperState === 'PASS' ? '' : paperState === 'RUNNING' ? 'is-warning' : 'is-danger'}">${escapeHtml(paperState)}</span></div><div class="pilot-paper-meta">경과 ${number(status.elapsedDays).toFixed(2)}일 · 자산 ${formatWon(status.currentAssets)} · 수익률 ${formatPercent(status.returnPercent)}<br>청산 거래 ${status.closedTradeCount || 0}회 · 실현손익 ${formatSignedWon(status.realizedProfit)} · MDD ${formatPercent(status.maxDrawdownPercent)}<br>strict 현재 포지션 ${status.strictEvaluation?.activePositions || 0}개 · 캔들 최신성 차단 ${number(status.candleFreshness?.blockedSnapshots) + number(status.candleFreshness?.blockedAnalyses) + number(status.candleFreshness?.blockedEntries)}회<br>분석 데이터 ${escapeHtml(analysisLabel)} · 부분 cycle ${analysisIncomplete}회 · 공백 ${analysisGap.toFixed(1)}초<br>신호 상태 ${escapeHtml(signalSummary)}<br>리스크 ticker ${escapeHtml(riskLabel)} · 연속 실패 ${number(riskMonitor.consecutiveFailures)}회 · 시세 공백 ${riskGap.toFixed(1)}초</div><div class="pilot-paper-actions"><button type="button" class="pilot-button" data-pilot-action="refresh-history">새로고침</button>${paperActions}</div></div>`;
+        if (status.orphaned) {
+            const strictOpen = number(status.strictEvaluation?.activePositions);
+            const diagnosticOpen = Array.isArray(status.diagnosticOpenPositions) ? status.diagnosticOpenPositions.length : 0;
+            const heartbeat = status.heartbeatAt ? escapeHtml(formatDateTime(status.heartbeatAt)) : '확인 불가';
+            const reason = status.orphanReason === 'heartbeat_stale' ? 'heartbeat가 오래되어' : 'owner process가 사라져';
+            target.querySelector('.pilot-paper-status')?.insertAdjacentHTML('afterend', `<div class="pilot-paper-orphan-alert">⚠️ Orphan 세션: ${reason} 자동 재개와 같은 ledger 재사용을 차단했습니다. strict 미청산 ${strictOpen}개 · diagnostic 미청산 ${diagnosticOpen}개 · 마지막 heartbeat ${heartbeat}</div>`);
+        }
+        syncObserverControls();
     }
 
     function renderSettings() {
@@ -1136,6 +1241,7 @@
             controls.innerHTML = `<div class="pilot-control-row"><div class="pilot-control-copy"><strong>자동 최적화</strong><span>주기적으로 후보 파라미터를 탐색합니다. live gate와는 별개입니다.</span></div><label class="pilot-switch"><input type="checkbox" id="pilot-auto-optimization" ${optimization.enabled ? 'checked' : ''}><span class="pilot-switch-track"></span></label></div><div class="pilot-control-row"><div class="pilot-control-copy"><strong>최적화 주기</strong><span>다음 실행: ${escapeHtml(formatDateTime(optimization.nextRun))}</span></div><select class="pilot-select" style="max-width:140px" id="pilot-optimization-interval"><option value="3600000">1시간</option><option value="7200000">2시간</option><option value="10800000">3시간</option><option value="21600000">6시간</option><option value="43200000">12시간</option><option value="86400000">24시간</option></select></div><div class="pilot-control-row"><div class="pilot-control-copy"><strong>즉시 실행</strong><span>현재 설정을 기준으로 후보 탐색을 시작합니다.</span></div><button type="button" class="pilot-button is-small is-primary" data-pilot-action="run-optimization">지금 실행</button></div>`;
             const interval = byId('pilot-optimization-interval'); if (interval && optimization.interval) interval.value = String(optimization.interval);
         }
+        syncObserverControls();
     }
 
     function renderHistoryTables() {
@@ -1145,7 +1251,7 @@
     }
 
     function renderAll() {
-        renderMode(); renderGateCards(); renderChartPeriodButtons(); renderCoreStats(); renderPositionRows('pilot-overview-positions'); renderPositionRows('pilot-portfolio-positions'); renderActivity(); renderRiskSummary(); renderTradePanels(); drawEquityChart('pilot-equity-chart', 'pilot-equity-empty', state.portfolioHistory); renderPortfolio(); renderMarketHeader(); renderMarketList(); renderAnalysis(); renderNews(); renderValidationDetail(); renderPaperDetail();
+        renderMode(); renderGateCards(); renderChartPeriodButtons(); renderCoreStats(); renderPositionRows('pilot-overview-positions'); renderPositionRows('pilot-portfolio-positions'); renderActivity(); renderRiskSummary(); renderTradePanels(); drawEquityChart('pilot-equity-chart', 'pilot-equity-empty', state.portfolioHistory); renderPortfolio(); renderMarketHeader(); renderMarketList(); renderAnalysis(); renderNews(); renderValidationDetail(); renderPaperDetail(); syncObserverControls();
     }
 
     async function loadCore({ quiet = false } = {}) {
@@ -1235,23 +1341,27 @@
     }
 
     async function walletAction(kind) {
+        if (isReadOnlyObserver()) { showToast(readOnlyObserverReason(), 'warning'); return; }
         if (!isPaperMode()) { showToast('실제투자 모드에서는 모의투자 지갑을 조작할 수 없습니다.', 'warning'); return; }
         const input = byId(kind === 'deposit' ? 'pilot-deposit-amount' : 'pilot-withdraw-amount'); const amount = number(input?.value); if (!amount || amount < 1000) { showToast('최소 1,000원 이상 입력해주세요.', 'warning'); return; }
         try { const result = await requestJSON(`/virtual/${kind}`, { method: 'POST', body: JSON.stringify({ amount: Math.floor(amount) }) }); showToast(result.message || '지갑을 업데이트했습니다.', 'success'); if (input) input.value = ''; await loadCore(); } catch (error) { showToast(`지갑 변경 실패: ${error.message}`, 'error'); }
     }
 
     async function resetWallet() {
+        if (isReadOnlyObserver()) { showToast(readOnlyObserverReason(), 'warning'); return; }
         if (!isPaperMode()) { showToast('실제투자 모드에서는 지갑을 리셋할 수 없습니다.', 'warning'); return; }
         const seed = number(window.prompt('새 시드머니를 입력하세요 (원)', String(state.account?.initialSeedMoney || 10000000))); if (!seed || seed < 100000) return; if (!window.confirm(`모의 포트폴리오와 전략 포지션을 ${formatWon(seed)} 기준으로 초기화할까요?`)) return;
         try { const result = await requestJSON('/virtual/reset', { method: 'POST', body: JSON.stringify({ seedMoney: Math.floor(seed) }) }); showToast(result.message || '모의투자 지갑을 리셋했습니다.', 'success'); await loadCore(); } catch (error) { showToast(`리셋 실패: ${error.message}`, 'error'); }
     }
 
     async function startPaper(reset = false) {
+        if (isReadOnlyObserver()) { showToast(readOnlyObserverReason(), 'warning'); return; }
         const message = reset ? '새 시드로 초기화 후 forward paper 세션을 시작할까요? 기존 dry portfolio가 덮어써질 수 있습니다.' : '현재 상태 기준으로 forward paper 세션을 시작할까요?'; if (!window.confirm(message)) return;
         try { const result = await requestJSON('/paper-validation/start', { method: 'POST', body: JSON.stringify(reset ? { reset: true } : {}) }); state.paper = result.status; renderGateCards(); renderPaperDetail(); showToast('forward paper 세션을 시작했습니다.', 'success'); } catch (error) { showToast(`paper 세션 시작 실패: ${error.message}`, 'error'); }
     }
 
     async function stopPaper() {
+        if (isReadOnlyObserver()) { showToast(readOnlyObserverReason(), 'warning'); return; }
         if (!window.confirm('현재 forward paper 세션을 중지할까요?')) return;
         try { const result = await requestJSON('/paper-validation/stop', { method: 'POST' }); state.paper = result.status; renderGateCards(); renderPaperDetail(); showToast('forward paper 세션을 중지했습니다.', 'success'); } catch (error) { showToast(`paper 세션 중지 실패: ${error.message}`, 'error'); }
     }
@@ -1263,16 +1373,19 @@
     }
 
     async function saveSettings() {
+        if (isReadOnlyObserver()) { showToast(readOnlyObserverReason(), 'warning'); return; }
         const payload = settingPayload();
         try { const investmentRatio = payload.investmentRatio; delete payload.investmentRatio; const result = await requestJSON('/config/update', { method: 'POST', body: JSON.stringify(payload) }); if (investmentRatio !== undefined) await requestJSON('/investment-config/update', { method: 'POST', body: JSON.stringify({ investmentRatio }) }); state.settingsLoaded = false; await loadSettings(); showToast(result.message || '설정을 적용했습니다. 다음 검증에서 다시 확인하세요.', 'success'); } catch (error) { showToast(`설정 적용 실패: ${error.message}`, 'error'); }
     }
 
     async function applyPreset(presetId) {
+        if (isReadOnlyObserver()) { showToast(readOnlyObserverReason(), 'warning'); return; }
         const preset = state.settings?.presets?.find(item => item.id === presetId); if (!preset) return; if (!window.confirm(`${preset.name} 프리셋을 적용할까요? 현재 전략 파라미터가 변경됩니다.`)) return;
         try { await requestJSON('/investment-presets/apply', { method: 'POST', body: JSON.stringify({ presetId, config: preset.config }) }); state.settingsLoaded = false; await loadSettings(); showToast(`${preset.name} 프리셋을 적용했습니다.`, 'success'); } catch (error) { showToast(`프리셋 적용 실패: ${error.message}`, 'error'); }
     }
 
     async function runOptimization() {
+        if (isReadOnlyObserver()) { showToast(readOnlyObserverReason(), 'warning'); return; }
         if (!window.confirm('현재 설정으로 최적화 후보 탐색을 시작할까요?')) return;
         try { const result = await requestJSON('/optimization/run-now', { method: 'POST' }); showToast(result.message || '최적화를 시작했습니다.', 'success'); } catch (error) { showToast(`최적화 실행 실패: ${error.message}`, 'error'); }
     }
@@ -1328,6 +1441,16 @@
         if (withdraw) { const input = byId('pilot-withdraw-amount'); if (input) input.value = withdraw.dataset.pilotWithdraw; return; }
         const preset = event.target.closest('[data-pilot-preset-id]');
         if (preset) { await applyPreset(preset.dataset.pilotPresetId); return; }
+    });
+
+    // Market rows are clickable divs; expose them to keyboard users by
+    // forwarding Enter/Space to the existing delegated click handler.
+    root.addEventListener('keydown', event => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        const marketRow = event.target.closest?.('[data-pilot-market-row]');
+        if (!marketRow) return;
+        event.preventDefault();
+        marketRow.click();
     });
 
     root.addEventListener('input', event => {

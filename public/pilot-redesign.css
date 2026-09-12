@@ -14,8 +14,11 @@
     --sl-font-display: "IBM Plex Sans KR", "Noto Sans KR", "Apple SD Gothic Neo", sans-serif;
     --sl-ink: #142949;
     --sl-ink-soft: #43516a;
-    --sl-muted: #7a8698;
-    --sl-faint: #aeb7c4;
+    /* Status/text colors are tuned so 10-12px labels still clear WCAG AA 4.5:1
+       on the paper and tinted surfaces they sit on. --sl-faint stays below AA
+       and is reserved for placeholders, icon glyphs, and decorative dots. */
+    --sl-muted: #66707f;
+    --sl-faint: #8a94a3;
     --sl-line: #dfe4ea;
     --sl-line-strong: #cbd3dd;
     --sl-paper: #f7f4ee;
@@ -24,12 +27,12 @@
     --sl-blue: #1268d6;
     --sl-blue-deep: #0b4fae;
     --sl-blue-soft: #eaf2ff;
-    --sl-green: #0d8f68;
+    --sl-green: #0a7a58;
     --sl-green-bright: #12a375;
     --sl-green-soft: #e6f6ef;
-    --sl-amber: #b36b00;
+    --sl-amber: #96590a;
     --sl-amber-soft: #fff3d7;
-    --sl-red: #c94b46;
+    --sl-red: #b5433e;
     --sl-red-soft: #ffebe9;
     --sl-shadow-xs: 0 1px 2px rgba(20, 41, 73, 0.04);
     --sl-shadow-sm: 0 10px 30px rgba(20, 41, 73, 0.06);
@@ -153,7 +156,7 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
 
 .pilot-nav-label {
     padding: 4px 12px 7px;
-    color: var(--sl-faint);
+    color: var(--sl-muted);
     font-size: 10px;
     font-weight: 700;
     letter-spacing: 0.13em;
@@ -234,6 +237,7 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
     padding: 16px 32px;
     border-bottom: 1px solid rgba(203, 211, 221, 0.72);
     background: rgba(247, 244, 238, 0.9);
+    -webkit-backdrop-filter: blur(18px);
     backdrop-filter: blur(18px);
 }
 
@@ -472,8 +476,10 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
 }
 
 .pilot-button.is-success {
-    border-color: var(--sl-green-bright);
-    background: var(--sl-green-bright);
+    /* Text-bearing surface: use the AA-passing green, keep --sl-green-bright
+       for non-text accents (rings, dots, switch tracks). */
+    border-color: var(--sl-green);
+    background: var(--sl-green);
     color: #fff;
 }
 
@@ -503,9 +509,24 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
 .pilot-filter-chip:focus-visible,
 .pilot-table-action:focus-visible,
 .pilot-input:focus-visible,
-.pilot-select:focus-visible {
+.pilot-select:focus-visible,
+.pilot-gate-card:focus-visible,
+.pilot-preset-card:focus-visible,
+.pilot-news-row:focus-visible,
+.pilot-trade-tab:focus-visible,
+.pilot-trade-submit:focus-visible,
+.pilot-market-interval:focus-visible,
+.pilot-market-row:focus-visible,
+.pilot-ai-form-input:focus-visible,
+.pilot-ai-form-select:focus-visible,
+.pilot-ai-check:focus-within,
+.pilot-switch:has(input:focus-visible) .pilot-switch-track {
     outline: 3px solid rgba(18, 104, 214, 0.26);
     outline-offset: 2px;
+}
+
+.pilot-switch:has(input:focus-visible) .pilot-switch-track {
+    outline-offset: 1px;
 }
 
 .pilot-mode-banner {
@@ -577,6 +598,8 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
     background: rgba(255, 253, 249, 0.78);
     box-shadow: var(--sl-shadow-xs);
     cursor: pointer;
+    /* <button> resets: inherit the Signal Ledger type instead of the UA font. */
+    font: inherit;
     text-align: left;
     transition: border-color 160ms ease, transform 160ms ease, box-shadow 160ms ease;
 }
@@ -594,7 +617,7 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
     align-items: center;
     justify-content: center;
     border-radius: 50%;
-    background: var(--sl-green-bright);
+    background: var(--sl-green);
     color: #fff;
     font-size: 18px;
 }
@@ -960,7 +983,7 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
 
 .pilot-field-hint {
     color: var(--sl-muted);
-    font-size: 10px;
+    font-size: 11px;
     font-weight: 500;
 }
 
@@ -1001,14 +1024,14 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
 
 .pilot-filter-chip {
     min-height: 27px;
-    padding: 0 5px;
+    padding: 0 7px;
     border: 1px solid var(--sl-line);
     border-radius: 6px;
     background: transparent;
     color: var(--sl-muted);
     cursor: pointer;
     font: inherit;
-    font-size: 10px;
+    font-size: 11px;
     font-weight: 700;
 }
 
@@ -1035,7 +1058,7 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
 .pilot-trade-summary-label {
     display: block;
     color: var(--sl-muted);
-    font-size: 10px;
+    font-size: 11px;
 }
 
 .pilot-trade-summary-value {
@@ -1079,14 +1102,16 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
 }
 
 .pilot-trade-submit:disabled {
-    background: #c5cbd3;
-    color: #fff;
+    /* Disabled but still legible: ink text on a line-gray fill instead of
+       white-on-gray (previously ~1.6:1 contrast). */
+    background: var(--sl-line);
+    color: #5f6a78;
     cursor: not-allowed;
 }
 
 .pilot-trade-disclaimer {
     color: var(--sl-muted);
-    font-size: 10px;
+    font-size: 11px;
     line-height: 1.5;
     text-align: center;
 }
@@ -1172,11 +1197,11 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
     display: inline-flex;
     align-items: center;
     min-height: 23px;
-    padding: 0 7px;
+    padding: 0 8px;
     border-radius: 999px;
     background: var(--sl-green-soft);
     color: var(--sl-green);
-    font-size: 10px;
+    font-size: 11px;
     font-weight: 800;
 }
 
@@ -1199,7 +1224,7 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
     color: var(--sl-ink-soft);
     cursor: pointer;
     font: inherit;
-    font-size: 10px;
+    font-size: 11px;
     font-weight: 700;
 }
 
@@ -1276,7 +1301,7 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
 .pilot-market-metric-label {
     display: block;
     color: var(--sl-muted);
-    font-size: 10px;
+    font-size: 11px;
 }
 
 .pilot-market-metric-value {
@@ -1355,6 +1380,22 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
     border-bottom: 0;
 }
 
+/* Column header rendered with the same grid: never signal interactivity. */
+.pilot-market-row-head,
+.pilot-market-row-head:hover {
+    background: transparent;
+    cursor: default;
+}
+
+.pilot-market-row-head .pilot-market-row-label {
+    padding: 2px 0;
+}
+
+.pilot-market-row[role="button"]:focus-visible {
+    outline: 3px solid rgba(18, 104, 214, 0.26);
+    outline-offset: -3px;
+}
+
 .pilot-market-row-label {
     color: var(--sl-muted);
     font-size: 10px;
@@ -1420,7 +1461,7 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
     display: block;
     margin-top: 2px;
     color: var(--sl-muted);
-    font-size: 10px;
+    font-size: 11px;
 }
 
 .pilot-analysis-stat.is-buy strong { color: var(--sl-green); }
@@ -1492,11 +1533,19 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
 
 .pilot-news-row {
     display: grid;
+    width: 100%;
     grid-template-columns: minmax(0, 1fr) auto;
     gap: 18px;
     padding: 15px 20px;
+    /* <button> UA reset: native outset borders, buttonface fill, centered text
+       and the system font must not leak into the editorial list. */
+    border: 0;
     border-bottom: 1px solid var(--sl-line);
+    background: transparent;
+    color: inherit;
     cursor: pointer;
+    font: inherit;
+    text-align: left;
     transition: background 140ms ease;
 }
 
@@ -1528,7 +1577,7 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
     border-radius: 6px;
     background: var(--sl-green-soft);
     color: var(--sl-green);
-    font-size: 10px;
+    font-size: 11px;
     font-weight: 800;
     text-align: center;
 }
@@ -1751,14 +1800,14 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
     margin: 8px 0 0 18px;
     padding: 0;
     color: var(--sl-ink-soft);
-    font-size: 10px;
+    font-size: 11px;
     line-height: 1.6;
 }
 
 .pilot-impact-group p {
     margin: 7px 0 0;
     color: var(--sl-muted);
-    font-size: 10px;
+    font-size: 11px;
     line-height: 1.5;
 }
 
@@ -1814,7 +1863,7 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
 .pilot-preset-en {
     margin-top: 2px;
     color: var(--sl-muted);
-    font-size: 10px;
+    font-size: 11px;
 }
 
 .pilot-preset-risk {
@@ -1930,7 +1979,7 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
 
 .pilot-history-warning span {
     margin-top: 3px;
-    color: #9a6a20;
+    color: #8a5c14;
     font-size: 11px;
     line-height: 1.45;
 }
@@ -2030,7 +2079,7 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
 .pilot-validation-market-meta {
     margin-top: 6px;
     color: var(--sl-muted);
-    font-size: 10px;
+    font-size: 11px;
     line-height: 1.45;
 }
 
@@ -2066,6 +2115,30 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
     gap: 8px;
     flex-wrap: wrap;
     margin-top: 15px;
+}
+
+/* Orphaned forward-paper sessions are a safety signal: render them as a
+   danger callout on the light shell (the legacy dark-theme rule in
+   index.html still applies to the hidden compatibility DOM only). */
+#pilot-redesign-root .pilot-paper-orphan-alert {
+    display: flex;
+    align-items: flex-start;
+    gap: 9px;
+    margin: 12px 20px 18px;
+    padding: 12px 14px;
+    border: 1px solid #efc1bd;
+    border-radius: var(--sl-radius-md);
+    background: var(--sl-red-soft);
+    color: var(--sl-red);
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.5;
+}
+
+#pilot-redesign-root .pilot-paper-orphan-alert i {
+    flex: 0 0 auto;
+    margin-top: 1px;
+    font-size: 18px;
 }
 
 .pilot-wallet {
@@ -2172,6 +2245,7 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
     place-items: center;
     padding: 20px;
     background: rgba(20, 41, 73, 0.34);
+    -webkit-backdrop-filter: blur(4px);
     backdrop-filter: blur(4px);
 }
 
@@ -2225,6 +2299,7 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
     background: transparent;
     color: var(--sl-muted);
     cursor: pointer;
+    font: inherit;
     font-size: 19px;
 }
 
@@ -2419,7 +2494,7 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
     display: block;
     margin-top: 3px;
     color: var(--sl-muted);
-    font-size: 10px;
+    font-size: 11px;
 }
 
 .pilot-ai-effectiveness-list {
@@ -2455,7 +2530,7 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
 .pilot-ai-effectiveness-row span {
     margin-top: 3px;
     color: var(--sl-muted);
-    font-size: 10px;
+    font-size: 11px;
 }
 
 .pilot-ai-effectiveness-row b {
@@ -2510,7 +2585,7 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
 .pilot-ai-event-action {
     color: var(--sl-muted);
     font-family: "SFMono-Regular", Consolas, monospace;
-    font-size: 9px;
+    font-size: 10px;
     font-weight: 800;
     letter-spacing: 0.05em;
     text-transform: uppercase;
@@ -2547,7 +2622,7 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
 
 .pilot-ai-form-label small {
     color: var(--sl-muted);
-    font-size: 10px;
+    font-size: 11px;
     font-weight: 400;
 }
 
@@ -2674,12 +2749,12 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
     border-radius: 7px;
     background: #f4fbf7;
     color: var(--sl-green);
-    font-size: 10px;
+    font-size: 11px;
 }
 
 .pilot-ai-evaluation strong {
     font-family: "SFMono-Regular", Consolas, monospace;
-    font-size: 9px;
+    font-size: 10px;
     letter-spacing: 0.04em;
     text-transform: uppercase;
 }
@@ -2793,14 +2868,15 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
 
     .pilot-app {
         display: block;
-        padding-bottom: 76px;
+        /* Clearance for the fixed bottom nav + OS home indicator. */
+        padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px));
     }
 
     .pilot-sidebar {
         position: fixed;
         top: auto !important;
         right: 10px;
-        bottom: 10px;
+        bottom: calc(10px + env(safe-area-inset-bottom, 0px));
         left: 10px;
         display: block;
         min-height: 0 !important;
@@ -2809,6 +2885,7 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
         border-radius: 14px;
         background: rgba(255, 253, 249, 0.94);
         box-shadow: 0 12px 34px rgba(20, 41, 73, 0.15);
+        -webkit-backdrop-filter: blur(16px);
         backdrop-filter: blur(16px);
     }
 
@@ -2833,7 +2910,7 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
         gap: 3px;
         padding: 3px;
         border-radius: 9px;
-        font-size: 9px;
+        font-size: 10px;
         text-align: center;
     }
 
@@ -3060,9 +3137,36 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
 
     .pilot-toast-stack {
         right: 16px;
-        bottom: 84px;
+        /* Must sit above the fixed bottom navigation plus the home
+           indicator area, not inside it. */
+        bottom: calc(150px + env(safe-area-inset-bottom, 0px));
         left: 16px;
         width: auto;
+    }
+
+    /* iOS Safari auto-zooms into form controls under 16px; keep data entry
+       zoom-free on phones. */
+    .pilot-input,
+    .pilot-select,
+    .pilot-ai-form-input,
+    .pilot-ai-form-select {
+        font-size: 16px;
+    }
+
+    /* Touch-target floor: primary actions reach ~44px, compact controls
+       (filter chips, table actions) stay smaller but tappable. */
+    .pilot-button,
+    .pilot-trade-tab {
+        min-height: 44px;
+    }
+
+    .pilot-market-interval,
+    .pilot-filter-chip {
+        min-height: 34px;
+    }
+
+    .pilot-table-action {
+        min-height: 36px;
     }
 }
 

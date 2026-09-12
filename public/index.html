@@ -2,20 +2,21 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="theme-color" content="#0b1e33">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="theme-color" content="#f7f4ee">
     <meta name="description" content="CoinPilot 과매도 반응 스캘핑 모의투자·워크포워드 검증 대시보드">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="CoinPilot">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <link rel="manifest" href="/manifest.webmanifest">
     <link rel="icon" href="/icon.svg" type="image/svg+xml">
-    <link rel="apple-touch-icon" href="/icon.svg">
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@phosphor-icons/web@2.1.1/src/regular/style.css">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&family=Noto+Sans+KR:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/pilot-redesign.css?v=20260910-6">
+    <link rel="stylesheet" href="/pilot-redesign.css?v=20260910-7">
     <title>CoinPilot | Automated Trading</title>
     <style>
         :root {
@@ -2670,6 +2671,18 @@
             margin-top: 5px;
         }
 
+        .pilot-paper-orphan-alert {
+            margin-top: 10px;
+            padding: 10px 12px;
+            border: 1px solid rgba(255, 123, 114, 0.42);
+            border-radius: 10px;
+            background: rgba(255, 123, 114, 0.09);
+            color: var(--accent-red);
+            font-size: 12px;
+            line-height: 1.55;
+            overflow-wrap: anywhere;
+        }
+
         .pilot-mobile-nav {
             display: none;
         }
@@ -4421,11 +4434,23 @@
             const installButton = document.getElementById('pwaInstallButton');
             const installState = document.getElementById('pwaInstallState');
             const isStandalone = window.matchMedia?.('(display-mode: standalone)').matches || window.navigator.standalone;
+            const isIos = /iphone|ipad|ipod/i.test(window.navigator.userAgent || '') ||
+                (window.navigator.platform === 'MacIntel' && window.navigator.maxTouchPoints > 1);
+            const isAndroid = /android/i.test(window.navigator.userAgent || '');
 
             if (isStandalone) {
                 if (installState) {
                     installState.textContent = '설치앱 모드';
                     installState.className = 'badge badge-running';
+                }
+            } else {
+                if (installButton) {
+                    installButton.hidden = false;
+                    installButton.textContent = isIos ? '설치 안내' : '앱으로 설치';
+                }
+                if (installState) {
+                    installState.textContent = isIos ? '홈 화면 설치' : '브라우저 모드';
+                    installState.className = 'badge badge-dry';
                 }
             }
 
@@ -4457,7 +4482,12 @@
 
             installButton?.addEventListener('click', async () => {
                 if (!deferredInstallPrompt) {
-                    showToast('브라우저 메뉴에서 홈 화면/앱 설치를 선택해주세요', 'info');
+                    const instruction = isIos
+                        ? 'Safari 공유 버튼에서 “홈 화면에 추가”를 선택해주세요.'
+                        : isAndroid
+                            ? '브라우저 메뉴에서 “앱 설치” 또는 “홈 화면에 추가”를 선택해주세요.'
+                            : '브라우저 주소창 또는 메뉴에서 “앱 설치”/“홈 화면에 추가”를 선택해주세요.';
+                    showToast(instruction, 'info');
                     return;
                 }
                 deferredInstallPrompt.prompt();
@@ -5205,6 +5235,23 @@
             const requestStats = telemetry.requestStats || {};
             const candleFreshness = status.candleFreshness || {};
             const candleDataQuality = status.candleDataQuality || {};
+            const analysisDataHealth = status.analysisDataHealth || {};
+            const analysisGapSeconds = Number(analysisDataHealth.currentGapDurationSeconds) || 0;
+            const analysisIncompleteCycles = Number(telemetry.analysisIncompleteCycles) || 0;
+            const analysisDataText = analysisDataHealth.failClosed
+                ? `중지 필요 · 공백 ${formatNumber(analysisGapSeconds)}초`
+                : analysisGapSeconds > 0
+                    ? `부분 응답 재시도 · 공백 ${formatNumber(analysisGapSeconds)}초`
+                    : analysisIncompleteCycles > 0
+                        ? `부분 cycle ${analysisIncompleteCycles}회 기록`
+                        : '전체 대상 시장 분석 수신 정상';
+            const signalAvailability = status.signalAvailability || {};
+            const signalLabel = status.marketQuiet
+                ? '시장 정적 · 과매도 반등 후보 없음'
+                : status.filterStarvation
+                    ? '필터 고착 후보 감지'
+                    : '반등 후보 집계 중';
+            const signalSummary = `${signalLabel} · 과매도 ${Number(signalAvailability.oversoldObservations) || 0}회 · strict 후보 ${Number(signalAvailability.strictReboundCandidates) || 0}회 · 확인 ${Number(signalAvailability.strictConfirmedCandidates) || 0}회`;
             const insufficientCandleEntry = Object.entries(candleDataQuality.insufficientByCoin || {})
                 .sort((a, b) => (Number(b[1]?.count) || 0) - (Number(a[1]?.count) || 0))[0];
             const insufficientCandleText = insufficientCandleEntry
@@ -5265,6 +5312,9 @@
             const continuityHtml = status.continuityEligible === false
                 ? `<div style="margin-top:6px; color:var(--accent-red);">⚠️ 연속 관찰 게이트 보류: ${formatPercent(status.maxInterruptionMinutes || 0)}분 공백 기록</div>`
                 : '';
+            const orphanHtml = status.orphaned
+                ? `<div class="pilot-paper-orphan-alert">⚠️ Orphan 세션: ${status.orphanReason === 'heartbeat_stale' ? 'heartbeat가 오래되어' : 'owner process가 사라져'} 자동 재개와 같은 ledger 재사용을 차단했습니다. strict 미청산 ${Number(status.strictEvaluation?.activePositions) || 0}개 · diagnostic 미청산 ${Array.isArray(status.diagnosticOpenPositions) ? status.diagnosticOpenPositions.length : 0}개 · 마지막 heartbeat ${status.heartbeatAt ? escapeHtml(new Date(status.heartbeatAt).toLocaleString('ko-KR')) : '확인 불가'}</div>`
+                : '';
             const storage = status.storage || {};
             const storageHtml = storage.available && storage.healthy === false
                 ? `<div style="margin-top:6px; color:var(--accent-red);">⚠️ 저장공간 부족: ${formatPercent(storage.availableMiB || 0)}MiB 남음 · 최소 ${formatPercent(storage.minimumMiB || 128)}MiB 필요</div>`
@@ -5296,10 +5346,12 @@
                             동일 신호창 진입 상한: ${signalWindow.enabled ? `${signalWindow.maxEntriesPerSignalWindow}개 · 마지막 ${signalWindow.lastEntryCount || 0}개 기록 · 차단 ${signalWindow.blockedEntries || 0}회` : '비활성화'}<br>
                             시장 regime gate: ${marketRegimeEnabled ? `활성화 · breadth ${status.configSnapshot?.marketRegimeMinBreadth ?? 0.5} · ${status.configSnapshot?.marketRegimeLookback ?? 5}봉 · strict 차단 ${telemetry.marketRegimeBlockedEntries || 0}회 · shadow 차단 ${telemetry.shadowMarketRegimeBlockedEntries || 0}회 · 현재 ${lastMarketRegime ? `${lastMarketRegime.confirmed ? '통과' : '차단'} (${formatPercent(lastMarketRegime.breadth || 0)})` : '계산 전'}` : '비활성화'}<br>
                             요청 경로: ticker batch ${requestStats.batchTickerRequests || 0}회 · 개별 ${requestStats.individualTickerRequests || 0}회 · candle ${requestStats.candleRequests || 0}회 · batch 실패 ${requestStats.batchTickerFailures || 0}회<br>
+                            분석 데이터 완전성: ${analysisDataText} · 부분 cycle ${analysisIncompleteCycles}회 · 허용 공백 ${formatNumber(analysisDataHealth.maxAnalysisDataGapSeconds || status.configSnapshot?.maxAnalysisDataGapSeconds || 60)}초<br>
                             캔들 신선도: 최대 ${formatNumber(candleFreshness.maxAgeSeconds || 0)}초 · 전체 차단 ${candleFreshness.blockedSnapshots || 0}회 · 분석 ${candleFreshness.blockedAnalyses || 0}회 · 지연진입 ${candleFreshness.blockedEntries || 0}회 · 주요 사유 ${freshnessDetail}<br>
                             stale 상위 마켓: ${freshnessMarketSummary}<br>
                             캔들 데이터 부족: 최소 ${candleDataQuality.minimumCandleCount || 0}개 · 주요 마켓 ${insufficientCandleText}<br>
                             분석 사이클 ${telemetry.cycles || 0}회 · strict BUY ${telemetry.buyCandidates || 0}회 · soft 후보 ${telemetry.shadowCandidates || 0}회 · HOLD ${telemetry.holdDecisions || 0}회<br>
+                            신호 상태: ${signalSummary}<br>
                             soft 장부 ${shadowEvaluation.closedTradeCount || 0}회 청산 · 참고손익 ${formatProfit(shadowEvaluation.realizedProfit || 0)} · 참고 PF ${Number.isFinite(shadowEvaluation.profitFactor) ? Number(shadowEvaluation.profitFactor).toFixed(2) : '∞'}<br>
                             loose 장부 ${looseShadowEvaluation.closedTradeCount || 0}회 청산 · 참고손익 ${formatProfit(looseShadowEvaluation.realizedProfit || 0)} · 참고 PF ${Number.isFinite(looseShadowEvaluation.profitFactor) ? Number(looseShadowEvaluation.profitFactor).toFixed(2) : '∞'}<br>
                             현재 주요 병목: ${topReason}<br>
@@ -5307,6 +5359,7 @@
                             거절 후보 결과: ${rejectionOutcomeText}<br>
                             ${starvationHtml}
                             ${continuityHtml}
+                            ${orphanHtml}
                             ${storageHtml}
                             ${configHtml}
                             ${circuitHtml}
@@ -10153,6 +10206,6 @@
             }
         });
     </script>
-    <script src="/pilot-redesign.js?v=ai-desk-5"></script>
+    <script src="/pilot-redesign.js?v=observer-readonly-3"></script>
 </body>
 </html>

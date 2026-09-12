@@ -132,6 +132,29 @@ Browser verification at `1280 × 720` confirmed all eight pages activated the ex
 - Fix: removed the serif font import, added IBM Plex Sans KR, and moved the display token to a bold technical sans with a tighter but less ornamental tracking. Brand, page titles, sidebar notes, news context titles, settings impact titles, and footer display text now share the corrected token.
 - Evidence: browser-computed styles report `IBM Plex Sans KR` at `700` for all nine page titles (`overview`, `trade`, `portfolio`, `market`, `analysis`, `ai`, `news`, `settings`, `history`); the mobile preview shows the `근거 로그` title without serif forms or clipping; all page transitions report no horizontal overflow. `npm test` remains `76/76 PASS`, `node --check public/pilot-redesign.js`, and `git diff --check` pass.
 
+### Pass 11 — 상용 수준 폴리시 (2026-09-12)
+
+발견과 조치:
+
+- 뉴스 행 네이티브 스타일 누출: `.pilot-news-row`는 `<button>`이지만 UA 리셋이 없어 실제 렌더에서 `2px outset` 테두리, `buttonface` 배경, Arial, 중앙 정렬로 노출됐다. 그리드/폰트/정렬/커서를 포함한 완전한 버튼 리셋을 추가하고 `width: 100%`를 명시했다.
+- 상태·텍스트 색 대비 재조정: 텍스트 토큰을 AA 기준(연면 배경 포함 4.5:1)에 맞춰 체계적으로 수정했다. `--sl-muted #7a8698→#66707f`, `--sl-faint #aeb7c4→#8a94a3`(플레이스홀더·장식 전용으로 제한), `--sl-green #0d8f68→#0a7a58`, `--sl-amber #b36b00→#96590a`, `--sl-red #c94b46→#b5433e`. `--sl-green-bright`는 스위치 트랙·테두리 등 비텍스트 강조 전용으로 유지하고, 성공 버튼/게이트 아이콘처럼 흰 텍스트가 올라가는 면은 `--sl-green`으로 변경했다(3.22→5.3:1). 비활성 제출 버튼은 흰 텍스트/회색 면(약 1.6:1) 대신 잉크 텍스트/`--sl-line` 면(약 4.3:1)으로 바꿨다.
+- 타이포 하한 정리: 콘텐츠·상호작용 텍스트의 9–10px 선언을 10–11px로 올렸다(필드 힌트, 필터 칩, 상태 pill, 테이블 액션, 뉴스 감성 pill, 프리셋 보조 문구, AI 폼 라벨/평가, 모바일 내비게이션 라벨 포함). 캔버스 차트 5곳의 `"DM Sans"` 참조를 `Manrope, "Noto Sans KR", sans-serif`로 교체하고 캔버스 하드코딩 색을 새 토큰 값과 동기화했다.
+- 키보드·포커스: `.pilot-market-row` 데이터 행은 클릭 가능한 `<div>`였으므로 `role="button" tabindex="0"`를 부여하고 Enter/Space를 기존 위임 클릭 핸들러로 전달하는 keydown 리스너를 추가했다. 헤더 행에는 `pilot-market-row-head`를 붙여 hover 커서/배경 상호작용 신호를 제거했다. 공유 `:focus-visible` 목록에 게이트 카드, 프리셋 카드, 뉴스 행, 거래 탭/제출, 인터벌 버튼, 시장 행, AI 폼 컨트롤, 체크·스위치를 추가했다.
+- 모바일 폴리시: 760px 구간에서 입력/셀렉트/AI 폼을 16px로 올려 iOS 자동 줌을 막고, 버튼 44px·칩 34px·테이블 액션 36px 터치 하한을 적용했다. 고정 하단 내비는 `safe-area-inset-bottom`을 더해 홈 인디케이터 위에 올리고, `.pilot-app` 하단 여백과 토스트 위치(`150px + safe-area`)를 함께 조정해 겹침을 제거했다.
+- PWA 정합성: `index.html`의 `theme-color #0b1e33`와 manifest의 `#1268d6`이 서로 다르고 실제 표면색과도 어긋나 있어 두 값 모두 `--sl-paper`와 같은 `#f7f4ee`로 통일했다(설치형 창 크롬이 밝은 상단바와 이어진다). `viewport-fit=cover`를 추가해 safe-area env()가 실제로 동작하게 했다. 아이콘은 SVG 단일 선언에서 `icon-192.png`/`icon-512.png`/`apple-touch-icon.png`를 생성해 매니페스트(any + maskable)와 apple-touch-icon에 연결했다. 서비스워커는 `coinpilot-shell-v7`로 올리고 프리캐시 목록을 새 에셋·버전 쿼리(`?v=20260910-7`, `?v=observer-readonly-3`)와 동기화했다(기존 목록은 css `-5`를 캐시해 오프라인에서 최신 CSS가 빠질 수 있었다).
+- 사파리 블러: `backdrop-filter` 3곳(상단바, 모바일 내비, 모달 배경)에 `-webkit-` 접두사를 추가했다.
+
+검증 증거:
+
+- 목 대시보드(`DASHBOARD_PORT=3214`) 헤드리스 검증: 9개 페이지 전부 데스크톱 `1280×900`과 모바일 `390×844`에서 `hOverflow=0`. 뉴스 새로고침 후 22개 행이 `display:grid`·`border:none`·`text-align:left`·Manrope 계열 폰트로 계산된다. 시장 행은 `role=button`/`tabindex=0`, 헤더 커서 `default`로 확인됐다. 모바일 스크롤 최하단에서 콘텐츠 하단 579px vs 내비 상단 705px로 126px 간격을 확보했고, 입력 16px·버튼 44px·토스트 `bottom:150px`가 계산 값으로 확인됐다.
+- `npm test` 131/131 통과, `node --check public/pilot-redesign.js`·`public/sw.js`·`public/ai-desk.js` 통과, `git diff --check` 클린.
+- 안전 신호는 강화 방향으로만 변경했다: DRY_RUN 배지·검증 게이트·orphan 알림·읽기 전용 잠금은 진해진 상태 토큰과 새 `#pilot-redesign-root` 스코프의 `.pilot-paper-orphan-alert` 규칙으로 더 높은 대비를 갖는다.
+
+의도적 미수정:
+
+- 레거시 `ai-desk.css`/`ai-desk.js`는 `index.html`이 더 이상 참조하지 않는 비렌더 자산이므로 유지했다(제거는 별도 정리 범위).
+- `.pilot-button:disabled`의 `opacity 0.54`는 WCAG가 면제하는 비활성 상태이며, 활성·비활성 구분 신호로 유지했다.
+
 ## Open questions / accepted deviations
 
 - The mock server has no positions, so the implementation correctly shows an empty position state rather than inventing holdings from the visual reference. A production account with holdings will populate the same table and allocation components.
