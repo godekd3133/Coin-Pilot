@@ -453,6 +453,10 @@ export class MonitoringSessionService {
           ...session,
           providers: normalizeProviderValue(session.providers),
           eventTypes: normalizeEventTypes(session.eventTypes),
+          autoConsultEventTypes: session.autoConsultEventTypes === undefined
+            ? normalizeEventTypes(session.eventTypes)
+            : normalizeEventTypes(session.autoConsultEventTypes)
+              .filter(type => normalizeEventTypes(session.eventTypes).includes(type)),
           coins: normalizeCoins(session.coins),
           evaluationMinutes: resolveEvaluationMinutes(session.evaluationMinutes, this.defaultEvaluationMinutes),
           seenEventKeys: Array.isArray(session.seenEventKeys) ? session.seenEventKeys : [],
@@ -496,6 +500,7 @@ export class MonitoringSessionService {
       ...publicData,
       providers: [...(session.providers || [])],
       eventTypes: [...(session.eventTypes || [])],
+      autoConsultEventTypes: [...(session.autoConsultEventTypes || [])],
       coins: [...(session.coins || [])]
     };
   }
@@ -701,6 +706,9 @@ export class MonitoringSessionService {
   createSession(input = {}) {
     const eventTypes = normalizeEventTypes(input.eventTypes);
     const providers = normalizeProviderValue(input.providers ?? input.provider);
+    const autoConsultEventTypes = input.autoConsultEventTypes === undefined
+      ? eventTypes
+      : normalizeEventTypes(input.autoConsultEventTypes).filter(type => eventTypes.includes(type));
     if (eventTypes.length === 0) throw new Error('최소 하나의 monitoring event를 선택해주세요');
     if (providers.length === 0) throw new Error('최소 하나의 AI provider를 선택해주세요');
 
@@ -711,6 +719,7 @@ export class MonitoringSessionService {
       status: 'RUNNING',
       providers,
       eventTypes,
+      autoConsultEventTypes,
       coins: normalizeCoins(input.coins),
       autoConsult: input.autoConsult !== false,
       cooldownSeconds: Math.max(30, Math.min(86_400, Number(input.cooldownSeconds) || 300)),
@@ -1007,7 +1016,10 @@ export class MonitoringSessionService {
         session.eventCount = (Number(session.eventCount) || 0) + 1;
         session.lastEventAt = event.timestamp;
 
-        if (session.autoConsult) {
+        const autoConsultEventTypes = Array.isArray(session.autoConsultEventTypes)
+          ? session.autoConsultEventTypes
+          : session.eventTypes;
+        if (session.autoConsult && autoConsultEventTypes.includes(event.type)) {
           session.lastConsultByEventKey = session.lastConsultByEventKey || {};
           const lastRequested = Number(session.lastConsultByEventKey[event.key]) || 0;
           const cooldownMs = Number(session.cooldownSeconds || 300) * 1000;

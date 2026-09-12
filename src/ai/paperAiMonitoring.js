@@ -59,6 +59,7 @@ export function createPaperAiMonitor({
     name: env.PAPER_AI_SESSION_NAME || 'Paper AI efficacy monitoring',
     providers: listEnv(env, 'PAPER_AI_PROVIDERS', ['gpt']),
     eventTypes: listEnv(env, 'PAPER_AI_EVENTS', ['REBOUND_CANDIDATE', 'BUY_SIGNAL', 'SELL_SIGNAL']),
+    autoConsultEventTypes: listEnv(env, 'PAPER_AI_AUTO_CONSULT_EVENTS', ['BUY_SIGNAL', 'SELL_SIGNAL']),
     coins: listEnv(env, 'PAPER_AI_COINS', config.targetCoins || []),
     autoConsult: true,
     cooldownSeconds: numericEnv(env, 'PAPER_AI_COOLDOWN_SECONDS', 300),

@@ -22,6 +22,14 @@ function validateSessionInput(body = {}) {
   const eventTypes = [...new Set(rawEventTypes
     .map(type => String(type).trim().toUpperCase())
     .filter(type => EVENT_TYPES.has(type)))];
+  const rawAutoConsultEventTypes = Array.isArray(body.autoConsultEventTypes)
+    ? body.autoConsultEventTypes
+    : body.autoConsultEventTypes ? [body.autoConsultEventTypes] : null;
+  const autoConsultEventTypes = rawAutoConsultEventTypes === null
+    ? undefined
+    : [...new Set(rawAutoConsultEventTypes
+      .map(type => String(type).trim().toUpperCase())
+      .filter(type => eventTypes.includes(type)))];
   if (eventTypes.length === 0) throw new Error('최소 하나의 monitoring event를 선택해주세요');
 
   const name = String(body.name || '').trim();
@@ -42,6 +50,7 @@ function validateSessionInput(body = {}) {
     ...body,
     name: name || 'CoinPilot AI 모니터링',
     eventTypes,
+    ...(autoConsultEventTypes === undefined ? {} : { autoConsultEventTypes }),
     autoConsult: parseBoolean(body.autoConsult, true),
     cooldownSeconds,
     ...(hasEvaluationMinutes ? { evaluationMinutes } : {})
