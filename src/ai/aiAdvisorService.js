@@ -718,15 +718,19 @@ export class AIAdvisorService {
       return this.statusCache;
     }
 
-    const providers = await Promise.all(Object.keys(AI_PROVIDER_DEFINITIONS).map(async provider => {
+    // Status probes spawn the same local CLIs as consultations, so they share
+    // the serialized execution lane: a probe can never overlap a sibling probe
+    // or an in-flight consultation. Parallel `codex login status` init takes
+    // 30-40s and made concurrent `claude` calls time out.
+    const providers = [];
+    for (const provider of Object.keys(AI_PROVIDER_DEFINITIONS)) {
       const definition = AI_PROVIDER_DEFINITIONS[provider];
-      const executable = this.executables[provider];
       const statusArgs = provider === 'gpt' ? ['login', 'status'] : ['auth', 'status'];
       try {
-        const result = await this.runProvider(provider, '', {
+        const result = await this.enqueueProviderExecution(() => this.runProvider(provider, '', {
           timeoutMs: Math.min(this.timeoutMs, 8_000),
           statusArgs
-        });
+        }));
         const output = `${result.stdout}\n${result.stderr}`;
         let parsed = null;
         try {
@@ -737,7 +741,7 @@ export class AIAdvisorService {
         const loggedIn = provider === 'gpt'
           ? parsed?.loggedIn === true || /logged in using chatgpt|loggedin["': =]+true/i.test(output)
           : parsed?.loggedIn === true || /claude\.ai/i.test(output) || parsed?.authMethod === 'claude.ai';
-        return {
+        providers.push({
           id: provider,
           label: definition.label,
           installed: true,
@@ -749,7 +753,7 @@ export class AIAdvisorService {
           detail: loggedIn ? '로컬 구독 세션 사용 가능' : 'CLI 로그인 상태를 확인해주세요.',
           nextStep: loggedIn ? null : provider === 'claude' ? 'claude auth login' : 'codex login status',
           canAttemptWithoutUserConfig: provider === 'gpt' && this.gptIgnoreUserConfig === true
-        };
+        });
       } catch (error) {
         const errorDetail = error?.detail || '';
         const unauthenticated = provider === 'claude' &&
@@ -762,7 +766,7 @@ export class AIAdvisorService {
             ? 'Codex 사용자 설정을 읽지 못했습니다. Codex 설정을 수정한 뒤 자문을 다시 시도하세요.'
             : '로그인 상태를 확인하지 못했습니다.';
         const configurationError = provider === 'gpt' && /config|invalid type|설정/i.test(errorDetail);
-        return {
+        providers.push({
           id: provider,
           label: definition.label,
           installed: error?.code !== 'ENOENT',
@@ -785,9 +789,9 @@ export class AIAdvisorService {
               : configurationError
                 ? 'Codex 설정 수정 후 codex login status'
                 : `${definition.defaultExecutable} 로그인 상태 확인`
-        };
+        });
       }
-    }));
+    }
 
     this.statusCache = {
       enabled: true,
