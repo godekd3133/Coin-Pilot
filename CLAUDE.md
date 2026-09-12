@@ -12,6 +12,8 @@ The default runtime mode is `oversold_reaction_scalping`. It scans the most liqu
 
 Open positions have an independent ticker-based risk monitor (`SCALP_RISK_CHECK_INTERVAL_MS`, default 1 second) for stop-loss, take-profit, and max-hold exits. It covers both strict positions and diagnostic paper shadow books; it is a safety/latency path, not profitability evidence. If a complete ticker response is unavailable beyond `SCALP_MAX_RISK_DATA_GAP_SECONDS` (default 30 seconds), the loop stops fail-closed and marks forward continuity invalid instead of pretending that max-hold protection remained active. Paper promotion still requires the historical and forward gates. The optional `momentum_breakout` signal profile is a separate diagnostic contract; it does not relax the default RSI-rebound profile and cannot authorize live orders without a matching fixed-config holdout.
 
+Analysis completeness has its own fail-closed boundary (`SCALP_MAX_ANALYSIS_DATA_GAP_SECONDS`, default 60 seconds in scalping mode). A cycle is complete only when every configured market returns an analysis object; a batch ticker failure is acceptable if individual fallback requests recover all markets. Persistent partial cycles stop paper/live observation even with no open position and persist `analysisDataHealth` plus the missing-market telemetry, so network starvation cannot be counted as valid forward evidence.
+
 The forward-paper runner also has a research-only `PAPER_SMOKE_MARKETS=FRESH_FROM_LEDGER` mode. With `PAPER_SMOKE_FRESHNESS_LEDGER` it selects previously observed markets that meet the configured minimum observation count and freshness-block-rate ceiling, preserves source order, and fails closed when no market qualifies. This is a reproducible data-quality cohort comparison; it does not mutate the default universe, runtime filters, or live-order gate.
 
 Optional break-even/trailing protection (`SCALP_BREAK_EVEN_*`, `SCALP_TRAILING_*`) is disabled when its activation trigger is zero. Its break-even floor is cost-adjusted for two fees and adverse exit slippage; a raw entry-price stop is not considered break-even. It must be evaluated as a separate fixed-config holdout and forward-shadow cohort before enabling; the live risk monitor, backtest, and shadow books share the same conservative protection contract.
@@ -26,13 +28,23 @@ The optional loss-only early exit (`SCALP_MAX_LOSING_HOLD_MINUTES`) is disabled 
 
 `SCALP_MAX_ENTRIES_PER_SIGNAL_WINDOW` is another opt-in portfolio safeguard. A positive value limits strict entries sharing the same completed-candle signal key, reducing correlated multi-market exposure when a market-wide rebound fires at once. It is disabled with `0`, persisted in the forward strict risk state, and must be compared in the shared portfolio holdout before enabling.
 
-`npm run validate:scalping` is the promotion gate. It fetches read-only minute candles, tunes only on the earlier segment, evaluates the untouched holdout segment with fees/slippage, and promotes the strategy only when every selected validation market passes the trade-count, return, profit-factor, and drawdown thresholds. A single passing market never promotes the global strategy.
+`npm run validate:scalping` is the read-only validation path; the live-gate artifact is produced by `npm run validate:scalping:fixed`. It fetches minute candles, evaluates the untouched holdout with fees/slippage, and the fixed report additionally requires every market to carry and pass the 95% one-sided trade-return confidence gate. A single passing market never promotes the global strategy, and missing confidence metadata fails closed.
+
+The default tuning grid is intentionally exhaustive (`20,736` candidates) but can be expensive on long windows. `SCALP_VALIDATION_MAX_CANDIDATES` is a research-only deterministic cap that samples the full pool evenly and includes the current base configuration; the report records both counts, and capped results must not be used for live promotion.
 
 `npm run validate:scalping:portfolio` is a separate diagnostic lane that synchronizes multiple markets, shares one KRW balance, enforces `maxPositions`, and ranks simultaneous entries. It is useful for testing whether per-market results survive the actual portfolio allocator, but it must never write or replace `scalping_validation.json` and never authorizes live orders.
 
 For stronger evidence, run the portfolio lane with `SCALP_PORTFOLIO_VALIDATION_FOLDS>=2`; the expanding multi-fold validator requires every future fold to pass and keeps the result diagnostic-only. Reuse a fixed `SCALP_PORTFOLIO_CANDLES_FILE` when comparing candidates so timestamp drift does not become a false improvement.
 
 When stopping a paper session, persist `strictOpenPositions` and mark `endedWithOpenPositions`. Do not start a new session in the same ledger unless the user explicitly resets the isolated portfolio or passes `allowUnsettledResume=true`; this prevents unrealized positions from being silently reclassified as a new baseline.
+
+The same boundary applies to diagnostic `shadow` and `looseShadow` books:
+persist `endedWithDiagnosticOpenPositions` and their stop-time snapshots, and
+refuse automatic same-ledger reuse when either book has an open position or
+when risk/analysis continuity was invalidated. Automatic fail-closed stops must
+retain `stopReason=risk_data_gap` or `stopReason=analysis_data_gap` and expose
+overall `continuityEligible=false`; preserve those sessions as invalid
+diagnostic evidence rather than relabeling them clean.
 
 The portfolio-only `requireNextCandleBullish` candidate enters at the next candle close after verifying bullish follow-through. It is a different latency contract from the live 1–5 second revalidation and must stay diagnostic until a separate implementation and holdout decision are made.
 
@@ -57,7 +69,24 @@ npm run dev          # Development mode with auto-restart
 npm run backtest     # Run backtesting only
 npm run optimize     # Run parameter optimization only
 npm run dashboard    # Run web dashboard only (http://localhost:3000)
+npm run dashboard:paper # Observe an explicitly selected forward paper ledger (read-only)
 ```
+
+`runDashboard.js` is a deterministic mock for UI smoke. To show the actual
+persisted forward-paper result without starting a second trading loop, use
+`PAPER_DASHBOARD_LEDGER_FILE=/absolute/path/to/paper_validation.json npm run dashboard:paper`.
+The observer reads the latest ledger snapshot, rejects paper-session start/stop
+mutations, and uses an isolated portfolio-history path. It must run on a
+different port from the forward runner and is observation evidence only, not a
+live-order, wallet, or settlement proof. `PORTFOLIO_HISTORY_FILE` is also
+honored by `MultiCoinTrader` and the portfolio routes so staging processes do
+not write the repository's default `portfolio_history.json`.
+
+When multiple read-only paper studies share one public Upbit IP, set
+`UPBIT_MIN_REQUEST_INTERVAL_MS` to a value above the default 120ms for the
+additional process. The client applies it to both market and risk requests;
+this is a request-budget control, not a trading signal or profitability
+change.
 
 ## Architecture
 

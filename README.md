@@ -41,11 +41,15 @@ TARGET_COINS=ALL
 
 시장 분석 클라이언트와 독립 포지션 리스크 클라이언트는 같은 프로세스-wide 요청 슬롯을 공유합니다. 따라서 리스크 확인을 빠르게 유지하면서도 두 클라이언트가 각자 Upbit 요청 한도를 초과하지 않도록 합니다.
 
+열린 포지션이 없더라도 전체 대상 시장을 분석하지 못한 상태가 계속되면 유효한 forward 표본으로 보지 않습니다. `SCALP_MAX_ANALYSIS_DATA_GAP_SECONDS`(스캘핑 기본 60초)를 넘는 부분 분석 공백은 paper/live 루프를 fail-closed로 중지하고 `analysisDataHealth.continuityEligible=false`로 기록합니다. batch ticker가 실패했어도 개별 fallback으로 모든 시장 분석이 완료되면 완전한 cycle로 인정하며, 실제 시장 누락만 공백으로 판정합니다.
+
 스캘핑 RSI는 레거시 전략의 전역 `RSI_*`와 분리할 수 있습니다. `SCALP_RSI_PERIOD`, `SCALP_RSI_OVERSOLD`, `SCALP_RSI_OVERBOUGHT`를 지정하면 스캘핑과 기존 전략이 서로 다른 RSI 튜닝값을 섞지 않습니다. 미지정 시 기존 `RSI_*` 값으로 fallback하며, 실제 사용값은 forward `configSnapshot`에 기록됩니다.
 
 네트워크 timeout과 별도로 진입 직전 캔들의 시각도 확인합니다. `SCALP_MAX_CANDLE_AGE_SECONDS=0`이면 분봉 단위에 맞춰 자동으로 계산하며, 1분봉 기본값은 90초입니다. 최신 캔들 timestamp가 없거나 허용 나이를 넘으면 strict 진입과 shadow 후보를 모두 차단하고 telemetry에 사유를 기록합니다. telemetry는 초기 `analysis` 차단과 지연 후 `entry_confirmation` 차단을 따로 세고, age의 최소·평균·최대와 마지막 timestamp를 함께 보존합니다. 캔들 개수가 최소 분석량보다 적은 마켓은 stale과 별도의 데이터 품질 항목으로 마켓별 횟수·수신 개수·필요 개수를 기록합니다. freshness 관측은 마켓별 전체 표본·유효 표본·stale 비율·age 통계도 함께 보존해 특정 마켓 격리 후보를 검토할 수 있게 합니다. 캔들 부족 telemetry도 stale과 분리해 보존하므로, 마켓 제외 판단을 데이터 지연과 데이터 부족으로 혼동하지 않습니다. 이 값은 실행 계약에 포함되므로 forward `configSnapshot`과 fixed validation 설정이 일치해야 하며, 오래된 세션에 조용히 섞이지 않습니다.
 
 특정 마켓이나 후보 로직만 연구할 때는 `SCALP_VALIDATION_MARKETS`와 `SCALP_VALIDATION_OUTPUT_FILE`을 함께 지정해 기본 승격 리포트를 덮어쓰지 않도록 합니다. 검증 grid는 lookback 1/3과 직전 고가 돌파 필터 true/false를 모두 비교하지만, 런타임 기본값은 여전히 엄격한 조건을 유지합니다.
+
+기본 tuned holdout grid는 여러 signal profile·RSI·반등·거래량·추세·손익비 후보의 Cartesian 조합을 모두 평가합니다(현재 `20,736`개). 장시간 연구에서만 `SCALP_VALIDATION_MAX_CANDIDATES`를 양수로 지정하면 전체 grid에서 결정론적으로 균등 샘플링하고 실제 runtime 설정을 반드시 포함합니다. 리포트에는 전체 후보 수와 실제 평가 수가 따로 기록되며, capped 결과는 후보 누락 가능성이 있으므로 live 승격 근거로 사용하지 않습니다. 기본값 `0`은 전체 grid입니다.
 
 현재 실행 중인 설정 자체의 성과를 확인하려면 `npm run validate:scalping:fixed`를 사용합니다. 이 모드에서는 학습 구간에서 grid 튜닝을 하지 않고 현재 `SCALP_*`/`RSI_*` 설정을 그대로 training/holdout에 적용합니다. 기본 `npm run validate:scalping`은 tuned holdout 탐색용이며, 두 결과는 서로 다른 질문에 답합니다. live gate에는 fixed 명령으로 생성한 `scalping_validation.json`만 사용할 수 있습니다.
 
@@ -67,6 +71,8 @@ TARGET_COINS=ALL
 
 워크포워드 튜닝은 holdout만 보지 않습니다. 학습 구간에서도 기본적으로 최소 3회 거래, PF 1 이상, 수익률 0% 이상을 요구합니다. 학습부터 무너진 후보는 `training_gate_failed`로 기록되며, 거래 수가 많다는 이유로 우선순위를 얻지 않습니다. 이 기준은 탐색 후보를 줄이는 안전장치이며 실제 수익을 보장하지 않습니다.
 
+`npm run validate:scalping:fixed`는 여기에 거래별 수익률의 95% 단측 t 하한을 추가로 확인합니다. 기본값은 학습 10건·holdout 20건 이상이며, 평균 거래수익 하한이 `0%` 이상이어야 합니다. 단일 양수 거래나 표본이 작은 양수 holdout은 신뢰도 게이트를 통과하지 못합니다. 이 계산은 거래 표본의 screening guard일 뿐 실제 체결·독립성·미래 수익을 증명하지 않으며, confidence metadata가 없는 구형 report도 live gate에서 fail-closed 됩니다.
+
 API 키는 [업비트 Open API 관리](https://upbit.com/mypage/open_api_management)에서 발급받을 수 있습니다.
 
 ## 실행
@@ -77,6 +83,7 @@ npm start
 
 # 개별 실행
 npm run dashboard    # 대시보드만
+npm run dashboard:paper # 기존 forward paper ledger를 읽기 전용으로 표시
 npm run dashboard:staging # 실제 entrypoint 기반 격리 DRY_RUN staging 대시보드
 npm run backtest     # 백테스팅만
 npm run optimize     # 기존 종합점수 전략 최적화 (스캘핑 기본 모드에서는 사용하지 않음)
@@ -93,7 +100,17 @@ npm run paper:forward     # .paper-forward에 격리된 장기 DRY_RUN forward �
 
 프론트엔드/API smoke가 필요할 때는 `npm run dashboard:staging`을 사용하세요. 이 명령은 `DRY_RUN=true`를 강제하고 `.staging-runtime/<timestamp>/` 아래에 별도 `dry_portfolio.json`과 paper ledger를 생성하므로 사용자의 root `dry_portfolio.json`을 읽거나 수정하지 않습니다. 기본 staging 포트는 `3100`이며 `STAGING_PORT`와 `STAGING_TARGET_COINS`로 바꿀 수 있습니다. 실제 주문·수익성·wallet settlement 증거가 아닙니다.
 
-대시보드는 PWA로도 동작합니다. 모바일 브라우저의 “홈 화면에 추가” 또는 데스크톱 브라우저의 “앱 설치”를 사용하면 standalone 설치앱으로 열 수 있습니다. 설치앱에서도 계좌·시세·거래 데이터는 서버 API를 기준으로 읽으며, 오프라인 캐시는 화면 껍데기만 제공하고 오래된 거래 상태를 표시하지 않습니다.
+실제로 실행 중인 forward paper 장부를 웹/모바일/PWA 화면에서 관찰하려면 별도 읽기 전용 서버를 사용하세요. 이 서버는 지정한 ledger의 최신 snapshot과 strict/shadow 검증 결과만 읽고, paper 세션 start/stop과 주문 경로를 차단합니다. 원본 runner와 다른 포트에서 실행해야 합니다.
+
+```bash
+PAPER_DASHBOARD_LEDGER_FILE=$PWD/.paper-forward-v49/paper_validation.json \
+DASHBOARD_PORT=3152 \
+npm run dashboard:paper
+```
+
+`npm run dashboard`는 UI smoke를 위한 결정론적 mock 화면이고, `npm run dashboard:staging`은 실제 entrypoint 기반의 격리 DRY_RUN 화면입니다. 둘을 실제 forward 수익성 장부와 혼동하지 마세요. `dashboard:paper`도 관찰 UI 증거일 뿐이며, 실거래·wallet settlement 증거는 아닙니다.
+
+대시보드는 PWA로도 동작합니다. 모바일 브라우저의 “홈 화면에 추가” 또는 데스크톱 브라우저의 “앱 설치”를 사용하면 standalone 설치앱으로 열 수 있습니다. Android/Chrome은 설치 이벤트를 사용하고, iOS Safari처럼 설치 이벤트가 없는 환경은 화면의 `설치 안내`에서 `공유 → 홈 화면에 추가` 경로를 안내합니다. 설치앱에서도 계좌·시세·거래 데이터는 서버 API를 기준으로 읽으며, 오프라인 캐시는 화면 껍데기만 제공하고 오래된 거래 상태를 표시하지 않습니다.
 
 ### AI Desk: 구독 기반 읽기 전용 자문
 
@@ -105,10 +122,12 @@ AI 자문은 다음 경계를 지킵니다.
 - AI 응답은 `BUY`/`SELL`/`HOLD`/`WAIT` 의견과 근거·위험·무효화 조건으로만 기록됩니다.
 - AI 의견은 주문으로 자동 변환되지 않습니다. 설정값 기반 기존 `executeOrder()` 자동 매수·매도 경로는 그대로 독립 실행됩니다.
 - session 생성 시 이벤트 종류, 코인 필터, 동일 이벤트 재자문 간격, 자동 자문 여부, 결과 평가 시점(기본 5분)을 정할 수 있습니다. 비용과 호출량을 관리하기 위해 기본 cooldown은 300초입니다.
-- 실제 provider 응답은 기준 이벤트 가격과 평가 시점 이후 처음 관측된 같은 코인 가격에 자동 대조됩니다. `BUY`/`SELL`은 중립 구간(기본 ±0.1%)을 제외하고 `HIT`/`MISS`/`FLAT`으로, `HOLD`/`WAIT`는 `CALM`/`ABSTAINED`로 별도 집계합니다. local brief·실패 응답·신선하지 않은 snapshot·가격이 없는 이벤트는 provider 적중률에 섞지 않습니다.
+- paper AI bridge는 후보 event를 계속 기록하지만 `PAPER_AI_AUTO_CONSULT_EVENTS`(기본 `BUY_SIGNAL,SELL_SIGNAL`)에 포함된 확정 event만 자동 상담합니다. 후보를 자동 상담하려면 이 환경변수에 `REBOUND_CANDIDATE`를 명시적으로 추가해야 합니다.
+- 실제 provider 응답은 기준 이벤트 가격과 평가 시점 이후 처음 관측된 같은 코인 가격에 자동 대조됩니다. `BUY`/`SELL`은 비용중립 구간(기본 ±0.3%)을 제외하고 `HIT`/`MISS`/`FLAT`으로, `HOLD`/`WAIT`는 `CALM`/`ABSTAINED`로 별도 집계합니다. provider prompt에도 동일한 horizon·neutral band가 전달되므로 자문 기준과 evaluator 기준이 어긋나지 않습니다. local brief·실패 응답·신선하지 않은 snapshot·가격이 없는 이벤트는 provider 적중률에 섞지 않습니다.
 - 실제 응답이 한 provider뿐이면 `singleProvider`로 제한 표시하고 consensus 표본으로 세지 않습니다. 두 provider 이상이 같은 방향으로 응답한 경우에만 `quorum=true`인 consensus를 별도로 평가합니다.
 - 기존 전략 event가 `BUY`/`SELL`인데 AI가 `WAIT`/`HOLD`를 반환하면 directional hit-rate와 별도로 `VETO_GOOD`(손실 회피), `VETO_MISSED_OPPORTUNITY`(상승 기회 회피), `VETO_FLAT`을 집계합니다. AI를 방향 예측기뿐 아니라 위험 veto로 평가하기 위한 지표입니다.
-- 대시보드와 `GET /api/ai/effectiveness`에서 실제 응답률, provider별 지연·평가 표본·적중률, 평가 대기 건수를 확인할 수 있습니다. 최소 20개 평가 표본 전에는 `sufficientEvidence=false`로 표시되며, 이 지표도 주문 승인이나 수익성 보장을 의미하지 않습니다.
+- veto에는 비용중립 band를 넘은 counterfactual 영향도 합산합니다. `veto net impact`가 양수면 band 초과 손실 회피가 기회손실보다 컸다는 뜻이고, 이는 실제 주문 수익이 아니라 research-only 위험 회피 지표입니다.
+- 대시보드와 `GET /api/ai/effectiveness`에서 실제 응답률, provider별 지연·평가 표본·적중률, 평가 대기 건수를 확인할 수 있습니다. 최소 20개 비중립 방향성 또는 veto 표본 전에는 `sufficientEvidence=false`로 표시됩니다. 단순 `REBOUND_CANDIDATE + WAIT/CALM` 관찰과 `VETO_FLAT`은 표본 수에 포함되지 않으며, 이 지표도 주문 승인이나 수익성 보장을 의미하지 않습니다.
 
 로컬 CLI가 먼저 로그인되어 있어야 합니다. ChatGPT 구독과 OpenAI API 사용은 별도 결제 체계이므로, ChatGPT 구독을 API key로 오인해 앱에 넣지 않습니다. [OpenAI 공식 billing 안내](https://help.openai.com/en/articles/9039756)를 확인하고, 현재 provider 로그인 상태는 AI Desk의 연결 상태 카드에서 다시 확인하세요.
 
@@ -138,6 +157,8 @@ POST /api/paper-validation/stop
 
 세션을 중지할 때 strict 포지션이 남아 있으면 ledger에 `endedWithOpenPositions`와 `stopReason`을 기록합니다. 이후 같은 ledger에서 새 세션을 시작하려면 새 시드 reset 또는 명시적인 `allowUnsettledResume=true`가 필요합니다. 미청산 상태를 조용히 새 기준선에 섞지 않기 위한 연속성 보호입니다.
 
+shadow/loose 진단 장부에만 미청산 포지션이 남은 경우에도 `endedWithDiagnosticOpenPositions`와 종료 시점 snapshot을 보존하고, 같은 ledger의 자동 재사용을 막습니다. 리스크 ticker 또는 분석 데이터 공백으로 자동 중지되면 `stopReason`은 각각 `risk_data_gap` 또는 `analysis_data_gap`으로 기록되며 `continuityEligible=false`가 됩니다. 이런 ledger는 수익성 표본으로 승격하지 않고 새 출력 디렉터리에서 관찰을 이어가야 합니다.
+
 격리 smoke가 필요하면 `npm run paper:smoke`를 사용합니다. 기본 60초 동안 `PAPER_SMOKE_MARKETS`를 읽기 전용으로 분석하고 `.paper-smoke/` 아래에 가상 포트폴리오와 paper ledger를 저장합니다. 기존 `dry_portfolio.json`은 읽거나 수정하지 않습니다. 이 smoke는 연결·상태 저장 검증용이며, 7일 수익성 승격 증거로 사용하지 않습니다.
 
 실제 DRY_RUN 분석 이벤트를 AI 자문과 함께 관찰하려면 다음처럼 선택형 paper AI monitoring을 켤 수 있습니다. 이 모드는 별도 `ai_monitoring_sessions.json`에 provider 응답과 미래 가격 평가를 저장하며, AI 의견을 주문에 연결하지 않습니다. provider 호출 비용과 지연을 의도적으로 발생시키므로 기본값은 꺼져 있습니다.
@@ -145,7 +166,7 @@ POST /api/paper-validation/stop
 ```bash
 PAPER_AI_MONITORING=true \
 PAPER_AI_PROVIDERS=gpt \
-PAPER_AI_EVENTS=BUY_SIGNAL,SELL_SIGNAL \
+PAPER_AI_EVENTS=REBOUND_CANDIDATE,BUY_SIGNAL,SELL_SIGNAL \
 PAPER_SMOKE_SECONDS=600 \
 PAPER_SMOKE_OUTPUT_DIR=/tmp/coinpilot-ai-paper-smoke \
 npm run paper:smoke
@@ -164,7 +185,19 @@ AI_REPLAY_OUTPUT_FILE=/tmp/coinpilot-ai-historical-replay.json \
 npm run ai:replay -- --require-provider
 ```
 
+확정된 `BUY_SIGNAL`/`SELL_SIGNAL` 후보만 provider에 보내는 진단 replay가 필요하면 `AI_REPLAY_CONFIRMED_ONLY=true`를 추가합니다. 이는 완화된 진단 설정을 비교할 때 유용하지만 runtime 설정·live gate·promotion 증거를 바꾸지 않습니다.
+
 Replay는 방향성 `HIT/MISS`와 함께 기존 BUY/SELL signal을 AI가 WAIT/HOLD로 막았을 때의 `VETO_GOOD`/`VETO_MISSED_OPPORTUNITY`를 별도로 집계합니다. historical replay의 결과도 live 효용이나 promotion 근거로 자동 승격하지 않습니다.
+
+여러 historical replay window의 안정성을 함께 확인하려면 다음 research-only gate를 사용합니다. window별 veto net impact의 부호가 충돌하거나 비중립 표본이 최소값보다 적으면 `evidenceReady=false`로 유지합니다.
+
+```bash
+npm run ai:robustness -- \
+  /tmp/coinpilot-ai-7d-confirmed-loose-20.json \
+  /tmp/coinpilot-ai-14d-confirmed-loose-20.json
+```
+
+양쪽 provider replay report의 합의만 점검하려면 `AI_ROBUSTNESS_SCOPE=consensus`를 추가합니다. `providers`는 개별 provider만, `all`은 provider와 consensus rows를 함께 집계합니다. 이 gate는 현재 두 window를 `INSUFFICIENT_NON_NEUTRAL` 및 `windowSignConflict=true`로 판정하며, AI 자문을 주문으로 연결하거나 live promotion을 허용하지 않습니다.
 
 장기 forward paper는 `npm run paper:forward`로 실행합니다. 첫 실행은 `.paper-forward/`에 새 시드로 시작하고, 이후 같은 폴더로 재실행하면 기존 활성 세션을 이어갑니다. 프로세스가 비정상 종료되어 heartbeat가 오래된 경우에도 forward 모드는 기존 ledger를 새로 만들지 않고 같은 세션을 복구하지만, 기록된 공백이 `SCALP_PAPER_MAX_HEARTBEAT_GAP_MINUTES`를 넘으면 승격 자격은 자동 보류됩니다. 의도적인 `Ctrl+C` 종료 후에는 새 세션으로 다시 시작하며, 실전 주문은 호출하지 않습니다. 이 세션이 최소 7일·20회 청산·수익률·MDD·연속 관찰 게이트를 모두 통과해야 forward paper 승격 후보가 됩니다. strict 진입과 별도로 soft 후보는 shadow 장부에만 기록되어 완화 후보의 참고 손익/PF를 관찰합니다.
 
@@ -177,6 +210,16 @@ Forward 상태의 `lossCircuitBreaker`는 현재 손실 횟수, 차단 여부, �
 이전 forward 원장에서 데이터 품질이 좋은 시장만 별도 코호트로 재현하려면 `PAPER_SMOKE_MARKETS=FRESH_FROM_LEDGER PAPER_SMOKE_FRESHNESS_LEDGER=.paper-forward-v44/paper_validation.json npm run paper:forward`처럼 실행할 수 있습니다. 기본 최소 관측 수는 100회, freshness 차단률 상한은 5%이며 `PAPER_SMOKE_MIN_FRESHNESS_OBSERVATIONS`, `PAPER_SMOKE_MAX_STALE_RATE`, `PAPER_SMOKE_MAX_MARKETS`로 실험 범위를 지정합니다. 표본 부족·차단률 초과 시장은 fail-closed로 제외하고, 선택된 시장의 원래 순서는 유지합니다. 이는 이전 ledger 기반의 진단 코호트 선택일 뿐 기본 전략·실거래 universe·live gate를 바꾸지 않습니다.
 
 후보 비교 study는 `SCALP_VARIANT_MARKETS`, `SCALP_VARIANT_NAMES`, `SCALP_VARIANT_CANDLE_COUNT`, `SCALP_VARIANT_CANDLES_FILE`, `SCALP_VARIANT_OUTPUT_FILE`을 선택적으로 지정할 수 있습니다. `SCALP_VARIANT_CANDLES_FILE`에 `{ "KRW-BTC": [...] }` 형태의 candle cache를 주면 네트워크 재수집 없이 동일한 윈도우를 재사용할 수 있어 후보 간 시간창 drift를 막습니다. 시장별 캔들을 한 번만 수집해 같은 윈도우에서 비교하지만, 결과는 승격 리포트가 아니며 실전 설정을 바꾸지 않습니다.
+
+variant 목록에는 `micro_exit_04_06`, `micro_exit_05_08`, `micro_exit_06_09`처럼 비용 이후에도 작은 반등을 회수할 수 있는지 보는 stop/take 후보와 `next_candle_followthrough` 후보가 포함됩니다. 전자는 수수료·슬리피지에 민감하고 후자는 기존 1~5초 지연 진입과 다른 다음 봉 종가 계약이므로, 양수 결과가 나와도 각각 별도 holdout·forward cohort 없이 runtime에 적용하지 않습니다.
+
+`range_cap_02`, `range_cap_05`, `range_cap_08`, `range_cap_10`과 rebound 조합은 신호 캔들의 과도한 고저폭을 상한으로 제한하는 연구용 후보입니다. 이 cap은 현재 runtime 기본값이 아니며, 동일창 study에서 실제 신호를 바꿨는지와 training/holdout 통과 여부를 함께 확인해야 합니다.
+
+`oversold_lookback_3` 계열은 최근 완료 봉 하나가 아니라 최대 3개 완료 봉 안의 과매도 반응을 참조하는 진단 후보입니다. 과거 신호를 더 많이 포착할 수 있지만 stale signal과 비용 누적 위험도 있으므로, 양수 표본 하나만으로 runtime `oversoldLookback=1`을 바꾸지 않습니다.
+
+`rebound_10`, `rebound_30`, `rebound_35`, `rebound_40`은 기본 `0.15%` 및 `0.25/0.50%` 주변의 반등 threshold를 비교하는 연구 후보입니다. 비용·표본·training/holdout gate를 함께 통과하지 않는 한 runtime threshold를 조정하지 않습니다.
+
+`cooldown_30m`, `cooldown_60m`, `cooldown_120m`은 손실 청산 뒤 같은 시장의 재진입을 더 오래 차단하는 risk 후보입니다. 현재 runtime 기본 cooldown은 15분이며, longer cooldown은 거래 기회를 줄일 수 있으므로 별도 holdout과 forward cohort 없이는 적용하지 않습니다.
 
 relaxed shadow 후보 검증도 `SHADOW_VALIDATION_CANDLES_FILE`을 지정하면 동일한 `{ "KRW-BTC": [...] }` candle cache를 재사용합니다. `SHADOW_VALIDATION_MARKET`으로 cache 안의 시장을 선택하고, 리포트에는 `candleSource=cache`를 기록합니다. 이 검증은 strict 계약을 완화한 진단 코호트일 뿐이며 실전 승격을 허용하지 않습니다.
 
@@ -200,8 +243,8 @@ portfolio 진단에서만 `requireNextCandleBullish` 후보도 비교할 수 있
 | `SCALP_INVESTMENT_RATIO` | 0.02 | 1회 진입 총자산 비율 |
 | `SCALP_STOP_LOSS_PERCENT` | 1.2 | 스캘핑 손절률 (%) |
 | `SCALP_TAKE_PROFIT_PERCENT` | 1.8 | 스캘핑 익절률 (%) |
-| `SCALP_MIN_VOLUME_RATIO` | 0.8 | 반등 캔들 최소 거래량 배수 |
-| `SCALP_MIN_CLOSE_STRENGTH` | 0.55 | 캔들 고가권 종가 강도 |
+| `SCALP_MIN_VOLUME_RATIO` | 1.0 | 반등 캔들 최소 거래량 배수 |
+| `SCALP_MIN_CLOSE_STRENGTH` | 0.65 | 캔들 고가권 종가 강도 |
 | `SCALP_MIN_TREND_SLOPE_PERCENT` | -0.2 | 강한 하락 추세 진입 하한 |
 | `SCALP_MAX_SIGNAL_RANGE_PERCENT` | 0 (disabled) | 신호 캔들 고가-저가 범위 상한 (%) |
 | `SCALP_MIN_SIGNAL_RANGE_PERCENT` | 0 (disabled) | 조용한 반등 신호를 제외하는 고가-저가 범위 하한 (%) |
@@ -224,6 +267,7 @@ portfolio 진단에서만 `requireNextCandleBullish` 후보도 비교할 수 있
 | `SCALP_MAX_ENTRIES_PER_SIGNAL_WINDOW` | 0 (disabled) | 같은 완료 캔들 signal window에서 허용할 strict 동시 진입 수 |
 | `SCALP_RISK_CHECK_INTERVAL_MS` | 1000 | 열린 포지션의 손절·익절·최대보유시간 독립 확인 주기(ms) |
 | `SCALP_MAX_RISK_DATA_GAP_SECONDS` | 30 | 열린 포지션 ticker 확인이 끊겼을 때 fail-closed로 중지할 최대 공백(초) |
+| `SCALP_MAX_ANALYSIS_DATA_GAP_SECONDS` | 60 | 전체 대상 시장 분석이 불완전한 상태로 이어질 수 있는 최대 공백(초) |
 | `SCALP_COOLDOWN_AFTER_LOSS_MINUTES` | 15 | 손실 후 재진입 대기 시간 |
 | `SCALP_MAX_CONSECUTIVE_LOSSES` | 3 | 연속 손실 후 장시간 진입 잠금 |
 | `SCALP_LOSS_CIRCUIT_BREAKER_COUNT` | 0 (disabled) | 전역 차단을 발동할 최근 손실 횟수 |
@@ -235,6 +279,7 @@ portfolio 진단에서만 `requireNextCandleBullish` 후보도 비교할 수 있
 | `SCALP_PAPER_MAX_DRAWDOWN_PERCENT` | 15 | forward 모의투자 최대 낙폭 |
 | `SCALP_PAPER_MAX_HEARTBEAT_GAP_MINUTES` | 15 | 연속 관찰로 인정할 수 있는 최대 heartbeat 공백; 초과 시 승격 보류 |
 | `SCALP_PAPER_MIN_STORAGE_MIB` | 1024 | forward ledger 시작/재개에 필요한 최소 여유 저장공간(MiB) |
+| `SCALP_VALIDATION_MAX_CANDIDATES` | 0 (full grid) | tuned holdout에서 평가할 후보 상한; 양수는 research-only 균등 샘플링이며 full pool/선택 수를 함께 기록 |
 | `PAPER_SMOKE_MARKETS` | 미설정 | `FRESH_FROM_LEDGER`를 지정하면 이전 paper 원장 freshness 코호트 선택; 그 외에는 명시 시장 목록 또는 `ALL` |
 | `PAPER_SMOKE_FRESHNESS_LEDGER` | 미설정 | freshness 코호트 기준으로 읽을 이전 격리 paper ledger 경로 |
 | `PAPER_SMOKE_MIN_FRESHNESS_OBSERVATIONS` | 100 | 코호트 선택에 필요한 시장별 최소 freshness 관측 수 |
@@ -242,8 +287,13 @@ portfolio 진단에서만 `requireNextCandleBullish` 후보도 비교할 수 있
 | `SCALP_VALIDATION_MIN_TRAINING_TRADES` | 3 | 학습 구간 최소 거래 수 |
 | `SCALP_VALIDATION_MIN_TRAINING_PROFIT_FACTOR` | 1 | 학습 구간 최소 profit factor |
 | `SCALP_VALIDATION_MIN_TRAINING_RETURN_PERCENT` | 0 | 학습 구간 최소 수익률 (%) |
+| `SCALP_VALIDATION_REQUIRE_STATISTICAL_CONFIDENCE` | fixed validation에서 true | 거래수익 95% 단측 신뢰도 하한 게이트 사용 여부; false여도 live report는 통계 metadata 없이는 승인되지 않음 |
+| `SCALP_VALIDATION_MIN_TRAINING_CONFIDENCE_TRADES` | 10 | 통계 하한을 계산할 학습 구간 최소 청산 거래 수 |
+| `SCALP_VALIDATION_MIN_CONFIDENCE_TRADES` | 20 | 통계 하한을 계산할 holdout 최소 청산 거래 수 |
+| `SCALP_VALIDATION_MIN_CONFIDENCE_LOWER_PERCENT` | 0 | holdout 평균 거래수익의 95% 단측 하한 최소값 (%) |
 | `AI_ADVISOR_ENABLED` | true | 구독 CLI 기반 읽기 전용 AI 자문 활성화 여부 |
-| `AI_ADVISOR_TIMEOUT_MS` | 30000 | provider 한 곳의 자문 응답 최대 대기 시간(ms); 구독 CLI의 초기화 지연 변동을 포함 |
+| `AI_ADVISOR_TIMEOUT_MS` | 60000 | provider 한 곳의 자문 응답 최대 대기 시간(ms); 로컬 CLI 초기화 지연 변동을 포함 |
+| `AI_PROVIDER_FAILURE_COOLDOWN_MS` | 30000 | timeout/일시적 provider failure 뒤 반복 child 실행을 막는 재시도 대기(ms) |
 | `AI_CODEX_IGNORE_USER_CONFIG` | true | 사용자 Codex 설정 파싱 오류가 있어도 앱의 격리 실행 경로를 시도할지 여부 |
 | `AI_MONITORING_FILE` | `ai_monitoring_sessions.json` | 장기 모니터링 session/이벤트/자문 이력 파일 |
 | `AI_CODEX_BIN` | `codex` | GPT/Codex CLI 실행 파일 경로 |
@@ -255,7 +305,8 @@ portfolio 진단에서만 `requireNextCandleBullish` 후보도 비교할 수 있
 | `AI_EVALUATION_MIN_SAMPLES` | 20 | AI 실효성을 충분한 표본으로 표시하기 위한 최소 평가 수 |
 | `PAPER_AI_MONITORING` | false | paper smoke에 AI monitoring session을 명시적으로 연결 |
 | `PAPER_AI_PROVIDERS` | gpt | paper AI monitoring에 사용할 provider 목록 |
-| `PAPER_AI_EVENTS` | `BUY_SIGNAL,SELL_SIGNAL` | paper AI monitoring 대상 event 목록 |
+| `PAPER_AI_EVENTS` | `REBOUND_CANDIDATE,BUY_SIGNAL,SELL_SIGNAL` | paper AI monitoring 대상 event 목록 |
+| `PAPER_AI_AUTO_CONSULT_EVENTS` | `BUY_SIGNAL,SELL_SIGNAL` | paper AI monitoring에서 자동 provider 상담할 event 목록; 후보 기록과 자동 상담을 분리 |
 | `PAPER_AI_EVALUATION_MINUTES` | 5 | paper AI monitoring의 미래 가격 평가 시점(분) |
 | `PAPER_AI_STOP_WAIT_MS` | 35000 | smoke 종료 시 진행 중 provider 호출을 기다리는 최대 시간(ms) |
 | `PAPER_AI_MONITORING_FILE` | output dir 아래 | paper AI monitoring 원장 경로 override |
@@ -263,8 +314,13 @@ portfolio 진단에서만 `requireNextCandleBullish` 후보도 비교할 수 있
 | `AI_REPLAY_MAX_SAMPLES` | 20 | replay provider 호출 최대 후보 수 |
 | `AI_REPLAY_HORIZON_CANDLES` | 5 | 후보 이후 미래 가격을 확인할 candle 수 |
 | `AI_REPLAY_MIN_SPACING_CANDLES` | 5 | 인접 후보 중복을 줄이는 최소 간격 |
+| `AI_REPLAY_CONFIRMED_ONLY` | false | 확정된 BUY/SELL 후보만 선택하는 research-only replay 필터 |
 | `AI_REPLAY_PROVIDER` | gpt | historical replay provider |
 | `AI_REPLAY_OUTPUT_FILE` | `/tmp/coinpilot-ai-historical-replay.json` | replay 결과 report 경로 |
+| `AI_ROBUSTNESS_MIN_NON_NEUTRAL` | 20 | 여러 replay window를 충분한 표본으로 인정하기 위한 비중립 결과 수 |
+| `AI_ROBUSTNESS_SCOPE` | all | robustness 집계 범위: `providers`, `consensus`, `all` |
+| `AI_ROBUSTNESS_REPORT_FILES` | 미설정 | robustness CLI에 전달할 replay report 경로 목록 |
+| `AI_ROBUSTNESS_OUTPUT_FILE` | 미설정 | robustness aggregate report 저장 경로 |
 | `RSI_PERIOD` | 14 | RSI 기간 |
 | `RSI_OVERSOLD` | 30 | RSI 과매도 기준 |
 | `RSI_OVERBOUGHT` | 70 | RSI 과매수 기준 |
