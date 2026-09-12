@@ -20,7 +20,8 @@ try {
   const reports = files.map(file => JSON.parse(fs.readFileSync(file, 'utf8')));
   const result = assessReplayRobustness(reports, {
     neutralBandPercent: Number(process.env.AI_REPLAY_NEUTRAL_BAND_PERCENT) || 0.3,
-    minimumNonNeutralSamples: Number(process.env.AI_ROBUSTNESS_MIN_NON_NEUTRAL) || 20
+    minimumNonNeutralSamples: Number(process.env.AI_ROBUSTNESS_MIN_NON_NEUTRAL) || 20,
+    scope: process.env.AI_ROBUSTNESS_SCOPE || 'all'
   });
   const outputFile = process.env.AI_ROBUSTNESS_OUTPUT_FILE || '';
   if (outputFile) fs.writeFileSync(outputFile, JSON.stringify(result, null, 2), 'utf8');

@@ -78,8 +78,16 @@ function summarizeRows(rows = [], neutralBandPercent = 0.3) {
   return summary;
 }
 
-export function summarizeReplayReport(report = {}, index = 0, neutralBandPercent = 0.3) {
-  const rows = Array.isArray(report.rows) ? report.rows : [];
+function selectReplayRows(report = {}, scope = 'all') {
+  const providerRows = Array.isArray(report.rows) ? report.rows : [];
+  const consensusRows = Array.isArray(report.consensusRows) ? report.consensusRows : [];
+  if (scope === 'consensus') return consensusRows;
+  if (scope === 'providers') return providerRows;
+  return [...providerRows, ...consensusRows];
+}
+
+export function summarizeReplayReport(report = {}, index = 0, neutralBandPercent = 0.3, scope = 'all') {
+  const rows = selectReplayRows(report, scope);
   const summary = summarizeRows(rows, neutralBandPercent);
   const failures = Array.isArray(report.failures) ? report.failures.length : 0;
   summary.failures = failures;
@@ -87,6 +95,7 @@ export function summarizeReplayReport(report = {}, index = 0, neutralBandPercent
     id: report.outputFile || report.candleFile || report.generatedAt || `window-${index + 1}`,
     generatedAt: report.generatedAt || null,
     source: report.source || 'historical_replay',
+    scope,
     selectedSamples: Number(report.selectedSamples) || rows.length,
     responseCount: Number(report.responseCount) || rows.length,
     ...summary
@@ -95,11 +104,12 @@ export function summarizeReplayReport(report = {}, index = 0, neutralBandPercent
 
 export function assessReplayRobustness(reports = [], options = {}) {
   const neutralBandPercent = Math.max(0, Number(options.neutralBandPercent ?? 0.3) || 0);
+  const scope = ['consensus', 'providers', 'all'].includes(options.scope) ? options.scope : 'all';
   const minimumNonNeutralSamples = Math.max(
     1,
     Math.floor(Number(options.minimumNonNeutralSamples ?? DEFAULT_ROBUSTNESS_MIN_NON_NEUTRAL) || DEFAULT_ROBUSTNESS_MIN_NON_NEUTRAL)
   );
-  const windows = reports.map((report, index) => summarizeReplayReport(report, index, neutralBandPercent));
+  const windows = reports.map((report, index) => summarizeReplayReport(report, index, neutralBandPercent, scope));
   const total = windows.reduce((accumulator, window) => {
     for (const key of [
       'responses', 'failures', 'hits', 'misses', 'flat', 'calm', 'abstained',
@@ -141,6 +151,7 @@ export function assessReplayRobustness(reports = [], options = {}) {
   return {
     generatedAt: new Date().toISOString(),
     windowCount: windows.length,
+    scope,
     neutralBandPercent,
     minimumNonNeutralSamples,
     status,

@@ -38,3 +38,17 @@ test('replay robustness는 두 window의 안정적인 non-neutral veto를 별도
   assert.equal(result.total.nonNeutral, 20);
   assert.equal(result.total.vetoGood, 20);
 });
+
+test('replay robustness는 consensus rows를 provider rows와 분리해 집계한다', () => {
+  const result = assessReplayRobustness([
+    {
+      rows: [{ action: 'BUY', eventType: 'BUY_SIGNAL', priceChangePercent: 0.6, verdict: 'HIT' }],
+      consensusRows: [{ action: 'WAIT', eventType: 'BUY_SIGNAL', priceChangePercent: -0.6, vetoVerdict: 'VETO_GOOD' }]
+    }
+  ], { scope: 'consensus', minimumNonNeutralSamples: 1, neutralBandPercent: 0.3 });
+
+  assert.equal(result.scope, 'consensus');
+  assert.equal(result.total.responses, 1);
+  assert.equal(result.total.hits, 0);
+  assert.equal(result.total.vetoGood, 1);
+});
