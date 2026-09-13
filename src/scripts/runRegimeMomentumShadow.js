@@ -4,9 +4,12 @@ import path from 'node:path';
 import axios from 'axios';
 import UpbitAPI from '../api/upbit.js';
 import RegimeMomentumStrategy from '../strategy/regimeMomentumStrategy.js';
+import { createNotifier } from '../utils/notify.js';
 
 /**
- * Research-only forward shadow runner for the regime-momentum candidate.
+ * Research-only forward shadow runner for the regime-momentum defense
+ * overlay candidate. The current ~400-day audit is negative in absolute
+ * return, so this process can only accumulate diagnostic forward evidence.
  *
  * Fully self-contained: owns its own ledger directory and lockfile, fetches
  * daily candles on a slow cadence, and simulates the candidate contract
@@ -17,6 +20,7 @@ import RegimeMomentumStrategy from '../strategy/regimeMomentumStrategy.js';
  *   node src/scripts/runRegimeMomentumShadow.js
  *
  * Ledger: .paper-momentum-shadow-v1/ledger.json (override MOMO_SHADOW_DIR).
+ * No result from this runner can authorize live orders or promotion.
  */
 dotenv.config();
 
@@ -50,6 +54,8 @@ const strategyConfig = {
 
 const upbit = new UpbitAPI('', '', { requestTimeoutMs: 10_000 });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const notify = createNotifier({ topic: process.env.MOMO_SHADOW_NTFY_TOPIC || '' });
+const bookName = `${DIR.replace(/[^a-z0-9]+/gi, '-')}·${MODE}`;
 
 function loadLedger() {
   try { return JSON.parse(fs.readFileSync(LEDGER, 'utf8')); } catch { return null; }
@@ -131,6 +137,9 @@ async function cycle(ledger, strategies) {
       ledger.balance += pos.size * (1 + profit / 100);
       ledger.trades.push({ market: m, entry: pos, exitTs: last.ts, exitPrice: last.trade_price, exit: ex.exit, profitPercent: profit });
       delete ledger.positions[m];
+      notify.send(`momentum close ${m.replace('KRW-', '')}`,
+        `${ex.exit} ${profit >= 0 ? '+' : ''}${profit.toFixed(2)}% · ${bookName} · bal ${Math.round(ledger.balance).toLocaleString()}`,
+        [profit >= 0 ? 'white_check_mark' : 'x']);
     }
   }
 
@@ -159,6 +168,9 @@ async function cycle(ledger, strategies) {
     ledger.balance -= size;
     ledger.positions[m] = { entryPrice: r.referencePrice, entryTs: bars[bars.length - 1].ts, entryTimeMs: now, size, trendPercent: r.trendPercent, breadth };
     ledger.entries = (ledger.entries || 0) + 1;
+    notify.send(`momentum open ${m.replace('KRW-', '')}`,
+      `7d trend +${r.trendPercent.toFixed(1)}% · breadth ${breadth} · size ${Math.round(size).toLocaleString()} · ${bookName}`,
+      ['chart_with_upwards_trend']);
   }
 
   ledger.lastCycleAt = nowIso;
