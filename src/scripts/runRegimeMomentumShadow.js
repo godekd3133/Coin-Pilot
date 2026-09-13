@@ -32,13 +32,18 @@ const MAX_POSITIONS = Number(process.env.MOMO_SHADOW_MAX_POSITIONS) || 4;
 const TREND_MIN_PERCENT = Number(process.env.MOMO_SHADOW_TREND_MIN_PERCENT) || 0;
 const BREADTH_MIN = Number(process.env.MOMO_SHADOW_BREADTH_MIN) || 1;
 const HISTORY_DAYS = 200;
+// 'fixed': exit at maxHoldHours / SL / TP (trade-based).
+// 'regime': hold while trailing 7d trend stays > trendMinPercent (regime switch).
+const MODE = process.env.MOMO_SHADOW_MODE === 'regime' ? 'regime' : 'fixed';
 
 const strategyConfig = {
   candleUnitMinutes: 1440,
   rsiEntryThreshold: 0,          // pure trend gate: RSI disabled
   trendLookbackHours: 168,       // 7d
   requireUpBar: true,
-  maxHoldHours: Number(process.env.MOMO_SHADOW_MAX_HOLD_HOURS) || 72,
+  // regime mode holds while the trend gate stays open; disable the fixed cap.
+  maxHoldHours: Number(process.env.MOMO_SHADOW_MAX_HOLD_HOURS)
+    || (MODE === 'regime' ? 24 * 365 : 72),
   stopLossPercent: Number(process.env.MOMO_SHADOW_STOP_LOSS_PERCENT) || 0,
   takeProfitPercent: Number(process.env.MOMO_SHADOW_TAKE_PROFIT_PERCENT) || 0
 };
@@ -113,8 +118,14 @@ async function cycle(ledger, strategies) {
     const bars = series[m];
     if (!bars || !bars.length) continue;
     const last = bars[bars.length - 1];
-    const ex = strategies[m].checkPosition(
+    let ex = strategies[m].checkPosition(
       { entryPrice: pos.entryPrice, entryTimeMs: pos.entryTimeMs }, last.trade_price, now);
+    if (!ex.exit && MODE === 'regime') {
+      const t = trailingTrend(bars, bars.length - 1);
+      if (t != null && t <= TREND_MIN_PERCENT) {
+        ex = { exit: 'REGIME_OFF', profitPercent: ((last.trade_price - pos.entryPrice) / pos.entryPrice) * 100 };
+      }
+    }
     if (ex.exit) {
       const profit = ex.profitPercent - COST_PERCENT;
       ledger.balance += pos.size * (1 + profit / 100);
@@ -167,12 +178,12 @@ async function main() {
     ledger = {
       diagnosticOnly: true, promoted: false,
       startedAt: new Date().toISOString(),
-      config: { ...strategyConfig, trendMinPercent: TREND_MIN_PERCENT, breadthMin: BREADTH_MIN, costPercent: COST_PERCENT, positionFraction: POSITION_FRACTION, maxPositions: MAX_POSITIONS, markets: MARKETS },
+      config: { mode: MODE, ...strategyConfig, trendMinPercent: TREND_MIN_PERCENT, breadthMin: BREADTH_MIN, costPercent: COST_PERCENT, positionFraction: POSITION_FRACTION, maxPositions: MAX_POSITIONS, markets: MARKETS },
       balance: Number(process.env.MOMO_SHADOW_INITIAL_BALANCE) || 100_000_000,
       positions: {}, trades: [], cycles: 0
     };
   } else {
-    const active = { ...strategyConfig, trendMinPercent: TREND_MIN_PERCENT, breadthMin: BREADTH_MIN, costPercent: COST_PERCENT, positionFraction: POSITION_FRACTION, maxPositions: MAX_POSITIONS, markets: MARKETS };
+    const active = { mode: MODE, ...strategyConfig, trendMinPercent: TREND_MIN_PERCENT, breadthMin: BREADTH_MIN, costPercent: COST_PERCENT, positionFraction: POSITION_FRACTION, maxPositions: MAX_POSITIONS, markets: MARKETS };
     if (JSON.stringify(ledger.config) !== JSON.stringify(active)) {
       ledger.configDrift = { previous: ledger.config, changedAt: new Date().toISOString() };
       ledger.config = active;
