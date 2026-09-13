@@ -167,6 +167,12 @@ async function main() {
       balance: Number(process.env.MOMO_SHADOW_INITIAL_BALANCE) || 100_000_000,
       positions: {}, trades: [], cycles: 0
     };
+  } else {
+    const active = { ...strategyConfig, trendMinPercent: TREND_MIN_PERCENT, breadthMin: BREADTH_MIN, costPercent: COST_PERCENT, positionFraction: POSITION_FRACTION, maxPositions: MAX_POSITIONS, markets: MARKETS };
+    if (JSON.stringify(ledger.config) !== JSON.stringify(active)) {
+      ledger.configDrift = { previous: ledger.config, changedAt: new Date().toISOString() };
+      ledger.config = active;
+    }
   }
   console.log(`momentum shadow started: ${MARKETS.join(',')} hold=${strategyConfig.maxHoldHours}h trend>${TREND_MIN_PERCENT}% breadth>=${BREADTH_MIN}`);
   while (true) {
