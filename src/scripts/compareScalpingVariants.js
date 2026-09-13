@@ -27,6 +27,12 @@ export const SCALPING_VARIANTS = {
   range_cap_08: { maxSignalRangePercent: 0.8 },
   range_cap_10: { maxSignalRangePercent: 1 },
   range_cap_02: { maxSignalRangePercent: 0.2 },
+  // Research-only exhaustion guard: reject a rebound that is already too
+  // extended from its oversold reference before the delayed entry.
+  max_rebound_04: { maxReboundPercent: 0.4 },
+  max_rebound_05: { maxReboundPercent: 0.5 },
+  max_rebound_07: { maxReboundPercent: 0.7 },
+  max_rebound_04_follow_through: { maxReboundPercent: 0.4, requireNextCandleBullish: true },
   oversold_lookback_3: { oversoldLookback: 3 },
   oversold_lookback_3_rebound_25: { oversoldLookback: 3, minReboundPercent: 0.25 },
   oversold_lookback_3_volume_15: { oversoldLookback: 3, minVolumeRatio: 1.5 },
@@ -56,6 +62,12 @@ export const SCALPING_VARIANTS = {
   },
   rsi_30_volume_15_rebound_50: { rsiOversold: 30, minVolumeRatio: 1.5, minReboundPercent: 0.5 },
   rsi_25_volume_15_rebound_50: { rsiOversold: 25, minVolumeRatio: 1.5, minReboundPercent: 0.5 },
+  // Research-only sensitivity checks above the current runtime RSI-35
+  // threshold. These candidates are never applied without the same-window
+  // training/holdout gates and a separate forward cohort.
+  rsi_40: { rsiOversold: 40 },
+  rsi_45: { rsiOversold: 45 },
+  rebound_below_overbought: { requireReboundBelowOverbought: true },
   relax_volume: { minVolumeRatio: 0 },
   relax_trend: { minTrendSlopePercent: -1.5 },
   relax_highbreak: { requirePreviousHighBreak: false },
@@ -67,12 +79,43 @@ export const SCALPING_VARIANTS = {
     minTrendSlopePercent: -1.5,
     requirePreviousHighBreak: false
   },
+  strong_rebound_no_highbreak: {
+    minReboundPercent: 0.5,
+    minTrendSlopePercent: 0,
+    requirePreviousHighBreak: false
+  },
+  strong_rebound_no_highbreak_volume15: {
+    minReboundPercent: 0.5,
+    minVolumeRatio: 1.5,
+    minTrendSlopePercent: 0,
+    requirePreviousHighBreak: false
+  },
+  strong_rebound_no_highbreak_recovery5: {
+    minReboundPercent: 0.5,
+    minRsiRecovery: 5,
+    minTrendSlopePercent: 0,
+    requirePreviousHighBreak: false
+  },
+  trend_nonnegative: { minTrendSlopePercent: 0 },
+  trend_positive_01: { minTrendSlopePercent: 0.1 },
+  trend_positive_02: { minTrendSlopePercent: 0.2 },
   fast_exit: { stopLossPercent: 0.8, takeProfitPercent: 1.0 },
   tight_exit: { stopLossPercent: 0.8, takeProfitPercent: 1.2 },
   balanced_exit: { stopLossPercent: 1.2, takeProfitPercent: 1.2 },
   micro_exit_04_06: { stopLossPercent: 0.4, takeProfitPercent: 0.6 },
   micro_exit_05_08: { stopLossPercent: 0.5, takeProfitPercent: 0.8 },
   micro_exit_06_09: { stopLossPercent: 0.6, takeProfitPercent: 0.9 },
+  tp_06: { takeProfitPercent: 0.6 },
+  tp_09: { takeProfitPercent: 0.9 },
+  tp_12: { takeProfitPercent: 1.2 },
+  runner_trail: { takeProfitPercent: 50, trailingActivationPercent: 0.8, trailingStopPercent: 0.4, maxHoldMinutes: 240 },
+  runner_trail_tight: { takeProfitPercent: 50, trailingActivationPercent: 0.5, trailingStopPercent: 0.3, maxHoldMinutes: 240 },
+  runner_be: { takeProfitPercent: 50, breakEvenTriggerPercent: 0.5, breakEvenOffsetPercent: 0.05, maxHoldMinutes: 240 },
+  runner_trail_we: { takeProfitPercent: 50, trailingActivationPercent: 0.8, trailingStopPercent: 0.4, maxHoldMinutes: 240, winnerExtendMinutes: 120 },
+  rf20_we60: { minSignalRangePercent: 0.2, winnerExtendMinutes: 60 },
+  rf20_vol15: { minSignalRangePercent: 0.2, minVolumeRatio: 1.5 },
+  rf20_we60_vol15: { minSignalRangePercent: 0.2, winnerExtendMinutes: 60, minVolumeRatio: 1.5 },
+  rf20_mr04ft: { minSignalRangePercent: 0.2, maxReboundPercent: 0.4, requireNextCandleBullish: true },
   max_hold_5m: { maxHoldMinutes: 5 },
   max_hold_15m: { maxHoldMinutes: 15 },
   max_hold_30m: { maxHoldMinutes: 30 },
@@ -80,9 +123,33 @@ export const SCALPING_VARIANTS = {
   loss_timeout_5m: { maxLosingHoldMinutes: 5 },
   loss_timeout_10m: { maxLosingHoldMinutes: 10 },
   winner_extend_60: { winnerExtendMinutes: 60 },
+  winner_extend_15: { winnerExtendMinutes: 15 },
+  winner_extend_30: { winnerExtendMinutes: 30 },
+  winner_extend_60_p05: { winnerExtendMinutes: 60, winnerExtendMinProfitPercent: 0.05 },
+  winner_extend_60_p10: { winnerExtendMinutes: 60, winnerExtendMinProfitPercent: 0.1 },
+  winner_extend_60_p30: { winnerExtendMinutes: 60, winnerExtendMinProfitPercent: 0.3 },
   winner_extend_90: { winnerExtendMinutes: 90 },
   winner_extend_60_p02: { winnerExtendMinutes: 60, winnerExtendMinProfitPercent: 0.2 },
   winner_extend_90_p05: { winnerExtendMinutes: 90, winnerExtendMinProfitPercent: 0.5 },
+  max_hold_60: { maxHoldMinutes: 60 },
+  max_hold_90: { maxHoldMinutes: 90 },
+  mlh10_we60: { maxLosingHoldMinutes: 10, winnerExtendMinutes: 60 },
+  mlh5_we60: { maxLosingHoldMinutes: 5, winnerExtendMinutes: 60 },
+  mlh10_we90: { maxLosingHoldMinutes: 10, winnerExtendMinutes: 90 },
+  hold_120: { maxHoldMinutes: 120 },
+  hold_240: { maxHoldMinutes: 240 },
+  hold_480: { maxHoldMinutes: 480 },
+  hold_240_tp36: { maxHoldMinutes: 240, takeProfitPercent: 3.6 },
+  hold_480_tp50: { maxHoldMinutes: 480, takeProfitPercent: 50 },
+  hold_240_tp36_vol15: { maxHoldMinutes: 240, takeProfitPercent: 3.6, minVolumeRatio: 1.5 },
+  hold_960_tp50: { maxHoldMinutes: 960, takeProfitPercent: 50 },
+  hold_480_trail: { maxHoldMinutes: 480, takeProfitPercent: 50, trailingActivationPercent: 1.0, trailingStopPercent: 0.6 },
+  hold_960_trail: { maxHoldMinutes: 960, takeProfitPercent: 50, trailingActivationPercent: 1.0, trailingStopPercent: 0.6 },
+  hold_480_tp50_vol15: { maxHoldMinutes: 480, takeProfitPercent: 50, minVolumeRatio: 1.5 },
+  hold_960_tp50_sl24: { maxHoldMinutes: 960, takeProfitPercent: 50, stopLossPercent: 2.4 },
+  hold_960_tp50_sl36: { maxHoldMinutes: 960, takeProfitPercent: 50, stopLossPercent: 3.6 },
+  hold_1920_tp50: { maxHoldMinutes: 1920, takeProfitPercent: 50 },
+  hold_1920_tp50_sl24: { maxHoldMinutes: 1920, takeProfitPercent: 50, stopLossPercent: 2.4 },
   loss_circuit_3: {
     lossCircuitBreakerCount: 3,
     lossCircuitBreakerWindowMinutes: 30,
@@ -131,6 +198,7 @@ function getBaseConfig() {
     requirePreviousHighBreak: process.env.SCALP_REQUIRE_PREVIOUS_HIGH_BREAK !== 'false',
     maxSignalRangePercent: number(process.env.SCALP_MAX_SIGNAL_RANGE_PERCENT, 0),
     minSignalRangePercent: number(process.env.SCALP_MIN_SIGNAL_RANGE_PERCENT, 0),
+    maxReboundPercent: number(process.env.SCALP_MAX_REBOUND_PERCENT, 0),
     marketRegimeEnabled: process.env.SCALP_MARKET_REGIME_ENABLED === 'true',
     marketRegimeLookback: number(process.env.SCALP_MARKET_REGIME_LOOKBACK, 5),
     marketRegimeMinBreadth: number(process.env.SCALP_MARKET_REGIME_MIN_BREADTH, 0.5),
@@ -275,6 +343,7 @@ export async function runVariantStudy() {
     .filter(name => SCALPING_VARIANTS[name]);
   const markets = await selectMarkets(upbit);
   const candleCacheFile = process.env.SCALP_VARIANT_CANDLES_FILE || null;
+  const candleCacheOutputFile = process.env.SCALP_VARIANT_CANDLES_OUTPUT_FILE || null;
   let cachedCandles = {};
   if (candleCacheFile && fs.existsSync(candleCacheFile)) {
     try {
@@ -290,6 +359,7 @@ export async function runVariantStudy() {
   const gateOptions = makeGateOptions();
   const variantResults = Object.fromEntries(selectedNames.map(name => [name, []]));
   const fetched = [];
+  const collectedCandles = {};
 
   for (const market of markets) {
     console.log(`\n⏳ ${market} 공통 데이터 ${candleCacheFile ? '확인' : '수집'} 중...`);
@@ -299,6 +369,7 @@ export async function runVariantStudy() {
       const candles = fromCache
         ? cached
         : await getHistoricalCandles(upbit, market, unit, candleCount);
+      collectedCandles[market] = candles;
       fetched.push({ market, candleCount: candles.length, source: fromCache ? 'cache' : 'upbit' });
       console.log(`   ${fromCache ? 'cache 사용' : '수집 완료'}: ${candles.length}개 / ${selectedNames.length}개 variant 평가`);
       for (const name of selectedNames) {
@@ -319,6 +390,11 @@ export async function runVariantStudy() {
     }
   }
 
+  if (candleCacheOutputFile && Object.keys(collectedCandles).length > 0) {
+    fs.writeFileSync(candleCacheOutputFile, JSON.stringify(collectedCandles), 'utf8');
+    console.log(`\n💾 동일 윈도우 candle cache 저장: ${candleCacheOutputFile}`);
+  }
+
   const report = {
     generatedAt: new Date().toISOString(),
     study: 'same_window_scalping_variant_comparison',
@@ -327,6 +403,7 @@ export async function runVariantStudy() {
     candleCount,
     baseConfig,
     markets,
+    candleCacheOutputFile,
     fetched,
     variants: Object.fromEntries(selectedNames.map(name => [name, {
       overrides: SCALPING_VARIANTS[name],
