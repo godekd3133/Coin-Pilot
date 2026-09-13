@@ -76,8 +76,12 @@ async function fetchDailyCandles(market) {
   });
 }
 
-function toBars(candles) {
+function toBars(candles, now = new Date()) {
+  // Upbit's /candles/days includes today's still-forming candle; only
+  // completed daily bars are eligible for signals and exits.
+  const todayUtc = now.toISOString().slice(0, 10);
   return candles
+    .filter((c) => String(c.candle_date_time_utc).slice(0, 10) !== todayUtc)
     .map((c) => ({
       ts: c.candle_date_time_utc,
       trade_price: c.trade_price,
