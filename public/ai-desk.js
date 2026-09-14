@@ -50,22 +50,22 @@
     function mountMarkup() {
         host.innerHTML = `
             <section class="ai-desk-hero">
-                <div><div class="ai-desk-kicker">AI ADVISORY / LONG-RUN WATCH</div><h2 class="ai-desk-title">판단이 필요한 순간만, 빠르게 자문</h2><p class="ai-desk-copy">모니터링 이벤트를 고르고 GPT·Claude 구독 세션에 읽기 전용 자문을 요청합니다. AI 의견은 기록되지만 기존 설정값 기반 자동 매수·매도에는 연결되지 않습니다.</p></div>
-                <div class="ai-desk-stamp">ADVISORY ONLY<br>NO ORDER ROUTING</div>
+                <div><div class="ai-desk-kicker">AI 자문 / 상시 감시</div><h2 class="ai-desk-title">판단이 필요한 순간만, 빠르게 자문</h2><p class="ai-desk-copy">모니터링 이벤트를 고르고 GPT·Claude 구독 세션에 읽기 전용 자문을 요청합니다. AI 의견은 기록되지만 기존 설정값 기반 자동 매수·매도에는 연결되지 않습니다.</p></div>
+                <div class="ai-desk-stamp">참고용 의견<br>주문 연결 없음</div>
             </section>
             <div class="ai-desk-grid">
                 <div class="ai-desk-column">
                     <div class="ai-desk-section-title"><h3>연결 상태</h3><button type="button" class="ai-desk-button" data-ai-refresh>새로고침</button></div>
-                    <div class="ai-desk-provider-grid" data-ai-providers><div class="ai-desk-empty">provider 상태 확인 중...</div></div>
+                    <div class="ai-desk-provider-grid" data-ai-providers><div class="ai-desk-empty">AI 연결 상태 확인 중...</div></div>
                     <div class="ai-desk-note">GPT는 Codex CLI, Claude는 Claude CLI의 구독 로그인 상태를 사용합니다. 앱에는 API key를 저장하지 않습니다.</div>
 
-                    <div class="ai-desk-section-title" style="margin-top:20px"><h3>장기 모니터링 세션</h3><small data-ai-session-count>0 active</small></div>
-                    <div class="ai-desk-list" data-ai-sessions><div class="ai-desk-empty">아직 만든 session이 없습니다.</div></div>
+                    <div class="ai-desk-section-title" style="margin-top:20px"><h3>장기 모니터링 세션</h3><small data-ai-session-count>0개 실행 중</small></div>
+                    <div class="ai-desk-list" data-ai-sessions><div class="ai-desk-empty">아직 만든 세션이 없습니다.</div></div>
 
-                    <div class="ai-desk-section-title" style="margin-top:20px"><h3>새 세션 열기</h3><small>persistent</small></div>
+                    <div class="ai-desk-section-title" style="margin-top:20px"><h3>새 세션 열기</h3><small>상시 감시</small></div>
                     <form class="ai-desk-form" data-ai-session-form>
                         <label class="ai-desk-label">세션 이름<input class="ai-desk-input" name="name" maxlength="80" value="시장 이벤트 자문" placeholder="예: BTC 반등 감시"></label>
-                        <div class="ai-desk-label">provider<div class="ai-desk-check-grid"><label class="ai-desk-check"><input type="checkbox" name="provider" value="gpt" checked> GPT / Codex</label><label class="ai-desk-check"><input type="checkbox" name="provider" value="claude" checked> Claude</label></div></div>
+                        <div class="ai-desk-label">AI 제공자<div class="ai-desk-check-grid"><label class="ai-desk-check"><input type="checkbox" name="provider" value="gpt" checked> GPT / Codex</label><label class="ai-desk-check"><input type="checkbox" name="provider" value="claude" checked> Claude</label></div></div>
                         <div class="ai-desk-label">감시 이벤트<div class="ai-desk-check-grid"><label class="ai-desk-check"><input type="checkbox" name="eventType" value="BUY_SIGNAL" checked> 매수 신호</label><label class="ai-desk-check"><input type="checkbox" name="eventType" value="SELL_SIGNAL" checked> 매도 신호</label><label class="ai-desk-check"><input type="checkbox" name="eventType" value="REBOUND_CANDIDATE"> 반등 후보</label><label class="ai-desk-check"><input type="checkbox" name="eventType" value="BREAKING_NEWS"> 속보</label><label class="ai-desk-check"><input type="checkbox" name="eventType" value="BUNDLE_SUGGESTION"> 리밸런싱 제안</label><label class="ai-desk-check"><input type="checkbox" name="eventType" value="TRADE_EXECUTED"> 체결 알림</label></div></div>
                         <label class="ai-desk-label">코인 필터<input class="ai-desk-input" name="coins" placeholder="전체 코인 · BTC 또는 KRW-BTC"></label>
                         <label class="ai-desk-label">동일 이벤트 재자문 간격 (초)<input class="ai-desk-input" type="number" name="cooldownSeconds" min="30" max="86400" step="30" value="300"></label>
@@ -74,10 +74,10 @@
                     </form>
                 </div>
                 <div class="ai-desk-column">
-                    <div class="ai-desk-section-title"><h3>실시간 이벤트</h3><small data-ai-snapshot>snapshot 대기</small></div>
+                    <div class="ai-desk-section-title"><h3>실시간 이벤트</h3><small data-ai-snapshot>수신 대기</small></div>
                     <div class="ai-desk-list" data-ai-events><div class="ai-desk-empty">자동매매 루프가 분석을 완료하면 이벤트가 여기에 표시됩니다.</div></div>
-                    <div class="ai-desk-note">이벤트 카드에서 선택한 provider에 수동 자문을 요청할 수 있습니다.</div>
-                    <div class="ai-desk-section-title" style="margin-top:20px"><h3>AI 자문 결과</h3><small data-ai-consultation-count>0 consultations</small></div>
+                    <div class="ai-desk-note">이벤트 카드에서 선택한 AI에 수동 자문을 요청할 수 있습니다.</div>
+                    <div class="ai-desk-section-title" style="margin-top:20px"><h3>AI 자문 결과</h3><small data-ai-consultation-count>0건</small></div>
                     <div class="ai-desk-list" data-ai-consultations><div class="ai-desk-empty">아직 자문 결과가 없습니다.</div></div>
                 </div>
             </div>`;
@@ -87,12 +87,12 @@
         const container = $('[data-ai-providers]');
         if (!container) return;
         if (!state.providers?.providers?.length) {
-            container.innerHTML = '<div class="ai-desk-empty">provider 상태를 불러오지 못했습니다.</div>';
+            container.innerHTML = '<div class="ai-desk-empty">AI 연결 상태를 불러오지 못했습니다.</div>';
             return;
         }
         container.innerHTML = state.providers.providers.map(provider => {
             const statusClass = provider.ready ? 'ready' : provider.status === 'NOT_AUTHENTICATED' ? 'warn' : 'error';
-            const text = provider.ready ? 'READY' : provider.status === 'NOT_AUTHENTICATED' ? 'LOGIN NEEDED' : provider.status || 'UNAVAILABLE';
+            const text = provider.ready ? '준비됨' : provider.status === 'NOT_AUTHENTICATED' ? '로그인 필요' : provider.status || '사용 불가';
             return `<article class="ai-desk-provider ${statusClass}"><div class="ai-desk-item-head"><span class="ai-desk-name">${esc(provider.label || providerName(provider.id))}</span><span class="ai-desk-state ${statusClass}">${esc(text)}</span></div><div class="ai-desk-detail">${esc(provider.detail || provider.subscriptionLabel || '')}</div><div class="ai-desk-detail" style="margin-top:5px;font:10px/1.3 'SFMono-Regular',Consolas,monospace">${provider.ready ? 'subscription session available' : esc(provider.nextStep || 'check local CLI login')}</div></article>`;
         }).join('');
     }
@@ -102,14 +102,14 @@
         const count = $('[data-ai-session-count]');
         if (!container) return;
         const active = state.sessions.filter(session => session.status === 'RUNNING').length;
-        if (count) count.textContent = `${active} active / ${state.sessions.length} total`;
+        if (count) count.textContent = `실행 중 ${active}개 / 전체 ${state.sessions.length}개`;
         if (!state.sessions.length) {
-            container.innerHTML = '<div class="ai-desk-empty">아직 만든 session이 없습니다.</div>';
+            container.innerHTML = '<div class="ai-desk-empty">아직 만든 세션이 없습니다.</div>';
             return;
         }
         container.innerHTML = state.sessions.map(session => {
             const statusClass = session.status === 'PAUSED' ? 'paused' : session.status === 'STOPPED' ? 'stopped' : '';
-            const statusText = session.status === 'RUNNING' ? 'RUNNING' : session.status;
+            const statusText = { RUNNING: '실행 중', PAUSED: '일시정지', STOPPED: '중지' }[session.status] || session.status || '-';
             const actions = session.status === 'RUNNING'
                 ? `<button type="button" class="ai-desk-button" data-ai-session-action="pause" data-session-id="${esc(session.id)}">일시정지</button><button type="button" class="ai-desk-button danger" data-ai-session-action="stop" data-session-id="${esc(session.id)}">종료</button>`
                 : session.status === 'PAUSED'
@@ -136,7 +136,7 @@
         const container = $('[data-ai-consultations]');
         const count = $('[data-ai-consultation-count]');
         if (!container) return;
-        if (count) count.textContent = `${state.consultations.length} consultations`;
+        if (count) count.textContent = `${state.consultations.length}건`;
         if (!state.consultations.length) {
             container.innerHTML = '<div class="ai-desk-empty">아직 자문 결과가 없습니다.</div>';
             return;
@@ -152,19 +152,19 @@
                 if (result.status === 'FALLBACK' && result.advice) {
                     const fallback = result.advice;
                     const risks = (fallback.risks || []).map(risk => `<li>${esc(risk)}</li>`).join('');
-                    return `<div class="ai-desk-advice"><div class="ai-desk-action wait">LOCAL<br>BRIEF</div><div class="ai-desk-rationale"><strong>AI 없음 · 사실 요약</strong><br>${esc(fallback.rationale || '')}${risks ? `<ul class="ai-desk-risks">${risks}</ul>` : ''}<div class="ai-desk-detail">${esc(fallback.invalidation || 'provider 연결 후 재자문')}</div></div></div>`;
+                    return `<div class="ai-desk-advice"><div class="ai-desk-action wait">로컬<br>요약</div><div class="ai-desk-rationale"><strong>AI 없음 · 사실 요약</strong><br>${esc(fallback.rationale || '')}${risks ? `<ul class="ai-desk-risks">${risks}</ul>` : ''}<div class="ai-desk-detail">${esc(fallback.invalidation || 'AI 연결 후 재자문')}</div></div></div>`;
                 }
                 if (result.status !== 'COMPLETED' || !result.advice) return `<div class="ai-desk-rationale" style="color:var(--ai-red)">${esc(providerName(result.provider))}: ${esc(result.error || '응답 실패')}</div>`;
                 const advice = result.advice;
                 const actionClass = advice.action === 'SELL' ? 'sell' : ['HOLD', 'WAIT'].includes(advice.action) ? 'wait' : '';
                 const risks = (advice.risks || []).map(risk => `<li>${esc(risk)}</li>`).join('');
-                return `<div class="ai-desk-advice"><div class="ai-desk-action ${actionClass}">${esc(advice.action)}<br><small>${n(advice.confidence)}%</small></div><div class="ai-desk-rationale"><strong>${esc(providerName(result.provider))}</strong> · ${esc(advice.horizon || '')}<br>${esc(advice.rationale || '')}${risks ? `<ul class="ai-desk-risks">${risks}</ul>` : ''}<div class="ai-desk-detail">무효화 조건: ${esc(advice.invalidation || '추가 확인 필요')}</div></div></div>`;
+                return `<div class="ai-desk-advice"><div class="ai-desk-action ${actionClass}">${esc(advice.action)}</div><div class="ai-desk-rationale"><strong>${esc(providerName(result.provider))}</strong> · ${esc(advice.horizon || '')}<br>${esc(advice.rationale || '')}${risks ? `<ul class="ai-desk-risks">${risks}</ul>` : ''}<div class="ai-desk-detail">재검토 조건: ${esc(advice.invalidation || '추가 확인 필요')}</div></div></div>`;
             }).join('');
             const consensus = consultation.consensus;
             const consensusHtml = consensus
-                ? `<div class="ai-desk-consensus ${consensus.conflict ? 'conflict' : ''}"><strong>${consensus.conflict ? '⚠ 의견 충돌 · 관망' : `합의 ${esc(consensus.action)}`}</strong> · ${n(consensus.providerCount)}개 provider · 일치율 ${Math.round(n(consensus.agreementRatio) * 100)}%<br>${esc(consensus.rationale || '')}</div>`
+                ? `<div class="ai-desk-consensus ${consensus.conflict ? 'conflict' : ''}"><strong>${consensus.conflict ? '⚠ 의견 충돌 · 관망' : `합의 ${esc(consensus.action)}`}</strong> · ${n(consensus.providerCount)}개 AI · 일치율 ${Math.round(n(consensus.agreementRatio) * 100)}%<br>${esc(consensus.rationale || '')}</div>`
                 : '';
-            return `<article class="ai-desk-consultation ${statusClass}"><div class="ai-desk-item-head"><span class="ai-desk-event-title">${esc(event.coin ? symbol(event.coin) : 'MARKET')} · ${esc(labels[event.type] || event.type || '자문')}</span><span class="ai-desk-state ${statusClass === 'completed' ? 'ready' : statusClass === 'failed' ? 'error' : 'warn'}">${esc(consultation.status || '-')}</span></div><div class="ai-desk-consultation-meta">${esc(time(consultation.createdAt))} · ${(consultation.providerSelection || []).map(providerName).map(esc).join(' + ')}${consultation.auto ? ' · 자동 자문' : ' · 수동 자문'}</div>${consensusHtml}${results || (consultation.status === 'RUNNING' ? '<div class="ai-desk-rationale">응답을 기다리는 중…</div>' : '')}${consultation.error ? `<div class="ai-desk-rationale" style="color:var(--ai-red)">${esc(consultation.error)}</div>` : ''}</article>`;
+            return `<article class="ai-desk-consultation ${statusClass}"><div class="ai-desk-item-head"><span class="ai-desk-event-title">${esc(event.coin ? symbol(event.coin) : 'MARKET')} · ${esc(labels[event.type] || event.type || '자문')}</span><span class="ai-desk-state ${statusClass === 'completed' ? 'ready' : statusClass === 'failed' ? 'error' : 'warn'}">${esc({ COMPLETED: '완료', DEGRADED: '제한됨', RUNNING: '실행 중', FAILED: '실패' }[consultation.status] || consultation.status || '-')}</span></div><div class="ai-desk-consultation-meta">${esc(time(consultation.createdAt))} · ${(consultation.providerSelection || []).map(providerName).map(esc).join(' + ')}${consultation.auto ? ' · 자동 자문' : ' · 수동 자문'}</div>${consensusHtml}${results || (consultation.status === 'RUNNING' ? '<div class="ai-desk-rationale">응답을 기다리는 중…</div>' : '')}${consultation.error ? `<div class="ai-desk-rationale" style="color:var(--ai-red)">${esc(consultation.error)}</div>` : ''}</article>`;
         }).join('');
     }
 
@@ -177,7 +177,7 @@
         renderEvents();
         renderConsultations();
         const snapshotElement = $('[data-ai-snapshot]');
-        if (snapshotElement) snapshotElement.textContent = snapshot.latestSnapshot?.timestamp ? `snapshot ${time(snapshot.latestSnapshot.timestamp)}` : 'snapshot 대기';
+        if (snapshotElement) snapshotElement.textContent = snapshot.latestSnapshot?.timestamp ? `수신 ${time(snapshot.latestSnapshot.timestamp)}` : '수신 대기';
         const sync = $('#ai-desk-root')?.querySelector?.('[data-ai-snapshot]');
         if (sync && snapshot.updatedAt) sync.title = `동기화 ${time(snapshot.updatedAt)}`;
     }
@@ -208,17 +208,17 @@
             toast('장기 AI 모니터링 세션을 시작했습니다', 'success');
             await load(false);
         } catch (error) {
-            toast(`AI session 시작 실패: ${error.message}`, 'error');
+            toast(`AI 세션 시작 실패: ${error.message}`, 'error');
         }
     }
 
     async function updateSession(sessionId, action) {
         try {
             await request(`/ai/sessions/${sessionId}/${action}`, { method: 'POST' });
-            toast(action === 'stop' ? 'AI 모니터링 세션을 종료했습니다' : `session을 ${action === 'pause' ? '일시정지' : '재개'}했습니다`, 'success');
+            toast(action === 'stop' ? 'AI 모니터링 세션을 종료했습니다' : `세션을 ${action === 'pause' ? '일시정지' : '재개'}했습니다`, 'success');
             await load(false);
         } catch (error) {
-            toast(`session 상태 변경 실패: ${error.message}`, 'error');
+            toast(`세션 상태 변경 실패: ${error.message}`, 'error');
         }
     }
 
@@ -235,7 +235,7 @@
                 consultationStatus === 'COMPLETED'
                     ? 'AI 자문 결과를 받았습니다'
                     : consultationStatus === 'DEGRADED'
-                        ? 'provider 미연결 · 사실 기반 WAIT 브리프를 저장했습니다'
+                        ? 'AI 미연결 · 사실 기반 WAIT 브리프를 저장했습니다'
                         : 'AI 자문이 완료되지 않았습니다',
                 consultationStatus === 'COMPLETED' ? 'success' : 'warning'
             );

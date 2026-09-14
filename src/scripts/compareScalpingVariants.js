@@ -176,7 +176,7 @@ export const SCALPING_VARIANTS = {
 function getBaseConfig() {
   return {
     initialBalance: number(process.env.SCALP_VALIDATION_INITIAL_BALANCE, 1_000_000),
-    tradingFee: 0.0005,
+    tradingFee: number(process.env.SCALP_VALIDATION_FEE, 0.0005),
     slippage: number(process.env.SCALP_VALIDATION_SLIPPAGE, 0.001),
     investmentRatio: number(process.env.SCALP_INVESTMENT_RATIO, 0.02),
     maxCandleAgeSeconds: resolveMaxCandleAgeSeconds(
@@ -205,6 +205,10 @@ function getBaseConfig() {
     marketRegimeMinReturnPercent: number(process.env.SCALP_MARKET_REGIME_MIN_RETURN_PERCENT, -0.2),
     requireReboundBelowOverbought: process.env.SCALP_REQUIRE_REBOUND_BELOW_OVERBOUGHT === 'true',
     signalProfile: process.env.SCALP_SIGNAL_PROFILE || 'rsi_rebound',
+    bbPeriod: number(process.env.BB_PERIOD, 20),
+    bbStdDev: number(process.env.BB_STD_DEV, 2),
+    emaPeriod: number(process.env.EMA_LONG, 60),
+    requireNextCandleBullish: process.env.SCALP_PORTFOLIO_REQUIRE_NEXT_CANDLE_BULLISH === 'true',
     maxEntryRetracePercent: number(process.env.SCALP_MAX_ENTRY_RETRACE_PERCENT, 0.25),
     maxEntryChasePercent: number(process.env.SCALP_MAX_ENTRY_CHASE_PERCENT, 0.35),
     breakEvenTriggerPercent: number(process.env.SCALP_BREAK_EVEN_TRIGGER_PERCENT, 0),

@@ -46,7 +46,8 @@
    mounted so the existing server-backed functions do not lose their anchors. */
 body:has(#pilot-redesign-root) {
     margin: 0;
-    min-width: 320px;
+    /* Do not force a desktop-width canvas on narrow mobile webviews. */
+    min-width: 0;
     background: var(--sl-paper);
     color: var(--sl-ink);
     font-family: var(--sl-font-body);
@@ -564,7 +565,7 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
     font-size: 14px;
 }
 
-.pilot-mode-banner span {
+.pilot-mode-banner-copy span {
     display: block;
     margin-top: 2px;
     color: inherit;
@@ -577,6 +578,48 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
     border-color: currentColor;
     background: rgba(255, 255, 255, 0.48);
     color: inherit;
+}
+
+.pilot-mode-banner-actions {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.pilot-pwa-state {
+    white-space: nowrap;
+}
+
+.pilot-install-guide {
+    display: grid;
+    gap: 16px;
+}
+
+.pilot-install-guide-steps {
+    display: grid;
+    gap: 11px;
+    margin: 0;
+    padding-left: 24px;
+    color: var(--sl-ink);
+    line-height: 1.6;
+}
+
+.pilot-install-guide-steps li::marker {
+    color: var(--sl-blue);
+    font-weight: 800;
+}
+
+.pilot-install-guide-note {
+    margin: 0;
+    padding: 12px 14px;
+    border-radius: var(--sl-radius-sm);
+    background: var(--sl-blue-soft);
+    color: var(--sl-ink-soft);
+    font-size: 12px;
+    line-height: 1.65;
 }
 
 .pilot-gate-grid {
@@ -894,6 +937,161 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
     font-weight: 700;
     text-align: right;
     white-space: nowrap;
+}
+
+/* Research variant names are longer than the normal time/coin labels. Keep
+   the metric column readable instead of letting the first column overlap it. */
+.pilot-strategy-research-panel .pilot-evidence-row {
+    grid-template-columns: minmax(150px, 0.42fr) minmax(0, 1fr) auto;
+}
+
+.pilot-strategy-research-panel .pilot-evidence-row > div,
+.pilot-strategy-research-panel .pilot-evidence-time {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.pilot-momentum-shadow-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+    padding: 18px 20px 20px;
+}
+
+.pilot-momentum-shadow-card {
+    min-width: 0;
+    padding: 14px;
+    border: 1px solid var(--sl-line);
+    border-radius: 10px;
+    background: var(--sl-surface-2);
+}
+
+.pilot-momentum-shadow-preflight {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 6px 12px;
+    margin: 0 20px 2px;
+    padding: 12px 14px;
+    border: 1px solid var(--sl-line);
+    border-radius: 10px;
+    background: var(--sl-surface-2);
+}
+
+.pilot-momentum-shadow-preflight > div {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.pilot-momentum-shadow-preflight strong {
+    color: var(--sl-ink);
+    font-size: 12px;
+    font-weight: 800;
+}
+
+.pilot-momentum-shadow-preflight span:not(.pilot-status-pill) {
+    color: var(--sl-muted);
+    font-size: 11px;
+}
+
+.pilot-momentum-shadow-preflight p {
+    grid-column: 1 / -1;
+    margin: 0;
+    color: var(--sl-muted);
+    font-size: 11px;
+    line-height: 1.5;
+}
+
+.pilot-momentum-shadow-card-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.pilot-momentum-shadow-card-head > div {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.pilot-momentum-shadow-card-head strong {
+    color: var(--sl-ink);
+    font-size: 13px;
+    font-weight: 800;
+}
+
+.pilot-momentum-shadow-card-head span:not(.pilot-status-pill) {
+    color: var(--sl-muted);
+    font-size: 11px;
+}
+
+.pilot-momentum-shadow-equity {
+    margin-top: 18px;
+    font-size: 24px;
+    font-weight: 800;
+    letter-spacing: -0.04em;
+}
+
+.pilot-momentum-shadow-equity.pilot-positive,
+.pilot-momentum-shadow-return.pilot-positive {
+    color: var(--sl-green);
+}
+
+.pilot-momentum-shadow-equity.pilot-negative,
+.pilot-momentum-shadow-return.pilot-negative {
+    color: var(--sl-red);
+}
+
+.pilot-momentum-shadow-return {
+    margin-top: 2px;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.pilot-momentum-shadow-stats {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px 12px;
+    margin-top: 14px;
+    color: var(--sl-muted);
+    font-size: 11px;
+    line-height: 1.45;
+}
+
+.pilot-momentum-shadow-stats span:last-child {
+    grid-column: 1 / -1;
+}
+
+.pilot-momentum-shadow-positions {
+    margin-top: 13px;
+    padding-top: 11px;
+    border-top: 1px solid var(--sl-line);
+    color: var(--sl-muted);
+    font-size: 11px;
+    line-height: 1.55;
+}
+
+.pilot-momentum-shadow-positions strong {
+    display: block;
+    margin-top: 3px;
+    color: var(--sl-ink-soft);
+    font-size: 11px;
+    font-weight: 600;
+    overflow-wrap: anywhere;
+}
+
+.pilot-momentum-shadow-warning {
+    display: block;
+    margin-top: 11px;
+    padding: 8px 9px;
+    border-radius: 7px;
+    background: var(--sl-amber-soft);
+    color: #8a5c14;
+    font-size: 10px;
+    line-height: 1.45;
 }
 
 .pilot-execution-panel {
@@ -2110,6 +2308,103 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
     line-height: 1.6;
 }
 
+.pilot-paper-diagnostics {
+    margin-top: 15px;
+    padding-top: 14px;
+    border-top: 1px solid var(--sl-line);
+}
+
+.pilot-paper-diagnostics-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.pilot-paper-diagnostics-head > div {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.pilot-paper-diagnostics-head strong {
+    color: var(--sl-ink);
+    font-size: 12px;
+    font-weight: 800;
+}
+
+.pilot-paper-diagnostics-head span:not(.pilot-status-pill) {
+    color: var(--sl-muted);
+    font-size: 11px;
+}
+
+.pilot-paper-diagnostic-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    margin-top: 9px;
+}
+
+.pilot-paper-diagnostic-card {
+    min-width: 0;
+    padding: 11px 12px;
+    border: 1px solid var(--sl-line);
+    border-radius: 10px;
+    background: var(--sl-surface-2);
+}
+
+.pilot-paper-diagnostic-card.is-shadow {
+    border-color: #c8dff5;
+    background: #f5f9fd;
+}
+
+.pilot-paper-diagnostic-card.is-loose {
+    border-color: #f0d38e;
+    background: #fffaf0;
+}
+
+.pilot-paper-diagnostic-card-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.pilot-paper-diagnostic-card-head strong {
+    color: var(--sl-ink);
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.pilot-paper-diagnostic-card-head span {
+    color: var(--sl-muted);
+    font-size: 10px;
+}
+
+.pilot-paper-diagnostic-profit {
+    display: block;
+    margin-top: 8px;
+    overflow: hidden;
+    color: var(--sl-ink);
+    font-size: 17px;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.03em;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.pilot-paper-diagnostic-profit.is-positive { color: var(--sl-green); }
+.pilot-paper-diagnostic-profit.is-negative { color: var(--sl-red); }
+
+.pilot-paper-diagnostic-stats {
+    margin-top: 4px;
+    color: var(--sl-muted);
+    font-size: 10px;
+    line-height: 1.5;
+}
+
 .pilot-paper-actions {
     display: flex;
     gap: 8px;
@@ -2858,6 +3153,10 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
         grid-template-columns: 1fr;
     }
 
+    .pilot-momentum-shadow-grid {
+        grid-template-columns: 1fr;
+    }
+
     .pilot-market-list {
         max-height: none;
     }
@@ -2961,11 +3260,17 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
     .pilot-mode-banner {
         align-items: flex-start;
         padding: 12px 14px;
+        flex-wrap: wrap;
     }
 
     .pilot-mode-banner .pilot-button {
         padding: 0 9px;
         font-size: 11px;
+    }
+
+    .pilot-mode-banner-actions {
+        width: 100%;
+        justify-content: flex-start;
     }
 
     .pilot-content {
@@ -3043,9 +3348,23 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
         grid-template-columns: 58px minmax(0, 1fr);
     }
 
+    .pilot-strategy-research-panel .pilot-evidence-row {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 4px;
+    }
+
+    .pilot-strategy-research-panel .pilot-evidence-value {
+        grid-column: auto;
+        text-align: left;
+    }
+
     .pilot-evidence-value {
         grid-column: 2;
         text-align: left;
+    }
+
+    .pilot-paper-diagnostic-grid {
+        grid-template-columns: 1fr;
     }
 
     .pilot-market-quote {

@@ -51,11 +51,21 @@ function createConfig() {
 }
 
 async function main() {
+  // 이 엔트리의 createConfig는 레거시 전략 형태이며 SCALP_* 계약을 매핑하지 않는다.
+  // strategyMode 미설정 시 trader가 스캘핑으로 fallback하면서 레거시 risk 값이
+  // 적용되므로, 스캘핑 해석이면 fail-closed로 종료하고 index.js로 유도한다.
+  const strategyMode = process.env.TRADING_STRATEGY || 'oversold_reaction_scalping';
+  if (strategyMode === 'oversold_reaction_scalping') {
+    console.error('⛔ multiCoinIndex.js는 레거시 엔트리입니다. 스캘핑 모드는 `npm start`(src/index.js)로 실행하세요.');
+    process.exit(1);
+  }
+
   console.log('\n' + '='.repeat(80));
   console.log('🤖 다중 코인 자동매매 시스템');
   console.log('='.repeat(80));
 
   const config = createConfig();
+  config.strategyMode = strategyMode;
   const logger = new Logger(config.logLevel);
 
   console.log('\n⚙️  설정:');

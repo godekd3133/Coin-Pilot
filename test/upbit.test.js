@@ -66,3 +66,40 @@ test('분석 클라이언트와 리스크 클라이언트가 요청 슬롯을 �
   assert.equal(requestTimes.length, 2);
   assert.ok(requestTimes[1] - requestTimes[0] >= 100);
 });
+
+test('risk 요청은 이미 쌓인 분석 backlog보다 먼저 다음 rate-limit 슬롯을 얻는다', async () => {
+  const marketApi = new UpbitAPI('', '', { minRequestIntervalMs: 250 });
+  const riskApi = new UpbitAPI('', '', { minRequestIntervalMs: 250 });
+  const events = [];
+  const request = (api, label, options) => api.requestWithRetry(async () => {
+    events.push(label);
+    return { label };
+  }, 1, options);
+
+  const normalRequests = [
+    request(marketApi, 'analysis-0'),
+    request(marketApi, 'analysis-1'),
+    request(marketApi, 'analysis-2'),
+    request(marketApi, 'analysis-3')
+  ];
+  await new Promise(resolve => setImmediate(resolve));
+  const riskRequest = request(riskApi, 'risk', { priority: 'risk' });
+
+  await Promise.all([...normalRequests, riskRequest]);
+
+  assert.ok(events.indexOf('risk') >= 0);
+  assert.ok(events.indexOf('risk') < events.indexOf('analysis-3'));
+});
+
+test('ticker 호출은 risk priority 옵션을 requestWithRetry까지 전달한다', async () => {
+  const api = new UpbitAPI('', '');
+  let requestOptions;
+  api.requestWithRetry = async (_requestFn, _maxRetries, options) => {
+    requestOptions = options;
+    return [];
+  };
+
+  await api.getTicker('KRW-BTC', { priority: 'risk' });
+
+  assert.deepEqual(requestOptions, { priority: 'risk' });
+});

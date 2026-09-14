@@ -55,7 +55,7 @@ async function getHistoricalCandles(upbit, market, unit, totalCount) {
 function shadowConfig() {
   return {
     initialBalance: number(process.env.SCALP_VALIDATION_INITIAL_BALANCE, 1_000_000),
-    tradingFee: 0.0005,
+    tradingFee: number(process.env.SCALP_VALIDATION_FEE, 0.0005),
     slippage: number(process.env.SCALP_VALIDATION_SLIPPAGE, 0.001),
     investmentRatio: number(process.env.SCALP_INVESTMENT_RATIO, 0.02),
     maxCandleAgeSeconds: resolveMaxCandleAgeSeconds(
@@ -77,6 +77,7 @@ function shadowConfig() {
     requirePreviousHighBreak: false,
     maxSignalRangePercent: number(process.env.SCALP_MAX_SIGNAL_RANGE_PERCENT, 0),
     minSignalRangePercent: number(process.env.SCALP_MIN_SIGNAL_RANGE_PERCENT, 0),
+    maxReboundPercent: number(process.env.SCALP_MAX_REBOUND_PERCENT, 0),
     marketRegimeEnabled: process.env.SCALP_MARKET_REGIME_ENABLED === 'true',
     marketRegimeLookback: number(process.env.SCALP_MARKET_REGIME_LOOKBACK, 5),
     marketRegimeMinBreadth: number(process.env.SCALP_MARKET_REGIME_MIN_BREADTH, 0.5),

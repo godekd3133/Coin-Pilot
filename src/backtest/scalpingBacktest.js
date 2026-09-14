@@ -22,6 +22,9 @@ const DEFAULT_CONFIG = {
   requirePreviousHighBreak: true,
   maxSignalRangePercent: 0,
   minSignalRangePercent: 0,
+  // Optional exhaustion guard. Zero preserves the current lower-bound-only
+  // rebound contract; positive values reject already-extended rebounds.
+  maxReboundPercent: 0,
   requireReboundBelowOverbought: false,
   signalProfile: 'rsi_rebound',
   bbPeriod: 20,
@@ -59,6 +62,10 @@ const DEFAULT_CONFIG = {
   lossCircuitBreakerCooldownMinutes: 60,
   maxPositions: 3,
   portfolioAllocation: 0.1,
+  // Historical OHLC must be time-contiguous before it can be used for a
+  // simulation. Treating a multi-minute/multi-period gap as one adjacent
+  // candle distorts RSI, rolling features, and time-based exits.
+  requireHistoricalCandleContinuity: true,
   marketRegimeEnabled: false,
   marketRegimeLookback: 5,
   marketRegimeMinBreadth: 0.5,
@@ -229,10 +236,53 @@ export function evaluateStatisticalConfidenceGate(
   };
 }
 
+function parseHistoricalTimestampValue(raw, timezone = 'generic') {
+  if (raw instanceof Date) {
+    const timestamp = raw.getTime();
+    return Number.isFinite(timestamp) ? timestamp : null;
+  }
+  // Upbit candle `timestamp` fields are epoch milliseconds. A number must be
+  // accepted directly: routing it through Date.parse(String(raw)) always
+  // produces NaN and silently discards otherwise valid rows.
+  if (typeof raw === 'number') {
+    return Number.isFinite(raw) && raw > 0 ? raw : null;
+  }
+  if (typeof raw !== 'string') return null;
+
+  const text = raw.trim();
+  if (!text) return null;
+  // A digit-only string is the same epoch-ms value serialized as text. The
+  // magnitude floor keeps short digit strings (bare years, counters) on the
+  // normal date-parser path instead of turning them into 1970-era rows.
+  if (/^\d+$/.test(text)) {
+    const numeric = Number(text);
+    if (Number.isFinite(numeric) && numeric >= 100_000_000_000) return numeric;
+  }
+  const normalized = !/[zZ]|[+-]\d{2}:?\d{2}$/.test(text)
+    ? timezone === 'utc'
+      ? `${text}Z`
+      : timezone === 'kst'
+        ? `${text}+09:00`
+        : text
+    : text;
+  const parsed = Date.parse(normalized);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+export function historicalTimestampForCandle(candle) {
+  // Truthiness matches the original `utc || kst || timestamp` chain: a falsy
+  // field must not shadow a usable value in a lower-priority field.
+  if (candle?.candle_date_time_utc) {
+    return parseHistoricalTimestampValue(candle.candle_date_time_utc, 'utc');
+  }
+  if (candle?.candle_date_time_kst) {
+    return parseHistoricalTimestampValue(candle.candle_date_time_kst, 'kst');
+  }
+  return parseHistoricalTimestampValue(candle?.timestamp);
+}
+
 function candleTime(candle, fallback) {
-  const raw = candle?.candle_date_time_utc || candle?.candle_date_time_kst || candle?.timestamp;
-  const parsed = raw instanceof Date ? raw.getTime() : new Date(raw || 0).getTime();
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+  return historicalTimestampForCandle(candle) ?? fallback;
 }
 
 /**
@@ -253,6 +303,207 @@ export function normalizeHistoricalCandles(candles) {
     return normalized.slice().reverse();
   }
   return normalized.slice();
+}
+
+/**
+ * Check whether historical candles preserve the configured time interval.
+ *
+ * Exchange APIs may omit candles for illiquid markets. The simulator cannot
+ * infer the missing price path or risk checks, so a gap is reported as an
+ * invalid evidence window instead of silently compressing elapsed time into
+ * adjacent array indexes.
+ */
+export function analyzeHistoricalCandleContinuity(rawCandles, candleUnit = 1, options = {}) {
+  const candles = normalizeHistoricalCandles(rawCandles);
+  const expectedIntervalSeconds = Number(candleUnit) * 60;
+  if (!Number.isFinite(expectedIntervalSeconds) || expectedIntervalSeconds <= 0) {
+    return {
+      valid: false,
+      reason: 'historical_candle_unit_invalid',
+      candleCount: candles.length,
+      expectedIntervalSeconds: null,
+      maxGapSeconds: null,
+      timestampCount: 0,
+      missingTimestampCount: candles.length,
+      gapCount: 0,
+      missingIntervalCount: 0,
+      largestGapSeconds: null,
+      firstTimestamp: null,
+      lastTimestamp: null
+    };
+  }
+
+  const configuredMaxGapSeconds = Number(options.maxGapSeconds);
+  const maxGapSeconds = Number.isFinite(configuredMaxGapSeconds) && configuredMaxGapSeconds > 0
+    ? configuredMaxGapSeconds
+    : expectedIntervalSeconds * 1.5;
+  const timestamps = candles.map(historicalTimestampForCandle);
+  const missingTimestampCount = timestamps.filter(timestamp => timestamp === null).length;
+  const gaps = [];
+  let nonIncreasingCount = 0;
+  let missingIntervalCount = 0;
+
+  for (let index = 1; index < timestamps.length; index += 1) {
+    const previous = timestamps[index - 1];
+    const current = timestamps[index];
+    if (previous === null || current === null) continue;
+    const gapSeconds = (current - previous) / 1000;
+    if (gapSeconds <= 0) {
+      nonIncreasingCount += 1;
+      continue;
+    }
+    if (gapSeconds > maxGapSeconds) {
+      gaps.push({
+        index,
+        previousTimestamp: new Date(previous).toISOString(),
+        timestamp: new Date(current).toISOString(),
+        gapSeconds,
+        missingIntervals: Math.max(0, Math.floor(gapSeconds / expectedIntervalSeconds) - 1)
+      });
+      missingIntervalCount += Math.max(0, Math.floor(gapSeconds / expectedIntervalSeconds) - 1);
+    }
+  }
+
+  const largestGapSeconds = gaps.length > 0
+    ? Math.max(...gaps.map(gap => gap.gapSeconds))
+    : 0;
+  const firstTimestamp = timestamps.find(timestamp => timestamp !== null) || null;
+  const lastTimestamp = [...timestamps].reverse().find(timestamp => timestamp !== null) || null;
+  const valid = missingTimestampCount === 0 && nonIncreasingCount === 0 && gaps.length === 0;
+  const reason = valid
+    ? 'historical_candles_contiguous'
+    : missingTimestampCount > 0
+      ? 'historical_candle_timestamp_missing_or_invalid'
+      : nonIncreasingCount > 0
+        ? 'historical_candle_timestamps_not_increasing'
+        : 'historical_candle_gap';
+
+  return {
+    valid,
+    reason,
+    candleCount: candles.length,
+    expectedIntervalSeconds,
+    maxGapSeconds,
+    timestampCount: candles.length - missingTimestampCount,
+    missingTimestampCount,
+    nonIncreasingCount,
+    gapCount: gaps.length,
+    missingIntervalCount,
+    largestGapSeconds,
+    firstTimestamp: firstTimestamp ? new Date(firstTimestamp).toISOString() : null,
+    lastTimestamp: lastTimestamp ? new Date(lastTimestamp).toISOString() : null,
+    gaps: gaps.slice(0, 20),
+    truncatedGapCount: Math.max(0, gaps.length - 20)
+  };
+}
+
+/**
+ * Split a historical window at every candle-time discontinuity.
+ *
+ * This helper deliberately does not fill missing candles. Each returned
+ * segment can be replayed independently, while the boundary metadata remains
+ * available to a diagnostic caller that needs to explain discarded evidence.
+ */
+export function splitHistoricalCandleSegments(rawCandles, candleUnit = 1, options = {}) {
+  const candles = normalizeHistoricalCandles(rawCandles);
+  const dataQuality = analyzeHistoricalCandleContinuity(candles, candleUnit, {
+    maxGapSeconds: options.maxGapSeconds ?? options.maxHistoricalCandleGapSeconds
+  });
+  const expectedIntervalSeconds = Number(candleUnit) * 60;
+  const configuredMaxGapSeconds = Number(options.maxGapSeconds ?? options.maxHistoricalCandleGapSeconds);
+  const maxGapSeconds = Number.isFinite(configuredMaxGapSeconds) && configuredMaxGapSeconds > 0
+    ? configuredMaxGapSeconds
+    : expectedIntervalSeconds * 1.5;
+  const minimumSegmentCandles = Math.max(1, Math.floor(number(options.minimumSegmentCandles, 200)));
+  const segments = [];
+  const excludedSegments = [];
+  const boundaries = [];
+  let segmentStart = 0;
+  let nextSegmentIndex = 0;
+
+  const addSegment = (startIndex, endIndex, reason = null) => {
+    const segmentCandles = candles.slice(startIndex, endIndex);
+    const segmentIndex = nextSegmentIndex;
+    nextSegmentIndex += 1;
+    const descriptor = {
+      segmentIndex,
+      startIndex,
+      endIndex,
+      candleCount: segmentCandles.length,
+      firstTimestamp: historicalTimestampForCandle(segmentCandles[0]),
+      lastTimestamp: historicalTimestampForCandle(segmentCandles.at(-1)),
+      boundaryReason: reason
+    };
+    if (segmentCandles.length >= minimumSegmentCandles) {
+      segments.push({
+        candles: segmentCandles,
+        ...descriptor,
+        firstTimestamp: descriptor.firstTimestamp
+          ? new Date(descriptor.firstTimestamp).toISOString()
+          : null,
+        lastTimestamp: descriptor.lastTimestamp
+          ? new Date(descriptor.lastTimestamp).toISOString()
+          : null
+      });
+    } else if (segmentCandles.length > 0) {
+      excludedSegments.push({
+        ...descriptor,
+        reason: reason || 'segment_below_minimum_candles',
+        firstTimestamp: descriptor.firstTimestamp
+          ? new Date(descriptor.firstTimestamp).toISOString()
+          : null,
+        lastTimestamp: descriptor.lastTimestamp
+          ? new Date(descriptor.lastTimestamp).toISOString()
+          : null
+      });
+    }
+  };
+
+  for (let index = 1; index <= candles.length; index += 1) {
+    if (index === candles.length) {
+      addSegment(segmentStart, index);
+      break;
+    }
+
+    const previousTimestamp = historicalTimestampForCandle(candles[index - 1]);
+    const currentTimestamp = historicalTimestampForCandle(candles[index]);
+    const gapSeconds = previousTimestamp !== null && currentTimestamp !== null
+      ? (currentTimestamp - previousTimestamp) / 1000
+      : null;
+    const boundary = previousTimestamp === null || currentTimestamp === null
+      ? { reason: 'historical_candle_timestamp_missing_or_invalid', gapSeconds: null }
+      : gapSeconds <= 0
+        ? { reason: 'historical_candle_timestamps_not_increasing', gapSeconds }
+        : gapSeconds > maxGapSeconds
+          ? { reason: 'historical_candle_gap', gapSeconds }
+          : null;
+    if (!boundary) continue;
+
+    boundaries.push({
+      index,
+      previousTimestamp: previousTimestamp ? new Date(previousTimestamp).toISOString() : null,
+      timestamp: currentTimestamp ? new Date(currentTimestamp).toISOString() : null,
+      gapSeconds,
+      reason: boundary.reason
+    });
+    addSegment(segmentStart, index, boundary.reason);
+    segmentStart = index;
+  }
+
+  return {
+    candleCount: candles.length,
+    candleUnit,
+    expectedIntervalSeconds,
+    maxGapSeconds,
+    minimumSegmentCandles,
+    dataQuality,
+    segments,
+    excludedSegments,
+    boundaries,
+    boundaryCount: boundaries.length,
+    excludedSegmentCount: excludedSegments.length,
+    source: 'historical_candle_continuity_segments'
+  };
 }
 
 function getOpen(candle) {
@@ -627,13 +878,18 @@ function calculateReboundAtIndex(candles, index, rsiSeries, config, featureSet =
     ? ((currentClose - oversoldReferenceClose) / oversoldReferenceClose) * 100
     : priceChangePercent;
   const rsiRecovery = oversoldReference ? rsi - oversoldReference.rsi : immediateRsiRecovery;
+  const configuredMaxReboundPercent = Number(config.maxReboundPercent);
+  const reboundCeilingConfirmed = config.signalProfile === 'momentum_breakout' ||
+    !Number.isFinite(configuredMaxReboundPercent) ||
+    configuredMaxReboundPercent <= 0 ||
+    reboundPriceChangePercent <= configuredMaxReboundPercent;
   const reboundOverboughtConfirmed = config.requireReboundBelowOverbought !== true || rsi < config.rsiOverbought;
   const candleTime = currentCandle?.candle_date_time_utc || currentCandle?.candle_date_time_kst || currentCandle?.timestamp || null;
   const oversoldReboundConfirmed = previousWasOversold && bullishCandle &&
     reboundPriceChangePercent >= config.minReboundPercent &&
     rsiRecovery >= config.minRsiRecovery &&
     volumeConfirmed && volatilityConfirmed && signalRangeFloorConfirmed && closeStrengthConfirmed && trendConfirmed && previousHighBreakConfirmed &&
-    reboundOverboughtConfirmed && profileConfirmed;
+    reboundOverboughtConfirmed && reboundCeilingConfirmed && profileConfirmed;
   const momentumBreakoutConfirmed = config.signalProfile === 'momentum_breakout' &&
     bullishCandle &&
     priceChangePercent >= config.minReboundPercent &&
@@ -652,6 +908,7 @@ function calculateReboundAtIndex(candles, index, rsiSeries, config, featureSet =
     if (!momentumRsiConfirmed) rejectionReasons.push('rsi_overbought_blocked');
   } else {
     if (reboundPriceChangePercent < config.minReboundPercent) rejectionReasons.push('price_rebound_below_threshold');
+    if (!reboundCeilingConfirmed) rejectionReasons.push('price_rebound_above_threshold');
     if (rsiRecovery < config.minRsiRecovery) rejectionReasons.push('rsi_recovery_below_threshold');
     if (!reboundOverboughtConfirmed) rejectionReasons.push('rsi_overbought_blocked');
   }
@@ -686,6 +943,7 @@ function calculateReboundAtIndex(candles, index, rsiSeries, config, featureSet =
     signalRangePercent,
     volatilityConfirmed,
     signalRangeFloorConfirmed,
+    reboundCeilingConfirmed,
     closeStrength,
     closeStrengthConfirmed,
     trendSlopePercent,
@@ -716,6 +974,19 @@ function calculateReboundAtIndex(candles, index, rsiSeries, config, featureSet =
 export function collectScalpingCandidates(rawCandles, config = {}, options = {}) {
   const resolvedConfig = { ...DEFAULT_CONFIG, ...config };
   const candles = normalizeHistoricalCandles(rawCandles);
+  const dataQuality = analyzeHistoricalCandleContinuity(candles, resolvedConfig.candleUnit, {
+    maxGapSeconds: options.maxHistoricalCandleGapSeconds ?? resolvedConfig.maxHistoricalCandleGapSeconds
+  });
+  if (requiresHistoricalCandleContinuity(resolvedConfig, options) && !dataQuality.valid) {
+    return {
+      candles,
+      candidates: [],
+      horizonCandles: Math.max(1, Math.floor(number(options.horizonCandles, 5))),
+      minimumSpacingCandles: Math.max(1, Math.floor(number(options.minimumSpacingCandles, 5))),
+      source: 'fixed_historical_candle_replay',
+      dataQuality
+    };
+  }
   const featureCache = createScalpingFeatureCache(candles);
   const featureSet = featureCache.get(resolvedConfig);
   const rsiSeries = featureSet.rsiSeries;
@@ -753,7 +1024,8 @@ export function collectScalpingCandidates(rawCandles, config = {}, options = {})
     candidates,
     horizonCandles,
     minimumSpacingCandles,
-    source: 'fixed_historical_candle_replay'
+    source: 'fixed_historical_candle_replay',
+    dataQuality
   };
 }
 
@@ -783,7 +1055,8 @@ function createMetrics({
   circuitBlockedEntries = 0,
   circuitBreaks = 0,
   marketRegimeBlockedEntries = 0,
-  signalWindowBlockedEntries = 0
+  signalWindowBlockedEntries = 0,
+  dataQuality = null
 }) {
   const closedTrades = trades.filter(trade => trade.type === 'CLOSE');
   const winners = closedTrades.filter(trade => trade.netProfit > 0);
@@ -816,12 +1089,79 @@ function createMetrics({
     circuitBreaks,
     marketRegimeBlockedEntries,
     signalWindowBlockedEntries,
+    dataQuality,
     qualityScore: calculateQualityScore({
       totalReturnPercent,
       maxDrawdownPercent: calculateDrawdown(equityCurve),
       profitFactor,
       tradeCount: closedTrades.length
     })
+  };
+}
+
+function requiresHistoricalCandleContinuity(config, simulationOptions = {}) {
+  return simulationOptions.requireHistoricalCandleContinuity !== false &&
+    config.requireHistoricalCandleContinuity !== false;
+}
+
+function createHistoricalContinuityFailure(candles, options, dataQuality) {
+  const initialBalance = number(options.initialBalance, 1_000_000);
+  const metrics = createMetrics({
+    initialBalance,
+    finalBalance: initialBalance,
+    trades: [],
+    equityCurve: [],
+    signals: 0,
+    cancelledSignals: 0,
+    fees: 0,
+    rejectionCounts: {},
+    dataQuality
+  });
+  return {
+    config: options,
+    candleCount: candles.length,
+    trades: [],
+    equityCurve: [],
+    metrics,
+    dataQuality
+  };
+}
+
+function createPortfolioContinuityFailure(entries, options, dataQualityByMarket) {
+  const initialBalance = number(options.initialBalance, 1_000_000);
+  const dataQuality = {
+    valid: false,
+    reason: 'historical_candle_continuity_failed',
+    marketCount: entries.length,
+    invalidMarkets: entries
+      .filter(([market]) => dataQualityByMarket[market]?.valid !== true)
+      .map(([market]) => market),
+    byMarket: dataQualityByMarket
+  };
+  const metrics = createMetrics({
+    initialBalance,
+    finalBalance: initialBalance,
+    trades: [],
+    equityCurve: [],
+    signals: 0,
+    cancelledSignals: 0,
+    fees: 0,
+    rejectionCounts: {},
+    dataQuality
+  });
+  return {
+    portfolio: true,
+    config: options,
+    marketCount: entries.length,
+    candleCounts: Object.fromEntries(entries.map(([market, candles]) => [market, candles.length])),
+    trades: [],
+    equityCurve: [],
+    lossCircuitBreaker: createLossCircuitBreakerState(),
+    marketRegime: null,
+    metrics,
+    skippedEntries: 0,
+    signalWindowBlockedEntries: 0,
+    dataQuality
   };
 }
 
@@ -890,6 +1230,7 @@ function entryDecision(rebound, nextCandle, config) {
 }
 
 function closePosition(position, candle, exitReason, exitPrice, config, timestamp) {
+  updatePositionExcursion(position, candle);
   const grossAmount = position.amount * exitPrice;
   const sellFee = grossAmount * config.tradingFee;
   const netReceived = grossAmount - sellFee;
@@ -908,9 +1249,44 @@ function closePosition(position, candle, exitReason, exitPrice, config, timestam
     profitPercent: position.investAmount > 0 ? (netProfit / position.investAmount) * 100 : 0,
     entryTime: position.entryTime,
     exitTime: timestamp,
+    maxFavorableExcursionPercent: position.maxFavorableExcursionPercent,
+    maxAdverseExcursionPercent: position.maxAdverseExcursionPercent,
     winnerExtended: position.winnerExtended === true,
     candleTime: candle?.candle_date_time_utc || candle?.candle_date_time_kst || null
   };
+}
+
+function updatePositionExcursion(position, candle) {
+  if (!position || typeof position !== 'object') return;
+  const entryPrice = Number(position.entryPrice);
+  const candleHigh = getHigh(candle);
+  const candleLow = getLow(candle);
+  if (!Number.isFinite(entryPrice) || entryPrice <= 0) return;
+
+  const previousHigh = Number(position.highestPrice);
+  const previousLow = Number(position.lowestPrice);
+  if (Number.isFinite(candleHigh) && candleHigh > 0) {
+    position.highestPrice = Math.max(
+      Number.isFinite(previousHigh) && previousHigh > 0 ? previousHigh : entryPrice,
+      candleHigh
+    );
+  } else {
+    position.highestPrice = Number.isFinite(previousHigh) && previousHigh > 0
+      ? previousHigh
+      : entryPrice;
+  }
+  if (Number.isFinite(candleLow) && candleLow > 0) {
+    position.lowestPrice = Math.min(
+      Number.isFinite(previousLow) && previousLow > 0 ? previousLow : entryPrice,
+      candleLow
+    );
+  } else {
+    position.lowestPrice = Number.isFinite(previousLow) && previousLow > 0
+      ? previousLow
+      : entryPrice;
+  }
+  position.maxFavorableExcursionPercent = ((position.highestPrice - entryPrice) / entryPrice) * 100;
+  position.maxAdverseExcursionPercent = ((position.lowestPrice - entryPrice) / entryPrice) * 100;
 }
 
 function getProtectiveStop(position, config) {
@@ -942,8 +1318,7 @@ function getProtectiveStop(position, config) {
 }
 
 function updateProtectionState(position, candle, config) {
-  const candleHigh = getHigh(candle);
-  position.highestPrice = Math.max(Number(position.highestPrice) || position.entryPrice, candleHigh);
+  updatePositionExcursion(position, candle);
   const highGainPercent = ((position.highestPrice - position.entryPrice) / position.entryPrice) * 100;
 
   if (config.breakEvenTriggerPercent > 0 && highGainPercent >= config.breakEvenTriggerPercent) {
@@ -1000,6 +1375,12 @@ function findExit(position, candle, config, timestamp) {
 export function simulateScalping(rawCandles, config = {}, simulationOptions = {}) {
   const options = { ...DEFAULT_CONFIG, ...config };
   const candles = normalizeHistoricalCandles(rawCandles);
+  const dataQuality = analyzeHistoricalCandleContinuity(candles, options.candleUnit, {
+    maxGapSeconds: simulationOptions.maxHistoricalCandleGapSeconds ?? options.maxHistoricalCandleGapSeconds
+  });
+  if (requiresHistoricalCandleContinuity(options, simulationOptions) && !dataQuality.valid) {
+    return createHistoricalContinuityFailure(candles, options, dataQuality);
+  }
   const featureCache = simulationOptions.useFeatureCache === false
     ? null
     : simulationOptions.featureCache?.get
@@ -1108,6 +1489,9 @@ export function simulateScalping(rawCandles, config = {}, simulationOptions = {}
                 entryTime: nextCandle?.candle_date_time_utc || nextCandle?.candle_date_time_kst || null,
                 signalKey: rebound.signalKey,
                 highestPrice: entry.entryPrice,
+                lowestPrice: entry.entryPrice,
+                maxFavorableExcursionPercent: 0,
+                maxAdverseExcursionPercent: 0,
                 breakEvenArmed: false,
                 trailingArmed: false,
                 winnerExtended: false
@@ -1164,8 +1548,181 @@ export function simulateScalping(rawCandles, config = {}, simulationOptions = {}
       fees,
       rejectionCounts,
       circuitBlockedEntries,
-      circuitBreaks
-    })
+      circuitBreaks,
+      dataQuality
+    }),
+    dataQuality
+  };
+}
+
+/**
+ * Replay each contiguous historical segment independently for research.
+ *
+ * A position that reaches a segment boundary is an unknown outcome because
+ * the missing candle path cannot prove whether its stop, target, or risk
+ * monitor would have fired. Such positions are excluded from realized
+ * metrics and returned separately. This function is intentionally diagnostic
+ * only and must never replace the contiguous-window promotion gate.
+ */
+export function simulateScalpingSegmented(rawCandles, config = {}, simulationOptions = {}) {
+  const options = { ...DEFAULT_CONFIG, ...config };
+  const segmentation = splitHistoricalCandleSegments(
+    rawCandles,
+    options.candleUnit,
+    {
+      maxGapSeconds: simulationOptions.maxHistoricalCandleGapSeconds ?? options.maxHistoricalCandleGapSeconds,
+      minimumSegmentCandles: simulationOptions.minimumSegmentCandles
+    }
+  );
+  const initialBalance = number(options.initialBalance, 1_000_000);
+  let balance = initialBalance;
+  let fees = 0;
+  let signals = 0;
+  let cancelledSignals = 0;
+  const trades = [];
+  const equityCurve = [];
+  const segmentReports = [];
+  const unknownBoundaryPositions = [];
+
+  for (const segment of segmentation.segments) {
+    const segmentResult = simulateScalping(
+      segment.candles,
+      { ...options, initialBalance: balance },
+      {
+        ...simulationOptions,
+        // A returned segment is expected to be contiguous; preserve the
+        // invariant even if a caller supplied a permissive option upstream.
+        requireHistoricalCandleContinuity: true,
+        minimumSegmentCandles: undefined
+      }
+    );
+    if (segmentResult.dataQuality?.valid !== true) {
+      segmentReports.push({
+        segmentIndex: segment.segmentIndex,
+        startIndex: segment.startIndex,
+        endIndex: segment.endIndex,
+        candleCount: segment.candleCount,
+        firstTimestamp: segment.firstTimestamp,
+        lastTimestamp: segment.lastTimestamp,
+        status: 'excluded_invalid_segment',
+        dataQuality: segmentResult.dataQuality
+      });
+      continue;
+    }
+
+    const boundaryCloseIndex = segmentResult.trades.findIndex(trade =>
+      trade?.type === 'CLOSE' && trade.reason === 'BACKTEST_END'
+    );
+    const boundaryClose = boundaryCloseIndex >= 0
+      ? segmentResult.trades[boundaryCloseIndex]
+      : null;
+    const boundaryOpen = boundaryClose
+      ? [...segmentResult.trades.slice(0, boundaryCloseIndex)]
+        .reverse()
+        .find(trade => trade?.type === 'OPEN' && (
+          !boundaryClose.signalKey || trade.signalKey === boundaryClose.signalKey
+        )) || null
+      : null;
+    const unknownFees = Number(boundaryOpen?.buyFee || 0) + Number(boundaryClose?.sellFee || 0);
+    const segmentFees = Math.max(0, Number(segmentResult.metrics.fees || 0) - unknownFees);
+    const usableTrades = segmentResult.trades.filter(trade =>
+      trade !== boundaryClose && trade !== boundaryOpen
+    );
+    const usableClosedTrades = usableTrades.filter(trade => trade?.type === 'CLOSE');
+    trades.push(...usableTrades.map(trade => ({
+      ...trade,
+      segmentIndex: segment.segmentIndex
+    })));
+    fees += segmentFees;
+    signals += Number(segmentResult.metrics.signals || 0);
+    cancelledSignals += Number(segmentResult.metrics.cancelledSignals || 0);
+    balance = boundaryClose
+      ? Number(segmentResult.metrics.finalBalance) - Number(boundaryClose.netProfit || 0)
+      : Number(segmentResult.metrics.finalBalance);
+    if (!Number.isFinite(balance)) balance = initialBalance;
+    equityCurve.push(...(
+      boundaryClose
+        ? segmentResult.equityCurve.slice(0, -1)
+        : segmentResult.equityCurve
+    ).map(point => ({
+      ...point,
+      segmentIndex: segment.segmentIndex
+    })));
+
+    if (boundaryClose) {
+      unknownBoundaryPositions.push({
+        segmentIndex: segment.segmentIndex,
+        startIndex: segment.startIndex,
+        endIndex: segment.endIndex,
+        reason: segment.endIndex < segmentation.candleCount
+          ? 'open_position_at_gap_boundary'
+          : 'open_position_at_segment_end',
+        originalReason: boundaryClose.reason,
+        openTrade: boundaryOpen,
+        closeObservation: boundaryClose
+      });
+    }
+    segmentReports.push({
+      segmentIndex: segment.segmentIndex,
+      startIndex: segment.startIndex,
+      endIndex: segment.endIndex,
+      candleCount: segment.candleCount,
+      firstTimestamp: segment.firstTimestamp,
+      lastTimestamp: segment.lastTimestamp,
+      status: boundaryClose ? 'used_with_unknown_boundary_position' : 'used',
+      closedTradeCount: usableClosedTrades.length,
+      metrics: {
+        initialBalance: segmentResult.metrics.initialBalance,
+        finalBalance: balance,
+        netProfit: usableClosedTrades.reduce((sum, trade) => sum + Number(trade.netProfit || 0), 0),
+        tradeCount: usableClosedTrades.length,
+        signals: segmentResult.metrics.signals,
+        cancelledSignals: segmentResult.metrics.cancelledSignals,
+        fees: segmentFees
+      },
+      dataQuality: segmentResult.dataQuality
+    });
+  }
+
+  const dataQuality = {
+    valid: segmentation.dataQuality.valid === true,
+    reason: 'segmented_diagnostic_only',
+    diagnosticOnly: true,
+    policy: 'split_on_gap_exclude_boundary_positions',
+    raw: segmentation.dataQuality,
+    candleCount: segmentation.candleCount,
+    boundaryCount: segmentation.boundaryCount,
+    segmentCount: segmentation.segments.length,
+    usedSegmentCount: segmentReports.filter(report => report.status.startsWith('used')).length,
+    excludedSegmentCount: segmentation.excludedSegmentCount,
+    unknownBoundaryPositionCount: unknownBoundaryPositions.length
+  };
+  const metrics = createMetrics({
+    initialBalance,
+    finalBalance: balance,
+    trades,
+    equityCurve,
+    signals,
+    cancelledSignals,
+    fees,
+    rejectionCounts: {},
+    dataQuality
+  });
+  return {
+    segmented: true,
+    diagnosticOnly: true,
+    config: options,
+    candleCount: segmentation.candleCount,
+    segments: segmentReports,
+    excludedSegments: segmentation.excludedSegments,
+    boundaries: segmentation.boundaries,
+    trades,
+    equityCurve,
+    unknownBoundaryPositions,
+    dataQuality,
+    metrics,
+    promoted: false,
+    promotion: 'diagnostic_only_never_authorizes_live_orders'
   };
 }
 
@@ -1237,10 +1794,36 @@ function calculatePortfolioMarketRegime(group, options) {
  */
 export function simulateScalpingPortfolio(rawCandlesByMarket, config = {}, simulationOptions = {}) {
   const options = { ...DEFAULT_CONFIG, maxPositions: 3, portfolioAllocation: 0.1, ...config };
+  const normalizedEntries = marketEntries(rawCandlesByMarket)
+    .map(([market, rawCandles]) => [String(market), normalizeHistoricalCandles(rawCandles)])
+    .filter(([, candles]) => candles.length > 0);
+  const dataQualityByMarket = Object.fromEntries(normalizedEntries.map(([market, candles]) => [
+    market,
+    analyzeHistoricalCandleContinuity(candles, options.candleUnit, {
+      maxGapSeconds: simulationOptions.maxHistoricalCandleGapSeconds ?? options.maxHistoricalCandleGapSeconds
+    })
+  ]));
+  const invalidMarkets = Object.entries(dataQualityByMarket)
+    .filter(([, quality]) => quality.valid !== true)
+    .map(([market]) => market);
+  const dataQuality = {
+    valid: invalidMarkets.length === 0,
+    reason: invalidMarkets.length === 0
+      ? 'historical_candles_contiguous'
+      : 'historical_candle_continuity_failed',
+    marketCount: normalizedEntries.length,
+    invalidMarkets,
+    byMarket: dataQualityByMarket
+  };
+  if (requiresHistoricalCandleContinuity(options, simulationOptions)) {
+    const invalidMarket = normalizedEntries.some(([market]) => dataQualityByMarket[market]?.valid !== true);
+    if (invalidMarket) {
+      return createPortfolioContinuityFailure(normalizedEntries, options, dataQualityByMarket);
+    }
+  }
   const suppliedFeatureCaches = simulationOptions.featureCacheByMarket || {};
-  const contexts = marketEntries(rawCandlesByMarket)
-    .map(([market, rawCandles]) => {
-      const candles = normalizeHistoricalCandles(rawCandles);
+  const contexts = normalizedEntries
+    .map(([market, candles]) => {
       const featureCache = suppliedFeatureCaches[market]?.get
         ? suppliedFeatureCaches[market]
         : createScalpingFeatureCache(candles);
@@ -1452,16 +2035,19 @@ export function simulateScalpingPortfolio(rawCandlesByMarket, config = {}, simul
       const amount = (investAmount - buyFee) / candidate.entry.entryPrice;
       balance -= investAmount;
       fees += buyFee;
-      const position = {
+        const position = {
         market: candidate.context.market,
         entryPrice: candidate.entry.entryPrice,
         amount,
         investAmount,
         entryTimestamp: timestamp,
-        entryTime: candidate.candle?.candle_date_time_utc || candidate.candle?.candle_date_time_kst || null,
-        signalKey: candidate.rebound.signalKey,
-        highestPrice: candidate.entry.entryPrice,
-        breakEvenArmed: false,
+          entryTime: candidate.candle?.candle_date_time_utc || candidate.candle?.candle_date_time_kst || null,
+          signalKey: candidate.rebound.signalKey,
+          highestPrice: candidate.entry.entryPrice,
+          lowestPrice: candidate.entry.entryPrice,
+          maxFavorableExcursionPercent: 0,
+          maxAdverseExcursionPercent: 0,
+          breakEvenArmed: false,
         trailingArmed: false,
         winnerExtended: false
       };
@@ -1534,10 +2120,12 @@ export function simulateScalpingPortfolio(rawCandlesByMarket, config = {}, simul
       circuitBlockedEntries,
       circuitBreaks,
       marketRegimeBlockedEntries,
-      signalWindowBlockedEntries
+      signalWindowBlockedEntries,
+      dataQuality
     }),
     skippedEntries,
-    signalWindowBlockedEntries
+    signalWindowBlockedEntries,
+    dataQuality
   };
 }
 
@@ -1714,6 +2302,34 @@ export function walkForwardValidatePortfolio(rawCandlesByMarket, baseConfig = {}
     };
   }
 
+  const dataQualityByMarket = Object.fromEntries(entries.map(([market, candles]) => [
+    market,
+    analyzeHistoricalCandleContinuity(candles, resolvedConfig.candleUnit, {
+      maxGapSeconds: options.maxHistoricalCandleGapSeconds ?? resolvedConfig.maxHistoricalCandleGapSeconds
+    })
+  ]));
+  const invalidMarkets = entries
+    .filter(([market]) => dataQualityByMarket[market]?.valid !== true)
+    .map(([market]) => market);
+  const dataQuality = {
+    valid: invalidMarkets.length === 0,
+    reason: invalidMarkets.length === 0
+      ? 'historical_candles_contiguous'
+      : 'historical_candle_continuity_failed',
+    marketCount,
+    invalidMarkets,
+    byMarket: dataQualityByMarket
+  };
+  if (requiresHistoricalCandleContinuity(resolvedConfig, options) && invalidMarkets.length > 0) {
+    return {
+      promoted: false,
+      reason: 'historical_candle_continuity_failed',
+      marketCount,
+      candleCount: Math.min(...entries.map(([, candles]) => candles.length)),
+      dataQuality
+    };
+  }
+
   const shortestCandleCount = Math.min(...entries.map(([, candles]) => candles.length));
   const minimumCandles = options.minimumCandles ?? 120;
   if (shortestCandleCount < minimumCandles) {
@@ -1851,6 +2467,7 @@ export function walkForwardValidatePortfolio(rawCandlesByMarket, baseConfig = {}
       marketRegimeBlockedEntries: validationMetrics.marketRegimeBlockedEntries,
       signalWindowBlockedEntries: validationMetrics.signalWindowBlockedEntries
     },
+    dataQuality,
     promotion: 'diagnostic_only_never_authorizes_live_orders'
   };
 }
@@ -1942,6 +2559,17 @@ export function walkForwardValidatePortfolioFolds(rawCandlesByMarket, baseConfig
 export function walkForwardValidate(candles, baseConfig = {}, options = {}) {
   const resolvedConfig = { ...DEFAULT_CONFIG, ...baseConfig };
   const normalized = normalizeHistoricalCandles(candles);
+  const dataQuality = analyzeHistoricalCandleContinuity(normalized, resolvedConfig.candleUnit, {
+    maxGapSeconds: options.maxHistoricalCandleGapSeconds ?? resolvedConfig.maxHistoricalCandleGapSeconds
+  });
+  if (requiresHistoricalCandleContinuity(resolvedConfig, options) && !dataQuality.valid) {
+    return {
+      promoted: false,
+      reason: 'historical_candle_continuity_failed',
+      candleCount: normalized.length,
+      dataQuality
+    };
+  }
   const trainRatio = options.trainRatio ?? 0.7;
   const minimumCandles = options.minimumCandles ?? 120;
   if (normalized.length < minimumCandles) {
@@ -2064,7 +2692,8 @@ export function walkForwardValidate(candles, baseConfig = {}, options = {}) {
         training: trainingConfidenceGate,
         validation: validationConfidenceGate
       }
-    }
+    },
+    dataQuality
   };
 }
 

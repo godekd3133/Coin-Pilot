@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <meta name="theme-color" content="#f7f4ee">
-    <meta name="description" content="CoinPilot 과매도 반응 스캘핑 모의투자·워크포워드 검증 대시보드">
+    <meta name="description" content="CoinPilot 과매도 반응 스캘핑 모의투자·실제투자 거래 대시보드">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-title" content="CoinPilot">
@@ -16,7 +16,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&family=Noto+Sans+KR:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/pilot-redesign.css?v=20260910-7">
+    <link rel="stylesheet" href="/pilot-redesign.css?v=20260914-04">
     <title>CoinPilot | Automated Trading</title>
     <style>
         :root {
@@ -2495,7 +2495,7 @@
         }
 
         .header h1::after {
-            content: ' / PAPER EDGE';
+            content: ' / AUTO PILOT';
             margin-left: 8px;
             color: var(--pilot-mint);
             font-size: 10px;
@@ -3142,13 +3142,13 @@
 
         <section class="pilot-context-ribbon" aria-label="CoinPilot 실행 컨텍스트">
             <div>
-                <div class="pilot-context-kicker">OVERSOLD REACTION / PAPER EDGE</div>
-                <div class="pilot-context-copy">실제 주문 전, 워크포워드 게이트를 통과한 마켓만 승격합니다. 현재 화면은 웹·모바일·설치앱에서 동일하게 동작합니다.</div>
+                <div class="pilot-context-kicker">과매도 반응 / 자동매매</div>
+                <div class="pilot-context-copy">실제 주문 전 사전 점검을 통과한 시장만 사용합니다. 현재 화면은 웹·모바일·설치앱에서 동일하게 동작합니다.</div>
             </div>
             <div class="pilot-context-actions">
                 <span id="pwaInstallState" class="badge badge-dry">브라우저 모드</span>
                 <button id="pwaInstallButton" class="btn btn-secondary btn-sm pilot-install-btn" hidden>앱으로 설치</button>
-                <button class="btn btn-secondary btn-sm" onclick="loadScalpingValidation()">검증 새로고침</button>
+                <button class="btn btn-secondary btn-sm" onclick="loadScalpingValidation()">상태 새로고침</button>
             </div>
         </section>
 
@@ -3169,17 +3169,17 @@
         <div id="tab-overview" class="tab-content">
             <div class="card pilot-validation-card" style="margin-bottom: 20px;">
                 <div class="card-header">
-                    <h2>🧪 실전 승격 게이트</h2>
-                    <span id="validationGeneratedAt" style="color: var(--text-muted); font-size: 11px;">검증 리포트 로딩 중</span>
+                    <h2>🧪 실전 전환 상태</h2>
+                    <span id="validationGeneratedAt" style="color: var(--text-muted); font-size: 11px;">점검 리포트 로딩 중</span>
                 </div>
                 <div class="card-body" id="scalpingValidationPanel">
-                    <div class="loading"><div class="spinner"></div>워크포워드 결과를 불러오는 중...</div>
+                    <div class="loading"><div class="spinner"></div>점검 결과를 불러오는 중...</div>
                 </div>
             </div>
 
             <div class="card pilot-validation-card" style="margin-bottom: 20px;">
                 <div class="card-header">
-                    <h2>🧭 Forward Paper Session</h2>
+                    <h2>🧭 모의투자 세션</h2>
                     <span id="paperValidationUpdatedAt" style="color: var(--text-muted); font-size: 11px;">세션 없음</span>
                 </div>
                 <div class="card-body" id="paperValidationPanel">
@@ -3300,11 +3300,11 @@
             <section class="card ai-desk">
                 <div class="ai-hero">
                     <div>
-                        <div class="ai-kicker">AI ADVISORY / LONG-RUN WATCH</div>
+                        <div class="ai-kicker">AI 자문 / 상시 감시</div>
                         <h2>판단이 필요한 순간만, 빠르게 자문</h2>
                         <p>모니터링 이벤트를 고르고 GPT·Claude 구독 세션에 읽기 전용 자문을 요청합니다. 기존 설정값 기반 자동 매수·매도는 그대로 별도 실행됩니다.</p>
                     </div>
-                    <div class="ai-policy-stamp">ADVISORY ONLY<br>NO ORDER ROUTING</div>
+                    <div class="ai-policy-stamp">참고용 의견<br>주문 연결 없음</div>
                 </div>
 
                 <div class="ai-desk-grid">
@@ -3314,12 +3314,12 @@
                             <button class="btn btn-secondary btn-sm" onclick="loadAiDesk(true)">새로고침</button>
                         </div>
                         <div id="aiProviderStatus" class="ai-provider-grid">
-                            <div class="ai-empty" style="grid-column: 1 / -1;">provider 상태를 확인하는 중...</div>
+                            <div class="ai-empty" style="grid-column: 1 / -1;">AI 연결 상태를 확인하는 중...</div>
                         </div>
 
                         <div class="ai-section-title">
                             <span>장기 모니터링 세션</span>
-                            <small id="aiSessionCount">0 active</small>
+                            <small id="aiSessionCount">0개 실행 중</small>
                         </div>
                         <div id="aiSessionList" class="ai-session-list">
                             <div class="ai-empty">아직 만든 모니터링 세션이 없습니다.</div>
@@ -3327,7 +3327,7 @@
 
                         <div class="ai-section-title" style="margin-top: 20px;">
                             <span>새 세션 열기</span>
-                            <small>persistent</small>
+                            <small>상시 감시</small>
                         </div>
                         <form class="ai-form" onsubmit="createAiMonitoringSession(event)">
                             <div class="form-group">
@@ -3335,7 +3335,7 @@
                                 <input id="aiSessionName" class="form-input" maxlength="80" placeholder="예: BTC 반등 감시" value="시장 이벤트 자문">
                             </div>
                             <div class="form-group">
-                                <label class="form-label">자문 provider</label>
+                                <label class="form-label">자문 AI</label>
                                 <div class="ai-check-grid">
                                     <label class="ai-check"><input type="checkbox" name="aiProvider" value="gpt" checked> GPT / Codex</label>
                                     <label class="ai-check"><input type="checkbox" name="aiProvider" value="claude" checked> Claude</label>
@@ -3367,19 +3367,19 @@
                                 </div>
                             </div>
                             <button class="btn btn-primary" type="submit" style="width: 100%;">장기 모니터링 시작</button>
-                            <div class="ai-inline-note">세션은 JSON 기록으로 재시작 후에도 보존됩니다. 자동 자문은 선택한 이벤트와 cooldown 안에서만 실행됩니다.</div>
+                            <div class="ai-inline-note">세션은 기록으로 재시작 후에도 보존됩니다. 자동 자문은 선택한 이벤트와 재요청 간격 안에서만 실행됩니다.</div>
                         </form>
                     </div>
 
                     <div class="ai-desk-column">
                         <div class="ai-section-title">
                             <span>실시간 이벤트</span>
-                            <small id="aiLatestSnapshotAt">waiting for snapshot</small>
+                            <small id="aiLatestSnapshotAt">수신 대기</small>
                         </div>
                         <div id="aiEventList" class="ai-event-list">
                             <div class="ai-empty">자동매매 루프가 분석을 완료하면 매수·매도 이벤트가 여기에 표시됩니다.</div>
                         </div>
-                        <div class="ai-inline-note">이벤트 카드를 누르면 선택한 provider에 수동으로 자문을 요청할 수 있습니다.</div>
+                        <div class="ai-inline-note">이벤트 카드를 누르면 선택한 AI에 수동으로 자문을 요청할 수 있습니다.</div>
 
                         <div class="ai-section-title" style="margin-top: 22px;">
                             <span>AI 자문 결과</span>
@@ -4461,6 +4461,9 @@
             }
 
             window.addEventListener('beforeinstallprompt', event => {
+                // iOS/iPadOS must stay on the manual Share -> Home Screen
+                // guide even when a browser emulation emits this event.
+                if (isIos || isStandalone) return;
                 event.preventDefault();
                 deferredInstallPrompt = event;
                 if (installButton) installButton.hidden = false;
@@ -4922,7 +4925,7 @@
             const count = document.getElementById('aiSessionCount');
             if (!container) return;
             const activeCount = (sessions || []).filter(session => session.status === 'RUNNING').length;
-            if (count) count.textContent = `${activeCount} active / ${(sessions || []).length} total`;
+            if (count) count.textContent = `실행 중 ${activeCount}개 / 전체 ${(sessions || []).length}개`;
             if (!sessions?.length) {
                 container.innerHTML = '<div class="ai-empty">아직 만든 모니터링 세션이 없습니다.</div>';
                 return;
@@ -4930,7 +4933,7 @@
 
             container.innerHTML = sessions.map(session => {
                 const statusClass = String(session.status || '').toLowerCase();
-                const statusLabel = session.status === 'RUNNING' ? 'RUNNING' : session.status === 'PAUSED' ? 'PAUSED' : 'STOPPED';
+                const statusLabel = session.status === 'RUNNING' ? '실행 중' : session.status === 'PAUSED' ? '일시정지' : '중지';
                 const eventLabels = (session.eventTypes || []).map(type => AI_EVENT_LABELS[type] || type).join(' · ');
                 const providerLabels = (session.providers || []).map(aiProviderLabel).join(' + ');
                 const coinText = session.coins?.length ? session.coins.map(coin => coin.replace('KRW-', '')).join(', ') : '전체 코인';
@@ -4983,7 +4986,7 @@
             const container = document.getElementById('aiConsultationList');
             const count = document.getElementById('aiConsultationCount');
             if (!container) return;
-            if (count) count.textContent = `${(consultations || []).length} consultations`;
+            if (count) count.textContent = `${(consultations || []).length}건`;
             if (!consultations?.length) {
                 container.innerHTML = '<div class="ai-empty">아직 자문 결과가 없습니다.</div>';
                 return;
@@ -5002,8 +5005,8 @@
                     const risks = (advice.risks || []).map(risk => `<li>${escapeHtml(risk)}</li>`).join('');
                     return `
                         <div class="ai-advice-grid">
-                            <div class="ai-advice-action ${actionClass}">${escapeHtml(advice.action)}<br><small>${advice.confidence}%</small></div>
-                            <div class="ai-consultation-result"><strong>${escapeHtml(aiProviderLabel(result.provider))}</strong> · ${escapeHtml(advice.horizon || '')}<br>${escapeHtml(advice.rationale || '')}${risks ? `<ul class="ai-risk-list">${risks}</ul>` : ''}<div class="ai-consultation-meta">무효화 조건: ${escapeHtml(advice.invalidation || '추가 확인 필요')}</div></div>
+                            <div class="ai-advice-action ${actionClass}">${escapeHtml(advice.action)}</div>
+                            <div class="ai-consultation-result"><strong>${escapeHtml(aiProviderLabel(result.provider))}</strong> · ${escapeHtml(advice.horizon || '')}<br>${escapeHtml(advice.rationale || '')}${risks ? `<ul class="ai-risk-list">${risks}</ul>` : ''}<div class="ai-consultation-meta">재검토 조건: ${escapeHtml(advice.invalidation || '추가 확인 필요')}</div></div>
                         </div>
                     `;
                 }).join('');
@@ -5011,7 +5014,7 @@
                 const pending = consultation.status === 'RUNNING' ? '<div class="ai-consultation-result">응답을 기다리는 중…</div>' : '';
                 return `
                     <div class="ai-consultation-card ${stateClass}">
-                        <div class="ai-consultation-head"><span class="ai-event-title">${escapeHtml(coin)} · ${escapeHtml((event.type && AI_EVENT_LABELS[event.type]) || event.type || '자문')}</span><span class="ai-provider-state ${stateClass === 'completed' ? 'ready' : stateClass === 'failed' ? 'error' : 'warn'}">${escapeHtml(consultation.status || '-')}</span></div>
+                        <div class="ai-consultation-head"><span class="ai-event-title">${escapeHtml(coin)} · ${escapeHtml((event.type && AI_EVENT_LABELS[event.type]) || event.type || '자문')}</span><span class="ai-provider-state ${stateClass === 'completed' ? 'ready' : stateClass === 'failed' ? 'error' : 'warn'}">${escapeHtml({ COMPLETED: '완료', DEGRADED: '제한됨', RUNNING: '실행 중', FAILED: '실패' }[consultation.status] || consultation.status || '-')}</span></div>
                         <div class="ai-consultation-meta">${escapeHtml(aiTime(consultation.createdAt))} · ${(consultation.providerSelection || []).map(aiProviderLabel).map(escapeHtml).join(' + ')}${consultation.auto ? ' · 자동 자문' : ' · 수동 자문'}</div>
                         ${resultHtml || pending || failure}
                     </div>
@@ -5028,7 +5031,7 @@
             renderAiEvents(aiEvents);
             renderAiConsultations(aiConsultations);
             const latestAt = document.getElementById('aiLatestSnapshotAt');
-            if (latestAt) latestAt.textContent = snapshot.latestSnapshot?.timestamp ? `last ${aiTime(snapshot.latestSnapshot.timestamp)}` : 'no snapshot';
+            if (latestAt) latestAt.textContent = snapshot.latestSnapshot?.timestamp ? `마지막 수신 ${aiTime(snapshot.latestSnapshot.timestamp)}` : '수신 없음';
         }
 
         async function loadAiDesk(force = false) {
@@ -5137,7 +5140,7 @@
                 if (generatedAt) generatedAt.textContent = '리포트 없음';
                 panel.innerHTML = `
                     <div class="empty-state">
-                        아직 읽기 전용 워크포워드 리포트가 없습니다.<br>
+                        아직 읽기 전용 점검 리포트가 없습니다.<br>
                         <code>npm run validate:scalping</code> 실행 후 이 화면에서 결과를 확인하세요.
                     </div>
                 `;
@@ -5148,39 +5151,43 @@
             const results = report.results || [];
             const validationCount = results.filter(result => result.validation?.validation).length;
             const stateClass = report.promoted ? 'pass' : '';
-            const stateText = report.promoted ? '전체 마켓 승격 가능' : '전체 승격 보류';
+            const stateText = report.promoted ? '전체 시장 전환 가능' : '전체 전환 보류';
             const generated = report.generatedAt ? new Date(report.generatedAt).toLocaleString('ko-KR') : '-';
             const validationMode = report.validationMode === 'fixed_config'
-                ? '현재 설정 고정 검증'
-                : '학습 구간 튜닝 검증';
+                ? '현재 설정 기준 점검'
+                : '파라미터 조정 점검';
             if (generatedAt) generatedAt.textContent = `${generated} · ${report.candleCount || '-'}개 캔들 · ${validationMode}`;
 
             const marketHtml = results.map(result => {
                 const metrics = result.validation?.validation;
                 const passed = result.validation?.promoted;
+                const quality = result.validation?.dataQuality;
+                const qualityNote = quality?.valid === false
+                    ? `<br>캔들 공백 · 누락 ${Number(quality.gapCount) || 0}건 · 최대 ${Number(quality.largestGapSeconds) || 0}초`
+                    : '';
                 if (!metrics) {
-                    return `<div class="pilot-validation-market fail"><div class="pilot-validation-market-head"><span>${result.market}</span><span>데이터 부족</span></div><div class="pilot-validation-market-detail">${result.error || result.validation?.reason || '-'}</div></div>`;
+                    return `<div class="pilot-validation-market fail"><div class="pilot-validation-market-head"><span>${result.market}</span><span>데이터 부족</span></div><div class="pilot-validation-market-detail">${result.error || result.validation?.reason || '-'}${qualityNote}</div></div>`;
                 }
                 const pf = Number.isFinite(metrics.profitFactor) ? metrics.profitFactor.toFixed(2) : '∞';
                 const training = result.validation?.tuning?.metrics;
                 const trainingPf = Number.isFinite(training?.profitFactor) ? training.profitFactor.toFixed(2) : '∞';
-                const gateReason = result.validation?.reason || (passed ? 'walk_forward_gate_passed' : 'walk_forward_gate_failed');
+                const gateReason = result.validation?.reason || (passed ? '사전 점검 통과' : '사전 점검 미달');
                 const topTrainingRejection = Object.entries(training?.rejectionCounts || {})
                     .sort((a, b) => b[1] - a[1])[0];
                 const topHoldoutRejection = Object.entries(metrics.rejectionCounts || {})
                     .sort((a, b) => b[1] - a[1])[0];
                 const rejectionSummary = topTrainingRejection || topHoldoutRejection
-                    ? `학습 ${topTrainingRejection?.[0] || '-'} ${topTrainingRejection?.[1] || 0}회 · holdout ${topHoldoutRejection?.[0] || '-'} ${topHoldoutRejection?.[1] || 0}회`
-                    : '거절 telemetry 없음';
+                    ? `학습 ${topTrainingRejection?.[0] || '-'} ${topTrainingRejection?.[1] || 0}회 · 점검 ${topHoldoutRejection?.[0] || '-'} ${topHoldoutRejection?.[1] || 0}회`
+                    : '거절 기록 없음';
                 return `
                     <div class="pilot-validation-market ${passed ? 'pass' : 'fail'}">
-                        <div class="pilot-validation-market-head"><span>${result.market}</span><span>${passed ? 'PASS' : 'HOLD'}</span></div>
+                        <div class="pilot-validation-market-head"><span>${result.market}</span><span>${passed ? '통과' : '보류'}</span></div>
                         <div class="pilot-validation-market-detail">
-                            검증 수익률 ${formatPercent(metrics.totalReturnPercent)}% · 거래 ${metrics.tradeCount}회<br>
+                            점검 수익률 ${formatPercent(metrics.totalReturnPercent)}% · 거래 ${metrics.tradeCount}회<br>
                             승률 ${formatPercent(metrics.winRate)}% · PF ${pf} · MDD ${formatPercent(metrics.maxDrawdownPercent)}%<br>
                             학습 수익률 ${formatPercent(training?.totalReturnPercent)}% · 학습 거래 ${training?.tradeCount || 0}회 · 학습 PF ${trainingPf}<br>
                             주요 거절: ${rejectionSummary}<br>
-                            판정 사유 ${gateReason}
+                            판정 사유 ${gateReason}${qualityNote}
                         </div>
                     </div>
                 `;
@@ -5192,8 +5199,8 @@
                         <div class="pilot-validation-state ${stateClass}">${stateText}</div>
                         <div class="pilot-validation-meta">실전 주문은 이 리포트의 PASS 여부와 별개로 DRY_RUN에서 먼저 확인해야 합니다.</div>
                     </div>
-                    <div class="pilot-validation-stat"><div class="pilot-validation-stat-value">${promotedMarkets.length}/${results.length}</div><div class="pilot-validation-stat-label">승격 마켓</div></div>
-                    <div class="pilot-validation-stat"><div class="pilot-validation-stat-value">${validationCount}</div><div class="pilot-validation-stat-label">검증 완료</div></div>
+                    <div class="pilot-validation-stat"><div class="pilot-validation-stat-value">${promotedMarkets.length}/${results.length}</div><div class="pilot-validation-stat-label">전환 가능 시장</div></div>
+                    <div class="pilot-validation-stat"><div class="pilot-validation-stat-value">${validationCount}</div><div class="pilot-validation-stat-label">점검 완료</div></div>
                     <div class="pilot-validation-stat"><div class="pilot-validation-stat-value">${report.candleUnit || 1}분</div><div class="pilot-validation-stat-label">캔들 단위</div></div>
                 </div>
                 <div class="pilot-validation-markets">${marketHtml || '<div class="empty-state">마켓 결과 없음</div>'}</div>
@@ -5213,7 +5220,7 @@
             if (!status?.available) {
                 if (updatedAt) updatedAt.textContent = '세션 없음';
                 panel.innerHTML = `
-                    <div class="empty-state">forward paper 세션이 없습니다. 기존 dry_portfolio는 자동 초기화하지 않았습니다.</div>
+                    <div class="empty-state">모의투자 관찰 세션이 없습니다. 기존 모의 자산은 자동 초기화하지 않았습니다.</div>
                     <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top: 12px;">
                         <button class="btn btn-secondary btn-sm" onclick="startPaperValidationSession(false)">현재 상태 기준 세션 시작</button>
                         <button class="btn btn-danger btn-sm" onclick="startPaperValidationSession(true)">새 시드로 초기화 후 시작</button>
@@ -5224,7 +5231,7 @@
 
             const state = status.state || (status.active ? 'RUNNING' : 'STOPPED');
             const stateClass = state === 'PASS' ? 'pass' : state === 'RUNNING' ? 'running' : 'stopped';
-            const stateText = state === 'PASS' ? 'PAPER PASS' : state === 'RUNNING' ? 'PAPER 관찰 중' : 'PAPER 중지';
+            const stateText = state === 'PASS' ? '모의투자 조건 충족' : state === 'RUNNING' ? '모의투자 관찰 중' : '모의투자 중지';
             const startedAt = status.startedAt ? new Date(status.startedAt).toLocaleString('ko-KR') : '-';
             const telemetry = status.telemetry || {};
             const strictEvaluation = status.strictEvaluation || {};
@@ -5236,22 +5243,29 @@
             const candleFreshness = status.candleFreshness || {};
             const candleDataQuality = status.candleDataQuality || {};
             const analysisDataHealth = status.analysisDataHealth || {};
+            const analysisActive = analysisDataHealth.analysisActive === true;
+            const analysisStartedAtMs = Date.parse(analysisDataHealth.analysisStartedAt || '');
+            const analysisAgeSeconds = Number.isFinite(analysisStartedAtMs)
+                ? Math.max(0, (Date.now() - analysisStartedAtMs) / 1000)
+                : 0;
             const analysisGapSeconds = Number(analysisDataHealth.currentGapDurationSeconds) || 0;
             const analysisIncompleteCycles = Number(telemetry.analysisIncompleteCycles) || 0;
             const analysisDataText = analysisDataHealth.failClosed
                 ? `중지 필요 · 공백 ${formatNumber(analysisGapSeconds)}초`
+                : analysisActive
+                    ? `분석 진행 중 · ${formatNumber(analysisAgeSeconds)}초`
                 : analysisGapSeconds > 0
                     ? `부분 응답 재시도 · 공백 ${formatNumber(analysisGapSeconds)}초`
                     : analysisIncompleteCycles > 0
-                        ? `부분 cycle ${analysisIncompleteCycles}회 기록`
+                        ? `부분 응답 ${analysisIncompleteCycles}회 기록`
                         : '전체 대상 시장 분석 수신 정상';
             const signalAvailability = status.signalAvailability || {};
             const signalLabel = status.marketQuiet
                 ? '시장 정적 · 과매도 반등 후보 없음'
                 : status.filterStarvation
-                    ? '필터 고착 후보 감지'
+                    ? '진입 조건 장기 미충족'
                     : '반등 후보 집계 중';
-            const signalSummary = `${signalLabel} · 과매도 ${Number(signalAvailability.oversoldObservations) || 0}회 · strict 후보 ${Number(signalAvailability.strictReboundCandidates) || 0}회 · 확인 ${Number(signalAvailability.strictConfirmedCandidates) || 0}회`;
+            const signalSummary = `${signalLabel} · 과매도 ${Number(signalAvailability.oversoldObservations) || 0}회 · 반등 후보 ${Number(signalAvailability.strictReboundCandidates) || 0}회 · 확인 ${Number(signalAvailability.strictConfirmedCandidates) || 0}회`;
             const insufficientCandleEntry = Object.entries(candleDataQuality.insufficientByCoin || {})
                 .sort((a, b) => (Number(b[1]?.count) || 0) - (Number(a[1]?.count) || 0))[0];
             const insufficientCandleText = insufficientCandleEntry
@@ -5265,7 +5279,7 @@
             const lastFreshnessBlock = candleFreshness.lastBlock || null;
             const freshnessAgeStats = candleFreshness.ageStats || {};
             const freshnessAgeStatsText = freshnessAgeStats.sampleCount
-                ? ` · 표본 ${freshnessAgeStats.sampleCount}회 · 평균 age ${freshnessAgeStats.averageAgeSeconds !== null && freshnessAgeStats.averageAgeSeconds !== undefined ? formatNumber(freshnessAgeStats.averageAgeSeconds) + '초' : '확인 불가'} · 최대 ${freshnessAgeStats.maxObservedAgeSeconds !== null && freshnessAgeStats.maxObservedAgeSeconds !== undefined ? formatNumber(freshnessAgeStats.maxObservedAgeSeconds) + '초' : '확인 불가'}`
+                ? ` · 관측 ${freshnessAgeStats.sampleCount}회 · 평균 age ${freshnessAgeStats.averageAgeSeconds !== null && freshnessAgeStats.averageAgeSeconds !== undefined ? formatNumber(freshnessAgeStats.averageAgeSeconds) + '초' : '확인 불가'} · 최대 ${freshnessAgeStats.maxObservedAgeSeconds !== null && freshnessAgeStats.maxObservedAgeSeconds !== undefined ? formatNumber(freshnessAgeStats.maxObservedAgeSeconds) + '초' : '확인 불가'}`
                 : '';
             const freshnessCoinEntry = Object.entries(candleFreshness.blockedByCoin || {})
                 .map(([coin, blocked]) => ({
@@ -5306,31 +5320,42 @@
             const rejectionOutcomeText = topRejectionOutcome
                 ? `${topRejectionOutcome.reason}: ${topRejectionOutcome.tradeCount}회 · 손익 ${formatProfit(topRejectionOutcome.netProfit)} · 승률 ${formatPercent(topRejectionOutcome.winRate)}%`
                 : '아직 청산된 거절 후보 없음';
+            const shadowExecutionBlocked = Number(telemetry.shadowEntryExecutionBlockedEntries) || 0;
+            const looseShadowExecutionBlocked = Number(telemetry.looseShadowEntryExecutionBlockedEntries) || 0;
+            const shadowExecutionBlockReasons = telemetry.shadowEntryExecutionBlockReasons || {};
+            const looseShadowExecutionBlockReasons = telemetry.looseShadowEntryExecutionBlockReasons || {};
+            const executionBoundaryText = shadowExecutionBlocked > 0 || looseShadowExecutionBlocked > 0
+                ? ` · 비교 A ${shadowExecutionBlocked}회 · 비교 B ${looseShadowExecutionBlocked}회 · 추격 ${Number(shadowExecutionBlockReasons.entry_chase_exceeded) + Number(looseShadowExecutionBlockReasons.entry_chase_exceeded) || 0}회 · 되돌림 ${Number(shadowExecutionBlockReasons.entry_retrace_exceeded) + Number(looseShadowExecutionBlockReasons.entry_retrace_exceeded) || 0}회`
+                : ' · 차단 없음';
             const starvationHtml = status.filterStarvation
-                ? `<div style="margin-top:6px; color:var(--accent-yellow);">⚠️ 필터 고착 경고: ${status.suggestedAdjustments?.join(' · ') || '별도 홀드아웃 검증 필요'}</div>`
+                ? `<div style="margin-top:6px; color:var(--accent-yellow);">⚠️ 진입 조건 장기 미충족: ${status.suggestedAdjustments?.join(' · ') || '별도 점검이 필요합니다'}</div>`
                 : '';
             const continuityHtml = status.continuityEligible === false
-                ? `<div style="margin-top:6px; color:var(--accent-red);">⚠️ 연속 관찰 게이트 보류: ${formatPercent(status.maxInterruptionMinutes || 0)}분 공백 기록</div>`
+                ? `<div style="margin-top:6px; color:var(--accent-red);">⚠️ 연속 관찰 조건 보류: ${formatPercent(status.maxInterruptionMinutes || 0)}분 공백 기록</div>`
                 : '';
             const orphanHtml = status.orphaned
-                ? `<div class="pilot-paper-orphan-alert">⚠️ Orphan 세션: ${status.orphanReason === 'heartbeat_stale' ? 'heartbeat가 오래되어' : 'owner process가 사라져'} 자동 재개와 같은 ledger 재사용을 차단했습니다. strict 미청산 ${Number(status.strictEvaluation?.activePositions) || 0}개 · diagnostic 미청산 ${Array.isArray(status.diagnosticOpenPositions) ? status.diagnosticOpenPositions.length : 0}개 · 마지막 heartbeat ${status.heartbeatAt ? escapeHtml(new Date(status.heartbeatAt).toLocaleString('ko-KR')) : '확인 불가'}</div>`
+                ? `<div class="pilot-paper-orphan-alert">⚠️ 연결이 끊긴 세션: ${status.orphanReason === 'heartbeat_stale' ? '응답이 오래되어' : '실행 프로세스가 사라져'} 자동 재개와 기록 재사용을 차단했습니다. 미청산 ${Number(status.strictEvaluation?.activePositions) || 0}개 · 비교 장부 미청산 ${Array.isArray(status.diagnosticOpenPositions) ? status.diagnosticOpenPositions.length : 0}개 · 마지막 응답 ${status.heartbeatAt ? escapeHtml(new Date(status.heartbeatAt).toLocaleString('ko-KR')) : '확인 불가'}${status.terminalError ? ` · 실행 오류 ${escapeHtml(status.terminalError.source || 'unknown')}: ${escapeHtml(status.terminalError.message || '상세 없음')}` : ''}</div>`
                 : '';
             const storage = status.storage || {};
             const storageHtml = storage.available && storage.healthy === false
                 ? `<div style="margin-top:6px; color:var(--accent-red);">⚠️ 저장공간 부족: ${formatPercent(storage.availableMiB || 0)}MiB 남음 · 최소 ${formatPercent(storage.minimumMiB || 128)}MiB 필요</div>`
                 : '';
             const configHtml = status.configSnapshotComplete !== true
-                ? '<div style="margin-top:6px; color:var(--accent-red);">⚠️ 전략 설정 snapshot이 없어 전체 세션 재현성을 확인할 수 없습니다. 승격 보류</div>'
-                    : status.configConsistent === false
-                        ? `<div style="margin-top:6px; color:var(--accent-red);">⚠️ 전략 설정 drift 감지: ${(status.configDrift || []).join(', ') || '확인 필요'} · 승격 보류</div>`
-                        : '';
+                ? '<div style="margin-top:6px; color:var(--accent-red);">⚠️ 전략 설정 기록이 없어 세션을 재확인할 수 없습니다. 전환 보류</div>'
+                    : (status.configValueDrift || []).length > 0
+                        ? `<div style="margin-top:6px; color:var(--accent-red);">⚠️ 전략 설정값 변경 감지: ${(status.configDrift || []).join(', ') || '확인 필요'} · 전환 보류</div>`
+                        : (status.configSchemaDrift || []).length > 0
+                            ? `<div style="margin-top:6px; color:var(--accent-yellow);">ℹ️ 전략 설정 항목 차이: ${(status.configSchemaDrift || []).join(', ')} · 실제 값 변경은 확인되지 않음 · 자동 재개·전환 보류</div>`
+                            : status.configConsistent === false
+                                ? `<div style="margin-top:6px; color:var(--accent-red);">⚠️ 전략 설정 변경 감지: ${(status.configDrift || []).join(', ') || '확인 필요'} · 전환 보류</div>`
+                                : '';
             const circuitHtml = lossCircuitBreaker.enabled && lossCircuitBreaker.coolingDown
                 ? `<div style="margin-top:6px; color:var(--accent-red);">🛑 전역 손실 회로차단기 발동: ${lossCircuitBreaker.lossCount || 0}/${lossCircuitBreaker.maxLosses || 0}회 · ${Math.ceil((lossCircuitBreaker.cooldownRemainingMs || 0) / 60000)}분 후 신규 진입 재개 예정</div>`
                 : lossCircuitBreaker.enabled
                     ? `<div style="margin-top:6px; color:var(--accent-yellow);">🧯 전역 손실 회로차단기 대기: 최근 ${lossCircuitBreaker.lossCount || 0}/${lossCircuitBreaker.maxLosses || 0}회 · ${lossCircuitBreaker.windowMinutes || 0}분 창</div>`
                     : '<div style="margin-top:6px; color:var(--text-secondary);">🧯 전역 손실 회로차단기: 비활성화</div>';
             const unsettledHtml = status.endedWithOpenPositions
-                ? `<div style="margin-top:6px; color:var(--accent-red);">⚠️ 미청산 strict 포지션을 남긴 세션입니다. 같은 ledger에서 새 세션을 시작하려면 reset 또는 명시적 resume 허가가 필요합니다.</div>`
+                ? `<div style="margin-top:6px; color:var(--accent-red);">⚠️ 미청산 포지션을 남긴 세션입니다. 같은 기록에서 새 세션을 시작하려면 초기화 또는 명시적 재개 허가가 필요합니다.</div>`
                 : '';
             if (updatedAt) updatedAt.textContent = `${startedAt} 시작`;
 
@@ -5341,19 +5366,20 @@
                         <div class="pilot-paper-meta">
                             경과 ${formatPercent(status.elapsedDays)}일 · 자산 ${formatNumber(status.currentAssets)}원 · 수익률 ${formatChange(status.returnPercent)}<br>
                             청산 거래 ${status.closedTradeCount || 0}회 · 실현손익 ${formatProfit(status.realizedProfit)} · MDD ${formatPercent(status.maxDrawdownPercent)}%<br>
-                            strict 현재 포지션 ${strictEvaluation.activePositions || 0}개 · ${strictEvaluation.positions?.map(position => `${position.coin} @ ${formatNumber(position.entryPrice)}원${position.entryDelayMs !== null && position.entryDelayMs !== undefined ? ` · 지연 ${formatNumber(position.entryDelayMs)}ms` : ''}${position.executionDriftPercent !== null && position.executionDriftPercent !== undefined ? ` · drift ${formatChange(position.executionDriftPercent)}` : ''}${position.breakEvenArmed ? ' · BE armed' : ''}${position.trailingArmed ? ' · trailing armed' : ''}`).join(', ') || '없음'}<br>
-                            전역 손실 회로: ${lossCircuitBreaker.enabled ? `${lossCircuitBreaker.lossCount || 0}/${lossCircuitBreaker.maxLosses || 0}회 · ${lossCircuitBreaker.windowMinutes || 0}분 창 · ${lossCircuitBreaker.cooldownMinutes || 0}분 차단` : '비활성화'} · 차단된 strict 진입 ${telemetry.circuitBlockedEntries || 0}회<br>
+                            현재 포지션 ${strictEvaluation.activePositions || 0}개 · ${strictEvaluation.positions?.map(position => `${position.coin} @ ${formatNumber(position.entryPrice)}원${position.entryDelayMs !== null && position.entryDelayMs !== undefined ? ` · 지연 ${formatNumber(position.entryDelayMs)}ms` : ''}${position.executionDriftPercent !== null && position.executionDriftPercent !== undefined ? ` · 체결 편차 ${formatChange(position.executionDriftPercent)}` : ''}${position.maxFavorableExcursionPercent !== null && position.maxFavorableExcursionPercent !== undefined ? ` · MFE ${formatChange(position.maxFavorableExcursionPercent)} · MAE ${formatChange(position.maxAdverseExcursionPercent)}` : ''}${position.breakEvenArmed ? ' · 손익분기 보호' : ''}${position.trailingArmed ? ' · 추적 손절' : ''}`).join(', ') || '없음'}<br>
+                            전역 손실 차단: ${lossCircuitBreaker.enabled ? `${lossCircuitBreaker.lossCount || 0}/${lossCircuitBreaker.maxLosses || 0}회 · ${lossCircuitBreaker.windowMinutes || 0}분 창 · ${lossCircuitBreaker.cooldownMinutes || 0}분 차단` : '비활성화'} · 차단된 진입 ${telemetry.circuitBlockedEntries || 0}회<br>
                             동일 신호창 진입 상한: ${signalWindow.enabled ? `${signalWindow.maxEntriesPerSignalWindow}개 · 마지막 ${signalWindow.lastEntryCount || 0}개 기록 · 차단 ${signalWindow.blockedEntries || 0}회` : '비활성화'}<br>
-                            시장 regime gate: ${marketRegimeEnabled ? `활성화 · breadth ${status.configSnapshot?.marketRegimeMinBreadth ?? 0.5} · ${status.configSnapshot?.marketRegimeLookback ?? 5}봉 · strict 차단 ${telemetry.marketRegimeBlockedEntries || 0}회 · shadow 차단 ${telemetry.shadowMarketRegimeBlockedEntries || 0}회 · 현재 ${lastMarketRegime ? `${lastMarketRegime.confirmed ? '통과' : '차단'} (${formatPercent(lastMarketRegime.breadth || 0)})` : '계산 전'}` : '비활성화'}<br>
-                            요청 경로: ticker batch ${requestStats.batchTickerRequests || 0}회 · 개별 ${requestStats.individualTickerRequests || 0}회 · candle ${requestStats.candleRequests || 0}회 · batch 실패 ${requestStats.batchTickerFailures || 0}회<br>
-                            분석 데이터 완전성: ${analysisDataText} · 부분 cycle ${analysisIncompleteCycles}회 · 허용 공백 ${formatNumber(analysisDataHealth.maxAnalysisDataGapSeconds || status.configSnapshot?.maxAnalysisDataGapSeconds || 60)}초<br>
-                            캔들 신선도: 최대 ${formatNumber(candleFreshness.maxAgeSeconds || 0)}초 · 전체 차단 ${candleFreshness.blockedSnapshots || 0}회 · 분석 ${candleFreshness.blockedAnalyses || 0}회 · 지연진입 ${candleFreshness.blockedEntries || 0}회 · 주요 사유 ${freshnessDetail}<br>
-                            stale 상위 마켓: ${freshnessMarketSummary}<br>
-                            캔들 데이터 부족: 최소 ${candleDataQuality.minimumCandleCount || 0}개 · 주요 마켓 ${insufficientCandleText}<br>
-                            분석 사이클 ${telemetry.cycles || 0}회 · strict BUY ${telemetry.buyCandidates || 0}회 · soft 후보 ${telemetry.shadowCandidates || 0}회 · HOLD ${telemetry.holdDecisions || 0}회<br>
+                            시장 방향성 필터: ${marketRegimeEnabled ? `활성화 · 기준 ${status.configSnapshot?.marketRegimeMinBreadth ?? 0.5} · ${status.configSnapshot?.marketRegimeLookback ?? 5}봉 · 진입 차단 ${telemetry.marketRegimeBlockedEntries || 0}회 · 비교 차단 ${telemetry.shadowMarketRegimeBlockedEntries || 0}회 · 현재 ${lastMarketRegime ? `${lastMarketRegime.confirmed ? '통과' : '차단'} (${formatPercent(lastMarketRegime.breadth || 0)})` : '계산 전'}` : '비활성화'}<br>
+                            요청 경로: 시세 묶음 ${requestStats.batchTickerRequests || 0}회 · 개별 ${requestStats.individualTickerRequests || 0}회 · 캔들 ${requestStats.candleRequests || 0}회 · 묶음 실패 ${requestStats.batchTickerFailures || 0}회<br>
+                            분석 데이터 상태: ${analysisDataText} · 부분 응답 ${analysisIncompleteCycles}회 · 허용 공백 ${formatNumber(analysisDataHealth.maxAnalysisDataGapSeconds || status.configSnapshot?.maxAnalysisDataGapSeconds || 60)}초<br>
+                            캔들 최신도: 최대 ${formatNumber(candleFreshness.maxAgeSeconds || 0)}초 · 전체 차단 ${candleFreshness.blockedSnapshots || 0}회 · 분석 ${candleFreshness.blockedAnalyses || 0}회 · 지연진입 ${candleFreshness.blockedEntries || 0}회 · 주요 사유 ${freshnessDetail}<br>
+                            오래된 데이터 상위 시장: ${freshnessMarketSummary}<br>
+                            캔들 데이터 부족: 최소 ${candleDataQuality.minimumCandleCount || 0}개 · 주요 시장 ${insufficientCandleText}<br>
+                            분석 주기 ${telemetry.cycles || 0}회 · 매수 신호 ${telemetry.buyCandidates || 0}회 · 비교 후보 ${telemetry.shadowCandidates || 0}회 · 관망 ${telemetry.holdDecisions || 0}회<br>
                             신호 상태: ${signalSummary}<br>
-                            soft 장부 ${shadowEvaluation.closedTradeCount || 0}회 청산 · 참고손익 ${formatProfit(shadowEvaluation.realizedProfit || 0)} · 참고 PF ${Number.isFinite(shadowEvaluation.profitFactor) ? Number(shadowEvaluation.profitFactor).toFixed(2) : '∞'}<br>
-                            loose 장부 ${looseShadowEvaluation.closedTradeCount || 0}회 청산 · 참고손익 ${formatProfit(looseShadowEvaluation.realizedProfit || 0)} · 참고 PF ${Number.isFinite(looseShadowEvaluation.profitFactor) ? Number(looseShadowEvaluation.profitFactor).toFixed(2) : '∞'}<br>
+                            비교 장부 A ${shadowEvaluation.closedTradeCount || 0}회 청산 · 참고손익 ${formatProfit(shadowEvaluation.realizedProfit || 0)} · 참고 PF ${Number.isFinite(shadowEvaluation.profitFactor) ? Number(shadowEvaluation.profitFactor).toFixed(2) : '∞'}<br>
+                            비교 장부 B ${looseShadowEvaluation.closedTradeCount || 0}회 청산 · 참고손익 ${formatProfit(looseShadowEvaluation.realizedProfit || 0)} · 참고 PF ${Number.isFinite(looseShadowEvaluation.profitFactor) ? Number(looseShadowEvaluation.profitFactor).toFixed(2) : '∞'}<br>
+                            진입 경계 차단${executionBoundaryText}<br>
                             현재 주요 병목: ${topReason}<br>
                             필터별 병목: ${topRejection}<br>
                             거절 후보 결과: ${rejectionOutcomeText}<br>
@@ -5364,7 +5390,7 @@
                             ${configHtml}
                             ${circuitHtml}
                             ${unsettledHtml}
-                            ${status.baselineIncludesHoldings ? '⚠️ 기존 보유분 포함 기준입니다. 깨끗한 성과 검증은 리셋 후 새 세션이 필요합니다.' : '✅ 세션 시작 시점부터 독립적으로 측정 중입니다.'}
+                            ${status.baselineIncludesHoldings ? '⚠️ 기존 보유분 포함 기준입니다. 정확한 성과 측정은 초기화 후 새 세션이 필요합니다.' : '✅ 세션 시작 시점부터 독립적으로 측정 중입니다.'}
                         </div>
                     </div>
                     <div style="display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end;">
@@ -5382,8 +5408,8 @@
 
         async function startPaperValidationSession(reset = false) {
             const message = reset
-                ? '새 시드로 가상 포트폴리오를 초기화하고 기존 paper ledger와 별도의 forward 세션을 시작합니다. 기존 dry_portfolio 데이터가 이 작업으로 덮어써집니다. 계속할까요?'
-                : '현재 가상 포트폴리오 상태를 기준으로 forward paper 세션을 시작합니다. 기존 포지션은 초기화하지 않습니다. 계속할까요?';
+                ? '새 시드로 가상 포트폴리오를 초기화하고 별도의 모의투자 관찰 세션을 시작합니다. 기존 모의 자산 데이터가 이 작업으로 덮어써집니다. 계속할까요?'
+                : '현재 가상 포트폴리오 상태를 기준으로 모의투자 관찰 세션을 시작합니다. 기존 포지션은 초기화하지 않습니다. 계속할까요?';
             if (!confirm(message)) return;
             const result = await fetchAPI('/paper-validation/start', {
                 method: 'POST',
@@ -5392,20 +5418,20 @@
             });
             if (result?.success) {
                 renderPaperValidation(result.status);
-                showToast('forward paper 세션을 시작했습니다', 'success');
+                showToast('모의투자 관찰 세션을 시작했습니다', 'success');
             } else {
-                showToast(result?.error || 'paper 세션 시작 실패', 'error');
+                showToast(result?.error || '모의투자 세션 시작 실패', 'error');
             }
         }
 
         async function stopPaperValidationSession() {
-            if (!confirm('현재 forward paper 세션을 중지할까요? 포트폴리오 자체는 유지됩니다.')) return;
+            if (!confirm('현재 모의투자 관찰 세션을 중지할까요? 포트폴리오 자체는 유지됩니다.')) return;
             const result = await fetchAPI('/paper-validation/stop', { method: 'POST' });
             if (result?.success) {
                 renderPaperValidation(result.status);
-                showToast('forward paper 세션을 중지했습니다', 'info');
+                showToast('모의투자 관찰 세션을 중지했습니다', 'info');
             } else {
-                showToast(result?.error || 'paper 세션 중지 실패', 'error');
+                showToast(result?.error || '모의투자 세션 중지 실패', 'error');
             }
         }
 
@@ -5553,12 +5579,12 @@
             if (bb.position) return bb.position;
             if (bb.percentB !== undefined) {
                 const pB = parseFloat(bb.percentB);
-                if (pB < 0.2) return 'Lower';
-                if (pB > 0.8) return 'Upper';
-                return 'Middle';
+                if (pB < 0.2) return '하단';
+                if (pB > 0.8) return '상단';
+                return '중간';
             }
             if (bb.upper && bb.lower && bb.middle) {
-                return 'Active';
+                return '활성';
             }
             return '-';
         }
@@ -8131,8 +8157,8 @@
                 <div class="optimization-settings" style="grid-column: 1 / -1; margin-bottom: 8px;">
                     <div class="optimization-row">
                         <div class="optimization-row-info">
-                            <span class="optimization-row-label">Portfolio regime gate</span>
-                            <span class="optimization-row-desc">전체 대상 마켓의 breadth와 평균 방향성이 약하면 신규 반등 진입을 막습니다. 기본값은 검증 전 비활성입니다.</span>
+                            <span class="optimization-row-label">시장 방향성 필터</span>
+                            <span class="optimization-row-desc">전체 대상 시장의 방향성과 평균 수익률이 약하면 신규 반등 진입을 막습니다. 기본값은 비활성입니다.</span>
                         </div>
                         <div class="optimization-row-control">
                             <label class="toggle-switch">
@@ -8143,8 +8169,8 @@
                     </div>
                     <div class="optimization-row">
                         <div class="optimization-row-info">
-                            <span class="optimization-row-label">Rebound overbought guard</span>
-                            <span class="optimization-row-desc">반등 확정 시점의 RSI가 과매수 기준을 넘으면 늦은 진입을 차단합니다. 별도 holdout 후보입니다.</span>
+                            <span class="optimization-row-label">반등 과매수 보호</span>
+                            <span class="optimization-row-desc">반등 확정 시점의 RSI가 과매수 기준을 넘으면 늦은 진입을 차단합니다. 별도 점검이 필요한 설정입니다.</span>
                         </div>
                         <div class="optimization-row-control">
                             <label class="toggle-switch">
@@ -8475,7 +8501,7 @@
             let html = `
                 <div style="margin-bottom: 15px; color: var(--text-secondary); font-size: 13px;">
                     마지막 업데이트: <strong>${updatedAt}</strong>
-                    ${config.cycle ? ` | 사이클: <strong>#${config.cycle}</strong>` : ''}
+                    ${config.cycle ? ` | 실행 회차: <strong>#${config.cycle}</strong>` : ''}
                 </div>
                 <div class="param-grid">
             `;
@@ -10172,7 +10198,7 @@
                         </div>
                         <div>
                             <div style="font-size: 20px; font-weight: 700;">${(confidence * 100).toFixed(0)}%</div>
-                            <div style="font-size: 11px; color: var(--text-muted);">신뢰도</div>
+                            <div style="font-size: 11px; color: var(--text-muted);">참고 점수</div>
                         </div>
                     </div>
                 </div>
@@ -10206,6 +10232,6 @@
             }
         });
     </script>
-    <script src="/pilot-redesign.js?v=observer-readonly-3"></script>
+    <script src="/pilot-redesign.js?v=observer-readonly-23"></script>
 </body>
 </html>

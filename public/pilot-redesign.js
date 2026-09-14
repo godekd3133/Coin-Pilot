@@ -27,6 +27,8 @@
         statistics: [],
         validation: null,
         paper: null,
+        strategyResearch: null,
+        momentumShadow: null,
         portfolioAnalysis: null,
         portfolioHistory: [],
         trades: [],
@@ -99,6 +101,17 @@
         return `${parsed >= 0 ? '+' : ''}${parsed.toFixed(decimals)}%`;
     }
 
+    function formatOptionalPercent(value, decimals = 2) {
+        return Number.isFinite(Number(value)) ? formatPercent(value, decimals) : '—';
+    }
+
+    function formatExcursion(record) {
+        const mfe = Number(record?.maxFavorableExcursionPercent);
+        const mae = Number(record?.maxAdverseExcursionPercent);
+        if (!Number.isFinite(mfe) || !Number.isFinite(mae)) return '';
+        return ` · MFE ${formatPercent(mfe)} · MAE ${formatPercent(mae)}`;
+    }
+
     function formatSignedWon(value) {
         const parsed = number(value);
         return `${parsed >= 0 ? '+' : ''}${formatWon(parsed)}`;
@@ -129,6 +142,58 @@
         return String(coin || '').replace(/^KRW-/, '');
     }
 
+    const INTERNAL_TERM_MAP = [
+        [/재검증/g, '재확인'],
+        [/검증/g, '점검'],
+        [/승격/g, '전환'],
+        [/표본/g, '관측'],
+        [/게이트/g, '점검'],
+        [/신뢰도/g, '참고 점수'],
+        [/무효화/g, '재검토'],
+        [/홀드아웃/g, '별도 구간'],
+        [/연구 전용/g, '참고 전용'],
+        [/\bdrift\b/gi, '변경'],
+        [/\bcohort\b/gi, '그룹'],
+        [/\bholdout\b/gi, '별도 구간'],
+        [/\bwalk[- ]?forward\b/gi, '구간 점검'],
+        [/\bforward\b/gi, '실시간'],
+        [/\bledger\b/gi, '기록'],
+        [/\bheartbeat\b/gi, '응답'],
+        [/\borphan(?:ed)?\b/gi, '연결 끊김'],
+        [/\bcounterfactual\b/gi, '가상 정산'],
+        [/\bconfidence\b/gi, '참고 점수'],
+        [/\bsamples?\b/gi, '관측'],
+        [/\bpromot(?:ion|ed|e)\b/gi, '전환'],
+        [/\bwinnerShadow\b/g, '승자 연장 장부'],
+        [/\blooseShadow\b/g, '완화 비교 장부'],
+        [/\bshadow\b/gi, '참고 비교'],
+        [/\bloose\b/gi, '완화'],
+        [/\bstrict\b/gi, '기준'],
+        [/\brelaxed\b/gi, '비교'],
+        [/\bfail[- ]?closed\b/gi, '안전 중지'],
+        [/\bregime\b/gi, '국면'],
+        [/\bgate\b/gi, '점검'],
+        [/\bbreadth\b/gi, '상승 폭'],
+        [/\blookback\b/gi, '조회 구간'],
+        [/\bticker\b/gi, '시세'],
+        [/\bbreak[- ]?even\b/gi, '본전'],
+        [/\btrailing\b/gi, '추적'],
+        [/\bPASS\b/g, '통과'],
+        [/\bHOLD\b/g, '보류'],
+        [/\bWAIT\b/g, '대기'],
+        [/\bRUNNING\b/g, '실행 중'],
+        [/\bPAUSED\b/g, '일시정지'],
+        [/\bSTOPPED\b/g, '중지'],
+        [/\bFAILED\b/g, '실패'],
+        [/\bCOMPLETED\b/g, '완료']
+    ];
+
+    function toUserText(value) {
+        let text = String(value ?? '');
+        for (const [pattern, replacement] of INTERNAL_TERM_MAP) text = text.replace(pattern, replacement);
+        return text;
+    }
+
     function classForValue(value) {
         return number(value) >= 0 ? 'pilot-positive' : 'pilot-negative';
     }
@@ -142,7 +207,7 @@
     }
 
     function readOnlyObserverReason() {
-        return '읽기 전용 forward ledger 관찰 모드입니다. 원본 runner에서만 세션과 거래를 관리할 수 있습니다.';
+        return '읽기 전용 관찰 모드입니다. 원본 실행 환경에서만 세션과 거래를 관리할 수 있습니다.';
     }
 
     function syncObserverControls() {
@@ -183,7 +248,7 @@
             return '서버 설정이 모의투자라 실제 주문은 전송되지 않습니다.';
         }
         if (state.activeMode === 'live' && !state.liveEligible) {
-            return '검증 게이트를 모두 통과하기 전까지 실제 주문은 잠깁니다.';
+            return '사전 점검이 모두 완료되기 전까지 실제 주문은 잠겨 있습니다.';
         }
         return '';
     }
@@ -324,24 +389,35 @@
         return provider === 'gpt' ? 'GPT / Codex' : provider === 'claude' ? 'Claude' : String(provider || '-');
     }
 
+    function aiStatusLabel(status) {
+        return {
+            RUNNING: '실행 중',
+            PAUSED: '일시정지',
+            STOPPED: '중지',
+            COMPLETED: '완료',
+            DEGRADED: '제한됨',
+            FAILED: '실패'
+        }[status] || status || '-';
+    }
+
     function aiDeskMarkup() {
         return `
             <section class="pilot-page pilot-ai-page" data-pilot-page="ai">
                 <div class="pilot-page-heading">
-                    <div><div class="pilot-kicker">AI advisory / long-run watch</div><h1 class="pilot-page-title">AI 판단 데스크</h1><p class="pilot-page-description">특정 이벤트가 생길 때 GPT·Claude 구독 세션에 빠르게 자문을 요청합니다. AI 의견은 읽기 전용이며 기존 설정값 기반 자동 주문과 분리됩니다.</p></div>
+                    <div><div class="pilot-kicker">AI 자문 / 상시 감시</div><h1 class="pilot-page-title">AI 판단 데스크</h1><p class="pilot-page-description">특정 이벤트가 생길 때 GPT·Claude 구독 세션에 빠르게 자문을 요청합니다. AI 의견은 읽기 전용이며 기존 설정값 기반 자동 주문과 분리됩니다.</p></div>
                     <div class="pilot-heading-actions"><span class="pilot-sync-note" id="pilot-ai-sync">마지막 동기화 -</span><button type="button" class="pilot-button" data-pilot-ai-refresh><i class="ph ph-arrows-clockwise" aria-hidden="true"></i> 새로고침</button></div>
                 </div>
-                <div class="pilot-ai-policy"><div><strong><i class="ph ph-shield-check" aria-hidden="true"></i> 자문 전용 경계</strong><span>AI의 BUY/SELL은 기록되는 의견일 뿐 주문 명령이 아닙니다. 기존 자동매매는 설정값 계약으로만 실행됩니다.</span></div><span class="pilot-ai-policy-badge">advisory only · no order routing</span></div>
+                <div class="pilot-ai-policy"><div><strong><i class="ph ph-shield-check" aria-hidden="true"></i> 자문 전용 경계</strong><span>AI의 BUY/SELL은 기록되는 의견일 뿐 주문 명령이 아닙니다. 기존 자동매매는 설정값 계약으로만 실행됩니다.</span></div><span class="pilot-ai-policy-badge">참고용 의견 · 주문 연결 없음</span></div>
                 <div class="pilot-ai-grid">
                     <div class="pilot-ai-column">
-                        <section class="pilot-panel"><div class="pilot-ai-panel-header"><div><h2 class="pilot-panel-title">구독 provider</h2><p class="pilot-panel-subtitle">로컬 로그인 세션의 현재 상태</p></div><span class="pilot-status-pill is-warning" id="pilot-ai-provider-policy">API key 미사용</span></div><div class="pilot-ai-panel-body"><div id="pilot-ai-providers" class="pilot-ai-providers"><div class="pilot-ai-empty">provider 상태를 확인하는 중입니다.</div></div><div class="pilot-inline-note"><i class="ph ph-info" aria-hidden="true"></i><span>GPT는 Codex CLI, Claude는 Claude CLI의 인증 상태만 사용합니다.</span></div></div></section>
-                        <section class="pilot-panel"><div class="pilot-ai-panel-header"><div><h2 class="pilot-panel-title">자문 실효성</h2><p class="pilot-panel-subtitle">실제 provider 응답만 미래 가격과 대조합니다.</p></div><span class="pilot-status-pill is-warning" id="pilot-ai-effectiveness-state">표본 대기</span></div><div class="pilot-ai-panel-body"><div id="pilot-ai-effectiveness" class="pilot-ai-effectiveness"><div class="pilot-ai-empty">실제 provider 자문과 평가 시점 이후 가격이 쌓이면 지표가 표시됩니다.</div></div></div></section>
-                        <section class="pilot-panel"><div class="pilot-ai-panel-header"><div><h2 class="pilot-panel-title">장기 모니터링 세션</h2><p class="pilot-panel-subtitle">중지·일시정지·재개와 이력을 보존합니다.</p></div><span class="pilot-status-pill" id="pilot-ai-session-count">0 active</span></div><div class="pilot-ai-panel-body"><div id="pilot-ai-sessions" class="pilot-ai-session-list"><div class="pilot-ai-empty">아직 모니터링 세션이 없습니다.</div></div></div></section>
+                        <section class="pilot-panel"><div class="pilot-ai-panel-header"><div><h2 class="pilot-panel-title">구독 AI</h2><p class="pilot-panel-subtitle">로컬 로그인 세션의 현재 상태</p></div><span class="pilot-status-pill is-warning" id="pilot-ai-provider-policy">API key 미사용</span></div><div class="pilot-ai-panel-body"><div id="pilot-ai-providers" class="pilot-ai-providers"><div class="pilot-ai-empty">provider 상태를 확인하는 중입니다.</div></div><div class="pilot-inline-note"><i class="ph ph-info" aria-hidden="true"></i><span>GPT는 Codex CLI, Claude는 Claude CLI의 인증 상태만 사용합니다.</span></div></div></section>
+                        <section class="pilot-panel"><div class="pilot-ai-panel-header"><div><h2 class="pilot-panel-title">자문 성과</h2><p class="pilot-panel-subtitle">실제 AI 응답만 이후 가격과 대조합니다.</p></div><span class="pilot-status-pill is-warning" id="pilot-ai-effectiveness-state">데이터 대기</span></div><div class="pilot-ai-panel-body"><div id="pilot-ai-effectiveness" class="pilot-ai-effectiveness"><div class="pilot-ai-empty">실제 provider 자문과 평가 시점 이후 가격이 쌓이면 지표가 표시됩니다.</div></div></div></section>
+                        <section class="pilot-panel"><div class="pilot-ai-panel-header"><div><h2 class="pilot-panel-title">장기 모니터링 세션</h2><p class="pilot-panel-subtitle">중지·일시정지·재개와 이력을 보존합니다.</p></div><span class="pilot-status-pill" id="pilot-ai-session-count">0개 실행 중</span></div><div class="pilot-ai-panel-body"><div id="pilot-ai-sessions" class="pilot-ai-session-list"><div class="pilot-ai-empty">아직 모니터링 세션이 없습니다.</div></div></div></section>
                 <section class="pilot-panel"><div class="pilot-ai-panel-header"><div><h2 class="pilot-panel-title">새 세션 열기</h2><p class="pilot-panel-subtitle">이벤트와 자동 자문 간격을 직접 선택합니다.</p></div></div><div class="pilot-ai-panel-body"><form class="pilot-ai-session-form" id="pilot-ai-session-form"><label class="pilot-ai-form-label">세션 이름<input class="pilot-ai-form-input" id="pilot-ai-session-name" maxlength="80" value="시장 이벤트 자문" placeholder="예: BTC 반등 감시"></label><div class="pilot-ai-form-label">provider<div class="pilot-ai-check-grid"><label class="pilot-ai-check"><input type="checkbox" name="pilot-ai-provider" value="gpt" checked> GPT / Codex</label><label class="pilot-ai-check"><input type="checkbox" name="pilot-ai-provider" value="claude" checked> Claude</label></div></div><div class="pilot-ai-form-label">감시 이벤트<div class="pilot-ai-check-grid"><label class="pilot-ai-check"><input type="checkbox" name="pilot-ai-event" value="BUY_SIGNAL" checked> 매수 신호</label><label class="pilot-ai-check"><input type="checkbox" name="pilot-ai-event" value="SELL_SIGNAL" checked> 매도 신호</label><label class="pilot-ai-check"><input type="checkbox" name="pilot-ai-event" value="REBOUND_CANDIDATE"> 반등 후보</label><label class="pilot-ai-check"><input type="checkbox" name="pilot-ai-event" value="BREAKING_NEWS"> 속보</label><label class="pilot-ai-check"><input type="checkbox" name="pilot-ai-event" value="BUNDLE_SUGGESTION"> 리밸런싱 제안</label><label class="pilot-ai-check"><input type="checkbox" name="pilot-ai-event" value="TRADE_EXECUTED"> 체결 알림</label></div></div><label class="pilot-ai-form-label">코인 필터 <small>선택 사항 · BTC 또는 KRW-BTC</small><input class="pilot-ai-form-input" id="pilot-ai-session-coins" placeholder="전체 코인 감시"></label><div class="pilot-field-row"><label class="pilot-ai-form-label">재자문 간격 (초)<input class="pilot-ai-form-input" id="pilot-ai-cooldown" type="number" min="30" max="86400" step="30" value="300"></label><label class="pilot-ai-form-label">자동 자문<label class="pilot-ai-check"><input id="pilot-ai-auto-consult" type="checkbox" checked> 이벤트 즉시 요청</label></label></div><button class="pilot-button is-primary" type="submit"><i class="ph ph-broadcast" aria-hidden="true"></i> 장기 모니터링 시작</button><div class="pilot-inline-note"><i class="ph ph-database" aria-hidden="true"></i><span>세션·이벤트·자문 결과는 <code>ai_monitoring_sessions.json</code>에 기록됩니다.</span></div></form></div></section>
                     </div>
                     <div class="pilot-ai-column">
-                        <section class="pilot-panel"><div class="pilot-ai-panel-header"><div><h2 class="pilot-panel-title">실시간 이벤트</h2><p class="pilot-panel-subtitle">자동매매 분석 snapshot에서 생성된 관찰 이벤트</p></div><span class="pilot-status-pill is-warning" id="pilot-ai-snapshot-time">snapshot 대기</span></div><div class="pilot-ai-panel-body"><div id="pilot-ai-events" class="pilot-ai-event-list"><div class="pilot-ai-empty">자동매매 루프가 분석을 완료하면 이벤트가 여기에 표시됩니다.</div></div><div class="pilot-inline-note"><i class="ph ph-cursor-click" aria-hidden="true"></i><span>카드의 자문 버튼은 선택한 provider에만 snapshot을 보냅니다.</span></div></div></section>
-                        <section class="pilot-panel"><div class="pilot-ai-panel-header"><div><h2 class="pilot-panel-title">AI 자문 결과</h2><p class="pilot-panel-subtitle">provider별 의견·근거·위험·무효화 조건</p></div><span class="pilot-status-pill" id="pilot-ai-consultation-count">0 consultations</span></div><div class="pilot-ai-panel-body"><div id="pilot-ai-consultations" class="pilot-ai-consultation-list"><div class="pilot-ai-empty">아직 자문 결과가 없습니다.</div></div></div></section>
+                        <section class="pilot-panel"><div class="pilot-ai-panel-header"><div><h2 class="pilot-panel-title">실시간 이벤트</h2><p class="pilot-panel-subtitle">자동매매 분석에서 생성된 관찰 이벤트</p></div><span class="pilot-status-pill is-warning" id="pilot-ai-snapshot-time">수신 대기</span></div><div class="pilot-ai-panel-body"><div id="pilot-ai-events" class="pilot-ai-event-list"><div class="pilot-ai-empty">자동매매 루프가 분석을 완료하면 이벤트가 여기에 표시됩니다.</div></div><div class="pilot-inline-note"><i class="ph ph-cursor-click" aria-hidden="true"></i><span>카드의 자문 버튼은 선택한 provider에만 snapshot을 보냅니다.</span></div></div></section>
+                        <section class="pilot-panel"><div class="pilot-ai-panel-header"><div><h2 class="pilot-panel-title">AI 자문 결과</h2><p class="pilot-panel-subtitle">AI별 의견·이유·위험·재검토 조건</p></div><span class="pilot-status-pill" id="pilot-ai-consultation-count">0건</span></div><div class="pilot-ai-panel-body"><div id="pilot-ai-consultations" class="pilot-ai-consultation-list"><div class="pilot-ai-empty">아직 자문 결과가 없습니다.</div></div></div></section>
                     </div>
                 </div>
             </section>
@@ -377,7 +453,7 @@
         if (!container) return;
         if (policy) policy.textContent = status?.usesApiKeys === false ? 'API key 미사용' : '로컬 세션 확인';
         if (!status?.providers?.length) {
-            container.innerHTML = '<div class="pilot-ai-empty" style="grid-column:1/-1">provider 상태를 불러오지 못했습니다.</div>';
+            container.innerHTML = '<div class="pilot-ai-empty" style="grid-column:1/-1">AI 연결 상태를 불러오지 못했습니다.</div>';
             return;
         }
         container.innerHTML = status.providers.map(provider => {
@@ -385,13 +461,13 @@
                 (provider.status === 'CONFIG_ERROR' && provider.canAttemptWithoutUserConfig === true);
             const stateClass = configWarning ? 'is-warning' : provider.ready ? 'is-ready' : provider.status === 'NOT_AUTHENTICATED' ? 'is-warning' : 'is-error';
             const stateText = provider.status === 'READY_WITH_CONFIG_WARNING'
-                ? 'READY · CONFIG WARN'
+                ? '준비됨 · 설정 경고'
                 : provider.status === 'CONFIG_ERROR' && provider.canAttemptWithoutUserConfig === true
-                    ? 'TRYABLE · CONFIG WARN'
-                    : provider.ready ? 'READY' : provider.status === 'NOT_AUTHENTICATED' ? 'LOGIN NEEDED' : provider.status || 'UNAVAILABLE';
+                    ? '시도 가능 · 설정 경고'
+                    : provider.ready ? '준비됨' : provider.status === 'NOT_AUTHENTICATED' ? '로그인 필요' : provider.status || '사용 불가';
             const nextStep = provider.status === 'CONFIG_ERROR' && provider.canAttemptWithoutUserConfig === true
-                ? '격리 실행을 시도합니다. 첫 실제 응답 후 READY로 확인됩니다.'
-                : provider.ready && !configWarning ? 'subscription session available' : provider.nextStep || 'check local CLI login';
+                ? '격리 실행을 시도합니다. 첫 실제 응답 후 준비됨으로 확인됩니다.'
+                : provider.ready && !configWarning ? '구독 세션 사용 가능' : provider.nextStep || '로컬 CLI 로그인을 확인하세요';
             return `<article class="pilot-ai-provider ${stateClass}"><div class="pilot-ai-provider-head"><span class="pilot-ai-provider-name">${escapeHtml(provider.label || aiProviderLabel(provider.id))}</span><span class="pilot-ai-provider-state ${stateClass}">${escapeHtml(stateText)}</span></div><div class="pilot-ai-provider-detail">${escapeHtml(provider.detail || provider.subscriptionLabel || '')}</div><div class="pilot-ai-provider-detail" style="margin-top:4px;font-family:'SFMono-Regular',Consolas,monospace;font-size:10px">${escapeHtml(nextStep)}</div></article>`;
         }).join('');
     }
@@ -402,11 +478,11 @@
         if (!container) return;
         const evidenceReady = effectiveness?.sufficientEvidence === true;
         if (statePill) {
-            statePill.textContent = evidenceReady ? '검증 표본 충족' : '표본 부족';
+            statePill.textContent = evidenceReady ? '충분한 데이터' : '데이터 부족';
             statePill.className = `pilot-status-pill ${evidenceReady ? 'is-ready' : 'is-warning'}`;
         }
         if (!effectiveness) {
-            container.innerHTML = '<div class="pilot-ai-empty">실효성 지표를 불러오지 못했습니다.</div>';
+            container.innerHTML = '<div class="pilot-ai-empty">성과 지표를 불러오지 못했습니다.</div>';
             return;
         }
         const stats = Object.values(effectiveness.providerStats || {});
@@ -426,7 +502,7 @@
                     : `응답 ${stat.completed || 0}/${stat.attempted || 0} · 평가 ${stat.evaluated || 0} · actionable ${stat.actionableEvaluations || 0} · 지연 ${latency}${veto}${vetoImpact}`;
                 return `<div class="pilot-ai-effectiveness-row"><div><strong>${escapeHtml(stat.label || stat.source)}</strong><span>${escapeHtml(resultLine)}</span></div><b>${escapeHtml(hitRate)}</b></div>`;
             }).join('')
-            : '<div class="pilot-ai-empty">아직 실제 provider 응답이 없습니다.</div>';
+            : '<div class="pilot-ai-empty">아직 실제 AI 응답이 없습니다.</div>';
         const coverage = effectiveness.evaluationCoverageRate === null || effectiveness.evaluationCoverageRate === undefined
             ? '-'
             : `${(number(effectiveness.evaluationCoverageRate) * 100).toFixed(1)}%`;
@@ -434,10 +510,10 @@
             ? '-'
             : `${(number(effectiveness.actualProviderCompletionRate) * 100).toFixed(1)}%`;
         const warning = effectiveness.evidenceWarning
-            ? `<div class="pilot-inline-note"><i class="ph ph-warning" aria-hidden="true"></i><span>${escapeHtml(effectiveness.evidenceWarning)}</span></div>`
+            ? `<div class="pilot-inline-note"><i class="ph ph-warning" aria-hidden="true"></i><span>${escapeHtml(toUserText(effectiveness.evidenceWarning))}</span></div>`
             : '';
         const actionable = Math.max(...stats.map(stat => Number(stat.actionableEvaluations) || 0), 0);
-        container.innerHTML = `<div class="pilot-ai-effectiveness-summary"><div><strong>${escapeHtml(String(effectiveness.actualProviderCompletions || 0))}</strong><span>실제 응답</span></div><div><strong>${escapeHtml(String(effectiveness.evaluatedConsultations || 0))}</strong><span>평가 완료</span></div><div><strong>${escapeHtml(String(actionable))}</strong><span>비중립 표본</span></div><div><strong>${escapeHtml(coverage)}</strong><span>평가 커버리지</span></div><div><strong>${escapeHtml(completion)}</strong><span>응답 성공률</span></div></div><div class="pilot-ai-effectiveness-list">${statMarkup}</div>${providerStats.length ? '<div class="pilot-inline-note"><i class="ph ph-chart-line-up" aria-hidden="true"></i><span>충분성 표본은 비중립 BUY/SELL 결과 또는 VETO_GOOD/MISSED_OPPORTUNITY만 집계합니다. CALM, FLAT, VETO_FLAT은 제외합니다.</span></div>' : ''}${warning}`;
+        container.innerHTML = `<div class="pilot-ai-effectiveness-summary"><div><strong>${escapeHtml(String(effectiveness.actualProviderCompletions || 0))}</strong><span>실제 응답</span></div><div><strong>${escapeHtml(String(effectiveness.evaluatedConsultations || 0))}</strong><span>평가 완료</span></div><div><strong>${escapeHtml(String(actionable))}</strong><span>비중립 응답</span></div><div><strong>${escapeHtml(coverage)}</strong><span>평가 비율</span></div><div><strong>${escapeHtml(completion)}</strong><span>응답 성공률</span></div></div><div class="pilot-ai-effectiveness-list">${statMarkup}</div>${providerStats.length ? '<div class="pilot-inline-note"><i class="ph ph-chart-line-up" aria-hidden="true"></i><span>적중률은 비중립 BUY/SELL 결과와 회피 판정만 집계하고, 중립 결과는 제외합니다.</span></div>' : ''}${warning}`;
     }
 
     function renderAiSessions(sessions) {
@@ -445,14 +521,14 @@
         const count = byId('pilot-ai-session-count');
         if (!container) return;
         const activeCount = (sessions || []).filter(session => session.status === 'RUNNING').length;
-        if (count) count.textContent = `${activeCount} active / ${(sessions || []).length} total`;
+        if (count) count.textContent = `실행 중 ${activeCount}개 / 전체 ${(sessions || []).length}개`;
         if (!sessions?.length) {
             container.innerHTML = '<div class="pilot-ai-empty">아직 모니터링 세션이 없습니다.</div>';
             return;
         }
         container.innerHTML = sessions.map(session => {
             const statusClass = session.status === 'RUNNING' ? '' : session.status === 'PAUSED' ? 'is-paused' : 'is-stopped';
-            const statusText = session.status === 'RUNNING' ? 'RUNNING' : session.status === 'PAUSED' ? 'PAUSED' : 'STOPPED';
+            const statusText = aiStatusLabel(session.status);
             const providers = (session.providers || []).map(aiProviderLabel).join(' + ');
             const events = (session.eventTypes || []).map(type => aiEventLabels[type] || type).join(' · ');
             const coins = session.coins?.length ? session.coins.map(symbolOf).join(', ') : '전체 코인';
@@ -477,7 +553,7 @@
             const actionClass = event.action === 'SELL' ? 'is-sell' : event.action === 'BUY' ? 'is-buy' : '';
             const coin = event.coin ? symbolOf(event.coin) : 'MARKET';
             const price = event.price === null || event.price === undefined ? '-' : `${formatPrice(event.price)}원`;
-            return `<article class="pilot-ai-event ${eventClass}"><div class="pilot-ai-event-head"><span class="pilot-ai-event-title">${escapeHtml(coin)} · ${escapeHtml(aiEventLabels[event.type] || event.type)}</span><span class="pilot-ai-event-action ${actionClass}">${escapeHtml(event.action || 'WAIT')}</span></div><div class="pilot-ai-event-meta">${escapeHtml(formatDateTime(event.timestamp))} · ${escapeHtml(price)}${event.signalStrength ? ` · ${escapeHtml(event.signalStrength)}` : ''}<br>${escapeHtml(event.reason || event.snapshot?.title || '관찰 이벤트')}</div><div class="pilot-ai-actions"><button type="button" class="pilot-button is-small" data-pilot-ai-consult-event="${event.id}"><i class="ph ph-sparkle" aria-hidden="true"></i> 이 이벤트 자문</button></div></article>`;
+            return `<article class="pilot-ai-event ${eventClass}"><div class="pilot-ai-event-head"><span class="pilot-ai-event-title">${escapeHtml(coin)} · ${escapeHtml(aiEventLabels[event.type] || event.type)}</span><span class="pilot-ai-event-action ${actionClass}">${escapeHtml(toUserText(event.action || 'WAIT'))}</span></div><div class="pilot-ai-event-meta">${escapeHtml(formatDateTime(event.timestamp))} · ${escapeHtml(price)}${event.signalStrength ? ` · ${escapeHtml(event.signalStrength)}` : ''}<br>${escapeHtml(toUserText(event.reason || event.snapshot?.title || '관찰 이벤트'))}</div><div class="pilot-ai-actions"><button type="button" class="pilot-button is-small" data-pilot-ai-consult-event="${event.id}"><i class="ph ph-sparkle" aria-hidden="true"></i> 이 이벤트 자문</button></div></article>`;
         }).join('');
     }
 
@@ -485,7 +561,7 @@
         const container = byId('pilot-ai-consultations');
         const count = byId('pilot-ai-consultation-count');
         if (!container) return;
-        if (count) count.textContent = `${(consultations || []).length} consultations`;
+        if (count) count.textContent = `${(consultations || []).length}건`;
         if (!consultations?.length) {
             container.innerHTML = '<div class="pilot-ai-empty">아직 자문 결과가 없습니다.</div>';
             return;
@@ -502,26 +578,26 @@
                 if (result.status === 'FALLBACK' && result.advice) {
                     const fallback = result.advice;
                     const risks = (fallback.risks || []).map(risk => `<li>${escapeHtml(risk)}</li>`).join('');
-                    return `<div class="pilot-ai-consultation-result"><div class="pilot-ai-advice-action is-wait">LOCAL<br>BRIEF</div><div class="pilot-ai-rationale"><strong>AI 없음 · 사실 요약</strong><br>${escapeHtml(fallback.rationale || '')}${risks ? `<ul class="pilot-ai-risks">${risks}</ul>` : ''}<div class="pilot-ai-consultation-meta">${escapeHtml(fallback.invalidation || 'provider 연결 후 재자문')}</div></div></div>`;
+                    return `<div class="pilot-ai-consultation-result"><div class="pilot-ai-advice-action is-wait">로컬<br>요약</div><div class="pilot-ai-rationale"><strong>AI 없음 · 사실 요약</strong><br>${escapeHtml(fallback.rationale || '')}${risks ? `<ul class="pilot-ai-risks">${risks}</ul>` : ''}<div class="pilot-ai-consultation-meta">${escapeHtml(fallback.invalidation || 'provider 연결 후 재자문')}</div></div></div>`;
                 }
                 if (result.status !== 'COMPLETED' || !result.advice) return `<div class="pilot-ai-rationale" style="color:var(--sl-red)">${escapeHtml(aiProviderLabel(result.provider))}: ${escapeHtml(result.error || '응답 실패')}</div>`;
                 const advice = result.advice;
                 const actionClass = advice.action === 'SELL' ? 'is-sell' : ['HOLD', 'WAIT'].includes(advice.action) ? 'is-wait' : '';
                 const risks = (advice.risks || []).map(risk => `<li>${escapeHtml(risk)}</li>`).join('');
                 const configWarning = result.configWarning ? '<div class="pilot-ai-consultation-meta">Codex 사용자 설정 경고 · 격리 실행으로 응답 확인</div>' : '';
-                return `<div class="pilot-ai-consultation-result"><div class="pilot-ai-advice-action ${actionClass}">${escapeHtml(advice.action)}<br><small>${number(advice.confidence)}%</small></div><div class="pilot-ai-rationale"><strong>${escapeHtml(aiProviderLabel(result.provider))}</strong> · ${escapeHtml(advice.horizon || '')}<br>${escapeHtml(advice.rationale || '')}${risks ? `<ul class="pilot-ai-risks">${risks}</ul>` : ''}<div class="pilot-ai-consultation-meta">무효화 조건: ${escapeHtml(advice.invalidation || '추가 확인 필요')}</div>${configWarning}</div></div>`;
+                return `<div class="pilot-ai-consultation-result"><div class="pilot-ai-advice-action ${actionClass}">${escapeHtml(toUserText(advice.action))}</div><div class="pilot-ai-rationale"><strong>${escapeHtml(aiProviderLabel(result.provider))}</strong> · ${escapeHtml(advice.horizon || '')}<br>${escapeHtml(advice.rationale || '')}${risks ? `<ul class="pilot-ai-risks">${risks}</ul>` : ''}<div class="pilot-ai-consultation-meta">재검토 조건: ${escapeHtml(advice.invalidation || '추가 확인 필요')}</div>${configWarning}</div></div>`;
             }).join('');
             const pending = consultation.status === 'RUNNING' ? '<div class="pilot-ai-rationale">응답을 기다리는 중…</div>' : '';
             const error = consultation.error ? `<div class="pilot-ai-rationale" style="color:var(--sl-red)">${escapeHtml(consultation.error)}</div>` : '';
             const evaluation = consultation.evaluation;
             const evaluationMarkup = evaluation?.status === 'COMPLETED'
-                ? `<div class="pilot-ai-evaluation"><strong>실효성 평가</strong><span>${escapeHtml(`${number(evaluation.horizonMinutes, 5)}분 후 ${number(evaluation.priceChangePercent).toFixed(2)}%`)}</span><span>${(evaluation.verdicts || []).map(verdict => `${escapeHtml(verdict.providerLabel || verdict.source)} ${escapeHtml(verdict.verdict)}`).join(' · ')}</span></div>`
+                ? `<div class="pilot-ai-evaluation"><strong>결과 평가</strong><span>${escapeHtml(`${number(evaluation.horizonMinutes, 5)}분 후 ${number(evaluation.priceChangePercent).toFixed(2)}%`)}</span><span>${(evaluation.verdicts || []).map(verdict => `${escapeHtml(toUserText(verdict.providerLabel || verdict.source))} ${escapeHtml(toUserText(verdict.verdict))}`).join(' · ')}</span></div>`
                 : evaluation?.status === 'PENDING'
-                    ? '<div class="pilot-ai-evaluation is-pending"><strong>실효성 평가 대기</strong><span>평가 시점 이후 동일 코인 가격을 기다리는 중</span></div>'
+                    ? '<div class="pilot-ai-evaluation is-pending"><strong>결과 평가 대기</strong><span>평가 시점 이후 동일 코인 가격을 기다리는 중</span></div>'
                     : evaluation?.status === 'NOT_EVALUABLE'
-                        ? `<div class="pilot-ai-evaluation is-pending"><strong>실효성 평가 제외</strong><span>${escapeHtml(evaluation.reason || '기준 가격 또는 실제 provider 응답 없음')}</span></div>`
+                        ? `<div class="pilot-ai-evaluation is-pending"><strong>결과 평가 제외</strong><span>${escapeHtml(toUserText(evaluation.reason || '기준 가격 또는 실제 provider 응답 없음'))}</span></div>`
                         : '';
-            return `<article class="pilot-ai-consultation ${stateClass}"><div class="pilot-ai-consultation-head"><span class="pilot-ai-event-title">${escapeHtml(coin)} · ${escapeHtml(aiEventLabels[event.type] || event.type || '자문')}</span><span class="pilot-ai-provider-state ${stateClass === 'is-completed' ? 'is-ready' : stateClass === 'is-failed' ? 'is-error' : 'is-warning'}">${escapeHtml(consultation.status || '-')}</span></div><div class="pilot-ai-consultation-meta">${escapeHtml(formatDateTime(consultation.createdAt))} · ${(consultation.providerSelection || []).map(aiProviderLabel).map(escapeHtml).join(' + ')}${consultation.auto ? ' · 자동 자문' : ' · 수동 자문'}</div>${results || pending || error}${evaluationMarkup}</article>`;
+            return `<article class="pilot-ai-consultation ${stateClass}"><div class="pilot-ai-consultation-head"><span class="pilot-ai-event-title">${escapeHtml(coin)} · ${escapeHtml(aiEventLabels[event.type] || event.type || '자문')}</span><span class="pilot-ai-provider-state ${stateClass === 'is-completed' ? 'is-ready' : stateClass === 'is-failed' ? 'is-error' : 'is-warning'}">${escapeHtml(aiStatusLabel(consultation.status))}</span></div><div class="pilot-ai-consultation-meta">${escapeHtml(formatDateTime(consultation.createdAt))} · ${(consultation.providerSelection || []).map(aiProviderLabel).map(escapeHtml).join(' + ')}${consultation.auto ? ' · 자동 자문' : ' · 수동 자문'}</div>${results || pending || error}${evaluationMarkup}</article>`;
         }).join('');
     }
 
@@ -536,7 +612,7 @@
         renderAiConsultations(state.ai.consultations);
         renderAiEffectiveness(state.ai.effectiveness);
         setText('pilot-ai-sync', snapshot.updatedAt ? `동기화 ${formatDateTime(snapshot.updatedAt)}` : '동기화 -');
-        setText('pilot-ai-snapshot-time', snapshot.latestSnapshot?.timestamp ? `snapshot ${formatTime(snapshot.latestSnapshot.timestamp, true)}` : 'snapshot 대기');
+        setText('pilot-ai-snapshot-time', snapshot.latestSnapshot?.timestamp ? `수신 ${formatTime(snapshot.latestSnapshot.timestamp, true)}` : '수신 대기');
     }
 
     async function loadAiDesk(force = false) {
@@ -605,7 +681,7 @@
                 consultationStatus === 'COMPLETED'
                     ? 'AI 자문 결과를 받았습니다'
                     : consultationStatus === 'DEGRADED'
-                        ? 'provider 미연결 · 사실 기반 WAIT 브리프를 저장했습니다'
+                        ? 'provider 미연결 · 사실 기반 WAIT 요약을 저장했습니다'
                         : 'AI 자문이 완료되지 않았습니다',
                 consultationStatus === 'COMPLETED' ? 'success' : 'warning'
             );
@@ -670,6 +746,85 @@
         aiSocket.on('ai-session-update', data => { if (data?.session) handleAiSessionUpdate(data.session); });
     }
 
+    function initProgressiveInstall() {
+        const installButton = byId('pilot-pwa-install');
+        const installState = byId('pilot-pwa-state');
+        if (!installButton || !installState) return;
+
+        let deferredInstallPrompt = null;
+        const isIos = /iphone|ipad|ipod/i.test(window.navigator.userAgent || '') ||
+            (window.navigator.platform === 'MacIntel' && window.navigator.maxTouchPoints > 1);
+        const isAndroid = /android/i.test(window.navigator.userAgent || '');
+        const isStandalone = () => window.matchMedia?.('(display-mode: standalone)').matches || window.navigator.standalone;
+
+        function openInstallGuide() {
+            const platformTitle = isIos ? 'iPhone·iPad' : isAndroid ? 'Android' : '데스크톱 브라우저';
+            const steps = isIos
+                ? '<ol class="pilot-install-guide-steps"><li>Safari에서 이 CoinPilot 화면을 엽니다.</li><li>하단 또는 상단의 공유 버튼을 누릅니다.</li><li>“홈 화면에 추가”를 선택하고 추가합니다.</li></ol><p class="pilot-install-guide-note">홈 화면의 CoinPilot 아이콘으로 다시 열면 이 화면이 설치앱 모드로 표시됩니다. 계좌·시세·거래 상태는 계속 서버 API에서 확인하며, 오프라인에서는 오래된 거래 상태를 보여주지 않습니다.</p>'
+                : `<ol class="pilot-install-guide-steps"><li>${platformTitle} 브라우저의 주소창 또는 메뉴를 엽니다.</li><li>“앱 설치”, “CoinPilot 설치” 또는 “홈 화면에 추가”를 선택합니다.</li><li>설치가 끝난 뒤 생성된 CoinPilot 아이콘으로 다시 엽니다.</li></ol><p class="pilot-install-guide-note">설치 이벤트가 아직 브라우저에 전달되지 않은 경우에도 메뉴에서 직접 설치할 수 있습니다. 설치 후 다시 열면 이 화면이 설치앱 모드로 표시됩니다.</p>`;
+            showModal('CoinPilot 설치 안내', `<div class="pilot-install-guide"><div class="pilot-inline-note"><i class="ph ph-device-mobile" aria-hidden="true"></i><span>${platformTitle}용 설치 절차입니다.</span></div>${steps}</div>`);
+        }
+
+        const renderInstallState = (installed = isStandalone()) => {
+            if (installed) {
+                installState.textContent = '설치앱 모드';
+                installState.className = 'pilot-status-pill is-ready pilot-pwa-state';
+                installButton.hidden = true;
+                return;
+            }
+            installState.textContent = deferredInstallPrompt ? '설치 가능' : (isIos ? '홈 화면 설치' : '브라우저 모드');
+            installState.className = `pilot-status-pill ${deferredInstallPrompt ? 'is-ready' : 'is-warning'} pilot-pwa-state`;
+            installButton.hidden = false;
+            installButton.textContent = isIos ? '설치 안내' : '앱으로 설치';
+        };
+
+        renderInstallState();
+        const refreshInstallState = () => renderInstallState();
+        document.addEventListener('visibilitychange', refreshInstallState);
+        window.addEventListener('pageshow', refreshInstallState);
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('/sw.js').catch(error => {
+                console.warn('PWA service worker 등록 실패:', error.message);
+                installState.textContent = '설치 확인 필요';
+                installState.className = 'pilot-status-pill is-warning pilot-pwa-state';
+            });
+        }
+
+        window.addEventListener('beforeinstallprompt', event => {
+            // iOS/iPadOS uses the Share -> Add to Home Screen flow. Some
+            // Chromium user-agent emulations can still emit this event, but
+            // routing those clicks to a native prompt leaves the iOS guide
+            // unreachable. Keep the platform contract explicit.
+            if (isIos || isStandalone()) return;
+            event.preventDefault();
+            deferredInstallPrompt = event;
+            renderInstallState(false);
+        });
+
+        window.addEventListener('appinstalled', () => {
+            deferredInstallPrompt = null;
+            renderInstallState(true);
+            showToast('CoinPilot 설치가 완료되었습니다', 'success');
+        });
+
+        installButton.addEventListener('click', async () => {
+            if (!deferredInstallPrompt) {
+                openInstallGuide();
+                return;
+            }
+            deferredInstallPrompt.prompt();
+            const choice = await deferredInstallPrompt.userChoice;
+            deferredInstallPrompt = null;
+            if (choice?.outcome === 'accepted') {
+                installState.textContent = '설치 요청 완료';
+                installState.className = 'pilot-status-pill is-ready pilot-pwa-state';
+                installButton.hidden = true;
+            } else {
+                renderInstallState(false);
+            }
+        });
+    }
+
     function renderShell() {
         root.innerHTML = `
             <div class="pilot-app">
@@ -680,15 +835,15 @@
                     </div>
                     <nav class="pilot-sidebar-nav">
                         <div class="pilot-nav-label">Workspace</div>
-                        <button type="button" class="pilot-nav-button is-active" data-pilot-view="overview"><i class="ph ph-chart-line-up" aria-hidden="true"></i><span>근거 로그</span></button>
+                        <button type="button" class="pilot-nav-button is-active" data-pilot-view="overview"><i class="ph ph-chart-line-up" aria-hidden="true"></i><span>대시보드</span></button>
                         <button type="button" class="pilot-nav-button" data-pilot-view="trade"><i class="ph ph-hand-coins" aria-hidden="true"></i><span>거래 실행</span></button>
                         <button type="button" class="pilot-nav-button" data-pilot-view="portfolio"><i class="ph ph-wallet" aria-hidden="true"></i><span>포트폴리오</span></button>
                         <button type="button" class="pilot-nav-button" data-pilot-view="market"><i class="ph ph-binoculars" aria-hidden="true"></i><span>시장 관찰</span></button>
-                        <button type="button" class="pilot-nav-button" data-pilot-view="analysis"><i class="ph ph-function" aria-hidden="true"></i><span>전략 연구</span></button>
+                        <button type="button" class="pilot-nav-button" data-pilot-view="analysis"><i class="ph ph-function" aria-hidden="true"></i><span>전략 분석</span></button>
                         <button type="button" class="pilot-nav-button" data-pilot-view="news"><i class="ph ph-newspaper" aria-hidden="true"></i><span>뉴스 센터</span></button>
                         <div class="pilot-nav-label">Control</div>
                         <button type="button" class="pilot-nav-button" data-pilot-view="settings"><i class="ph ph-sliders-horizontal" aria-hidden="true"></i><span>설정</span></button>
-                        <button type="button" class="pilot-nav-button" data-pilot-view="history"><i class="ph ph-clipboard-text" aria-hidden="true"></i><span>검증 기록</span></button>
+                        <button type="button" class="pilot-nav-button" data-pilot-view="history"><i class="ph ph-clipboard-text" aria-hidden="true"></i><span>준비 현황</span></button>
                     </nav>
                     <div class="pilot-sidebar-bottom"><p class="pilot-sidebar-note">데이터로 더 나은 판단을,<br>더 안전한 거래를.</p><button type="button" class="pilot-nav-button" data-pilot-view="settings"><i class="ph ph-gear" aria-hidden="true"></i><span>환경 설정</span></button></div>
                 </aside>
@@ -703,22 +858,22 @@
                         <div class="pilot-top-meta"><span class="pilot-connection is-warn" id="pilot-connection"><span class="pilot-connection-dot"></span><span id="pilot-connection-label">연결 확인 중</span></span><span id="pilot-clock">-</span><span class="pilot-user-chip"><span class="pilot-user-avatar">OP</span>운영자</span></div>
                     </header>
 
-                    <section class="pilot-mode-banner" id="pilot-mode-banner" aria-live="polite">
-                        <div class="pilot-mode-banner-copy"><i class="ph ph-lock-key" aria-hidden="true"></i><div><strong id="pilot-mode-banner-title">실전 주문 잠금</strong><span id="pilot-mode-banner-copy">검증 게이트가 통과될 때까지 실제 주문은 실행할 수 없습니다.</span></div></div>
-                        <button type="button" class="pilot-button" data-pilot-go="history">검증 게이트 보기 <i class="ph ph-arrow-right" aria-hidden="true"></i></button>
-                    </section>
+                        <section class="pilot-mode-banner" id="pilot-mode-banner" aria-live="polite">
+                            <div class="pilot-mode-banner-copy"><i class="ph ph-lock-key" aria-hidden="true"></i><div><strong id="pilot-mode-banner-title">실전 주문 잠금</strong><span id="pilot-mode-banner-copy">사전 점검이 완료될 때까지 실제 주문은 실행할 수 없습니다.</span></div></div>
+                            <div class="pilot-mode-banner-actions"><span class="pilot-status-pill is-warning pilot-pwa-state" id="pilot-pwa-state">브라우저 모드</span><button type="button" class="pilot-button pilot-pwa-install" id="pilot-pwa-install">앱으로 설치</button><button type="button" class="pilot-button" data-pilot-go="history">준비 현황 보기 <i class="ph ph-arrow-right" aria-hidden="true"></i></button></div>
+                        </section>
 
                     <main class="pilot-content">
                         <section class="pilot-page is-active" data-pilot-page="overview">
-                            <div class="pilot-page-heading"><div><div class="pilot-kicker">Decision workspace</div><h1 class="pilot-page-title">근거 로그</h1><p class="pilot-page-description">전략의 판단과 결과를 시간순으로 기록합니다. 수익률보다 먼저, 어떤 데이터로 어떤 결정을 했는지 확인하세요.</p></div><div class="pilot-heading-actions"><span class="pilot-sync-note" id="pilot-overview-sync">마지막 동기화 -</span><button type="button" class="pilot-button" data-pilot-action="refresh-core"><i class="ph ph-arrows-clockwise" aria-hidden="true"></i> 새로고침</button></div></div>
+                            <div class="pilot-page-heading"><div><div class="pilot-kicker">Decision workspace</div><h1 class="pilot-page-title">대시보드</h1><p class="pilot-page-description">자산·포지션·최근 활동을 한 화면에서 확인합니다. 수익률보다 먼저, 어떤 데이터로 어떤 결정을 했는지 볼 수 있습니다.</p></div><div class="pilot-heading-actions"><span class="pilot-sync-note" id="pilot-overview-sync">마지막 동기화 -</span><button type="button" class="pilot-button" data-pilot-action="refresh-core"><i class="ph ph-arrows-clockwise" aria-hidden="true"></i> 새로고침</button></div></div>
                             <div class="pilot-gate-grid">
-                                <button type="button" class="pilot-gate-card" data-pilot-view="history"><span class="pilot-gate-icon" id="pilot-gate-validation-icon"><i class="ph ph-check" aria-hidden="true"></i></span><span><strong class="pilot-gate-title">검증 게이트</strong><span class="pilot-gate-detail" id="pilot-gate-validation-detail">확인 중</span></span><i class="ph ph-caret-right pilot-gate-arrow" aria-hidden="true"></i></button>
-                                <button type="button" class="pilot-gate-card" data-pilot-view="history"><span class="pilot-gate-icon is-pending" id="pilot-gate-paper-icon"><i class="ph ph-hourglass-medium" aria-hidden="true"></i></span><span><strong class="pilot-gate-title">Forward paper</strong><span class="pilot-gate-detail" id="pilot-gate-paper-detail">세션 확인 중</span></span><i class="ph ph-caret-right pilot-gate-arrow" aria-hidden="true"></i></button>
-                                <button type="button" class="pilot-gate-card" data-pilot-view="history"><span class="pilot-gate-icon is-pending" id="pilot-gate-freshness-icon"><i class="ph ph-database" aria-hidden="true"></i></span><span><strong class="pilot-gate-title">데이터 최신성</strong><span class="pilot-gate-detail" id="pilot-gate-freshness-detail">수집 상태 확인 중</span></span><i class="ph ph-caret-right pilot-gate-arrow" aria-hidden="true"></i></button>
+                                <button type="button" class="pilot-gate-card" data-pilot-view="history"><span class="pilot-gate-icon" id="pilot-gate-validation-icon"><i class="ph ph-check" aria-hidden="true"></i></span><span><strong class="pilot-gate-title">사전 점검</strong><span class="pilot-gate-detail" id="pilot-gate-validation-detail">확인 중</span></span><i class="ph ph-caret-right pilot-gate-arrow" aria-hidden="true"></i></button>
+                                <button type="button" class="pilot-gate-card" data-pilot-view="history"><span class="pilot-gate-icon is-pending" id="pilot-gate-paper-icon"><i class="ph ph-hourglass-medium" aria-hidden="true"></i></span><span><strong class="pilot-gate-title">모의투자 세션</strong><span class="pilot-gate-detail" id="pilot-gate-paper-detail">세션 확인 중</span></span><i class="ph ph-caret-right pilot-gate-arrow" aria-hidden="true"></i></button>
+                                <button type="button" class="pilot-gate-card" data-pilot-view="history"><span class="pilot-gate-icon is-pending" id="pilot-gate-freshness-icon"><i class="ph ph-database" aria-hidden="true"></i></span><span><strong class="pilot-gate-title">데이터 상태</strong><span class="pilot-gate-detail" id="pilot-gate-freshness-detail">수집 상태 확인 중</span></span><i class="ph ph-caret-right pilot-gate-arrow" aria-hidden="true"></i></button>
                             </div>
                             <div class="pilot-workspace-grid">
                                 <section class="pilot-panel"><div class="pilot-panel-header"><div><h2 class="pilot-panel-title">자산 추이</h2><p class="pilot-panel-subtitle">실현·평가 자산의 변화를 동일한 기준선에서 확인합니다.</p></div><div class="pilot-chart-toolbar"><div class="pilot-chart-legend"><span><i class="pilot-legend-dot"></i>총 평가자산</span><span><i class="pilot-legend-dot is-muted"></i>시작 자산</span></div><div class="pilot-range-tabs"><button type="button" class="pilot-tab-button" data-pilot-chart-period="1h">1H</button><button type="button" class="pilot-tab-button is-active" data-pilot-chart-period="24h">1D</button><button type="button" class="pilot-tab-button" data-pilot-chart-period="7d">1W</button><button type="button" class="pilot-tab-button" data-pilot-chart-period="30d">1M</button></div></div></div><div class="pilot-chart-wrap"><canvas id="pilot-equity-chart" class="pilot-chart-canvas" aria-label="총 평가자산 추이 차트"></canvas><div class="pilot-chart-empty" id="pilot-equity-empty" hidden>자산 추이를 수집 중입니다.</div></div><div class="pilot-chart-footnote"><span id="pilot-equity-period-label">24시간 기준</span><span id="pilot-equity-source-label">-</span></div><div class="pilot-stat-strip"><div class="pilot-stat-cell"><span class="pilot-stat-label">총 평가자산</span><strong class="pilot-stat-value" id="pilot-total-assets">-</strong><span class="pilot-stat-caption" id="pilot-total-assets-caption">-</span></div><div class="pilot-stat-cell"><span class="pilot-stat-label">오늘의 손익</span><strong class="pilot-stat-value" id="pilot-today-profit">-</strong><span class="pilot-stat-caption" id="pilot-today-profit-caption">-</span></div><div class="pilot-stat-cell"><span class="pilot-stat-label">누적 손익</span><strong class="pilot-stat-value" id="pilot-cumulative-profit">-</strong><span class="pilot-stat-caption" id="pilot-cumulative-profit-caption">-</span></div><div class="pilot-stat-cell"><span class="pilot-stat-label">승률</span><strong class="pilot-stat-value" id="pilot-win-rate">-</strong><span class="pilot-stat-caption" id="pilot-trade-count-caption">-</span></div></div></section>
-                                ${tradePanelMarkup('overview', '실행 전 모드와 검증 상태를 먼저 확인하세요.')}
+                                ${tradePanelMarkup('overview', '실행 전 현재 모드를 먼저 확인하세요.')}
                             </div>
                             <div class="pilot-section-spacer"></div>
                             <section class="pilot-panel"><div class="pilot-panel-header"><div><h2 class="pilot-panel-title">보유 포지션</h2><p class="pilot-panel-subtitle">현재 평가손익과 다음으로 취할 수 있는 안전한 행동입니다.</p></div><button type="button" class="pilot-link-button" data-pilot-view="portfolio">전체 포트폴리오 보기 <i class="ph ph-arrow-right" aria-hidden="true"></i></button></div><div class="pilot-table-wrap"><table class="pilot-table"><thead><tr><th>자산</th><th class="pilot-table-number">수량</th><th class="pilot-table-number">평균 진입가</th><th class="pilot-table-number">현재가</th><th class="pilot-table-number">평가손익</th><th class="pilot-table-number">수익률</th><th>관리</th></tr></thead><tbody id="pilot-overview-positions"></tbody></table></div></section>
@@ -732,15 +887,15 @@
 
                         <section class="pilot-page" data-pilot-page="market"><div class="pilot-page-heading"><div><div class="pilot-kicker">Market observatory</div><h1 class="pilot-page-title">시장 관찰</h1><p class="pilot-page-description">선택한 마켓의 가격·캔들·거래량을 보고, 같은 화면에서 모의 주문을 검토합니다.</p></div><div class="pilot-heading-actions"><label class="pilot-field" style="min-width:200px"><span class="pilot-visually-hidden">마켓 검색</span><input class="pilot-input pilot-market-search" id="pilot-market-search" type="search" placeholder="마켓 검색 (BTC, ETH)"></label><button type="button" class="pilot-button" data-pilot-action="refresh-market"><i class="ph ph-arrows-clockwise" aria-hidden="true"></i> 시세 새로고침</button></div></div><div class="pilot-market-layout"><section class="pilot-panel"><div class="pilot-market-quote"><div><span class="pilot-market-symbol" id="pilot-market-symbol">BTC/KRW</span><span class="pilot-market-name" id="pilot-market-name">선택된 마켓</span></div><div><span class="pilot-market-price" id="pilot-market-price">-</span><span class="pilot-market-change" id="pilot-market-change">-</span></div></div><div class="pilot-market-metrics"><div><span class="pilot-market-metric-label">24H 고가</span><strong class="pilot-market-metric-value" id="pilot-market-high">-</strong></div><div><span class="pilot-market-metric-label">24H 저가</span><strong class="pilot-market-metric-value" id="pilot-market-low">-</strong></div><div><span class="pilot-market-metric-label">거래대금</span><strong class="pilot-market-metric-value" id="pilot-market-volume">-</strong></div><div><span class="pilot-market-metric-label">보유 평가</span><strong class="pilot-market-metric-value" id="pilot-market-holding">-</strong></div></div><div class="pilot-panel-header"><div><h2 class="pilot-panel-title">가격 차트</h2><p class="pilot-panel-subtitle">현재가와 완료 캔들을 분리해 표시합니다.</p></div><div class="pilot-market-toolbar"><button type="button" class="pilot-market-interval" data-pilot-candle-interval="1">1m</button><button type="button" class="pilot-market-interval is-active" data-pilot-candle-interval="5">5m</button><button type="button" class="pilot-market-interval" data-pilot-candle-interval="15">15m</button><button type="button" class="pilot-market-interval" data-pilot-candle-interval="60">1h</button></div></div><div class="pilot-market-chart-wrap"><canvas id="pilot-market-chart" class="pilot-market-chart" aria-label="선택 마켓 캔들 차트"></canvas><div class="pilot-chart-empty" id="pilot-market-empty" hidden>캔들 데이터를 불러오는 중입니다.</div></div></section>${tradePanelMarkup('market', '선택한 마켓과 보유 수량을 기준으로 계산합니다.')}</div><div class="pilot-section-spacer"></div><section class="pilot-panel"><div class="pilot-panel-header"><div><h2 class="pilot-panel-title">실시간 마켓</h2><p class="pilot-panel-subtitle">행을 선택하면 차트와 주문 패널이 함께 바뀝니다.</p></div><div class="pilot-filter-bar"><select class="pilot-select" style="width:auto" id="pilot-market-sort"><option value="volume">거래대금순</option><option value="change_desc">상승률순</option><option value="change_asc">하락률순</option><option value="name">이름순</option></select></div></div><div class="pilot-market-list" id="pilot-market-list"></div></section></section>
 
-                        <section class="pilot-page" data-pilot-page="analysis"><div class="pilot-page-heading"><div><div class="pilot-kicker">Strategy research</div><h1 class="pilot-page-title">전략 연구</h1><p class="pilot-page-description">신호를 실행 명령으로 오해하지 않도록, 기술 지표·점수·판정 근거를 분리해서 보여줍니다.</p></div><div class="pilot-heading-actions"><select class="pilot-select" style="width:auto" id="pilot-analysis-filter"><option value="all">전체 판정</option><option value="BUY">매수</option><option value="SELL">매도</option><option value="HOLD">관망</option></select><select class="pilot-select" style="width:auto" id="pilot-analysis-sort"><option value="score">총점순</option><option value="buy">매수점수순</option><option value="sell">매도점수순</option><option value="volume">거래대금순</option><option value="change">변동률순</option></select><button type="button" class="pilot-button" data-pilot-action="load-analysis"><i class="ph ph-play" aria-hidden="true"></i> 분석 실행</button></div></div><section class="pilot-panel"><div class="pilot-analysis-summary"><div class="pilot-analysis-stat"><strong id="pilot-analysis-total">-</strong><span>분석 마켓</span></div><div class="pilot-analysis-stat is-buy"><strong id="pilot-analysis-buy">-</strong><span>매수 판정</span></div><div class="pilot-analysis-stat is-sell"><strong id="pilot-analysis-sell">-</strong><span>매도 판정</span></div><div class="pilot-analysis-stat is-watch"><strong id="pilot-analysis-hold">-</strong><span>관망</span></div><div class="pilot-analysis-stat"><strong id="pilot-analysis-strong">-</strong><span>강한 신호</span></div></div><div class="pilot-analysis-table pilot-table-wrap"><table class="pilot-table"><thead><tr><th>자산</th><th class="pilot-table-number">현재가</th><th class="pilot-table-number">24H</th><th class="pilot-table-number">RSI</th><th>MACD</th><th class="pilot-table-number">점수</th><th>판정</th><th>관리</th></tr></thead><tbody id="pilot-analysis-rows"></tbody></table></div></section></section>
+                        <section class="pilot-page" data-pilot-page="analysis"><div class="pilot-page-heading"><div><div class="pilot-kicker">Strategy analysis</div><h1 class="pilot-page-title">전략 분석</h1><p class="pilot-page-description">신호를 실행 명령으로 오해하지 않도록, 기술 지표·점수·판정 이유를 분리해서 보여줍니다.</p></div><div class="pilot-heading-actions"><select class="pilot-select" style="width:auto" id="pilot-analysis-filter"><option value="all">전체 판정</option><option value="BUY">매수</option><option value="SELL">매도</option><option value="HOLD">관망</option></select><select class="pilot-select" style="width:auto" id="pilot-analysis-sort"><option value="score">총점순</option><option value="buy">매수점수순</option><option value="sell">매도점수순</option><option value="volume">거래대금순</option><option value="change">변동률순</option></select><button type="button" class="pilot-button" data-pilot-action="load-analysis"><i class="ph ph-play" aria-hidden="true"></i> 분석 실행</button></div></div><section class="pilot-panel"><div class="pilot-analysis-summary"><div class="pilot-analysis-stat"><strong id="pilot-analysis-total">-</strong><span>분석 마켓</span></div><div class="pilot-analysis-stat is-buy"><strong id="pilot-analysis-buy">-</strong><span>매수 판정</span></div><div class="pilot-analysis-stat is-sell"><strong id="pilot-analysis-sell">-</strong><span>매도 판정</span></div><div class="pilot-analysis-stat is-watch"><strong id="pilot-analysis-hold">-</strong><span>관망</span></div><div class="pilot-analysis-stat"><strong id="pilot-analysis-strong">-</strong><span>강한 신호</span></div></div><div class="pilot-analysis-table pilot-table-wrap"><table class="pilot-table"><thead><tr><th>자산</th><th class="pilot-table-number">현재가</th><th class="pilot-table-number">24H</th><th class="pilot-table-number">RSI</th><th>MACD</th><th class="pilot-table-number">점수</th><th>판정</th><th>관리</th></tr></thead><tbody id="pilot-analysis-rows"></tbody></table></div></section></section>
 
-                        <section class="pilot-page" data-pilot-page="news"><div class="pilot-page-heading"><div><div class="pilot-kicker">News center</div><h1 class="pilot-page-title">뉴스 센터</h1><p class="pilot-page-description">뉴스 감성은 의사결정 보조 정보입니다. 자동 주문의 승인 근거와 혼동하지 않도록 별도 영역에서 확인합니다.</p></div><div class="pilot-heading-actions"><select class="pilot-select" style="width:auto" id="pilot-news-filter"><option value="all">전체 감성</option><option value="positive">긍정</option><option value="negative">부정</option><option value="neutral">중립</option></select><button type="button" class="pilot-button" data-pilot-action="load-news"><i class="ph ph-arrows-clockwise" aria-hidden="true"></i> 뉴스 새로고침</button></div></div><section class="pilot-panel"><div class="pilot-news-sentiment"><div class="pilot-sentiment-score is-neutral" id="pilot-news-score">-</div><div><div class="pilot-sentiment-title" id="pilot-news-sentiment-title">시장 심리 확인 전</div><div class="pilot-sentiment-description" id="pilot-news-sentiment-copy">새로고침하면 누적 뉴스의 감성을 계산합니다.</div></div><span class="pilot-status-pill is-warning">참고 정보</span></div><div class="pilot-news-list" id="pilot-news-list"><div class="pilot-inline-empty">뉴스 새로고침을 눌러 최신 기사를 확인하세요.</div></div></section></section>
+                        <section class="pilot-page" data-pilot-page="news"><div class="pilot-page-heading"><div><div class="pilot-kicker">News center</div><h1 class="pilot-page-title">뉴스 센터</h1><p class="pilot-page-description">뉴스 감성은 의사결정 보조 정보입니다. 자동 주문 조건과 혼동하지 않도록 별도 영역에서 확인합니다.</p></div><div class="pilot-heading-actions"><select class="pilot-select" style="width:auto" id="pilot-news-filter"><option value="all">전체 감성</option><option value="positive">긍정</option><option value="negative">부정</option><option value="neutral">중립</option></select><button type="button" class="pilot-button" data-pilot-action="load-news"><i class="ph ph-arrows-clockwise" aria-hidden="true"></i> 뉴스 새로고침</button></div></div><section class="pilot-panel"><div class="pilot-news-sentiment"><div class="pilot-sentiment-score is-neutral" id="pilot-news-score">-</div><div><div class="pilot-sentiment-title" id="pilot-news-sentiment-title">시장 심리 확인 전</div><div class="pilot-sentiment-description" id="pilot-news-sentiment-copy">새로고침하면 누적 뉴스의 감성을 계산합니다.</div></div><span class="pilot-status-pill is-warning">참고 정보</span></div><div class="pilot-news-list" id="pilot-news-list"><div class="pilot-inline-empty">뉴스 새로고침을 눌러 최신 기사를 확인하세요.</div></div></section></section>
 
-                        <section class="pilot-page" data-pilot-page="settings"><div class="pilot-page-heading"><div><div class="pilot-kicker">Control room</div><h1 class="pilot-page-title">환경 설정</h1><p class="pilot-page-description">전략·리스크·자동 최적화 설정을 한 번에 조정합니다. 변경 전 현재 모드와 검증 영향을 확인하세요.</p></div><div class="pilot-heading-actions"><button type="button" class="pilot-button" data-pilot-action="reload-settings"><i class="ph ph-arrows-clockwise" aria-hidden="true"></i> 서버에서 다시 로드</button><button type="button" class="pilot-button is-primary" data-pilot-action="save-settings"><i class="ph ph-check" aria-hidden="true"></i> 변경사항 적용</button></div></div><div class="pilot-settings-grid"><div><section class="pilot-panel pilot-settings-section"><div class="pilot-panel-header"><div><h2 class="pilot-panel-title">자동 최적화</h2><p class="pilot-panel-subtitle">최적화는 후보 탐색이며, live gate를 자동으로 통과시키지 않습니다.</p></div><span class="pilot-status-pill is-warning" id="pilot-optimization-status">확인 중</span></div><div class="pilot-panel-body" id="pilot-optimization-controls"></div></section><div class="pilot-section-spacer"></div><section class="pilot-panel pilot-settings-section"><div class="pilot-panel-header"><div><h2 class="pilot-panel-title">투자 성향 프리셋</h2><p class="pilot-panel-subtitle">프리셋 적용은 현재 전략 설정을 즉시 변경합니다.</p></div></div><div class="pilot-panel-body"><div class="pilot-preset-grid" id="pilot-preset-grid"><div class="pilot-inline-empty">설정을 불러오는 중입니다.</div></div></div></section></div><section class="pilot-panel pilot-settings-section"><div class="pilot-panel-header"><div><h2 class="pilot-panel-title">전략·리스크 파라미터</h2><p class="pilot-panel-subtitle">값을 바꾼 뒤 하단의 적용 버튼으로 서버에 저장합니다.</p></div></div><div class="pilot-panel-body"><div class="pilot-settings-list" id="pilot-settings-list"><div class="pilot-inline-empty">설정을 불러오는 중입니다.</div></div></div></section></div></section>
+                        <section class="pilot-page" data-pilot-page="settings"><div class="pilot-page-heading"><div><div class="pilot-kicker">Control room</div><h1 class="pilot-page-title">환경 설정</h1><p class="pilot-page-description">전략·리스크·자동 최적화 설정을 한 번에 조정합니다. 변경 전 현재 모드와 영향 범위를 확인하세요.</p></div><div class="pilot-heading-actions"><button type="button" class="pilot-button" data-pilot-action="reload-settings"><i class="ph ph-arrows-clockwise" aria-hidden="true"></i> 서버에서 다시 로드</button><button type="button" class="pilot-button is-primary" data-pilot-action="save-settings"><i class="ph ph-check" aria-hidden="true"></i> 변경사항 적용</button></div></div><div class="pilot-settings-grid"><div><section class="pilot-panel pilot-settings-section"><div class="pilot-panel-header"><div><h2 class="pilot-panel-title">자동 최적화</h2><p class="pilot-panel-subtitle">최적화는 후보 탐색이며 결과가 자동으로 실전에 반영되지 않습니다.</p></div><span class="pilot-status-pill is-warning" id="pilot-optimization-status">확인 중</span></div><div class="pilot-panel-body" id="pilot-optimization-controls"></div></section><div class="pilot-section-spacer"></div><section class="pilot-panel pilot-settings-section"><div class="pilot-panel-header"><div><h2 class="pilot-panel-title">투자 성향 프리셋</h2><p class="pilot-panel-subtitle">프리셋 적용은 현재 전략 설정을 즉시 변경합니다.</p></div></div><div class="pilot-panel-body"><div class="pilot-preset-grid" id="pilot-preset-grid"><div class="pilot-inline-empty">설정을 불러오는 중입니다.</div></div></div></section></div><section class="pilot-panel pilot-settings-section"><div class="pilot-panel-header"><div><h2 class="pilot-panel-title">전략·리스크 파라미터</h2><p class="pilot-panel-subtitle">값을 바꾼 뒤 하단의 적용 버튼으로 서버에 저장합니다.</p></div></div><div class="pilot-panel-body"><div class="pilot-settings-list" id="pilot-settings-list"><div class="pilot-inline-empty">설정을 불러오는 중입니다.</div></div></div></section></div></section>
 
-                        <section class="pilot-page" data-pilot-page="history"><div class="pilot-page-heading"><div><div class="pilot-kicker">Validation ledger</div><h1 class="pilot-page-title">검증 기록</h1><p class="pilot-page-description">워크포워드 리포트와 forward paper 세션을 분리해 확인합니다. 작은 표본의 손익은 승격 근거가 아닙니다.</p></div><div class="pilot-heading-actions"><button type="button" class="pilot-button" data-pilot-action="refresh-history"><i class="ph ph-arrows-clockwise" aria-hidden="true"></i> 검증 새로고침</button></div></div><section class="pilot-panel"><div class="pilot-panel-header"><div><h2 class="pilot-panel-title">워크포워드 검증</h2><p class="pilot-panel-subtitle" id="pilot-validation-meta">리포트 확인 중</p></div><span class="pilot-status-pill is-warning" id="pilot-validation-status-pill">확인 중</span></div><div id="pilot-validation-detail"></div></section><div class="pilot-section-spacer"></div><section class="pilot-panel"><div class="pilot-panel-header"><div><h2 class="pilot-panel-title">Forward paper 세션</h2><p class="pilot-panel-subtitle" id="pilot-paper-meta">세션 확인 중</p></div><div class="pilot-heading-actions"><button type="button" class="pilot-button is-small" data-pilot-action="start-paper">새 세션 시작</button><button type="button" class="pilot-button is-small is-danger" data-pilot-action="stop-paper">세션 중지</button></div></div><div class="pilot-paper-status" id="pilot-paper-detail"></div></section><div class="pilot-section-spacer"></div><div class="pilot-split-grid"><section class="pilot-panel"><div class="pilot-panel-header"><div><h2 class="pilot-panel-title">최적화 이력</h2><p class="pilot-panel-subtitle">후보 탐색 기록</p></div></div><div class="pilot-panel-body" id="pilot-optimization-history"><div class="pilot-inline-empty">기록을 불러오는 중입니다.</div></div></section><section class="pilot-panel"><div class="pilot-panel-header"><div><h2 class="pilot-panel-title">백테스트 결과</h2><p class="pilot-panel-subtitle">전략별 진단 결과</p></div></div><div class="pilot-panel-body" id="pilot-backtest-results"><div class="pilot-inline-empty">결과를 불러오는 중입니다.</div></div></section></div></section>
+                        <section class="pilot-page" data-pilot-page="history"><div class="pilot-page-heading"><div><div class="pilot-kicker">Session records</div><h1 class="pilot-page-title">실전 준비 현황</h1><p class="pilot-page-description">전략의 사전 점검 결과와 모의투자 세션을 구분해 확인합니다. 소수 거래의 손익으로 실전 전환을 판단하지 않습니다.</p></div><div class="pilot-heading-actions"><button type="button" class="pilot-button" data-pilot-action="refresh-history"><i class="ph ph-arrows-clockwise" aria-hidden="true"></i> 새로고침</button></div></div><section class="pilot-panel"><div class="pilot-panel-header"><div><h2 class="pilot-panel-title">전략 사전 점검</h2><p class="pilot-panel-subtitle" id="pilot-validation-meta">리포트 확인 중</p></div><span class="pilot-status-pill is-warning" id="pilot-validation-status-pill">확인 중</span></div><div id="pilot-validation-detail"></div></section><div class="pilot-section-spacer"></div><section class="pilot-panel"><div class="pilot-panel-header"><div><h2 class="pilot-panel-title">모의투자 세션</h2><p class="pilot-panel-subtitle" id="pilot-paper-meta">세션 확인 중</p></div><div class="pilot-heading-actions"><button type="button" class="pilot-button is-small" data-pilot-action="start-paper">새 세션 시작</button><button type="button" class="pilot-button is-small is-danger" data-pilot-action="stop-paper">세션 중지</button></div></div><div class="pilot-paper-status" id="pilot-paper-detail"></div></section><div class="pilot-section-spacer"></div><div class="pilot-split-grid"><section class="pilot-panel"><div class="pilot-panel-header"><div><h2 class="pilot-panel-title">최적화 이력</h2><p class="pilot-panel-subtitle">파라미터 탐색 기록</p></div></div><div class="pilot-panel-body" id="pilot-optimization-history"><div class="pilot-inline-empty">기록을 불러오는 중입니다.</div></div></section><section class="pilot-panel"><div class="pilot-panel-header"><div><h2 class="pilot-panel-title">백테스트 결과</h2><p class="pilot-panel-subtitle">전략별 백테스트 결과</p></div></div><div class="pilot-panel-body" id="pilot-backtest-results"><div class="pilot-inline-empty">결과를 불러오는 중입니다.</div></div></section></div></section>
                     </main>
-                    <footer class="pilot-footer"><span><strong>CoinPilot</strong> <span aria-hidden="true">·</span> Discipline Today, A Safer Tomorrow.</span><span>시장은 늘 변합니다. 검증된 근거로, 더 나은 결정을.</span></footer>
+                    <footer class="pilot-footer"><span><strong>CoinPilot</strong> <span aria-hidden="true">·</span> Discipline Today, A Safer Tomorrow.</span><span>시장은 늘 변합니다. 데이터로, 더 나은 결정을.</span></footer>
                 </div>
             </div>
             <div class="pilot-toast-stack" id="pilot-toast-stack" aria-live="polite" aria-atomic="true"></div>
@@ -759,24 +914,31 @@
         if (newsPage && !newsPage.querySelector('.pilot-news-context')) {
             newsPage.classList.add('pilot-news-page');
             newsPage.querySelector('.pilot-panel')?.classList.add('pilot-news-main-panel');
-            newsPage.insertAdjacentHTML('beforeend', '<aside class="pilot-panel pilot-news-context"><div class="pilot-news-context-kicker">Context over noise</div><h2>뉴스는 판단의 맥락을 제공합니다</h2><p>뉴스는 시장을 이해하는 데 도움이 되는 참고 정보입니다. 자동매매 승인 신호가 아니며, CoinPilot의 주문은 사전에 설정된 전략과 리스크 규칙에 따라 독립적으로 실행됩니다.</p><div class="pilot-news-context-quote"><span class="pilot-news-quote-mark">“</span><strong>최종 결정은 투자자에게 있습니다.</strong></div><div class="pilot-news-context-check"><h3>자동 주문 승인과 분리</h3><div><i class="ph ph-check-circle" aria-hidden="true"></i>뉴스는 참고 정보만 제공합니다</div><div><i class="ph ph-check-circle" aria-hidden="true"></i>자동 주문에는 영향을 주지 않습니다</div><div><i class="ph ph-check-circle" aria-hidden="true"></i>투자 판단과 주문 승인은 별개입니다</div></div></aside>');
+            newsPage.insertAdjacentHTML('beforeend', '<aside class="pilot-panel pilot-news-context"><div class="pilot-news-context-kicker">Context over noise</div><h2>뉴스는 판단의 맥락을 제공합니다</h2><p>뉴스는 시장을 이해하는 데 도움이 되는 참고 정보입니다. 자동 주문 조건이 아니며, CoinPilot의 주문은 사전에 설정된 전략과 리스크 규칙에 따라 독립적으로 실행됩니다.</p><div class="pilot-news-context-quote"><span class="pilot-news-quote-mark">“</span><strong>최종 결정은 투자자에게 있습니다.</strong></div><div class="pilot-news-context-check"><h3>자동 주문과 분리</h3><div><i class="ph ph-check-circle" aria-hidden="true"></i>뉴스는 참고 정보만 제공합니다</div><div><i class="ph ph-check-circle" aria-hidden="true"></i>자동 주문에는 영향을 주지 않습니다</div><div><i class="ph ph-check-circle" aria-hidden="true"></i>투자 판단과 주문은 별개입니다</div></div></aside>');
         }
 
         const settingsPage = root.querySelector('[data-pilot-page="settings"]');
         const settingsGrid = settingsPage?.querySelector('.pilot-settings-grid');
         if (settingsGrid && !settingsGrid.querySelector('.pilot-settings-impact')) {
-            settingsGrid.insertAdjacentHTML('beforeend', '<aside class="pilot-panel pilot-settings-impact"><div class="pilot-settings-impact-head"><h2>변경 영향</h2><p>설정 항목이 시스템에 미치는 영향을 미리 확인하세요.</p></div><div class="pilot-impact-group is-signal"><h3><i class="ph ph-chart-line-up" aria-hidden="true"></i> 신호 생성에 영향</h3><ul><li>RSI 매수/매도 기준</li><li>이동평균 단기/장기</li><li>변동성 필터·ATR 배수</li></ul><p>진입 신호의 발생 빈도와 타이밍이 변경됩니다.</p></div><div class="pilot-impact-group is-risk"><h3><i class="ph ph-warning-circle" aria-hidden="true"></i> 리스크 청산에 영향</h3><ul><li>익절·손절 비율</li><li>추적 손절 비율</li><li>일일 최대 손실 한도</li></ul><p>포지션 청산 타이밍과 실현 손익의 분포가 달라집니다.</p></div><div class="pilot-impact-group is-data"><h3><i class="ph ph-database" aria-hidden="true"></i> 데이터 신선도에 영향</h3><ul><li>캔들 최신도 예산</li><li>분석 주기</li><li>지연 후 재검증</li></ul><p>오래된 데이터는 안전하게 신규 진입을 차단합니다.</p></div><div class="pilot-impact-group is-live"><h3><i class="ph ph-lock-key" aria-hidden="true"></i> 실전 전환에 영향</h3><ul><li>주요 전략 파라미터 전체</li><li>리스크 관리 설정 전체</li></ul><p>설정 변경 시 기존 검증은 무효화될 수 있어 새 검증이 필요합니다.</p></div></aside>');
+            settingsGrid.insertAdjacentHTML('beforeend', '<aside class="pilot-panel pilot-settings-impact"><div class="pilot-settings-impact-head"><h2>변경 영향</h2><p>설정 항목이 시스템에 미치는 영향을 미리 확인하세요.</p></div><div class="pilot-impact-group is-signal"><h3><i class="ph ph-chart-line-up" aria-hidden="true"></i> 신호 생성에 영향</h3><ul><li>RSI 매수/매도 기준</li><li>이동평균 단기/장기</li><li>변동성 필터·ATR 배수</li></ul><p>진입 신호의 발생 빈도와 타이밍이 변경됩니다.</p></div><div class="pilot-impact-group is-risk"><h3><i class="ph ph-warning-circle" aria-hidden="true"></i> 리스크 청산에 영향</h3><ul><li>익절·손절 비율</li><li>추적 손절 비율</li><li>일일 최대 손실 한도</li></ul><p>포지션 청산 타이밍과 실현 손익의 분포가 달라집니다.</p></div><div class="pilot-impact-group is-data"><h3><i class="ph ph-database" aria-hidden="true"></i> 데이터 신선도에 영향</h3><ul><li>캔들 최신도 예산</li><li>분석 주기</li><li>지연 후 재확인</li></ul><p>오래된 데이터는 안전하게 신규 진입을 차단합니다.</p></div><div class="pilot-impact-group is-live"><h3><i class="ph ph-lock-key" aria-hidden="true"></i> 실전 전환에 영향</h3><ul><li>주요 전략 파라미터 전체</li><li>리스크 관리 설정 전체</li></ul><p>설정을 바꾸면 기존 점검 결과를 더는 쓸 수 없어 다시 확인해야 합니다.</p></div></aside>');
         }
 
         const historyPage = root.querySelector('[data-pilot-page="history"]');
         if (historyPage && !historyPage.querySelector('.pilot-history-warning')) {
-            historyPage.querySelector('.pilot-page-heading')?.insertAdjacentHTML('afterend', '<div class="pilot-history-warning"><i class="ph ph-warning" aria-hidden="true"></i><div><strong>작은 표본의 손익은 승격 근거가 아닙니다.</strong><span>충분한 기간과 거래 수, 연속성, 리스크 지표가 일관되게 확인될 때만 다음 단계를 검토합니다.</span></div></div>');
+            historyPage.querySelector('.pilot-page-heading')?.insertAdjacentHTML('afterend', '<div class="pilot-history-warning"><i class="ph ph-warning" aria-hidden="true"></i><div><strong>소수 거래의 손익으로 실전 전환을 판단하지 않습니다.</strong><span>충분한 기간과 거래 수, 중단 없는 관찰, 리스크 지표가 일관되게 확인될 때만 다음 단계를 검토합니다.</span></div></div>');
+        }
+        if (historyPage && !historyPage.querySelector('.pilot-strategy-research-panel')) {
+            historyPage.querySelector('.pilot-history-warning')?.insertAdjacentHTML('afterend', '<section class="pilot-panel pilot-strategy-research-panel"><div class="pilot-panel-header"><div><h2 class="pilot-panel-title">다른 전략 비교</h2><p class="pilot-panel-subtitle" id="pilot-strategy-research-meta">비교 리포트 확인 중</p></div><span class="pilot-status-pill is-warning">참고용</span></div><div class="pilot-panel-body" id="pilot-strategy-research"><div class="pilot-inline-empty">비교 리포트를 불러오는 중입니다.</div></div></section><div class="pilot-section-spacer"></div>');
+        }
+        if (historyPage && !historyPage.querySelector('.pilot-momentum-shadow-panel')) {
+            historyPage.querySelector('.pilot-strategy-research-panel')?.insertAdjacentHTML('afterend', '<section class="pilot-panel pilot-momentum-shadow-panel"><div class="pilot-panel-header"><div><h2 class="pilot-panel-title">방어형 모멘텀 비교</h2><p class="pilot-panel-subtitle" id="pilot-momentum-shadow-meta">완료된 일봉 기준 모의 관찰을 불러오는 중입니다.</p></div><span class="pilot-status-pill is-warning">참고용</span></div><div class="pilot-momentum-shadow-grid" id="pilot-momentum-shadow"><div class="pilot-inline-empty">모의투자 기록을 읽는 중입니다.</div></div></section><div class="pilot-section-spacer"></div>');
         }
     }
 
     renderShell();
     mountAiDesk();
     mountPageEnhancements();
+    initProgressiveInstall();
     bindAiDesk();
     initializeAiSocket();
     activateView(state.view);
@@ -811,8 +973,8 @@
         } else {
             setText('pilot-mode-title', liveReady ? '실제투자 활성' : '실제투자 잠금');
             setText('pilot-mode-subtitle', liveReady
-                ? '검증 게이트를 통과한 실제 주문만 현재 계좌에 전송됩니다.'
-                : '검증 게이트를 모두 통과하기 전까지 실제 주문은 잠겨 있습니다.');
+                ? '사전 점검을 통과한 실제 주문만 현재 계좌에 전송됩니다.'
+                : '사전 점검이 모두 완료되기 전까지 실제 주문은 잠겨 있습니다.');
         }
 
         const banner = byId('pilot-mode-banner');
@@ -822,7 +984,7 @@
         setText('pilot-mode-banner-title', !paper && liveReady ? '실제투자 활성' : '실전 주문 잠금');
         setText('pilot-mode-banner-copy', !paper && liveReady
             ? '주문 전 자산·수량·리스크를 다시 확인하세요. 실전 체결 결과는 별도 확인이 필요합니다.'
-            : tradeBlockReason() || '검증 게이트가 통과될 때까지 실제 주문은 실행할 수 없습니다.');
+            : tradeBlockReason() || '사전 점검이 완료될 때까지 실제 주문은 실행할 수 없습니다.');
     }
 
     function renderGateIcon(id, tone, icon) {
@@ -838,8 +1000,8 @@
         const promotedMarkets = report?.promotedMarkets || [];
         const passed = report?.available === true && report?.promoted === true;
         setText('pilot-gate-validation-detail', !report?.available
-            ? '리포트 없음 · 승격 보류'
-            : `${promotedMarkets.length}/${results.length || 0} 마켓 통과 · ${report.validationMode === 'fixed_config' ? '현재 설정 고정' : '튜닝 후보'}`);
+            ? '리포트 없음 · 전환 보류'
+            : `${promotedMarkets.length}/${results.length || 0} 마켓 통과 · ${report.validationMode === 'fixed_config' ? '현재 설정 기준' : '조정안'}`);
         renderGateIcon('pilot-gate-validation-icon', passed ? '' : 'pending', passed ? 'check' : 'warning');
 
         const paper = state.paper;
@@ -850,12 +1012,22 @@
         renderGateIcon('pilot-gate-paper-icon', paperState === 'PASS' ? '' : paperState === 'RUNNING' ? 'pending' : 'blocked', paperState === 'PASS' ? 'check' : paperState === 'RUNNING' ? 'hourglass-medium' : 'pause');
 
         const freshness = paper?.candleFreshness || {};
+        const freshnessCohort = paper?.marketFreshnessCohort || {};
+        const selectedCohort = Array.isArray(freshnessCohort.selectedMarkets) ? freshnessCohort.selectedMarkets : [];
+        const observedMarketCount = number(freshnessCohort.observedMarketCount);
+        const cohortDetail = !paper
+            ? '세션 확인 필요'
+            : freshnessCohort.ready
+                ? `관측 시장 ${selectedCohort.length}/${observedMarketCount || selectedCohort.length}`
+                : observedMarketCount > 0
+                    ? `관측 ${observedMarketCount}개 · ${number(freshnessCohort.minObservations)}회 관측 후 안내`
+                    : '관측 대기 중';
         const freshnessBlocks = number(freshness.blockedSnapshots) + number(freshness.blockedAnalyses) + number(freshness.blockedEntries);
         setText('pilot-gate-freshness-detail', !paper
-            ? 'paper 세션 확인 필요'
+            ? '세션 확인 필요'
             : freshnessBlocks > 0
-                ? `차단 ${freshnessBlocks}회 · 최대 age ${formatPrice(freshness.ageStats?.maxObservedAgeSeconds || 0)}초`
-                : `최대 허용 ${formatPrice(freshness.maxAgeSeconds || paper.configSnapshot?.maxCandleAgeSeconds || 90)}초`);
+                ? `차단 ${freshnessBlocks}회 · ${cohortDetail}`
+                : cohortDetail);
         renderGateIcon('pilot-gate-freshness-icon', !paper ? 'pending' : freshnessBlocks > 0 ? 'pending' : '', freshnessBlocks > 0 ? 'warning' : 'database');
     }
 
@@ -890,7 +1062,7 @@
         setText('pilot-cumulative-profit-caption', formatPercent(pnl.profitPercent));
         setText('pilot-win-rate', winRate === null ? '-' : `${winRate.toFixed(1)}%`);
         setText('pilot-trade-count-caption', paperLedgerVisible
-            ? `strict paper 청산 ${totalTrades}회`
+            ? `모의투자 청산 ${totalTrades}회`
             : `집계 거래 ${totalTrades || today.totalTrades || 0}회`);
         setText('pilot-overview-sync', state.lastSync ? `마지막 동기화 ${formatTime(state.lastSync, true)}` : '마지막 동기화 -');
         setText('pilot-trade-sync', state.lastSync ? `잔액 확인 ${formatTime(state.lastSync, true)}` : '-');
@@ -937,7 +1109,7 @@
         if (!target) return;
         const trades = Array.isArray(state.trades) ? state.trades.slice(0, 6) : [];
         const activity = [];
-        if (state.paper?.active) activity.push({ time: state.paper.updatedAt || state.paper.lastHeartbeat || state.paper.heartbeatAt, title: 'Forward paper 세션 관찰 중', detail: `청산 ${state.paper.closedTradeCount || 0}회 · 중단 ${state.paper.interruptionCount || state.paper.interruptions?.length || 0}회`, value: state.paper.state || 'RUNNING' });
+        if (state.paper?.active) activity.push({ time: state.paper.updatedAt || state.paper.lastHeartbeat || state.paper.heartbeatAt, title: '모의투자 세션 관찰 중', detail: `청산 ${state.paper.closedTradeCount || 0}회 · 중단 ${state.paper.interruptionCount || state.paper.interruptions?.length || 0}회`, value: state.paper.state || 'RUNNING' });
         trades.forEach(trade => {
             const action = trade.type || trade.action || '기록';
             const coin = symbolOf(trade.coin);
@@ -959,19 +1131,25 @@
         const analysisTone = analysisHealth.failClosed || analysisHealth.continuityEligible === false
             ? 'danger'
             : analysisGap > 0 || analysisIncomplete > 0 ? 'warning' : 'ok';
+        const analysisStartedAt = Date.parse(analysisHealth.analysisStartedAt || '');
+        const analysisAge = Number.isFinite(analysisStartedAt)
+            ? Math.max(0, (Date.now() - analysisStartedAt) / 1000)
+            : 0;
         const analysisDetail = analysisHealth.failClosed
             ? `공백 ${analysisGap.toFixed(1)}초 · 관찰 중지`
+            : analysisHealth.analysisActive === true
+                ? `분석 진행 중 · ${analysisAge.toFixed(1)}초`
             : analysisGap > 0
                 ? `부분 응답 재시도 · 공백 ${analysisGap.toFixed(1)}초`
                 : analysisIncomplete > 0
-                    ? `부분 cycle ${analysisIncomplete}회 기록`
+                    ? `부분 응답 ${analysisIncomplete}회 기록`
                     : '전체 대상 시장 분석 수신 정상';
         const items = [
-            { title: '모드 경계', detail: state.actualMode === 'LIVE' ? '서버 실제투자 · 주문 전 검증 필요' : '서버 모의투자 · 실제 자금 미사용', tone: state.actualMode === 'LIVE' ? 'warning' : 'ok' },
-            { title: '캔들 신선도', detail: stale ? `${stale}회 진입 데이터 차단 기록` : `허용 age ${formatPrice(freshness.maxAgeSeconds || 90)}초`, tone: stale ? 'warning' : 'ok' },
-            { title: '분석 데이터 완전성', detail: analysisDetail, tone: analysisTone },
-            { title: '손실 회로차단기', detail: circuit.enabled ? `${circuit.lossCount || 0}/${circuit.maxLosses || 0}회 · ${circuit.coolingDown ? '차단 중' : '대기 중'}` : '비활성화', tone: circuit.coolingDown ? 'danger' : circuit.enabled ? 'warning' : 'ok' },
-            { title: '연속성 게이트', detail: paper.continuityEligible === false ? '공백 기록으로 승격 보류' : paper.available ? '현재 세션 기준 확인 중' : 'paper 세션 없음', tone: paper.continuityEligible === false ? 'danger' : paper.available ? 'ok' : 'warning' }
+            { title: '실행 모드', detail: state.actualMode === 'LIVE' ? '서버 실제투자 · 주문 전 확인 필요' : '서버 모의투자 · 실제 자금 미사용', tone: state.actualMode === 'LIVE' ? 'warning' : 'ok' },
+            { title: '시세 데이터', detail: stale ? `${stale}회 진입 데이터 차단 기록` : `허용 지연 ${formatPrice(freshness.maxAgeSeconds || 90)}초`, tone: stale ? 'warning' : 'ok' },
+            { title: '분석 데이터 상태', detail: analysisDetail, tone: analysisTone },
+            { title: '연속 손실 차단', detail: circuit.enabled ? `${circuit.lossCount || 0}/${circuit.maxLosses || 0}회 · ${circuit.coolingDown ? '차단 중' : '대기 중'}` : '비활성화', tone: circuit.coolingDown ? 'danger' : circuit.enabled ? 'warning' : 'ok' },
+            { title: '관찰 연속성', detail: paper.continuityEligible === false ? '공백 기록으로 전환 보류' : paper.available ? '현재 세션 기준 확인 중' : '세션 없음', tone: paper.continuityEligible === false ? 'danger' : paper.available ? 'ok' : 'warning' }
         ];
         target.innerHTML = items.map(item => `<div class="pilot-control-row"><div class="pilot-control-copy"><strong>${escapeHtml(item.title)}</strong><span>${escapeHtml(item.detail)}</span></div><span class="pilot-status-pill ${item.tone === 'danger' ? 'is-danger' : item.tone === 'warning' ? 'is-warning' : ''}">${item.tone === 'danger' ? '차단' : item.tone === 'warning' ? '확인' : '정상'}</span></div>`).join('');
     }
@@ -1010,7 +1188,7 @@
         const amountLabel = root.querySelector(`[data-pilot-trade-amount-label="${prefix}"]`);
         const balance = root.querySelector(`[data-pilot-trade-balance="${prefix}"]`);
         if (modeLabel) { modeLabel.textContent = state.activeMode === 'live' ? '실제투자' : '모의투자'; modeLabel.className = `pilot-status-pill${state.activeMode === 'live' && !state.liveEligible ? ' is-warning' : ''}`; }
-        if (lockCopy) lockCopy.textContent = canTrade() ? (state.activeMode === 'live' ? '검증 게이트 통과 상태입니다. 실행 전 최종 확인이 필요합니다.' : '가상 자금으로 주문 흐름을 확인합니다.') : tradeBlockReason();
+        if (lockCopy) lockCopy.textContent = canTrade() ? (state.activeMode === 'live' ? '사전 점검 통과 상태입니다. 실행 전 최종 확인이 필요합니다.' : '가상 자금으로 주문 흐름을 확인합니다.') : tradeBlockReason();
         if (lockIcon) lockIcon.className = `ph ${canTrade() ? (state.activeMode === 'live' ? 'ph-shield-check' : 'ph-lock-key-open') : 'ph-lock-key'}`;
         if (amountLabel) amountLabel.textContent = trade.side === 'buy' ? '주문 금액 (KRW)' : '매도 금액 기준 (KRW)';
         if (balance) balance.textContent = trade.side === 'buy' ? `잔액 ${formatWon(state.account?.krwBalance)}` : `보유 ${formatWon(holdingValue)}`;
@@ -1175,12 +1353,12 @@
             target.insertAdjacentElement('afterend', confidenceTarget);
         }
         if (!report?.available) {
-            confidenceTarget.innerHTML = '<i class="ph ph-chart-line-up" aria-hidden="true"></i><span>거래수익 신뢰도: 리포트가 없어 판정할 수 없습니다.</span>';
+            confidenceTarget.innerHTML = '<i class="ph ph-chart-line-up" aria-hidden="true"></i><span>수익 통계: 리포트가 없어 판정할 수 없습니다.</span>';
         } else {
             const confidence = report.statisticalConfidence || {};
             const required = confidence.required === true;
             const passedConfidence = confidence.passed === true;
-            const statusText = !required ? '진단 전용 · 미요구' : passedConfidence ? '통과' : '보류';
+            const statusText = !required ? '참고용 · 미요구' : passedConfidence ? '통과' : '보류';
             const lowerBound = Number.isFinite(Number(confidence.minimumLowerBoundPercent))
                 ? `${Number(confidence.minimumLowerBoundPercent).toFixed(2)}%`
                 : '-';
@@ -1192,14 +1370,14 @@
                 .filter(Number.isFinite);
             const lowestObserved = observedLowerBounds.length > 0
                 ? `${Math.min(...observedLowerBounds).toFixed(2)}%`
-                : '표본 부족';
+                : '데이터 부족';
             const observedTrades = validationConfidence
                 .reduce((sum, item) => sum + (Number(item.sampleCount) || 0), 0);
-            confidenceTarget.innerHTML = `<i class="ph ph-chart-line-up" aria-hidden="true"></i><span>거래수익 95% 단측 하한: <strong>${escapeHtml(statusText)}</strong> · 기준 ${escapeHtml(lowerBound)} · 관측 최저 ${escapeHtml(lowestObserved)} · holdout 표본 ${observedTrades}건 · 작은 양수 표본은 승격 근거가 아닙니다.</span>`;
+            confidenceTarget.innerHTML = `<i class="ph ph-chart-line-up" aria-hidden="true"></i><span>거래수익 95% 통계 하한: <strong>${escapeHtml(statusText)}</strong> · 기준 ${escapeHtml(lowerBound)} · 관측 최저 ${escapeHtml(lowestObserved)} · 점검 거래 ${observedTrades}건 · 작은 양수 결과는 실전 전환을 판단하는 기준이 아닙니다.</span>`;
         }
-        if (!report?.available) { pill.textContent = '리포트 없음'; pill.className = 'pilot-status-pill is-warning'; setText('pilot-validation-meta', '읽기 전용 워크포워드 리포트가 없습니다.'); target.innerHTML = '<div class="pilot-empty-panel"><i class="ph ph-file-dashed" aria-hidden="true"></i><div>검증 리포트가 없으면 실제 주문 승격을 판단할 수 없습니다.</div></div>'; return; }
-        const results = report.results || []; const promotedMarkets = report.promotedMarkets || []; const passed = report.promoted === true; pill.textContent = passed ? '승격 가능' : '전체 보류'; pill.className = `pilot-status-pill${passed ? '' : ' is-warning'}`; setText('pilot-validation-meta', `${report.validationMode === 'fixed_config' ? '현재 설정 고정 검증' : '학습 구간 튜닝 검증'} · 생성 ${formatDateTime(report.generatedAt)} · ${report.candleCount || '-'}개 캔들`);
-        target.innerHTML = `<div class="pilot-validation-detail"><div class="pilot-validation-ring ${passed ? 'is-pass' : ''}">${escapeHtml(`${promotedMarkets.length}/${results.length}`)}</div><div><div class="pilot-validation-headline">${passed ? '모든 대상 마켓이 게이트를 통과했습니다.' : '실전 승격을 보류하고 계속 관찰하세요.'}</div><div class="pilot-validation-copy">이 리포트는 실전 주문을 자동 승인하지 않습니다. paper 기간·리스크·연속성 조건을 함께 확인해야 합니다.</div></div></div><div class="pilot-validation-market-list">${results.length ? results.map(result => { const metric = result.validation?.validation; const marketPassed = result.validation?.promoted === true; return `<div class="pilot-validation-market-card ${marketPassed ? 'is-pass' : 'is-hold'}"><div class="pilot-validation-market-name"><span>${escapeHtml(result.market || '-')}</span><span class="pilot-status-pill ${marketPassed ? '' : 'is-warning'}">${marketPassed ? 'PASS' : 'HOLD'}</span></div><div class="pilot-validation-market-meta">${metric ? `수익률 ${formatPercent(metric.totalReturnPercent)} · 거래 ${metric.tradeCount || 0}회<br>승률 ${formatPercent(metric.winRate)} · PF ${Number.isFinite(metric.profitFactor) ? metric.profitFactor.toFixed(2) : '∞'} · MDD ${formatPercent(metric.maxDrawdownPercent)}` : escapeHtml(result.error || result.validation?.reason || '데이터 부족')}</div></div>`; }).join('') : '<div class="pilot-empty-panel">마켓 결과가 없습니다.</div>'}</div>`;
+        if (!report?.available) { pill.textContent = '리포트 없음'; pill.className = 'pilot-status-pill is-warning'; setText('pilot-validation-meta', '읽기 전용 점검 리포트가 없습니다.'); target.innerHTML = '<div class="pilot-empty-panel"><i class="ph ph-file-dashed" aria-hidden="true"></i><div>점검 리포트가 없으면 실전 전환 준비를 판단할 수 없습니다.</div></div>'; return; }
+        const results = report.results || []; const promotedMarkets = report.promotedMarkets || []; const passed = report.promoted === true; pill.textContent = passed ? '전환 가능' : '전체 보류'; pill.className = `pilot-status-pill${passed ? '' : ' is-warning'}`; setText('pilot-validation-meta', `${report.validationMode === 'fixed_config' ? '현재 설정 기준 점검' : '파라미터 조정 점검'} · 생성 ${formatDateTime(report.generatedAt)} · ${report.candleCount || '-'}개 캔들`);
+        target.innerHTML = `<div class="pilot-validation-detail"><div class="pilot-validation-ring ${passed ? 'is-pass' : ''}">${escapeHtml(`${promotedMarkets.length}/${results.length}`)}</div><div><div class="pilot-validation-headline">${passed ? '모든 대상 시장이 사전 점검을 통과했습니다.' : '실전 전환을 보류하고 계속 관찰하세요.'}</div><div class="pilot-validation-copy">이 리포트는 실전 주문을 자동 승인하지 않습니다. 모의투자 기간·리스크·중단 여부를 함께 확인해야 합니다.</div></div></div><div class="pilot-validation-market-list">${results.length ? results.map(result => { const metric = result.validation?.validation; const marketPassed = result.validation?.promoted === true; const quality = result.validation?.dataQuality; const qualityNote = quality?.valid === false ? `<br>캔들 공백 · 누락 ${Number(quality.gapCount) || 0}건 · 최대 ${Number(quality.largestGapSeconds) || 0}초` : ''; return `<div class="pilot-validation-market-card ${marketPassed ? 'is-pass' : 'is-hold'}"><div class="pilot-validation-market-name"><span>${escapeHtml(result.market || '-')}</span><span class="pilot-status-pill ${marketPassed ? '' : 'is-warning'}">${marketPassed ? '통과' : '보류'}</span></div><div class="pilot-validation-market-meta">${metric ? `수익률 ${formatPercent(metric.totalReturnPercent)} · 거래 ${metric.tradeCount || 0}회<br>승률 ${formatPercent(metric.winRate)} · PF ${Number.isFinite(metric.profitFactor) ? metric.profitFactor.toFixed(2) : '∞'} · MDD ${formatPercent(metric.maxDrawdownPercent)}${qualityNote}` : `${escapeHtml(toUserText(result.error || result.validation?.reason || '데이터 부족'))}${qualityNote}`}</div></div>`; }).join('') : '<div class="pilot-empty-panel">마켓 결과가 없습니다.</div>'}</div>`;
     }
 
     function renderPaperDetail() {
@@ -1212,32 +1390,133 @@
             target.insertAdjacentElement('afterend', confidenceTarget);
         }
         if (!status?.available) {
-            confidenceTarget.innerHTML = '<i class="ph ph-shield-warning" aria-hidden="true"></i><span>strict 수익 신뢰도: paper 세션이 없어 판정할 수 없습니다.</span>';
+            confidenceTarget.innerHTML = '<i class="ph ph-shield-warning" aria-hidden="true"></i><span>수익 통계: 세션이 없어 판정할 수 없습니다.</span>';
         } else {
             const confidence = status.strictTradeConfidence || status.strictEvaluation?.tradeReturnConfidence || {};
             const gate = status.strictConfidenceGate || status.strictEvaluation?.confidenceGate || {};
             const sampleCount = number(confidence.sampleCount);
             const minimumTrades = number(gate.minimumTrades, number(status.thresholds?.minTrades, 20));
             const lowerBound = confidence.lowerBoundPercent === null || confidence.lowerBoundPercent === undefined
-                ? '표본 부족'
+                ? '데이터 부족'
                 : `${number(confidence.lowerBoundPercent).toFixed(2)}%`;
             const gateLabel = gate.passed === true ? '통과' : '보류';
-            confidenceTarget.innerHTML = `<i class="ph ph-shield-warning" aria-hidden="true"></i><span>strict 수익 신뢰도: <strong>${escapeHtml(gateLabel)}</strong> · 표본 ${sampleCount}/${minimumTrades}건 · 95% 하한 ${escapeHtml(lowerBound)} · 실현손익은 충분한 표본 전까지 승격되지 않습니다.</span>`;
+            confidenceTarget.innerHTML = `<i class="ph ph-shield-warning" aria-hidden="true"></i><span>수익 통계: <strong>${escapeHtml(gateLabel)}</strong> · 거래 ${sampleCount}/${minimumTrades}건 · 95% 하한 ${escapeHtml(lowerBound)} · 거래가 충분히 쌓일 때까지 실전 전환은 보류됩니다.</span>`;
         }
-        if (!status?.available) { setText('pilot-paper-meta', '세션 없음 · 기존 모의 포트폴리오를 자동 초기화하지 않습니다.'); target.innerHTML = '<div class="pilot-paper-status"><div class="pilot-paper-status-head"><strong class="pilot-paper-state is-stopped">PAPER 세션 없음</strong><span class="pilot-status-pill is-warning">시작 필요</span></div><div class="pilot-paper-meta">현재 상태 기준으로 시작하거나 새 시드로 초기화할 수 있습니다. 초기화는 기존 dry portfolio 데이터를 덮어쓸 수 있으므로 실행 전 확인합니다.</div><div class="pilot-paper-actions"><button type="button" class="pilot-button" data-pilot-action="start-paper">현재 상태 기준 시작</button><button type="button" class="pilot-button is-danger" data-pilot-action="start-paper-reset">새 시드로 초기화 후 시작</button></div></div>'; return; }
-        const paperState = status.state || (status.active ? 'RUNNING' : 'STOPPED'); const paperClass = paperState === 'PASS' ? 'is-pass' : paperState === 'STOPPED' ? 'is-stopped' : ''; const riskMonitor = status.riskMonitor || {}; const riskLabel = riskMonitor.failClosed ? '중지 필요' : riskMonitor.currentOutageDurationSeconds > 0 ? '재시도 중' : '정상'; const riskGap = number(riskMonitor.currentOutageDurationSeconds); const analysisHealth = status.analysisDataHealth || {}; const analysisGap = number(analysisHealth.currentGapDurationSeconds); const analysisIncomplete = number(status.telemetry?.analysisIncompleteCycles); const analysisLabel = analysisHealth.failClosed ? '중지 필요' : analysisGap > 0 ? `재시도 중 (${analysisGap.toFixed(1)}초)` : analysisIncomplete > 0 ? `부분 cycle ${analysisIncomplete}회` : '정상'; const signalAvailability = status.signalAvailability || {}; const signalLabel = status.marketQuiet ? '시장 정적 · 과매도 반등 후보 없음' : status.filterStarvation ? '필터 고착 후보 감지' : '반등 후보 집계 중'; const signalSummary = `${signalLabel} · 과매도 ${number(signalAvailability.oversoldObservations)}회 · strict 후보 ${number(signalAvailability.strictReboundCandidates)}회 · 확인 ${number(signalAvailability.strictConfirmedCandidates)}회`; const heartbeat = status.updatedAt || status.heartbeatAt || status.lastHeartbeat; const observerNote = status.readOnlyObserver ? ' · 읽기 전용 관찰' : ''; setText('pilot-paper-meta', `시작 ${formatDateTime(status.startedAt)} · 마지막 갱신 ${formatDateTime(heartbeat)}${observerNote}`);
+        if (!status?.available) { setText('pilot-paper-meta', '세션 없음 · 기존 모의 포트폴리오를 자동 초기화하지 않습니다.'); target.innerHTML = '<div class="pilot-paper-status"><div class="pilot-paper-status-head"><strong class="pilot-paper-state is-stopped">모의투자 세션 없음</strong><span class="pilot-status-pill is-warning">시작 필요</span></div><div class="pilot-paper-meta">현재 상태 기준으로 시작하거나 새 시드로 초기화할 수 있습니다. 초기화는 기존 dry portfolio 데이터를 덮어쓸 수 있으므로 실행 전 확인합니다.</div><div class="pilot-paper-actions"><button type="button" class="pilot-button" data-pilot-action="start-paper">현재 상태 기준 시작</button><button type="button" class="pilot-button is-danger" data-pilot-action="start-paper-reset">새 시드로 초기화 후 시작</button></div></div>'; return; }
+        const paperState = status.state || (status.active ? 'RUNNING' : 'STOPPED'); const paperClass = paperState === 'PASS' ? 'is-pass' : paperState === 'STOPPED' ? 'is-stopped' : ''; const riskMonitor = status.riskMonitor || {}; const riskLabel = riskMonitor.failClosed ? '중지 필요' : riskMonitor.currentOutageDurationSeconds > 0 ? '재시도 중' : '정상'; const riskGap = number(riskMonitor.currentOutageDurationSeconds); const analysisHealth = status.analysisDataHealth || {}; const analysisGap = number(analysisHealth.currentGapDurationSeconds); const analysisIncomplete = number(status.telemetry?.analysisIncompleteCycles); const analysisLabel = analysisHealth.failClosed ? '중지 필요' : analysisGap > 0 ? `재시도 중 (${analysisGap.toFixed(1)}초)` : analysisIncomplete > 0 ? `부분 응답 ${analysisIncomplete}회` : '정상'; const signalAvailability = status.signalAvailability || {}; const uniqueSignalWindows = signalAvailability.uniqueSignalWindows; const uniqueSignalWindowLabel = uniqueSignalWindows === null || uniqueSignalWindows === undefined ? '미측정' : String(number(uniqueSignalWindows)); const signalLabel = status.marketQuiet ? '시장 정적 · 과매도 반등 후보 없음' : status.filterStarvation ? '진입 조건 장기 미충족' : '반등 후보 집계 중'; const confirmation = status.telemetry?.entryConfirmation || {}; const confirmationAttempts = number(confirmation.attempts ?? status.telemetry?.entryConfirmationAttempts); const confirmationSucceeded = number(confirmation.succeeded ?? status.telemetry?.entryConfirmationSucceeded); const confirmationCancelled = number(confirmation.cancelled ?? status.telemetry?.entryConfirmationCancelled); const confirmationReasons = confirmation.reasons || status.telemetry?.entryConfirmationReasons || {}; const topConfirmationReason = Object.entries(confirmationReasons).sort((a, b) => number(b[1]) - number(a[1]))[0]; const confirmationSummary = confirmationAttempts > 0 ? ` · 진입 전 재확인 ${confirmationSucceeded}/${confirmationAttempts} 성공 · 취소 ${confirmationCancelled}${topConfirmationReason ? ` (${topConfirmationReason[0]})` : ''}` : ''; const signalSummary = `${signalLabel} · 과매도 ${number(signalAvailability.oversoldObservations)}회 · 반등 후보 ${number(signalAvailability.strictReboundCandidates)}회 · 확인 ${number(signalAvailability.strictConfirmedCandidates)}회 · 고유 신호 구간 ${uniqueSignalWindowLabel} (중복 주기 제외)${confirmationSummary}`; const marketFreshnessCohort = status.marketFreshnessCohort || {}; const selectedFreshMarkets = Array.isArray(marketFreshnessCohort.selectedMarkets) ? marketFreshnessCohort.selectedMarkets : []; const observedFreshMarkets = number(marketFreshnessCohort.observedMarketCount); const marketCohortSummary = marketFreshnessCohort.ready ? `관측 완료 ${selectedFreshMarkets.length}/${observedFreshMarkets || selectedFreshMarkets.length}개 · ${selectedFreshMarkets.join(', ')}` : observedFreshMarkets > 0 ? `관측 ${observedFreshMarkets}개 · 시장별 ${number(marketFreshnessCohort.minObservations)}회 관측 후 안내` : '관측 대기 중'; const heartbeat = status.updatedAt || status.heartbeatAt || status.lastHeartbeat; const observerNote = status.readOnlyObserver ? ' · 읽기 전용 관찰' : ''; setText('pilot-paper-meta', `시작 ${formatDateTime(status.startedAt)} · 마지막 갱신 ${formatDateTime(heartbeat)}${observerNote}`);
+        const configValueDrift = Array.isArray(status.configValueDrift) ? status.configValueDrift : [];
+        const configSchemaDrift = Array.isArray(status.configSchemaDrift) ? status.configSchemaDrift : [];
+        const latestStrictTrade = Array.isArray(status.strictRecentTrades) ? status.strictRecentTrades.at(-1) : null;
+        const latestStrictProfit = latestStrictTrade && Number.isFinite(Number(latestStrictTrade.profit))
+            ? formatSignedWon(latestStrictTrade.profit)
+            : '손익 확인 불가';
+        const strictRecentSummary = latestStrictTrade
+            ? `${escapeHtml(latestStrictTrade.coin || '시장 미상')} · ${escapeHtml(toUserText(latestStrictTrade.reason || '청산 사유 미상'))} · ${escapeHtml(latestStrictProfit)}${Number.isFinite(Number(latestStrictTrade.profitPercent)) ? ` (${escapeHtml(formatPercent(latestStrictTrade.profitPercent))})` : ''}${escapeHtml(formatExcursion(latestStrictTrade))}`
+            : '없음';
+        const diagnosticRecentTrades = [
+            ...(Array.isArray(status.shadowEvaluation?.recentTrades) ? status.shadowEvaluation.recentTrades : []).map(trade => ({ ...trade, book: 'shadow' })),
+            ...(Array.isArray(status.looseShadowEvaluation?.recentTrades) ? status.looseShadowEvaluation.recentTrades : []).map(trade => ({ ...trade, book: 'loose' }))
+        ].sort((a, b) => new Date(a.exitTimestamp || 0).getTime() - new Date(b.exitTimestamp || 0).getTime());
+        const latestDiagnosticTrade = diagnosticRecentTrades.at(-1);
+        const latestDiagnosticProfit = latestDiagnosticTrade && Number.isFinite(Number(latestDiagnosticTrade.netProfit))
+            ? formatSignedWon(latestDiagnosticTrade.netProfit)
+            : '손익 확인 불가';
+        const diagnosticRecentSummary = latestDiagnosticTrade
+            ? `${escapeHtml(toUserText(latestDiagnosticTrade.book))} · ${escapeHtml(latestDiagnosticTrade.coin || '시장 미상')} · ${escapeHtml(toUserText(latestDiagnosticTrade.reason || '청산 사유 미상'))} · ${escapeHtml(latestDiagnosticProfit)}${Number.isFinite(Number(latestDiagnosticTrade.profitPercent)) ? ` (${escapeHtml(formatPercent(latestDiagnosticTrade.profitPercent))})` : ''}${escapeHtml(formatExcursion(latestDiagnosticTrade))}`
+            : '없음';
+        const strictOpenSummary = (status.strictEvaluation?.positions || []).map(position => {
+            const excursion = formatExcursion(position).trim();
+            return `${escapeHtml(position.coin || '시장 미상')}${excursion ? escapeHtml(excursion) : ''}`;
+        }).join(' · ') || '없음';
+        const diagnosticBookRows = [
+            { key: 'shadowEvaluation', label: '비교 A', accent: 'is-shadow' },
+            { key: 'looseShadowEvaluation', label: '비교 B', accent: 'is-loose' }
+        ].map(({ key, label, accent }) => {
+            const book = status[key] || {};
+            const closedTradeCount = number(book.closedTradeCount);
+            const realizedProfit = Number(book.realizedProfit);
+            const profitLabel = Number.isFinite(realizedProfit) ? formatSignedWon(realizedProfit) : '손익 확인 불가';
+            const profitClass = Number.isFinite(realizedProfit) && realizedProfit < 0 ? 'is-negative' : Number.isFinite(realizedProfit) && realizedProfit > 0 ? 'is-positive' : '';
+            const profitFactor = Number.isFinite(Number(book.profitFactor))
+                ? Number(book.profitFactor).toFixed(2)
+                : closedTradeCount > 0 ? '∞' : '-';
+            const winRate = closedTradeCount > 0 ? formatPercent(book.winRate) : '-';
+            return `<article class="pilot-paper-diagnostic-card ${accent}"><div class="pilot-paper-diagnostic-card-head"><strong>${escapeHtml(label)}</strong><span>참고치</span></div><strong class="pilot-paper-diagnostic-profit ${profitClass}">${escapeHtml(profitLabel)}</strong><div class="pilot-paper-diagnostic-stats">청산 ${closedTradeCount}회 · 승률 ${escapeHtml(winRate)}<br>PF ${escapeHtml(profitFactor)} · 보유 ${number(book.activePositions)}개</div></article>`;
+        }).join('');
+        const diagnosticBooksHtml = status.shadowEvaluation || status.looseShadowEvaluation
+            ? `<section class="pilot-paper-diagnostics" aria-label="참고용 비교 장부"><div class="pilot-paper-diagnostics-head"><div><strong>참고용 비교 장부</strong><span>실제 자산·전환과 무관 · 조건 비교용</span></div><span class="pilot-status-pill is-warning">참고치</span></div><div class="pilot-paper-diagnostic-grid">${diagnosticBookRows}</div></section>`
+            : '';
+        const shadowExecutionBlocked = number(status.telemetry?.shadowEntryExecutionBlockedEntries);
+        const looseShadowExecutionBlocked = number(status.telemetry?.looseShadowEntryExecutionBlockedEntries);
+        const executionBlockReasons = status.telemetry?.shadowEntryExecutionBlockReasons || {};
+        const looseExecutionBlockReasons = status.telemetry?.looseShadowEntryExecutionBlockReasons || {};
+        const shadowBoundary = status.shadowEvaluation?.executionBoundary || {};
+        const looseBoundary = status.looseShadowEvaluation?.executionBoundary || {};
+        const boundarySettled = number(shadowBoundary.settledCount) + number(looseBoundary.settledCount);
+        const boundaryPending = number(shadowBoundary.pendingCount) + number(looseBoundary.pendingCount);
+        const boundaryUnresolved = number(shadowBoundary.unresolvedCount) + number(looseBoundary.unresolvedCount);
+        const boundaryCounterfactualProfit = Number(shadowBoundary.counterfactualRealizedProfit || 0) + Number(looseBoundary.counterfactualRealizedProfit || 0);
+        const boundaryReasonText = reason => toUserText(({ entry_chase_exceeded: '추격 상한', entry_retrace_exceeded: '되돌림 상한' }[reason] || reason));
+        const boundaryReasonLabel = (shadowBoundary.reasonOutcomes || []).map(outcome => `${boundaryReasonText(outcome.reason)} ${number(outcome.settledCount)}/${number(outcome.blockedCount)} · ${formatSignedWon(outcome.counterfactualRealizedProfit)}`).join(' · ') || '정산 대기';
+        const executionBoundaryHtml = shadowExecutionBlocked > 0 || looseShadowExecutionBlocked > 0
+            ? `<div class="pilot-inline-note" style="margin-top:8px; border-color:var(--accent-yellow);"><i class="ph ph-arrows-in-cardinal" aria-hidden="true"></i><span>진입 경계 차단: 비교 A ${shadowExecutionBlocked}회 · 비교 B ${looseShadowExecutionBlocked}회 · 추격 ${number(executionBlockReasons.entry_chase_exceeded) + number(looseExecutionBlockReasons.entry_chase_exceeded)}회 · 되돌림 ${number(executionBlockReasons.entry_retrace_exceeded) + number(looseExecutionBlockReasons.entry_retrace_exceeded)}회<br>가상 정산: 완료 ${boundarySettled}회 · 대기 ${boundaryPending}회 · 미확정 ${boundaryUnresolved}회 · 가상손익 ${escapeHtml(formatSignedWon(boundaryCounterfactualProfit))}<br>손실 회피 ${number(shadowBoundary.counterfactualLossAvoidanceCount)}건 · 놓친 이익 ${number(shadowBoundary.counterfactualMissedProfitCount)}건<br>사유별: ${escapeHtml(boundaryReasonLabel)} (실제 체결 아님 · 전환 무관)</span></div>`
+            : '';
+        const configWarning = status.configSnapshotComplete !== true
+            ? '<div class="pilot-inline-note" style="margin-top:12px; border-color:var(--accent-red); color:var(--accent-red);"><i class="ph ph-warning" aria-hidden="true"></i><span>전략 설정 기록이 없어 세션을 재확인할 수 없습니다. 실전 전환 보류</span></div>'
+            : configValueDrift.length > 0
+                ? `<div class="pilot-inline-note" style="margin-top:12px; border-color:var(--accent-red); color:var(--accent-red);"><i class="ph ph-warning" aria-hidden="true"></i><span>전략 설정값 변경 감지: ${escapeHtml(configValueDrift.join(', '))} · 전환 보류</span></div>`
+                : configSchemaDrift.length > 0
+                    ? `<div class="pilot-inline-note" style="margin-top:12px; border-color:var(--accent-yellow);"><i class="ph ph-info" aria-hidden="true"></i><span>전략 설정 항목 차이: ${escapeHtml(configSchemaDrift.join(', '))} · 실제 값 변경은 확인되지 않음 · 자동 재개·전환 보류</span></div>`
+                    : status.configConsistent === false
+                        ? `<div class="pilot-inline-note" style="margin-top:12px; border-color:var(--accent-red); color:var(--accent-red);"><i class="ph ph-warning" aria-hidden="true"></i><span>전략 설정 변경 감지: ${escapeHtml((status.configDrift || []).join(', ') || '확인 필요')} · 전환 보류</span></div>`
+                        : '';
+        const recentTradeHtml = latestStrictTrade
+            ? `<div class="pilot-inline-note" style="margin-top:12px;"><i class="ph ph-check-circle" aria-hidden="true"></i><span>최근 청산: ${strictRecentSummary}</span></div>`
+            : '';
+        const diagnosticRecentHtml = latestDiagnosticTrade
+            ? `<div class="pilot-inline-note" style="margin-top:8px;"><i class="ph ph-flask" aria-hidden="true"></i><span>최근 비교 장부 청산: ${diagnosticRecentSummary}</span></div>`
+            : '';
+        const winnerShadow = status.winnerShadowEvaluation || {};
+        const winnerShadowEntryLabel = number(winnerShadow.entryMaxReboundPercent) > 0
+            ? `반등 상한 ${number(winnerShadow.entryMaxReboundPercent).toFixed(2)}% 비교 · 차단 ${number(winnerShadow.blockedEntryCount ?? winnerShadow.reboundBlockedEntries)}회 · 미체결 ${number(winnerShadow.notFilledBlockedEntryCount)}회 · 대기 ${number(winnerShadow.pendingBlockedEntryCount)}회 · 정산 ${number(winnerShadow.settledBlockedEntryCount)}회 · 회피 손익 ${formatSignedWon(winnerShadow.counterfactualRealizedProfit)}`
+            : `보유 ${number(winnerShadow.winnerExtendMinutes)}분 연장`;
+        const winnerShadowHtml = winnerShadow.enabled
+            ? `<div class="pilot-inline-note" style="margin-top:8px; border-color:var(--accent-blue);"><i class="ph ph-test-tube" aria-hidden="true"></i><span>보유 연장 비교: ${winnerShadowEntryLabel} · 청산 ${number(winnerShadow.closedTradeCount)}회 · 손익 ${escapeHtml(formatSignedWon(winnerShadow.realizedProfit))} · PF ${Number.isFinite(Number(winnerShadow.profitFactor)) ? Number(winnerShadow.profitFactor).toFixed(2) : '∞'} · 실제 자산·전환과 무관</span></div>`
+            : '';
+        const marketCohortHtml = `<div class="pilot-inline-note" style="margin-top:8px; border-color:var(--accent-yellow);"><i class="ph ph-database" aria-hidden="true"></i><span>시장 데이터 관측: ${escapeHtml(marketCohortSummary)} · 현재 세션을 바꾸지 않는 다음 세션 시장 선택 참고치</span></div>`;
         const paperActions = status.readOnlyObserver
             ? '<span class="pilot-status-pill">읽기 전용 관찰</span>'
             : status.active
                 ? '<button type="button" class="pilot-button is-danger" data-pilot-action="stop-paper">세션 중지</button>'
                 : '<button type="button" class="pilot-button" data-pilot-action="start-paper">새 세션 시작</button>';
-        target.innerHTML = `<div class="pilot-paper-status"><div class="pilot-paper-status-head"><strong class="pilot-paper-state ${paperClass}">${paperState === 'PASS' ? 'PAPER PASS' : paperState === 'RUNNING' ? 'PAPER 관찰 중' : 'PAPER 중지'}</strong><span class="pilot-status-pill ${paperState === 'PASS' ? '' : paperState === 'RUNNING' ? 'is-warning' : 'is-danger'}">${escapeHtml(paperState)}</span></div><div class="pilot-paper-meta">경과 ${number(status.elapsedDays).toFixed(2)}일 · 자산 ${formatWon(status.currentAssets)} · 수익률 ${formatPercent(status.returnPercent)}<br>청산 거래 ${status.closedTradeCount || 0}회 · 실현손익 ${formatSignedWon(status.realizedProfit)} · MDD ${formatPercent(status.maxDrawdownPercent)}<br>strict 현재 포지션 ${status.strictEvaluation?.activePositions || 0}개 · 캔들 최신성 차단 ${number(status.candleFreshness?.blockedSnapshots) + number(status.candleFreshness?.blockedAnalyses) + number(status.candleFreshness?.blockedEntries)}회<br>분석 데이터 ${escapeHtml(analysisLabel)} · 부분 cycle ${analysisIncomplete}회 · 공백 ${analysisGap.toFixed(1)}초<br>신호 상태 ${escapeHtml(signalSummary)}<br>리스크 ticker ${escapeHtml(riskLabel)} · 연속 실패 ${number(riskMonitor.consecutiveFailures)}회 · 시세 공백 ${riskGap.toFixed(1)}초</div><div class="pilot-paper-actions"><button type="button" class="pilot-button" data-pilot-action="refresh-history">새로고침</button>${paperActions}</div></div>`;
+        target.innerHTML = `<div class="pilot-paper-status"><div class="pilot-paper-status-head"><strong class="pilot-paper-state ${paperClass}">${paperState === 'PASS' ? '모의투자 조건 충족' : paperState === 'RUNNING' ? '모의투자 관찰 중' : '모의투자 중지'}</strong><span class="pilot-status-pill ${paperState === 'PASS' ? '' : paperState === 'RUNNING' ? 'is-warning' : 'is-danger'}">${escapeHtml(paperState)}</span></div><div class="pilot-paper-meta">경과 ${number(status.elapsedDays).toFixed(2)}일 · 자산 ${formatWon(status.currentAssets)} · 수익률 ${formatPercent(status.returnPercent)}<br>청산 거래 ${status.closedTradeCount || 0}회 · 실현손익 ${formatSignedWon(status.realizedProfit)} · MDD ${formatPercent(status.maxDrawdownPercent)}<br>현재 포지션 ${status.strictEvaluation?.activePositions || 0}개 · ${strictOpenSummary}<br>오래된 데이터 차단 ${number(status.candleFreshness?.blockedSnapshots) + number(status.candleFreshness?.blockedAnalyses) + number(status.candleFreshness?.blockedEntries)}회<br>시장 데이터 관측 ${escapeHtml(marketCohortSummary)}<br>분석 데이터 ${escapeHtml(analysisLabel)} · 부분 응답 ${analysisIncomplete}회 · 공백 ${analysisGap.toFixed(1)}초<br>신호 상태 ${escapeHtml(signalSummary)}<br>시세 수신 ${escapeHtml(riskLabel)} · 연속 실패 ${number(riskMonitor.consecutiveFailures)}회 · 공백 ${riskGap.toFixed(1)}초</div><div class="pilot-paper-actions"><button type="button" class="pilot-button" data-pilot-action="refresh-history">새로고침</button>${paperActions}</div></div>`;
+        if (analysisHealth.analysisActive === true && analysisHealth.failClosed !== true) {
+            const startedAt = Date.parse(analysisHealth.analysisStartedAt || '');
+            const ageSeconds = Number.isFinite(startedAt)
+                ? Math.max(0, (Date.now() - startedAt) / 1000)
+                : 0;
+            target.querySelector('.pilot-paper-status')?.insertAdjacentHTML(
+                'beforeend',
+                `<div class="pilot-inline-note" style="margin-top:8px; border-color:var(--accent-yellow);"><i class="ph ph-arrows-clockwise" aria-hidden="true"></i><span>분석 진행 중 · ${ageSeconds.toFixed(1)}초 · 완료 전 상태는 성과 집계에서 제외됩니다.</span></div>`
+            );
+        }
+        if (configWarning) target.querySelector('.pilot-paper-status')?.insertAdjacentHTML('beforeend', configWarning);
+        if (recentTradeHtml) target.querySelector('.pilot-paper-status')?.insertAdjacentHTML('beforeend', recentTradeHtml);
+        if (diagnosticRecentHtml) target.querySelector('.pilot-paper-status')?.insertAdjacentHTML('beforeend', diagnosticRecentHtml);
+        if (diagnosticBooksHtml) target.querySelector('.pilot-paper-status')?.insertAdjacentHTML('beforeend', diagnosticBooksHtml);
+        if (executionBoundaryHtml) target.querySelector('.pilot-paper-status')?.insertAdjacentHTML('beforeend', executionBoundaryHtml);
+        if (winnerShadowHtml) target.querySelector('.pilot-paper-status')?.insertAdjacentHTML('beforeend', winnerShadowHtml);
+        target.querySelector('.pilot-paper-status')?.insertAdjacentHTML('beforeend', marketCohortHtml);
         if (status.orphaned) {
             const strictOpen = number(status.strictEvaluation?.activePositions);
             const diagnosticOpen = Array.isArray(status.diagnosticOpenPositions) ? status.diagnosticOpenPositions.length : 0;
             const heartbeat = status.heartbeatAt ? escapeHtml(formatDateTime(status.heartbeatAt)) : '확인 불가';
-            const reason = status.orphanReason === 'heartbeat_stale' ? 'heartbeat가 오래되어' : 'owner process가 사라져';
-            target.querySelector('.pilot-paper-status')?.insertAdjacentHTML('afterend', `<div class="pilot-paper-orphan-alert">⚠️ Orphan 세션: ${reason} 자동 재개와 같은 ledger 재사용을 차단했습니다. strict 미청산 ${strictOpen}개 · diagnostic 미청산 ${diagnosticOpen}개 · 마지막 heartbeat ${heartbeat}</div>`);
+            const reason = status.orphanReason === 'heartbeat_stale' ? '응답이 오래되어' : '실행 프로세스가 사라져';
+            const terminalError = status.terminalError;
+            const errorDetail = terminalError
+                ? ` · 실행 오류 ${escapeHtml(toUserText(terminalError.source || 'unknown'))}: ${escapeHtml(toUserText(terminalError.message || '상세 없음'))}`
+                : '';
+            target.querySelector('.pilot-paper-status')?.insertAdjacentHTML('afterend', `<div class="pilot-paper-orphan-alert">⚠️ 연결이 끊긴 세션: ${reason} 자동 재개와 기록 재사용을 차단했습니다. 미청산 ${strictOpen}개 · 비교 장부 미청산 ${diagnosticOpen}개 · 마지막 응답 ${heartbeat}${errorDetail}</div>`);
         }
         syncObserverControls();
     }
@@ -1247,18 +1526,18 @@
         const ranges = settings.ranges || {}; const values = settings.values || {}; const list = byId('pilot-settings-list');
         if (list) {
             const toggles = [
-                { key: 'marketRegimeEnabled', label: '시장 regime gate', description: '전체 마켓 방향성이 약할 때 신규 진입을 차단하는 후보입니다.', value: settings.investmentConfig?.scalping?.marketRegimeEnabled === true },
-                { key: 'requireReboundBelowOverbought', label: '반등 과매수 보호', description: '반등 확정 시 RSI가 과매수이면 늦은 진입을 막는 후보입니다.', value: settings.investmentConfig?.scalping?.requireReboundBelowOverbought === true }
+                { key: 'marketRegimeEnabled', label: '시장 방향성 필터', description: '전체 시장 방향이 약할 때 신규 진입을 차단하는 설정입니다.', value: settings.investmentConfig?.scalping?.marketRegimeEnabled === true },
+                { key: 'requireReboundBelowOverbought', label: '반등 과매수 보호', description: '반등 확정 시 RSI가 과매수이면 늦은 진입을 막는 설정입니다.', value: settings.investmentConfig?.scalping?.requireReboundBelowOverbought === true }
             ];
-            const toggleHtml = toggles.map(item => `<div class="pilot-setting-row"><div><span class="pilot-setting-label">${escapeHtml(item.label)}</span><span class="pilot-setting-description">${escapeHtml(item.description)}</span></div><label class="pilot-switch"><input type="checkbox" data-pilot-setting-key="${item.key}" ${item.value ? 'checked' : ''}><span class="pilot-switch-track"></span></label></div>`).join('');
-            const rangeHtml = Object.keys(ranges).map(key => { const range = ranges[key] || {}; const raw = values[key] ?? range.min ?? 0; const display = key === 'investmentRatio' ? number(raw) * 100 : raw; return `<div class="pilot-setting-row"><div><span class="pilot-setting-label">${escapeHtml(range.label || key)}</span><span class="pilot-setting-description">${escapeHtml(range.description || '')}</span></div><div class="pilot-setting-control"><input class="pilot-input" type="number" data-pilot-setting-key="${escapeHtml(key)}" data-pilot-setting-kind="number" data-pilot-setting-display="${key === 'investmentRatio' ? 'percent' : 'raw'}" min="${escapeHtml(key === 'investmentRatio' ? number(range.min) * 100 : range.min)}" max="${escapeHtml(key === 'investmentRatio' ? number(range.max) * 100 : range.max)}" step="${escapeHtml(key === 'investmentRatio' ? number(range.step) * 100 : range.step)}" value="${escapeHtml(display)}"></div></div>`; }).join('');
+            const toggleHtml = toggles.map(item => `<div class="pilot-setting-row"><div><span class="pilot-setting-label">${escapeHtml(toUserText(item.label))}</span><span class="pilot-setting-description">${escapeHtml(toUserText(item.description))}</span></div><label class="pilot-switch"><input type="checkbox" data-pilot-setting-key="${item.key}" ${item.value ? 'checked' : ''}><span class="pilot-switch-track"></span></label></div>`).join('');
+            const rangeHtml = Object.keys(ranges).map(key => { const range = ranges[key] || {}; const raw = values[key] ?? range.min ?? 0; const display = key === 'investmentRatio' ? number(raw) * 100 : raw; return `<div class="pilot-setting-row"><div><span class="pilot-setting-label">${escapeHtml(toUserText(range.label || key))}</span><span class="pilot-setting-description">${escapeHtml(toUserText(range.description || ''))}</span></div><div class="pilot-setting-control"><input class="pilot-input" type="number" data-pilot-setting-key="${escapeHtml(key)}" data-pilot-setting-kind="number" data-pilot-setting-display="${key === 'investmentRatio' ? 'percent' : 'raw'}" min="${escapeHtml(key === 'investmentRatio' ? number(range.min) * 100 : range.min)}" max="${escapeHtml(key === 'investmentRatio' ? number(range.max) * 100 : range.max)}" step="${escapeHtml(key === 'investmentRatio' ? number(range.step) * 100 : range.step)}" value="${escapeHtml(display)}"></div></div>`; }).join('');
             list.innerHTML = toggleHtml + rangeHtml;
         }
         const presetGrid = byId('pilot-preset-grid');
         if (presetGrid) { const presets = settings.presets || []; presetGrid.innerHTML = presets.length ? presets.map(preset => `<button type="button" class="pilot-preset-card" data-pilot-preset-id="${escapeHtml(preset.id)}"><span><span class="pilot-preset-name">${escapeHtml(preset.name)}</span><span class="pilot-preset-en">${escapeHtml(preset.nameEn)}</span></span><span class="pilot-preset-risk">${'●'.repeat(number(preset.riskLevel))}${'○'.repeat(Math.max(0, 5 - number(preset.riskLevel)))}</span></button>`).join('') : '<div class="pilot-inline-empty">프리셋이 없습니다.</div>'; }
         const optimization = settings.optimization || {}; const controls = byId('pilot-optimization-controls');
         if (controls) {
-            controls.innerHTML = `<div class="pilot-control-row"><div class="pilot-control-copy"><strong>자동 최적화</strong><span>주기적으로 후보 파라미터를 탐색합니다. live gate와는 별개입니다.</span></div><label class="pilot-switch"><input type="checkbox" id="pilot-auto-optimization" ${optimization.enabled ? 'checked' : ''}><span class="pilot-switch-track"></span></label></div><div class="pilot-control-row"><div class="pilot-control-copy"><strong>최적화 주기</strong><span>다음 실행: ${escapeHtml(formatDateTime(optimization.nextRun))}</span></div><select class="pilot-select" style="max-width:140px" id="pilot-optimization-interval"><option value="3600000">1시간</option><option value="7200000">2시간</option><option value="10800000">3시간</option><option value="21600000">6시간</option><option value="43200000">12시간</option><option value="86400000">24시간</option></select></div><div class="pilot-control-row"><div class="pilot-control-copy"><strong>즉시 실행</strong><span>현재 설정을 기준으로 후보 탐색을 시작합니다.</span></div><button type="button" class="pilot-button is-small is-primary" data-pilot-action="run-optimization">지금 실행</button></div>`;
+            controls.innerHTML = `<div class="pilot-control-row"><div class="pilot-control-copy"><strong>자동 최적화</strong><span>주기적으로 파라미터를 탐색합니다. 실제투자 전환과는 별개입니다.</span></div><label class="pilot-switch"><input type="checkbox" id="pilot-auto-optimization" ${optimization.enabled ? 'checked' : ''}><span class="pilot-switch-track"></span></label></div><div class="pilot-control-row"><div class="pilot-control-copy"><strong>최적화 주기</strong><span>다음 실행: ${escapeHtml(formatDateTime(optimization.nextRun))}</span></div><select class="pilot-select" style="max-width:140px" id="pilot-optimization-interval"><option value="3600000">1시간</option><option value="7200000">2시간</option><option value="10800000">3시간</option><option value="21600000">6시간</option><option value="43200000">12시간</option><option value="86400000">24시간</option></select></div><div class="pilot-control-row"><div class="pilot-control-copy"><strong>즉시 실행</strong><span>현재 설정을 기준으로 후보 탐색을 시작합니다.</span></div><button type="button" class="pilot-button is-small is-primary" data-pilot-action="run-optimization">지금 실행</button></div>`;
             const interval = byId('pilot-optimization-interval'); if (interval && optimization.interval) interval.value = String(optimization.interval);
         }
         syncObserverControls();
@@ -1266,12 +1545,120 @@
 
     function renderHistoryTables() {
         const historyTarget = byId('pilot-optimization-history'); const backtestTarget = byId('pilot-backtest-results'); const optimization = state.settings?.optimizationHistory || []; const backtest = state.settings?.backtestResults || [];
-        if (historyTarget) historyTarget.innerHTML = optimization.length ? optimization.slice(0, 8).map(item => `<div class="pilot-evidence-row"><span class="pilot-evidence-time">${escapeHtml(formatTime(item.timestamp || item.date))}</span><div><strong class="pilot-evidence-title">${escapeHtml(item.type || item.strategy || '최적화 실행')}</strong><div class="pilot-evidence-detail">${escapeHtml(item.description || item.message || '후보 파라미터 기록')}</div></div><span class="pilot-evidence-value">${escapeHtml(String(item.fitness ?? item.score ?? '-'))}</span></div>`).join('') : '<div class="pilot-inline-empty">최적화 이력이 없습니다.</div>';
+        if (historyTarget) historyTarget.innerHTML = optimization.length ? optimization.slice(0, 8).map(item => `<div class="pilot-evidence-row"><span class="pilot-evidence-time">${escapeHtml(formatTime(item.timestamp || item.date))}</span><div><strong class="pilot-evidence-title">${escapeHtml(item.type || item.strategy || '최적화 실행')}</strong><div class="pilot-evidence-detail">${escapeHtml(toUserText(item.description || item.message || '후보 파라미터 기록'))}</div></div><span class="pilot-evidence-value">${escapeHtml(String(item.fitness ?? item.score ?? '-'))}</span></div>`).join('') : '<div class="pilot-inline-empty">최적화 이력이 없습니다.</div>';
         if (backtestTarget) backtestTarget.innerHTML = backtest.length ? `<div class="pilot-evidence-list">${backtest.slice(0, 8).map(item => `<div class="pilot-evidence-row"><span class="pilot-evidence-time">${escapeHtml(symbolOf(item.coin || item.market || '-'))}</span><div><strong class="pilot-evidence-title">${escapeHtml(item.strategy || item.name || '백테스트')}</strong><div class="pilot-evidence-detail">거래 ${item.totalTrades || item.tradeCount || 0}회 · PF ${item.profitFactor ?? '-'}</div></div><span class="pilot-evidence-value ${classForValue(item.totalReturnPercent || item.returnPercent)}">${formatPercent(item.totalReturnPercent || item.returnPercent)}</span></div>`).join('')}</div>` : '<div class="pilot-inline-empty">백테스트 결과가 없습니다.</div>';
+        renderStrategyResearch();
+        renderMomentumShadow();
+    }
+
+    function renderStrategyResearch() {
+        const target = byId('pilot-strategy-research');
+        const meta = byId('pilot-strategy-research-meta');
+        if (!target) return;
+        const report = state.strategyResearch;
+        if (!report?.available) {
+            if (meta) meta.textContent = report?.reason === 'research_report_not_found'
+                ? '지정한 비교 리포트를 찾을 수 없습니다.'
+                : '비교 리포트가 설정되지 않았습니다.';
+            target.innerHTML = '<div class="pilot-inline-empty">장기 기간 비교 결과는 별도 리포트를 지정하면 표시됩니다. 이 영역은 실전 전환과 무관합니다.</div>';
+            return;
+        }
+        const variants = Array.isArray(report.variants) ? report.variants : [];
+        if (report.study === 'daily_momentum_robustness_grid') {
+            const shortlist = Array.isArray(report.shortlist) ? report.shortlist : [];
+            const nearMisses = Array.isArray(report.nearMisses) ? report.nearMisses : [];
+            const items = shortlist.length ? shortlist : nearMisses;
+            const statusLabel = status => status === 'SHADOW_CANDIDATE_WITH_STOP'
+                ? '보호중단 모의 후보'
+                : status === 'SHADOW_CANDIDATE' ? '별도 모의 후보' : '보류';
+            const blockerLabel = blocker => ({
+                unknown_boundary_position: '구간 경계 미청산',
+                segment_data_unavailable: '구간 데이터 부족',
+                full_return_below_floor: '전체 수익률 기준 미달',
+                drawdown_above_limit: 'MDD 기준 초과',
+                worst_segment_below_floor: '최악 구간 기준 미달',
+                trade_sample_below_minimum: '거래 수 부족'
+            }[blocker] || '추가 확인 필요');
+            const labelFor = item => {
+                const config = item.config || {};
+                return `추세 ${formatPercent(config.trendMinPercent)} · 시장 수 ${number(config.breadthMin)} · 비중 ${formatPercent(number(config.positionFraction) * 100)} · 최대 ${number(config.maxPositions)}종목`;
+            };
+            const statusSummaryLabel = status => status === 'SHADOW_CANDIDATE_WITH_STOP'
+                ? '보호중단 후보'
+                : status === 'SHADOW_CANDIDATE' ? '일반 후보' : '보류';
+            const thresholdSummary = report.benchmarkThresholdSummary
+                ? Object.entries(report.benchmarkThresholdSummary)
+                    .map(([threshold, counts]) => `${threshold}% ${Object.entries(counts).map(([status, count]) => `${statusSummaryLabel(status)} ${count}개`).join(' · ')}`)
+                    .join(' / ')
+                : '임계값 비교 없음';
+            if (meta) meta.textContent = `참고용 · ${escapeHtml({ continuous: '연속', segments: '분할' }[report.segmentMode] || report.segmentMode || '연속')} 구간 · 통과 후보 ${shortlist.length}개 · 근접 후보 ${nearMisses.length}개 · ${escapeHtml(thresholdSummary)}`;
+            target.innerHTML = items.length
+                ? `<div class="pilot-inline-note"><i class="ph ph-flask" aria-hidden="true"></i><span>동일 완료 일봉의 위험 범위를 비교한 참고 결과입니다. 실제 주문·실전 전환·모의투자 기본값을 변경하지 않습니다. 최악 구간과 보호중단 발동 여부를 함께 확인하세요.<br>기준 시장 임계값 비교: ${escapeHtml(thresholdSummary)}</span></div><div class="pilot-evidence-list">${items.slice(0, 8).map(item => { const metrics = item.fullMetrics || {}; const blockers = Array.isArray(item.eligibilityBlockers) ? item.eligibilityBlockers.map(blockerLabel).join(' · ') : ''; const risk = item.drawdownStopTriggered ? ' · 보호중단 발동' : ''; const detail = `${labelFor(item)} · PF ${Number.isFinite(Number(metrics.profitFactor)) ? Number(metrics.profitFactor).toFixed(2) : '∞'} · MDD ${formatPercent(metrics.maxDrawdownPercent)} · 최악 구간 ${formatPercent(item.worstSegmentReturnPercent)} · 거래 ${number(metrics.tradeCount)}회${risk}${blockers ? ` · ${blockers}` : ''}`; return `<div class="pilot-evidence-row"><span class="pilot-evidence-time">${escapeHtml(statusLabel(item.status))}</span><div><strong class="pilot-evidence-title">전체 ${formatPercent(metrics.totalReturnPercent)} · ${escapeHtml(labelFor(item))}</strong><div class="pilot-evidence-detail">${escapeHtml(detail)}</div></div><span class="pilot-evidence-value ${item.status === 'HOLD' ? 'pilot-negative' : 'pilot-positive'}">${escapeHtml(statusLabel(item.status))}</span></div>`; }).join('')}</div>`
+                : '<div class="pilot-inline-empty">기준을 통과한 후보가 없습니다. 조건에 근접한 후보와 차단 사유를 확인하세요.</div>';
+            return;
+        }
+        if (meta) meta.textContent = `참고용 · 생성 ${formatDateTime(report.generatedAt)} · ${report.markets?.length || 0}개 시장`;
+        target.innerHTML = variants.length
+            ? `<div class="pilot-inline-note"><i class="ph ph-flask" aria-hidden="true"></i><span>이 결과는 전략 비교·참고용입니다. <strong>실제 주문으로 이어지지 않으며</strong> 실제투자 전환 조건도 변경하지 않습니다.</span></div><div class="pilot-evidence-list">${variants.slice(0, 8).map(variant => { const metrics = variant.portfolio?.metrics || variant.fullAggregate || {}; const status = variant.eligibleForFurtherShadow === true && variant.portfolio?.unknownBoundaryPositionCount === 0 ? '모의 검토' : '보류'; return `<div class="pilot-evidence-row"><span class="pilot-evidence-time">${escapeHtml(String(variant.name || 'variant'))}</span><div><strong class="pilot-evidence-title">통합 모의 ${formatPercent(metrics.totalReturnPercent)} · ${number(metrics.tradeCount)}회</strong><div class="pilot-evidence-detail">PF ${Number.isFinite(Number(metrics.profitFactor)) ? Number(metrics.profitFactor).toFixed(2) : '∞'} · MDD ${formatPercent(metrics.maxDrawdownPercent)} · 시장 구간 ${variant.allMarketFoldsPassed === true ? '통과' : '미달'} · 경계 미청산 ${number(variant.portfolio?.unknownBoundaryPositionCount)}건</div></div><span class="pilot-evidence-value ${status === '모의 검토' ? 'pilot-positive' : 'pilot-negative'}">${status}</span></div>`; }).join('')}</div>`
+            : '<div class="pilot-inline-empty">표시할 비교 결과가 없습니다.</div>';
+    }
+
+    function renderMomentumShadow() {
+        const target = byId('pilot-momentum-shadow');
+        const meta = byId('pilot-momentum-shadow-meta');
+        if (!target) return;
+        const projection = state.momentumShadow;
+        if (!projection?.available) {
+            if (meta) meta.textContent = '현재 비교 기록을 확인할 수 없습니다.';
+            target.innerHTML = '<div class="pilot-inline-empty">아직 표시할 모멘텀 비교 기록이 없습니다. 이 영역은 실제 주문과 분리된 참고 기록입니다.</div>';
+            return;
+        }
+        const books = Array.isArray(projection.books) ? projection.books : [];
+        const readiness = projection.candidateReadiness;
+        const readinessBlockerLabel = blocker => ({
+            benchmark_gate_closed: '기준 시장 필터가 닫혀 있습니다.',
+            benchmark_heartbeat_stale: '기준 시장 갱신이 오래되었습니다.',
+            benchmark_owner_not_running: '기준 시장 관찰이 실행 중이 아닙니다.',
+            benchmark_ledger_missing: '기준 시장 기록이 없습니다.',
+            target_owner_already_running: '후보 실행 프로세스가 이미 실행 중입니다.',
+            target_ledger_owner_alive: '후보 기록을 소유한 프로세스가 살아 있습니다.',
+            candidate_poll_below_minimum: '후보 갱신 주기가 너무 짧습니다.'
+        }[blocker] || '추가 사전 확인이 필요합니다.');
+        const readinessNextPoll = readiness?.benchmark && Number.isFinite(Number(readiness.benchmark.nextPollDueInSeconds))
+            ? Number(readiness.benchmark.nextPollDueInSeconds) > 0
+                ? ` · 다음 갱신 약 ${Math.ceil(Number(readiness.benchmark.nextPollDueInSeconds) / 60)}분 후`
+                : ' · 갱신 예정 또는 진행 중'
+            : '';
+        const readinessHtml = readiness
+            ? `<div class="pilot-momentum-shadow-preflight"><div><strong>다음 리스크 제한 후보</strong><span>${readiness.launchAllowed ? '시작 조건 충족' : '시작 대기'} · 실제 주문과 무관</span></div><span class="pilot-status-pill ${readiness.launchAllowed ? '' : 'is-warning'}">${readiness.launchAllowed ? '시작 가능' : '대기'}</span><p>추세 ${formatPercent(readiness.candidateConfig?.trendMinPercent)} · 시장 수 ${number(readiness.candidateConfig?.breadthMin)} · 연속 상승 ${number(readiness.candidateConfig?.minUpBars)}봉 · 비중 ${formatPercent(number(readiness.candidateConfig?.positionFraction) * 100)} · 손절 중단 ${formatOptionalPercent(readiness.candidateConfig?.maxPortfolioDrawdownPercent)} · 재시작 대기 ${number(readiness.candidateConfig?.cooldownAfterLossDays)}일</p><p>${Array.isArray(readiness.blockers) && readiness.blockers.length ? readiness.blockers.map(readinessBlockerLabel).join(' · ') : '모든 시작 전 조건을 통과했습니다.'}</p>${readiness.benchmark ? `<p>기준 시장 갱신 ${number(readiness.benchmark.heartbeatAgeSeconds)}초 전 · ${readiness.benchmark.heartbeatFresh ? '최신' : '오래됨'}${readinessNextPoll} · 추세 ${formatOptionalPercent(readiness.benchmark.trendPercent)}</p>` : ''}</div>`
+            : '';
+        if (meta) meta.textContent = `완료된 일봉 기준 · 거래비용 ${formatPercent(books[0]?.contract?.costPercent || 0, 2).replace('+', '')} 반영 · 실제 주문과 무관`;
+        target.innerHTML = readinessHtml + (books.length
+            ? books.map(book => {
+                const returnClass = classForValue(book.markedReturnPercent);
+                const statusClass = book.status === '관찰 중' ? 'is-warning' : book.status === '중지' ? 'is-danger' : 'is-warning';
+                const positions = Array.isArray(book.openPositions) && book.openPositions.length
+                    ? book.openPositions.map(position => `${escapeHtml(position.asset)} ${formatPrice(position.entryPrice)} → ${position.markPrice === null ? '—' : formatPrice(position.markPrice)} (${formatOptionalPercent(position.markProfitPercent)})`).join('<br>')
+                    : '현재 보유 없음';
+                const reason = book.statusReason ? ` · ${escapeHtml(toUserText(book.statusReason))}` : '';
+                const configurationWarning = book.configurationWarning ? `<span class="pilot-momentum-shadow-warning">${escapeHtml(toUserText(book.configurationWarning))}</span>` : '';
+                const benchmark = book.benchmark?.configured
+                    ? `<span>${escapeHtml(book.benchmark.market)} 필터 ${book.benchmark.available === false ? '데이터 대기' : book.benchmark.gateOpen ? '열림' : '닫힘'} · 추세 ${formatOptionalPercent(book.benchmark.trendPercent)} · 기준 &gt;${formatOptionalPercent(book.contract?.benchmarkTrendMinPercent)} · 차단 ${number(book.benchmark.blockedEntries)}회</span>`
+                    : '';
+                const riskControls = book.riskControls?.configured
+                    ? `<span>${book.riskControls.drawdownStopTriggered ? '보호중단 발동' : `보호중단 ${formatOptionalPercent(book.riskControls.maxPortfolioDrawdownPercent)} 기준`} · 재시작 대기 ${number(book.riskControls.cooldownAfterLossDays)}일 · 차단 ${number(book.riskControls.cooldownBlockedEntries) + number(book.riskControls.drawdownBlockedEntries)}회</span>`
+                    : '';
+                const heartbeat = Number.isFinite(Number(book.heartbeatAgeSeconds)) ? `갱신 ${Math.round(Number(book.heartbeatAgeSeconds))}초 전` : '갱신 시각 확인 필요';
+                const promotionWarning = Array.isArray(book.promotionBlockers) && book.promotionBlockers.length
+                    ? `<span class="pilot-momentum-shadow-warning">${escapeHtml(toUserText(book.promotionStatus || '전환 보류'))}: ${escapeHtml(toUserText(book.promotionBlockers.join(' · ')))}</span>`
+                    : '';
+                return `<article class="pilot-momentum-shadow-card"><div class="pilot-momentum-shadow-card-head"><div><strong>${escapeHtml(toUserText(book.label))}</strong><span>${escapeHtml(toUserText(book.description || '동일 진입계약 비교'))}</span></div><span class="pilot-status-pill ${statusClass}">${escapeHtml(toUserText(book.status || '확인 필요'))}</span></div><div class="pilot-momentum-shadow-equity ${returnClass}">${formatWon(book.markedEquity)}</div><div class="pilot-momentum-shadow-return ${returnClass}">${formatOptionalPercent(book.markedReturnPercent)} 평가수익률</div><div class="pilot-momentum-shadow-stats"><span>현금 ${formatWon(book.cash)}</span><span>실현 ${formatSignedWon(book.realizedProfit)}</span><span>미실현 ${formatSignedWon(book.unrealizedProfit)}</span><span>청산 ${number(book.closedTradeCount)}회 · 승률 ${book.closedTradeCount ? formatPercent((number(book.winningTrades) / number(book.closedTradeCount)) * 100, 1) : '—'}</span><span>관찰 ${number(book.cycles)}회 · ${number(book.markets)}개 시장${reason}</span><span>${heartbeat}</span>${benchmark}${riskControls}</div>${configurationWarning}${promotionWarning}<div class="pilot-momentum-shadow-positions"><span>현재 평가 포지션</span><strong>${positions}</strong></div></article>`;
+            }).join('')
+            : '<div class="pilot-inline-empty">표시할 비교 장부가 없습니다.</div>');
     }
 
     function renderAll() {
-        renderMode(); renderGateCards(); renderChartPeriodButtons(); renderCoreStats(); renderPositionRows('pilot-overview-positions'); renderPositionRows('pilot-portfolio-positions'); renderActivity(); renderRiskSummary(); renderTradePanels(); drawEquityChart('pilot-equity-chart', 'pilot-equity-empty', state.portfolioHistory); renderPortfolio(); renderMarketHeader(); renderMarketList(); renderAnalysis(); renderNews(); renderValidationDetail(); renderPaperDetail(); syncObserverControls();
+        renderMode(); renderGateCards(); renderChartPeriodButtons(); renderCoreStats(); renderPositionRows('pilot-overview-positions'); renderPositionRows('pilot-portfolio-positions'); renderActivity(); renderRiskSummary(); renderTradePanels(); drawEquityChart('pilot-equity-chart', 'pilot-equity-empty', state.portfolioHistory); renderPortfolio(); renderMarketHeader(); renderMarketList(); renderAnalysis(); renderNews(); renderValidationDetail(); renderPaperDetail(); renderStrategyResearch(); renderMomentumShadow(); syncObserverControls();
     }
 
     async function loadCore({ quiet = false } = {}) {
@@ -1279,7 +1666,7 @@
         state.refreshing = true;
         if (!quiet) setConnection(false, '연결 확인 중');
         const period = encodeURIComponent(state.chartPeriod || '24h');
-        const requests = { status: '/status', account: '/account', pnl: '/cumulative-pnl', today: '/today-summary', statistics: '/statistics', validation: '/scalping-validation', paper: '/paper-validation', portfolioAnalysis: '/portfolio-analysis', history: `/portfolio/history?period=${period}`, trades: '/trades?limit=12', marketPrices: '/market/prices', targetCoins: '/target-coins' };
+        const requests = { status: '/status', account: '/account', pnl: '/cumulative-pnl', today: '/today-summary', statistics: '/statistics', validation: '/scalping-validation', paper: '/paper-validation', momentumShadow: '/momentum-shadow', portfolioAnalysis: '/portfolio-analysis', history: `/portfolio/history?period=${period}`, trades: '/trades?limit=12', marketPrices: '/market/prices', targetCoins: '/target-coins' };
         const settled = await Promise.all(Object.entries(requests).map(async ([key, path]) => { try { return [key, await requestJSON(path)]; } catch (error) { return [key, null, error]; } }));
         settled.forEach(([key, data]) => { if (data === null) return; if (key === 'history') state.portfolioHistory = Array.isArray(data?.data) ? data.data : []; else if (key === 'targetCoins') state.targetCoins = Array.isArray(data?.coins) ? data.coins : []; else state[key] = data; });
         if (state.status?.mode) state.actualMode = state.status.mode === 'LIVE' ? 'LIVE' : 'DRY_RUN';
@@ -1300,7 +1687,7 @@
         if (state.viewLoading.has('analysis')) return;
         state.viewLoading.add('analysis');
         const button = root.querySelector('[data-pilot-action="load-analysis"]'); if (button) { button.disabled = true; button.innerHTML = '<i class="ph ph-spinner-gap" aria-hidden="true"></i> 분석 중'; }
-        try { state.analysis = await requestJSON('/all-coin-scores?limit=60'); renderAnalysis(); showToast(`전략 연구 결과 ${state.analysis?.totalAnalyzed || 0}개를 갱신했습니다.`, 'success'); } catch (error) { showToast(`분석을 불러오지 못했습니다: ${error.message}`, 'error'); } finally { state.viewLoading.delete('analysis'); if (button) { button.disabled = false; button.innerHTML = '<i class="ph ph-play" aria-hidden="true"></i> 분석 실행'; } }
+        try { state.analysis = await requestJSON('/all-coin-scores?limit=60'); renderAnalysis(); showToast(`전략 분석 결과 ${state.analysis?.totalAnalyzed || 0}개를 갱신했습니다.`, 'success'); } catch (error) { showToast(`분석을 불러오지 못했습니다: ${error.message}`, 'error'); } finally { state.viewLoading.delete('analysis'); if (button) { button.disabled = false; button.innerHTML = '<i class="ph ph-play" aria-hidden="true"></i> 분석 실행'; } }
     }
 
     async function loadNews() {
@@ -1332,9 +1719,9 @@
 
     async function loadHistory() {
         try {
-            const [validation, paper, optimizationHistory, backtestResults] = await Promise.all([requestJSON('/scalping-validation'), requestJSON('/paper-validation'), requestJSON('/optimization-history'), requestJSON('/backtest/results')]);
-            state.validation = validation; state.paper = paper; state.settings = state.settings || {}; state.settings.optimizationHistory = Array.isArray(optimizationHistory) ? optimizationHistory : optimizationHistory?.history || []; state.settings.backtestResults = Array.isArray(backtestResults) ? backtestResults : backtestResults?.results || []; state.historyLoaded = true; renderGateCards(); renderValidationDetail(); renderPaperDetail(); renderHistoryTables();
-        } catch (error) { showToast(`검증 기록을 불러오지 못했습니다: ${error.message}`, 'error'); }
+            const [validation, paper, momentumShadow, optimizationHistory, backtestResults, strategyResearch] = await Promise.all([requestJSON('/scalping-validation'), requestJSON('/paper-validation'), requestJSON('/momentum-shadow'), requestJSON('/optimization-history'), requestJSON('/backtest/results'), requestJSON('/strategy-research')]);
+            state.validation = validation; state.paper = paper; state.momentumShadow = momentumShadow; state.strategyResearch = strategyResearch; state.settings = state.settings || {}; state.settings.optimizationHistory = Array.isArray(optimizationHistory) ? optimizationHistory : optimizationHistory?.history || []; state.settings.backtestResults = Array.isArray(backtestResults) ? backtestResults : backtestResults?.results || []; state.historyLoaded = true; renderGateCards(); renderValidationDetail(); renderPaperDetail(); renderHistoryTables();
+        } catch (error) { showToast(`점검 기록을 불러오지 못했습니다: ${error.message}`, 'error'); }
     }
 
     function showView(view) {
@@ -1376,14 +1763,14 @@
 
     async function startPaper(reset = false) {
         if (isReadOnlyObserver()) { showToast(readOnlyObserverReason(), 'warning'); return; }
-        const message = reset ? '새 시드로 초기화 후 forward paper 세션을 시작할까요? 기존 dry portfolio가 덮어써질 수 있습니다.' : '현재 상태 기준으로 forward paper 세션을 시작할까요?'; if (!window.confirm(message)) return;
-        try { const result = await requestJSON('/paper-validation/start', { method: 'POST', body: JSON.stringify(reset ? { reset: true } : {}) }); state.paper = result.status; renderGateCards(); renderPaperDetail(); showToast('forward paper 세션을 시작했습니다.', 'success'); } catch (error) { showToast(`paper 세션 시작 실패: ${error.message}`, 'error'); }
+        const message = reset ? '새 시드로 초기화 후 모의투자 관찰 세션을 시작할까요? 기존 모의 자산이 덮어써질 수 있습니다.' : '현재 상태 기준으로 모의투자 관찰 세션을 시작할까요?'; if (!window.confirm(message)) return;
+        try { const result = await requestJSON('/paper-validation/start', { method: 'POST', body: JSON.stringify(reset ? { reset: true } : {}) }); state.paper = result.status; renderGateCards(); renderPaperDetail(); showToast('모의투자 관찰 세션을 시작했습니다.', 'success'); } catch (error) { showToast(`모의투자 세션 시작 실패: ${error.message}`, 'error'); }
     }
 
     async function stopPaper() {
         if (isReadOnlyObserver()) { showToast(readOnlyObserverReason(), 'warning'); return; }
-        if (!window.confirm('현재 forward paper 세션을 중지할까요?')) return;
-        try { const result = await requestJSON('/paper-validation/stop', { method: 'POST' }); state.paper = result.status; renderGateCards(); renderPaperDetail(); showToast('forward paper 세션을 중지했습니다.', 'success'); } catch (error) { showToast(`paper 세션 중지 실패: ${error.message}`, 'error'); }
+        if (!window.confirm('현재 모의투자 관찰 세션을 중지할까요?')) return;
+        try { const result = await requestJSON('/paper-validation/stop', { method: 'POST' }); state.paper = result.status; renderGateCards(); renderPaperDetail(); showToast('모의투자 관찰 세션을 중지했습니다.', 'success'); } catch (error) { showToast(`모의투자 세션 중지 실패: ${error.message}`, 'error'); }
     }
 
     function settingPayload() {
@@ -1395,7 +1782,7 @@
     async function saveSettings() {
         if (isReadOnlyObserver()) { showToast(readOnlyObserverReason(), 'warning'); return; }
         const payload = settingPayload();
-        try { const investmentRatio = payload.investmentRatio; delete payload.investmentRatio; const result = await requestJSON('/config/update', { method: 'POST', body: JSON.stringify(payload) }); if (investmentRatio !== undefined) await requestJSON('/investment-config/update', { method: 'POST', body: JSON.stringify({ investmentRatio }) }); state.settingsLoaded = false; await loadSettings(); showToast(result.message || '설정을 적용했습니다. 다음 검증에서 다시 확인하세요.', 'success'); } catch (error) { showToast(`설정 적용 실패: ${error.message}`, 'error'); }
+        try { const investmentRatio = payload.investmentRatio; delete payload.investmentRatio; const result = await requestJSON('/config/update', { method: 'POST', body: JSON.stringify(payload) }); if (investmentRatio !== undefined) await requestJSON('/investment-config/update', { method: 'POST', body: JSON.stringify({ investmentRatio }) }); state.settingsLoaded = false; await loadSettings(); showToast(result.message || '설정을 적용했습니다. 다음 점검에서 다시 확인하세요.', 'success'); } catch (error) { showToast(`설정 적용 실패: ${error.message}`, 'error'); }
     }
 
     async function applyPreset(presetId) {
@@ -1406,7 +1793,7 @@
 
     async function runOptimization() {
         if (isReadOnlyObserver()) { showToast(readOnlyObserverReason(), 'warning'); return; }
-        if (!window.confirm('현재 설정으로 최적화 후보 탐색을 시작할까요?')) return;
+        if (!window.confirm('현재 설정으로 최적화 탐색을 시작할까요?')) return;
         try { const result = await requestJSON('/optimization/run-now', { method: 'POST' }); showToast(result.message || '최적화를 시작했습니다.', 'success'); } catch (error) { showToast(`최적화 실행 실패: ${error.message}`, 'error'); }
     }
 
@@ -1417,7 +1804,7 @@
     }
 
     function setMode(mode) {
-        if (mode === 'live') { if (state.actualMode !== 'LIVE') { showToast('현재 서버가 모의투자 모드라 실제투자로 전환할 수 없습니다.', 'warning'); return; } if (!state.liveEligible) { showToast('검증 게이트를 모두 통과하기 전까지 실제투자는 잠겨 있습니다.', 'warning'); showView('history'); return; } }
+        if (mode === 'live') { if (state.actualMode !== 'LIVE') { showToast('현재 서버가 모의투자 모드라 실제투자로 전환할 수 없습니다.', 'warning'); return; } if (!state.liveEligible) { showToast('사전 점검이 모두 완료되기 전까지 실제투자는 잠겨 있습니다.', 'warning'); showView('history'); return; } }
         if (mode === 'paper' && state.actualMode === 'LIVE') { showToast('현재 서버가 실제투자 모드입니다. 모의 주문은 실행되지 않습니다.', 'warning'); return; }
         state.activeMode = mode; renderMode(); renderTradePanels();
     }
@@ -1500,7 +1887,7 @@
             liveSocket.on('connect', () => setConnection(true));
             liveSocket.on('disconnect', () => setConnection(Boolean(state.connected), '실시간 알림 대기'));
             liveSocket.on('auto-trade', payload => { const trade = payload?.trade || payload; showToast(`${trade?.coin ? symbolOf(trade.coin) : '자동'} ${trade?.type === 'SELL' ? '매도' : '매수'} 알림`, trade?.type === 'SELL' ? 'warning' : 'success'); loadCore({ quiet: true }); });
-            liveSocket.on('new-signal', () => { showToast('새로운 신호가 도착했습니다. 전략 연구에서 근거를 확인하세요.', 'info'); if (state.view === 'analysis') loadAnalysis(); });
+            liveSocket.on('new-signal', () => { showToast('새로운 신호가 도착했습니다. 전략 분석에서 확인하세요.', 'info'); if (state.view === 'analysis') loadAnalysis(); });
             liveSocket.on('breaking-news', news => { showToast(`속보: ${news?.title || '새로운 뉴스'}`, 'warning'); if (state.view === 'news') loadNews(); });
         } catch (error) { console.warn('Signal Ledger socket init failed:', error.message); }
     }
@@ -1508,6 +1895,9 @@
     window.addEventListener('resize', () => { drawEquityChart('pilot-equity-chart', 'pilot-equity-empty', state.portfolioHistory); drawEquityChart('pilot-portfolio-chart', 'pilot-portfolio-empty', state.portfolioHistory); drawAllocationChart(); drawMarketChart(); });
     window.setInterval(updateClock, 1000);
     window.setInterval(() => { if (!document.hidden) loadCore({ quiet: true }); }, 10000);
+    document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) loadCore({ quiet: true }).catch(() => {});
+    });
 
     updateClock();
     const savedView = localStorage.getItem('currentPilotView');

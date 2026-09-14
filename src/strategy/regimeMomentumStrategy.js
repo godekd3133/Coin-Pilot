@@ -2,23 +2,23 @@
  * Regime-gated momentum candidate — RESEARCH ONLY.
  *
  * Evidence basis (diagnostic, not promotion):
- * - /tmp/coinpilot-oos-60d-15m-4mk.json (bear 2026-05-16→07-15) and
- *   /tmp/coinpilot-60d-15m-20mk-20260913.json (bull 2026-07-15→09-13).
- * - 60m bars; signal = RSI(14) >= rsiEntryThreshold AND bar closed up AND
- *   trailing trendLookbackHours return > 0; deduped one position per market;
- *   fixed hold of maxHoldHours. Net of ~0.2% round-trip cost the contract was
- *   positive in BOTH windows (~+0.47%/trade bear, ~+1.6%/trade bull). The 7d
- *   trend gate is the only robust lookback band in the sensitivity sweep.
- * - Entries correlate across markets during recoveries (~65% fired with all
- *   four liquid markets inside the same hold window), so per-market trade
+ * - Earlier 60-day windows suggested a positive result, but those windows were
+ *   not sufficient evidence and are superseded by the contiguous ~400-day
+ *   audit recorded in scorecard.md and context.md.
+ * - On 12 liquid KRW markets after roughly 0.2% round-trip cost, the fixed
+ *   72-hour forward contract returned about -10.80% (317 trades, PF 0.91),
+ *   while the hold-while-7-day-trend regime variant returned about -12.24%
+ *   (177 trades, MDD about 31.4%). Both reduced loss versus buy-and-hold in
+ *   that bear-dominated window but failed to create positive absolute alpha.
+ * - Entries correlate across markets during recoveries, so per-market trade
  *   counts overstate independent evidence; a portfolio exposure cap is a
  *   required risk constraint, not an optional filter.
  *
  * This class is deliberately self-contained: it consumes COMPLETED candles of
  * the configured unit (default 60 minutes) and exposes pure signal/exit
- * decisions. It is not wired into the live runner yet; the delayed-entry,
- * freshness, and promotion contracts must be mirrored before any forward
- * shadow cohort, and it stays disabled until those gates pass.
+ * decisions. It is not wired into the live runner. Forward shadow use is
+ * diagnostic only, and the current audit treats this family as a regime
+ * defense overlay candidate rather than an alpha or promotion candidate.
  */
 class RegimeMomentumStrategy {
   constructor(config = {}) {
@@ -29,6 +29,7 @@ class RegimeMomentumStrategy {
       ? Number(config.rsiEntryThreshold) : 65;
     this.trendLookbackHours = Math.max(1, Number(config.trendLookbackHours) || 168);
     this.requireUpBar = config.requireUpBar !== false;
+    this.minUpBars = Math.max(1, Math.floor(Number(config.minUpBars) || 1));
     this.maxHoldHours = Math.max(1, Number(config.maxHoldHours) || 48);
     this.stopLossPercent = Math.max(0, Number(config.stopLossPercent) || 0);
     this.takeProfitPercent = Math.max(0, Number(config.takeProfitPercent) || 0);
@@ -81,7 +82,14 @@ class RegimeMomentumStrategy {
     const trendPercent = ((closes[i] - closes[i - lookbackBars]) / closes[i - lookbackBars]) * 100;
 
     if (rsi < this.rsiEntryThreshold) return { signal: null, reason: 'rsi_below_threshold', rsi, trendPercent };
-    if (this.requireUpBar && barReturn <= 0) return { signal: null, reason: 'bar_not_up', rsi, trendPercent };
+    if (this.requireUpBar) {
+      for (let offset = 0; offset < this.minUpBars; offset += 1) {
+        const current = i - offset;
+        if (current <= 0 || closes[current] <= closes[current - 1]) {
+          return { signal: null, reason: 'bar_not_up', rsi, trendPercent };
+        }
+      }
+    }
     if (trendPercent <= 0) return { signal: null, reason: 'trend_gate_blocked', rsi, trendPercent };
 
     const ts = candles[i].candle_date_time_utc || candles[i].ts || candles[i].timestamp;

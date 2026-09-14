@@ -6,9 +6,39 @@ import { v4 as uuidv4 } from 'uuid';
 // MultiCoinTrader owns separate market and risk clients. A module-level slot
 // prevents those clients from independently exceeding the exchange request
 // budget inside one Node process.
-let sharedRateLimitTail = Promise.resolve();
 let sharedNextRequestAt = 0;
 let sharedBackoffUntil = 0;
+let sharedRateLimitQueue = [];
+let sharedRateLimitProcessorRunning = false;
+let sharedRateLimitSequence = 0;
+
+function processSharedRateLimitQueue() {
+  if (sharedRateLimitProcessorRunning) return;
+  sharedRateLimitProcessorRunning = true;
+
+  (async () => {
+    try {
+      while (sharedRateLimitQueue.length > 0) {
+        sharedRateLimitQueue.sort((a, b) => a.priority - b.priority || a.sequence - b.sequence);
+        const request = sharedRateLimitQueue.shift();
+        const now = Date.now();
+        const waitMs = Math.max(
+          0,
+          sharedNextRequestAt - now,
+          sharedBackoffUntil - now
+        );
+        if (waitMs > 0) await new Promise(resolve => setTimeout(resolve, waitMs));
+
+        const requestStartedAt = Date.now();
+        sharedNextRequestAt = requestStartedAt + Math.max(120, request.minRequestInterval);
+        request.resolve(requestStartedAt);
+      }
+    } finally {
+      sharedRateLimitProcessorRunning = false;
+      if (sharedRateLimitQueue.length > 0) processSharedRateLimitQueue();
+    }
+  })();
+}
 
 class UpbitAPI {
   constructor(accessKey, secretKey, options = {}) {
@@ -48,20 +78,20 @@ class UpbitAPI {
   /**
    * Rate limiting을 위한 대기
    */
-  async waitForRateLimit() {
-    const scheduled = sharedRateLimitTail.then(async () => {
-      const now = Date.now();
-      const waitMs = Math.max(0, sharedNextRequestAt - now, sharedBackoffUntil - now);
-      if (waitMs > 0) await new Promise(resolve => setTimeout(resolve, waitMs));
-      const requestStartedAt = Date.now();
-      // Upbit's published ceiling is 10 requests/sec; keep a 120ms slot so
-      // client/risk requests and scheduler jitter do not sit exactly on the
-      // boundary and trigger avoidable 429 responses.
-      sharedNextRequestAt = requestStartedAt + Math.max(120, this.minRequestInterval);
-      this.lastRequestTime = requestStartedAt;
+  async waitForRateLimit(options = {}) {
+    const priority = options.priority === 'risk' ? 0 : 1;
+    const requestStartedAt = await new Promise((resolve, reject) => {
+      const request = {
+        priority,
+        sequence: sharedRateLimitSequence++,
+        minRequestInterval: this.minRequestInterval,
+        resolve,
+        reject
+      };
+      sharedRateLimitQueue.push(request);
+      processSharedRateLimitQueue();
     });
-    sharedRateLimitTail = scheduled.catch(() => {});
-    await scheduled;
+    this.lastRequestTime = requestStartedAt;
   }
 
   /**
@@ -129,10 +159,10 @@ class UpbitAPI {
   /**
    * 재시도 로직이 포함된 API 요청
    */
-  async requestWithRetry(requestFn, maxRetries = 3) {
+  async requestWithRetry(requestFn, maxRetries = 3, requestOptions = {}) {
     for (let attempt = 0; attempt < maxRetries; attempt++) {
       try {
-        await this.waitForRateLimit();
+        await this.waitForRateLimit(requestOptions);
         return await requestFn();
       } catch (error) {
         const status = error.response?.status;
@@ -284,14 +314,14 @@ class UpbitAPI {
   /**
    * 현재가 정보 조회
    */
-  async getTicker(markets) {
+  async getTicker(markets, requestOptions = {}) {
     const marketString = Array.isArray(markets) ? markets.join(',') : markets;
     return this.requestWithRetry(async () => {
       const response = await axios.get(`${this.baseURL}/ticker`, this.getRequestConfig({
         params: { markets: marketString }
       }));
       return response.data;
-    });
+    }, 3, requestOptions);
   }
 
   /**

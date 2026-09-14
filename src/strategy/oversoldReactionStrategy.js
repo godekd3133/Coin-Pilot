@@ -146,6 +146,7 @@ class OversoldReactionStrategy extends TradingStrategy {
         const reasonLabels = {
           bullish_rebound_not_confirmed: '양봉/고가 돌파 대기',
           price_rebound_below_threshold: '최소 반등률 미달',
+          price_rebound_above_threshold: '반등 과대·추격 방지',
           rsi_recovery_below_threshold: 'RSI 회복폭 미달',
           volume_confirmation_failed: '거래량 확인 실패',
           close_strength_failed: '종가 강도 부족',
@@ -257,11 +258,38 @@ class OversoldReactionStrategy extends TradingStrategy {
     return { valid: true, rebound, retracePercent, chasePercent };
   }
 
+  /**
+   * Record the observed price excursion without changing the exit contract.
+   * MFE/MAE are deliberately diagnostic: they show whether a future exit
+   * candidate would have protected an already-profitable trade or merely
+   * hidden an entry-quality problem.
+   */
+  recordPositionExcursion(currentPrice) {
+    if (!this.currentPosition) return;
+    const latestPrice = Number(currentPrice);
+    const entryPrice = Number(this.currentPosition.entryPrice);
+    if (!Number.isFinite(latestPrice) || latestPrice <= 0 || !Number.isFinite(entryPrice) || entryPrice <= 0) return;
+
+    const position = this.currentPosition;
+    const previousHigh = Number(position.highestPrice);
+    const previousLow = Number(position.lowestPrice);
+    position.highestPrice = Math.max(
+      Number.isFinite(previousHigh) && previousHigh > 0 ? previousHigh : entryPrice,
+      latestPrice
+    );
+    position.lowestPrice = Math.min(
+      Number.isFinite(previousLow) && previousLow > 0 ? previousLow : entryPrice,
+      latestPrice
+    );
+    position.maxFavorableExcursionPercent = ((position.highestPrice - entryPrice) / entryPrice) * 100;
+    position.maxAdverseExcursionPercent = ((position.lowestPrice - entryPrice) / entryPrice) * 100;
+  }
+
   checkPosition(currentPrice) {
     if (this.currentPosition && Number.isFinite(Number(currentPrice)) && Number(currentPrice) > 0) {
       const position = this.currentPosition;
       const latestPrice = Number(currentPrice);
-      position.highestPrice = Math.max(Number(position.highestPrice) || position.entryPrice, latestPrice);
+      this.recordPositionExcursion(latestPrice);
       const gainPercent = ((latestPrice - position.entryPrice) / position.entryPrice) * 100;
 
       if (this.breakEvenTriggerPercent > 0 && gainPercent >= this.breakEvenTriggerPercent) {
@@ -344,6 +372,7 @@ class OversoldReactionStrategy extends TradingStrategy {
   }
 
   closePosition(price, reason, options = {}) {
+    this.recordPositionExcursion(price);
     const closed = super.closePosition(price, reason, options);
     if (!closed) return closed;
 
@@ -365,6 +394,9 @@ class OversoldReactionStrategy extends TradingStrategy {
     super.openPosition(price, amount, type);
     if (!this.currentPosition) return;
     this.currentPosition.highestPrice = Number(price);
+    this.currentPosition.lowestPrice = Number(price);
+    this.currentPosition.maxFavorableExcursionPercent = 0;
+    this.currentPosition.maxAdverseExcursionPercent = 0;
     this.currentPosition.breakEvenArmed = false;
     this.currentPosition.trailingArmed = false;
     this.currentPosition.winnerExtended = false;

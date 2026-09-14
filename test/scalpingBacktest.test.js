@@ -4,6 +4,11 @@ import {
   calculateQualityScore,
   calculateTradeReturnConfidence,
   createScalpingFeatureCache,
+  analyzeHistoricalCandleContinuity,
+  historicalTimestampForCandle,
+  normalizeHistoricalCandles,
+  splitHistoricalCandleSegments,
+  simulateScalpingSegmented,
   evaluateStatisticalConfidenceGate,
   simulateScalping,
   simulateScalpingPortfolio,
@@ -13,6 +18,7 @@ import {
   walkForwardValidatePortfolioFolds
 } from '../src/backtest/scalpingBacktest.js';
 import { calculateCostAdjustedBreakEvenPrice } from '../src/strategy/protectionPrices.js';
+import { fillNoTradeCandleGaps } from '../src/research/historicalCandleSeries.js';
 
 function candle(index, close, open = close, high = close, low = close) {
   const timestamp = new Date(Date.UTC(2026, 0, 1, 0, index)).toISOString();
@@ -50,6 +56,186 @@ function syntheticGivebackAfterRebound() {
   return candles;
 }
 
+function syntheticReboundWithMinuteGap() {
+  return syntheticRebound().map((value, index) => ({
+    ...value,
+    candle_date_time_utc: new Date(Date.UTC(2026, 0, 1, 0, index + (index >= 27 ? 2 : 0))).toISOString()
+  }));
+}
+
+function syntheticReboundWithGapAfterEntry() {
+  return syntheticRebound().map((value, index) => ({
+    ...value,
+    candle_date_time_utc: new Date(Date.UTC(2026, 0, 1, 0, index + (index >= 28 ? 2 : 0))).toISOString()
+  }));
+}
+
+test('historical candle gap is detected and the simulator fails closed', () => {
+  const candles = syntheticReboundWithMinuteGap();
+  const continuity = analyzeHistoricalCandleContinuity(candles, 1);
+
+  assert.equal(continuity.valid, false);
+  assert.equal(continuity.gapCount, 1);
+  assert.ok(continuity.largestGapSeconds > 60);
+
+  const result = simulateScalping(candles, { slippage: 0, candleUnit: 1 });
+  assert.equal(result.metrics.tradeCount, 0);
+  assert.equal(result.metrics.dataQuality.valid, false);
+  assert.match(result.metrics.dataQuality.reason, /historical_candle_gap/);
+});
+
+test('epoch-ms 숫자 timestamp는 최신순 행을 시간순으로 뒤집고 continuity를 통과한다', () => {
+  const base = Date.UTC(2026, 0, 1, 0, 0);
+  const row = (minute, close) => ({
+    timestamp: base + minute * 60_000,
+    opening_price: close,
+    high_price: close + 0.5,
+    low_price: close - 0.5,
+    trade_price: close,
+    candle_acc_trade_volume: 100
+  });
+  // Upbit returns newest-first; the numeric timestamp alone must be enough to
+  // detect and reverse that ordering.
+  const newestFirst = [row(2, 102), row(1, 101), row(0, 100)];
+
+  const normalized = normalizeHistoricalCandles(newestFirst);
+  assert.deepEqual(
+    normalized.map(value => value.timestamp),
+    [base, base + 60_000, base + 120_000]
+  );
+  assert.equal(analyzeHistoricalCandleContinuity(newestFirst, 1).valid, true);
+  assert.equal(analyzeHistoricalCandleContinuity(newestFirst, 1).reason, 'historical_candles_contiguous');
+});
+
+test('epoch-ms timestamp만 가진 캔들도 끝단 시뮬레이션을 재생한다', () => {
+  const base = Date.UTC(2026, 0, 1, 0, 0);
+  const candles = syntheticRebound().map((value, index) => {
+    const { candle_date_time_utc, ...rest } = value;
+    return { ...rest, timestamp: base + index * 60_000 };
+  });
+
+  const result = simulateScalping(candles, { slippage: 0 });
+  assert.equal(result.metrics.tradeCount, 1);
+  assert.equal(result.trades.at(-1).reason, 'TAKE_PROFIT');
+  assert.equal(result.metrics.dataQuality.valid, true);
+});
+
+test('epoch-ms 문자열 timestamp도 파싱되어 무체결 gap을 채울 수 있다', () => {
+  const base = Date.UTC(2026, 0, 1, 0, 0);
+  const row = (minute, close) => ({
+    timestamp: String(base + minute * 60_000),
+    opening_price: close,
+    high_price: close + 0.5,
+    low_price: close - 0.5,
+    trade_price: close,
+    candle_acc_trade_volume: 100
+  });
+  const filled = fillNoTradeCandleGaps([row(2, 102), row(0, 100)], 1);
+
+  assert.equal(filled.dataQuality.invalidTimestampCount, 0);
+  assert.equal(filled.dataQuality.syntheticNoTradeCount, 1);
+  assert.equal(filled.dataQuality.validForReplay, true);
+  assert.equal(filled.candles[1].trade_price, 100);
+  assert.equal(filled.candles[1].isSyntheticNoTrade, true);
+});
+
+test('timestamp helper는 Date 인스턴스와 짧은 숫자 문자열을 구분한다', () => {
+  const epoch = Date.UTC(2026, 0, 1, 0, 0);
+  assert.equal(historicalTimestampForCandle({ timestamp: new Date(epoch) }), epoch);
+  assert.equal(historicalTimestampForCandle({ timestamp: epoch }), epoch);
+  assert.equal(historicalTimestampForCandle({ timestamp: String(epoch) }), epoch);
+  // A bare year or counter-sized digit string is not an epoch-ms value; it
+  // stays on the date-parser path instead of becoming a 1970-era row.
+  assert.notEqual(historicalTimestampForCandle({ timestamp: '12345' }), 12345);
+  assert.equal(historicalTimestampForCandle({ timestamp: -5 }), null);
+  assert.equal(historicalTimestampForCandle({ timestamp: 'not-a-date' }), null);
+});
+
+test('무체결 gap filler는 전일 종가와 거래량 0으로 시간을 보존한다', () => {
+  const raw = [candle(2, 102), candle(0, 100)];
+  const filled = fillNoTradeCandleGaps(raw, 1);
+
+  assert.equal(filled.dataQuality.validForReplay, true);
+  assert.equal(filled.dataQuality.rawCandleCount, 2);
+  assert.equal(filled.dataQuality.syntheticNoTradeCount, 1);
+  assert.equal(filled.dataQuality.filledGapCount, 1);
+  assert.equal(filled.dataQuality.continuityAfterFill.valid, true);
+  assert.equal(filled.candles.length, 3);
+  assert.deepEqual(
+    filled.candles.map(value => value.candle_date_time_utc),
+    [
+      '2026-01-01T00:00:00.000Z',
+      '2026-01-01T00:01:00.000Z',
+      '2026-01-01T00:02:00.000Z'
+    ]
+  );
+  assert.equal(filled.candles[1].trade_price, 100);
+  assert.equal(filled.candles[1].candle_acc_trade_volume, 0);
+  assert.equal(filled.candles[1].isSyntheticNoTrade, true);
+});
+
+test('무체결 gap filler는 설정한 범위를 넘는 gap을 채우지 않는다', () => {
+  const filled = fillNoTradeCandleGaps(
+    [candle(3, 103), candle(0, 100)],
+    1,
+    { maxFillIntervals: 1 }
+  );
+
+  assert.equal(filled.dataQuality.syntheticNoTradeCount, 0);
+  assert.equal(filled.dataQuality.unfilledGapCount, 1);
+  assert.equal(filled.dataQuality.validForReplay, false);
+  assert.equal(filled.dataQuality.continuityAfterFill.valid, false);
+});
+
+test('shared portfolio backtest refuses to mix an invalid market window', () => {
+  const result = simulateScalpingPortfolio({
+    'KRW-BTC': syntheticRebound(),
+    'KRW-ETH': syntheticReboundWithMinuteGap()
+  }, { slippage: 0, candleUnit: 1 });
+
+  assert.equal(result.metrics.tradeCount, 0);
+  assert.equal(result.dataQuality.valid, false);
+  assert.deepEqual(result.dataQuality.invalidMarkets, ['KRW-ETH']);
+  assert.equal(result.metrics.dataQuality.reason, 'historical_candle_continuity_failed');
+});
+
+test('segmented diagnostic splits gaps and excludes open positions at boundaries', () => {
+  const candles = syntheticReboundWithGapAfterEntry();
+  const split = splitHistoricalCandleSegments(candles, 1, { minimumSegmentCandles: 10 });
+
+  assert.equal(split.segments.length, 1);
+  assert.equal(split.boundaryCount, 1);
+  assert.equal(split.excludedSegmentCount, 1);
+  assert.equal(split.segments[0].candleCount, 28);
+
+  const result = simulateScalpingSegmented(candles, {
+    slippage: 0,
+    stopLossPercent: 50,
+    takeProfitPercent: 50
+  }, {
+    minimumSegmentCandles: 10
+  });
+
+  assert.equal(result.metrics.tradeCount, 0);
+  assert.equal(result.unknownBoundaryPositions.length, 1);
+  assert.equal(result.unknownBoundaryPositions[0].reason, 'open_position_at_gap_boundary');
+  assert.equal(result.promotion, 'diagnostic_only_never_authorizes_live_orders');
+});
+
+test('segmented diagnostic preserves a contiguous simulation result', () => {
+  const candles = syntheticRebound();
+  const baseline = simulateScalping(candles, { slippage: 0 });
+  const segmented = simulateScalpingSegmented(candles, { slippage: 0 }, {
+    minimumSegmentCandles: 10
+  });
+
+  assert.equal(segmented.dataQuality.raw.valid, true);
+  assert.equal(segmented.dataQuality.boundaryCount, 0);
+  assert.equal(segmented.unknownBoundaryPositions.length, 0);
+  assert.equal(segmented.metrics.tradeCount, baseline.metrics.tradeCount);
+  assert.equal(segmented.metrics.netProfit, baseline.metrics.netProfit);
+});
+
 test('스캘핑 시뮬레이터가 수수료를 포함한 지연 반등 수익을 계산한다', () => {
   const result = simulateScalping(syntheticRebound(), {
     initialBalance: 1_000_000,
@@ -68,6 +254,21 @@ test('스캘핑 시뮬레이터가 수수료를 포함한 지연 반등 수익�
   assert.ok(result.metrics.totalReturnPercent > 0);
   assert.equal(result.trades[0].type, 'OPEN');
   assert.equal(result.trades.at(-1).reason, 'TAKE_PROFIT');
+});
+
+test('백테스트 청산 거래는 MFE/MAE를 함께 기록해 exit 후보를 진단할 수 있다', () => {
+  const result = simulateScalping(syntheticRebound(), {
+    slippage: 0,
+    tradingFee: 0
+  });
+  const close = result.trades.at(-1);
+
+  assert.equal(close.type, 'CLOSE');
+  assert.equal(close.reason, 'TAKE_PROFIT');
+  assert.ok(Number.isFinite(close.maxFavorableExcursionPercent));
+  assert.ok(Number.isFinite(close.maxAdverseExcursionPercent));
+  assert.ok(close.maxFavorableExcursionPercent >= 1.8);
+  assert.ok(close.maxAdverseExcursionPercent <= 0);
 });
 
 test('튜닝 feature cache는 uncached 시뮬레이션과 같은 거래 결과를 재사용한다', () => {
@@ -89,6 +290,16 @@ test('튜닝 feature cache는 uncached 시뮬레이션과 같은 거래 결과�
   // Threshold-only changes share the same precomputed RSI/rolling features.
   simulateScalping(candles, { ...config, minReboundPercent: 0.5 }, { featureCache });
   assert.equal(featureCache.size(), 1);
+});
+
+test('max rebound exhaustion guard는 기본 비활성이고 양수 설정에서만 진입을 차단한다', () => {
+  const candles = syntheticRebound();
+  const baseline = simulateScalping(candles, { slippage: 0 });
+  const guarded = simulateScalping(candles, { slippage: 0, maxReboundPercent: 0.1 });
+
+  assert.equal(baseline.metrics.tradeCount, 1);
+  assert.equal(guarded.metrics.tradeCount, 0);
+  assert.ok(guarded.metrics.rejectionCounts.price_rebound_above_threshold >= 1);
 });
 
 test('feature cache는 대체 signal profile의 지표 결과도 보존한다', () => {
@@ -288,7 +499,7 @@ test('다음 봉 양봉 확인 후보는 양봉 종가에만 진입한다', () =
   assert.equal(followed.trades[0].entryPrice, 97.8);
 
   const rejectedCandles = syntheticRebound();
-  rejectedCandles[27] = candle(95.9, 96.2, 96.5, 95.5);
+  rejectedCandles[27] = candle(27, 95.9, 96.2, 96.5, 95.5);
   const rejected = simulateScalping(rejectedCandles, {
     slippage: 0,
     requireNextCandleBullish: true

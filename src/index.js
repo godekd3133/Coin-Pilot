@@ -215,6 +215,9 @@ function createConfig() {
     requirePreviousHighBreak: process.env.SCALP_REQUIRE_PREVIOUS_HIGH_BREAK !== 'false',
     maxSignalRangePercent: envNumber('SCALP_MAX_SIGNAL_RANGE_PERCENT', 0),
     minSignalRangePercent: envNumber('SCALP_MIN_SIGNAL_RANGE_PERCENT', 0),
+    // Optional research-only exhaustion guard; zero preserves the existing
+    // lower-bound-only rebound contract.
+    maxReboundPercent: envNumber('SCALP_MAX_REBOUND_PERCENT', 0),
     marketRegimeEnabled: process.env.SCALP_MARKET_REGIME_ENABLED === 'true',
     marketRegimeLookback: parseInt(process.env.SCALP_MARKET_REGIME_LOOKBACK) || 5,
     marketRegimeMinBreadth: envNumber('SCALP_MARKET_REGIME_MIN_BREADTH', 0.5),
@@ -234,6 +237,9 @@ function createConfig() {
     maxLosingHoldMinutes: envNumber('SCALP_MAX_LOSING_HOLD_MINUTES', 0),
     winnerExtendMinutes: envNumber('SCALP_WINNER_EXTEND_MINUTES', 0),
     winnerExtendMinProfitPercent: envNumber('SCALP_WINNER_EXTEND_MIN_PROFIT_PERCENT', 0),
+    winnerShadowExtendMinutes: envNumber('SCALP_WINNER_SHADOW_EXTEND_MINUTES', 0),
+    winnerShadowExtendMinProfitPercent: envNumber('SCALP_WINNER_SHADOW_EXTEND_MIN_PROFIT_PERCENT', 0),
+    winnerShadowMaxReboundPercent: envNumber('SCALP_WINNER_SHADOW_MAX_REBOUND_PERCENT', 0),
     maxEntriesPerSignalWindow: parseInt(process.env.SCALP_MAX_ENTRIES_PER_SIGNAL_WINDOW) || 0,
     positionRiskCheckIntervalMs: parseInt(process.env.SCALP_RISK_CHECK_INTERVAL_MS) || 1000,
     maxRiskDataGapSeconds: envNumber('SCALP_MAX_RISK_DATA_GAP_SECONDS', 30),

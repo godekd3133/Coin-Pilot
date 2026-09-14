@@ -38,6 +38,30 @@ test('진행 중 캔들을 제외하고 직전 과매도와 완료 양봉을 확
   assert.equal(rebound.signalKey, '2026-09-09T00:02:00');
 });
 
+test('이미 과대 반등한 신호는 선택형 exhaustion 상한으로 차단한다', () => {
+  const candles = [
+    candle(101.1, 100.9, '2026-09-09T00:02:30'),
+    candle(101, 100.5, '2026-09-09T00:02:00'),
+    candle(100, 100.8, '2026-09-09T00:01:00'),
+    ...Array.from({ length: 15 }, (_, index) => {
+      const close = 101 + index;
+      return candle(close, close + 0.5, `2026-09-08T23:${String(59 - index).padStart(2, '0')}:00`);
+    })
+  ];
+
+  const rebound = calculateClosedCandleRebound(candles, {
+    rsiPeriod: 14,
+    rsiOversold: 30,
+    minReboundPercent: 0.15,
+    minRsiRecovery: 2,
+    maxReboundPercent: 0.4
+  });
+
+  assert.equal(rebound.reboundCeilingConfirmed, false);
+  assert.equal(rebound.reboundConfirmed, false);
+  assert.ok(rebound.rejectionReasons.includes('price_rebound_above_threshold'));
+});
+
 test('선택형 rebound overbought guard는 RSI가 과열된 반등을 차단한다', () => {
   const candles = [
     candle(101.1, 100.9, '2026-09-09T00:02:30'),

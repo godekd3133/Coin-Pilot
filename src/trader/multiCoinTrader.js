@@ -17,14 +17,19 @@ import {
 import {
   createRiskMonitorState,
   getRiskMonitorStatus,
+  recordRiskMonitorAttempt,
   recordRiskMonitorFailure,
+  recordRiskMonitorIdle,
+  recordRiskMonitorStale,
   recordRiskMonitorSuccess,
   resolveMaxRiskDataGapSeconds
 } from '../risk/riskMonitor.js';
 import {
   createAnalysisDataHealthState,
   getAnalysisDataHealthStatus,
+  recordAnalysisDataAttempt,
   recordAnalysisDataFailure,
+  recordAnalysisDataStale,
   recordAnalysisDataSuccess,
   resolveMaxAnalysisDataGapSeconds
 } from '../risk/analysisDataHealth.js';
@@ -32,6 +37,11 @@ import {
   calculateTradeReturnConfidence,
   evaluateStatisticalConfidenceGate
 } from '../backtest/scalpingBacktest.js';
+import {
+  MARKET_QUALITY_DEFAULTS,
+  selectFreshMarketCohort
+} from '../research/marketQuality.js';
+import { LIVE_GATE_COMPARABLE_KEYS } from '../research/scalpingValidationConfig.js';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
@@ -73,6 +83,48 @@ function normalizeSignalWindowEntryCounts(existing) {
 function validTimestamp(value) {
   const timestamp = value instanceof Date ? value.getTime() : new Date(value || 0).getTime();
   return Number.isFinite(timestamp) && timestamp > 0 ? timestamp : null;
+}
+
+function derivePositionExcursion(position = {}) {
+  const entryPrice = Number(position.entryPrice);
+  const validEntryPrice = Number.isFinite(entryPrice) && entryPrice > 0 ? entryPrice : null;
+  const highestPrice = validEntryPrice === null
+    ? null
+    : Number.isFinite(Number(position.highestPrice)) && Number(position.highestPrice) > 0
+      ? Number(position.highestPrice)
+      : validEntryPrice;
+  const lowestPrice = validEntryPrice === null
+    ? null
+    : Number.isFinite(Number(position.lowestPrice)) && Number(position.lowestPrice) > 0
+      ? Number(position.lowestPrice)
+      : validEntryPrice;
+  return {
+    highestPrice,
+    lowestPrice,
+    maxFavorableExcursionPercent: validEntryPrice !== null && highestPrice !== null
+      ? ((highestPrice - validEntryPrice) / validEntryPrice) * 100
+      : null,
+    maxAdverseExcursionPercent: validEntryPrice !== null && lowestPrice !== null
+      ? ((lowestPrice - validEntryPrice) / validEntryPrice) * 100
+      : null
+  };
+}
+
+function updatePositionExcursion(position, currentPrice) {
+  if (!position || typeof position !== 'object') return derivePositionExcursion(position);
+  const latestPrice = Number(currentPrice);
+  const entryPrice = Number(position.entryPrice);
+  if (Number.isFinite(latestPrice) && latestPrice > 0 && Number.isFinite(entryPrice) && entryPrice > 0) {
+    const current = derivePositionExcursion(position);
+    position.highestPrice = Math.max(current.highestPrice ?? entryPrice, latestPrice);
+    position.lowestPrice = Math.min(current.lowestPrice ?? entryPrice, latestPrice);
+  }
+  const excursion = derivePositionExcursion(position);
+  position.highestPrice = excursion.highestPrice;
+  position.lowestPrice = excursion.lowestPrice;
+  position.maxFavorableExcursionPercent = excursion.maxFavorableExcursionPercent;
+  position.maxAdverseExcursionPercent = excursion.maxAdverseExcursionPercent;
+  return excursion;
 }
 
 /**
@@ -118,6 +170,45 @@ function calculateLiveMarketReturn(candles, lookback) {
     return null;
   }
   return ((currentClose - referenceClose) / referenceClose) * 100;
+}
+
+function inspectShadowEntryExecution(analysis, maxRetracePercent, maxChasePercent) {
+  const rebound = analysis?.decision?.details?.rebound;
+  const currentPrice = Number(analysis?.currentPrice);
+  const referencePrice = Number(rebound?.referencePrice);
+  if (!Number.isFinite(currentPrice) || currentPrice <= 0) {
+    return { valid: false, enforceable: true, reason: 'entry_price_invalid' };
+  }
+  // Some legacy diagnostic fixtures do not carry a rebound reference price.
+  // Keep those rows observable rather than fabricating a drift value; the
+  // strict BUY path always supplies a reference before execution.
+  if (!Number.isFinite(referencePrice) || referencePrice <= 0) {
+    return { valid: true, enforceable: false, reason: 'entry_reference_price_unavailable' };
+  }
+
+  const retracePercent = ((referencePrice - currentPrice) / referencePrice) * 100;
+  if (retracePercent > maxRetracePercent) {
+    return {
+      valid: false,
+      enforceable: true,
+      reason: 'entry_retrace_exceeded',
+      retracePercent,
+      chasePercent: ((currentPrice - referencePrice) / referencePrice) * 100
+    };
+  }
+
+  const chasePercent = ((currentPrice - referencePrice) / referencePrice) * 100;
+  if (chasePercent > maxChasePercent) {
+    return {
+      valid: false,
+      enforceable: true,
+      reason: 'entry_chase_exceeded',
+      retracePercent,
+      chasePercent
+    };
+  }
+
+  return { valid: true, enforceable: true, reason: null, retracePercent, chasePercent };
 }
 
 function summarizeLiveMarketRegime(analyses, config = {}) {
@@ -178,6 +269,15 @@ class MultiCoinTrader {
     this.newsMonitor = new NewsMonitor();
     this.strategyMode = config.strategyMode || 'oversold_reaction_scalping';
     this.isScalpingMode = this.strategyMode === 'oversold_reaction_scalping';
+    // Research-only forward candidate. It mirrors confirmed strict BUY
+    // signals in a separate book and changes only the winner-hold exit rule.
+    // Zero keeps the experiment completely disabled.
+    this.winnerShadowExtendMinutes = Math.max(0, Number(config.winnerShadowExtendMinutes) || 0);
+    this.winnerShadowExtendMinProfitPercent = Math.max(0, Number(config.winnerShadowExtendMinProfitPercent) || 0);
+    // Optional entry-side A/B filter. With strict maxReboundPercent=0, this
+    // lets winnerShadow mirror only confirmed signals that would survive a
+    // rebound-ceiling candidate, without changing strict paper assets.
+    this.winnerShadowMaxReboundPercent = Math.max(0, Number(config.winnerShadowMaxReboundPercent) || 0);
 
     // 각 코인별 전략 인스턴스
     this.strategies = new Map();
@@ -214,6 +314,7 @@ class MultiCoinTrader {
       minRsiRecovery: config.minRsiRecovery,
       maxSignalRangePercent: config.maxSignalRangePercent ?? 0,
       minSignalRangePercent: config.minSignalRangePercent ?? 0,
+      maxReboundPercent: config.maxReboundPercent ?? 0,
       marketRegimeEnabled: config.marketRegimeEnabled === true,
       marketRegimeLookback: config.marketRegimeLookback,
       marketRegimeMinBreadth: config.marketRegimeMinBreadth,
@@ -262,6 +363,14 @@ class MultiCoinTrader {
     this.positionRiskCheckIntervalMs = configuredRiskInterval === 0
       ? 0
       : Math.max(250, Number(configuredRiskInterval) || (this.isScalpingMode ? 1000 : 5000));
+    // Persist risk timestamps often enough for a read-only observer to see a
+    // real last-success boundary, without rewriting the growing ledger on
+    // every one-second risk tick.
+    this.riskStatePersistIntervalMs = Math.max(
+      1000,
+      (this.positionRiskCheckIntervalMs || 1000) * 5
+    );
+    this.lastRiskStatePersistedAt = 0;
     this.maxRiskDataGapSeconds = resolveMaxRiskDataGapSeconds(
       config.maxRiskDataGapSeconds,
       this.isScalpingMode ? 30 : 0
@@ -272,6 +381,9 @@ class MultiCoinTrader {
     );
     this.config.maxAnalysisDataGapSeconds = this.maxAnalysisDataGapSeconds;
     this.positionRiskTimer = null;
+    this.analysisWatchdogTimer = null;
+    this.analysisCycleProgress = null;
+    this.lastAnalysisStatePersistedAt = 0;
     this._riskCheckInProgress = false;
     this._orderInProgress = false;
     this._stopRequested = false;
@@ -448,6 +560,7 @@ class MultiCoinTrader {
       requirePreviousHighBreak: this.config.requirePreviousHighBreak !== false,
       maxSignalRangePercent: this.config.maxSignalRangePercent ?? 0,
       minSignalRangePercent: this.config.minSignalRangePercent ?? 0,
+      maxReboundPercent: this.config.maxReboundPercent ?? 0,
       requireReboundBelowOverbought: this.config.requireReboundBelowOverbought === true,
       signalProfile: this.config.signalProfile || 'rsi_rebound',
       emaPeriod: this.config.emaLong || 20
@@ -967,9 +1080,14 @@ class MultiCoinTrader {
       if (!hadRiskState || !hadCircuitState || !hadSignalWindowState) {
         data.strictRiskStateMigratedAt = new Date().toISOString();
       }
-      for (const stateKey of ['shadow', 'looseShadow']) {
+      for (const stateKey of ['shadow', 'looseShadow', 'winnerShadow']) {
         const shadow = data[stateKey];
         if (!shadow || typeof shadow !== 'object') continue;
+        if (stateKey !== 'winnerShadow') {
+          shadow.executionBoundaryBlockedEntries = Array.isArray(shadow.executionBoundaryBlockedEntries)
+            ? shadow.executionBoundaryBlockedEntries
+            : [];
+        }
         const shadowLossTimes = (Array.isArray(shadow.closedTrades) ? shadow.closedTrades : [])
           .filter(trade => Number(trade?.netProfit) < 0)
           .map(trade => trade.exitTimestamp || trade.exitTime)
@@ -1060,6 +1178,7 @@ class MultiCoinTrader {
       requirePreviousHighBreak: config.requirePreviousHighBreak !== false,
       maxSignalRangePercent: numericOrNull(config.maxSignalRangePercent),
       minSignalRangePercent: numericOrNull(config.minSignalRangePercent),
+      maxReboundPercent: numericOrNull(config.maxReboundPercent ?? 0),
       marketRegimeEnabled: config.marketRegimeEnabled === true,
       marketRegimeLookback: numericOrNull(config.marketRegimeLookback ?? 5),
       marketRegimeMinBreadth: numericOrNull(config.marketRegimeMinBreadth ?? 0.5),
@@ -1081,6 +1200,11 @@ class MultiCoinTrader {
       tradingFee: numericOrNull(config.tradingFee ?? 0.0005),
       slippage: numericOrNull(config.slippage ?? 0.001),
       maxPositions: numericOrNull(this.maxPositions),
+      portfolioAllocation: numericOrNull(this.portfolioAllocation),
+      bbPeriod: numericOrNull(config.bbPeriod || 20),
+      bbStdDev: numericOrNull(config.bbStdDev || 2),
+      emaPeriod: numericOrNull(config.emaLong || 20),
+      requireNextCandleBullish: config.requireNextCandleBullish === true,
       entryDelayMinMs: numericOrNull(config.entryDelayMinMs),
       entryDelayMaxMs: numericOrNull(config.entryDelayMaxMs),
       maxRiskDataGapSeconds: numericOrNull(this.maxRiskDataGapSeconds),
@@ -1095,6 +1219,424 @@ class MultiCoinTrader {
     };
   }
 
+  getPaperExperimentSnapshot() {
+    const winnerShadowEnabled = this.winnerShadowExtendMinutes > 0 || this.winnerShadowMaxReboundPercent > 0;
+    return {
+      winnerShadow: {
+        enabled: winnerShadowEnabled,
+        entryContract: this.winnerShadowMaxReboundPercent > 0
+          ? 'strict_confirmed_buy_signal_with_optional_rebound_ceiling'
+          : 'strict_confirmed_buy_signal',
+        winnerExtendMinutes: this.winnerShadowExtendMinutes,
+        winnerExtendMinProfitPercent: this.winnerShadowExtendMinProfitPercent,
+        entryMaxReboundPercent: this.winnerShadowMaxReboundPercent
+      }
+    };
+  }
+
+  comparePaperExperimentConfig(recordedSnapshot) {
+    const current = this.getPaperExperimentSnapshot();
+    const recorded = recordedSnapshot?.winnerShadow;
+    if (!recorded || typeof recorded !== 'object') {
+      const disabled = current.winnerShadow.enabled === false &&
+        current.winnerShadow.winnerExtendMinutes === 0 &&
+        current.winnerShadow.winnerExtendMinProfitPercent === 0;
+      return {
+        consistent: disabled,
+        drift: disabled ? [] : ['winnerShadow.snapshot_missing']
+      };
+    }
+
+    const keys = ['enabled', 'entryContract', 'winnerExtendMinutes', 'winnerExtendMinProfitPercent', 'entryMaxReboundPercent'];
+    const drift = keys.filter(key =>
+      JSON.stringify(recorded[key]) !== JSON.stringify(current.winnerShadow[key])
+    );
+    return { consistent: drift.length === 0, drift };
+  }
+
+  getExecutionBoundaryCounterfactualConfig() {
+    const config = this.config || {};
+    const numberOr = (value, fallback) => Number.isFinite(Number(value)) ? Number(value) : fallback;
+    const baselineAssets = Number(this.paperValidation?.baselineAssets);
+    const investmentRatio = Number.isFinite(Number(this.investmentRatio))
+      ? Number(this.investmentRatio)
+      : numberOr(config.investmentRatio, 0.02);
+    return {
+      baselineAssets: Number.isFinite(baselineAssets) && baselineAssets > 0
+        ? baselineAssets
+        : numberOr(this.initialSeedMoney, 1_000_000),
+      investmentRatio,
+      tradingFee: numberOr(config.tradingFee, 0.0005),
+      slippage: numberOr(config.slippage, 0.001),
+      stopLossPercent: numberOr(config.stopLossPercent, 1.2),
+      takeProfitPercent: numberOr(config.takeProfitPercent, 1.8),
+      maxHoldMinutes: numberOr(config.maxHoldMinutes, 30)
+    };
+  }
+
+  /**
+   * Record a signal rejected by the strict delayed-entry price boundary.
+   * This is not a shadow fill: it is a separate counterfactual position whose
+   * only purpose is to measure whether the boundary avoided a later loss.
+   */
+  recordExecutionBoundaryBlockedEntry(analysis, stateKey, reason, timestamp = new Date().toISOString()) {
+    if (!this.dryRun || !this.paperValidation?.active || !['shadow', 'looseShadow'].includes(stateKey)) return false;
+    const coin = analysis?.coin;
+    const rebound = analysis?.decision?.details?.rebound;
+    const signalKey = rebound?.signalKey ? String(rebound.signalKey) : '';
+    const currentPrice = Number(analysis?.currentPrice);
+    if (!coin || !signalKey || !Number.isFinite(currentPrice) || currentPrice <= 0) return false;
+
+    const shadow = this.paperValidation[stateKey] || {};
+    shadow.executionBoundaryBlockedEntries = Array.isArray(shadow.executionBoundaryBlockedEntries)
+      ? shadow.executionBoundaryBlockedEntries
+      : [];
+    const key = `${coin}:${signalKey}`;
+    if (shadow.executionBoundaryBlockedEntries.some(entry => entry.key === key)) {
+      this.paperValidation[stateKey] = shadow;
+      return false;
+    }
+
+    const counterfactualConfig = this.getExecutionBoundaryCounterfactualConfig();
+    const referencePrice = Number(rebound.referencePrice);
+    const retracePercent = Number.isFinite(referencePrice) && referencePrice > 0
+      ? ((referencePrice - currentPrice) / referencePrice) * 100
+      : null;
+    const chasePercent = Number.isFinite(referencePrice) && referencePrice > 0
+      ? ((currentPrice - referencePrice) / referencePrice) * 100
+      : null;
+    const investAmount = Math.min(
+      counterfactualConfig.baselineAssets * counterfactualConfig.investmentRatio,
+      counterfactualConfig.baselineAssets * 0.95
+    );
+    const entryPrice = currentPrice * (1 + counterfactualConfig.slippage);
+    shadow.executionBoundaryBlockedEntries.push({
+      key,
+      coin,
+      signalKey,
+      blockedAt: new Date(timestamp).toISOString(),
+      status: 'pending',
+      blockedReason: String(reason || 'entry_boundary_exceeded'),
+      entryPrice,
+      investAmount,
+      signalTime: rebound.candleTime || null,
+      signalReferencePrice: Number.isFinite(referencePrice) && referencePrice > 0 ? referencePrice : null,
+      signalReboundPercent: Number(rebound.reboundPriceChangePercent ?? rebound.priceChangePercent) || null,
+      signalRsi: Number(rebound.rsi) || null,
+      signalOversoldRsi: Number(rebound.oversoldRsi ?? rebound.previousRsi) || null,
+      signalRsiRecovery: Number(rebound.rsiRecovery) || null,
+      signalVolumeRatio: Number(rebound.volumeRatio) || null,
+      signalCloseStrength: Number(rebound.closeStrength) || null,
+      signalTrendSlopePercent: Number(rebound.trendSlopePercent) || null,
+      signalRangePercent: Number(rebound.signalRangePercent) || null,
+      executionBoundary: {
+        retracePercent,
+        chasePercent,
+        maxRetracePercent: Number(this.maxEntryRetracePercent) || 0.25,
+        maxChasePercent: Number(this.config.maxEntryChasePercent) || 0.35
+      },
+      tradingFee: counterfactualConfig.tradingFee,
+      slippage: counterfactualConfig.slippage,
+      stopLossPercent: counterfactualConfig.stopLossPercent,
+      takeProfitPercent: counterfactualConfig.takeProfitPercent,
+      maxHoldMinutes: counterfactualConfig.maxHoldMinutes,
+      highestPrice: currentPrice,
+      lowestPrice: currentPrice,
+      maxFavorableExcursionPercent: 0,
+      maxAdverseExcursionPercent: 0,
+      lastPrice: currentPrice,
+      lastObservedAt: new Date(timestamp).toISOString(),
+      counterfactual: null
+    });
+    shadow.executionBoundaryBlockedEntries = shadow.executionBoundaryBlockedEntries.slice(-1000);
+    this.paperValidation[stateKey] = shadow;
+    return true;
+  }
+
+  /**
+   * Advance pending boundary counterfactuals using only later fresh prices.
+   * Settled values stay outside shadow/loose realized P&L and promotion stats.
+   */
+  updateExecutionBoundaryBlockedEntries(analysis, stateKey, timestamp = new Date().toISOString()) {
+    if (!this.dryRun || !this.paperValidation?.active || !['shadow', 'looseShadow'].includes(stateKey)) return 0;
+    const shadow = this.paperValidation[stateKey];
+    if (!shadow || !Array.isArray(shadow.executionBoundaryBlockedEntries)) return 0;
+    const currentPrice = Number(analysis?.currentPrice);
+    const coin = analysis?.coin;
+    const nowMs = validTimestamp(timestamp) || Date.now();
+    if (!coin || !Number.isFinite(currentPrice) || currentPrice <= 0) return 0;
+
+    let settledCount = 0;
+    for (const entry of shadow.executionBoundaryBlockedEntries) {
+      if (entry?.status !== 'pending' || entry.coin !== coin) continue;
+      const blockedAtMs = validTimestamp(entry.blockedAt);
+      if (blockedAtMs === null || nowMs <= blockedAtMs) continue;
+
+      updatePositionExcursion(entry, currentPrice);
+      entry.lastPrice = currentPrice;
+      entry.lastObservedAt = new Date(nowMs).toISOString();
+      const entryPrice = Number(entry.entryPrice);
+      const tradingFee = Number.isFinite(Number(entry.tradingFee)) ? Number(entry.tradingFee) : 0.0005;
+      const slippage = Number.isFinite(Number(entry.slippage)) ? Number(entry.slippage) : 0.001;
+      const stopLossPercent = Number(entry.stopLossPercent) || 0;
+      const takeProfitPercent = Number(entry.takeProfitPercent) || 0;
+      const maxHoldMinutes = Number(entry.maxHoldMinutes) || 0;
+      if (!Number.isFinite(entryPrice) || entryPrice <= 0) continue;
+
+      let exitReason = null;
+      if (stopLossPercent > 0 && currentPrice <= entryPrice * (1 - stopLossPercent / 100)) {
+        exitReason = 'STOP_LOSS';
+      } else if (takeProfitPercent > 0 && currentPrice >= entryPrice * (1 + takeProfitPercent / 100)) {
+        exitReason = 'TAKE_PROFIT';
+      } else if (maxHoldMinutes > 0 && nowMs - blockedAtMs >= maxHoldMinutes * 60 * 1000) {
+        exitReason = 'MAX_HOLD_TIME';
+      }
+      if (!exitReason) continue;
+
+      const investAmount = Number(entry.investAmount);
+      if (!Number.isFinite(investAmount) || investAmount <= 0) {
+        entry.status = 'unresolved';
+        entry.resolvedAt = new Date(nowMs).toISOString();
+        entry.resolution = 'invalid_counterfactual_investment';
+        continue;
+      }
+      const buyFee = investAmount * tradingFee;
+      const amount = (investAmount - buyFee) / entryPrice;
+      const exitPrice = currentPrice * (1 - slippage);
+      const grossAmount = amount * exitPrice;
+      const sellFee = grossAmount * tradingFee;
+      const netProfit = grossAmount - sellFee - investAmount;
+      entry.status = 'settled';
+      entry.settledAt = new Date(nowMs).toISOString();
+      entry.counterfactual = {
+        exitReason,
+        exitMarketPrice: currentPrice,
+        exitPrice,
+        buyFee,
+        sellFee,
+        netProfit,
+        profitPercent: (netProfit / investAmount) * 100,
+        maxFavorableExcursionPercent: entry.maxFavorableExcursionPercent,
+        maxAdverseExcursionPercent: entry.maxAdverseExcursionPercent
+      };
+      settledCount += 1;
+    }
+    this.paperValidation[stateKey] = shadow;
+    return settledCount;
+  }
+
+  resolveExecutionBoundaryBlockedEntriesAtStop(timestamp = new Date().toISOString()) {
+    if (!this.paperValidation) return 0;
+    let resolvedCount = 0;
+    for (const stateKey of ['shadow', 'looseShadow']) {
+      const shadow = this.paperValidation[stateKey];
+      if (!shadow || !Array.isArray(shadow.executionBoundaryBlockedEntries)) continue;
+      for (const entry of shadow.executionBoundaryBlockedEntries) {
+        if (entry.status !== 'pending') continue;
+        entry.status = 'unresolved';
+        entry.resolvedAt = new Date(timestamp).toISOString();
+        entry.resolution = 'session_stopped_before_counterfactual_exit';
+        entry.counterfactual = null;
+        resolvedCount += 1;
+      }
+    }
+    return resolvedCount;
+  }
+
+  getExecutionBoundaryBlockedEntrySummary(shadow = {}) {
+    const entries = Array.isArray(shadow.executionBoundaryBlockedEntries)
+      ? shadow.executionBoundaryBlockedEntries
+      : [];
+    const settled = entries.filter(entry => entry.status === 'settled' && entry.counterfactual);
+    const pending = entries.filter(entry => entry.status === 'pending');
+    const unresolved = entries.filter(entry => entry.status === 'unresolved');
+    const counterfactualRealizedProfit = settled.reduce(
+      (sum, entry) => sum + (Number(entry.counterfactual?.netProfit) || 0),
+      0
+    );
+    const winners = settled.filter(entry => Number(entry.counterfactual?.netProfit) > 0).length;
+    const losers = settled.length - winners;
+    const grossProfit = settled
+      .filter(entry => Number(entry.counterfactual?.netProfit) > 0)
+      .reduce((sum, entry) => sum + Number(entry.counterfactual.netProfit), 0);
+    const grossLoss = Math.abs(settled
+      .filter(entry => Number(entry.counterfactual?.netProfit) <= 0)
+      .reduce((sum, entry) => sum + Number(entry.counterfactual.netProfit), 0));
+    const counterfactualLossEntries = settled
+      .filter(entry => Number(entry.counterfactual?.netProfit) < 0);
+    const counterfactualProfitEntries = settled
+      .filter(entry => Number(entry.counterfactual?.netProfit) > 0);
+    const reasonGroups = new Map();
+    for (const entry of entries) {
+      const reason = String(entry.blockedReason || 'unknown');
+      const group = reasonGroups.get(reason) || {
+        reason,
+        blockedCount: 0,
+        pendingCount: 0,
+        settledCount: 0,
+        unresolvedCount: 0,
+        counterfactualRealizedProfit: 0
+      };
+      group.blockedCount += 1;
+      if (entry.status === 'pending') group.pendingCount += 1;
+      if (entry.status === 'unresolved') group.unresolvedCount += 1;
+      if (entry.status === 'settled' && entry.counterfactual) {
+        group.settledCount += 1;
+        group.counterfactualRealizedProfit += Number(entry.counterfactual.netProfit) || 0;
+      }
+      reasonGroups.set(reason, group);
+    }
+    return {
+      blockedEntryCount: entries.length,
+      pendingCount: pending.length,
+      settledCount: settled.length,
+      unresolvedCount: unresolved.length,
+      counterfactualRealizedProfit,
+      counterfactualWinningTrades: winners,
+      counterfactualLosingTrades: losers,
+      counterfactualWinRate: settled.length > 0 ? (winners / settled.length) * 100 : 0,
+      counterfactualProfitFactor: grossLoss > 0 ? grossProfit / grossLoss : grossProfit > 0 ? Infinity : 0,
+      counterfactualLossAvoidanceCount: counterfactualLossEntries.length,
+      counterfactualLossAvoidanceAmount: Math.abs(counterfactualLossEntries.reduce(
+        (sum, entry) => sum + Number(entry.counterfactual.netProfit),
+        0
+      )),
+      counterfactualMissedProfitCount: counterfactualProfitEntries.length,
+      counterfactualMissedProfitAmount: counterfactualProfitEntries.reduce(
+        (sum, entry) => sum + Number(entry.counterfactual.netProfit),
+        0
+      ),
+      reasonOutcomes: [...reasonGroups.values()]
+        .sort((a, b) => b.blockedCount - a.blockedCount || a.reason.localeCompare(b.reason)),
+      recentEntries: entries.slice(-5).map(entry => ({
+        key: entry.key,
+        coin: entry.coin,
+        status: entry.status,
+        blockedAt: entry.blockedAt,
+        blockedReason: entry.blockedReason,
+        executionBoundary: entry.executionBoundary,
+        counterfactual: entry.counterfactual,
+        maxFavorableExcursionPercent: entry.maxFavorableExcursionPercent,
+        maxAdverseExcursionPercent: entry.maxAdverseExcursionPercent
+      }))
+    };
+  }
+
+  recordWinnerShadowBlockedEntry(analysis, timestamp = new Date().toISOString()) {
+    if (!this.dryRun || !this.paperValidation?.active || this.winnerShadowMaxReboundPercent <= 0) return;
+    const coin = analysis?.coin;
+    const rebound = analysis?.decision?.details?.rebound;
+    const signalKey = rebound?.signalKey ? String(rebound.signalKey) : '';
+    const currentPrice = Number(analysis?.currentPrice);
+    if (!coin || !signalKey || !Number.isFinite(currentPrice) || currentPrice <= 0) return;
+
+    const shadow = this.paperValidation.winnerShadow || {};
+    shadow.blockedEntries = Array.isArray(shadow.blockedEntries) ? shadow.blockedEntries : [];
+    const key = `${coin}:${signalKey}`;
+    if (shadow.blockedEntries.some(entry => entry.key === key)) {
+      this.paperValidation.winnerShadow = shadow;
+      return;
+    }
+    const tradingFee = Number.isFinite(Number(this.config.tradingFee))
+      ? Number(this.config.tradingFee)
+      : 0.0005;
+    const slippage = Number.isFinite(Number(this.config.slippage))
+      ? Number(this.config.slippage)
+      : 0.001;
+    const baselineAssets = Number(this.paperValidation.baselineAssets) || this.initialSeedMoney;
+    const investmentRatio = Number.isFinite(Number(this.investmentRatio))
+      ? Number(this.investmentRatio)
+      : 0.02;
+    const investAmount = Math.min(baselineAssets * investmentRatio, baselineAssets * 0.95);
+    shadow.blockedEntries.push({
+      key,
+      coin,
+      signalKey,
+      blockedAt: timestamp,
+      status: 'pending',
+      entryPrice: currentPrice * (1 + slippage),
+      investAmount,
+      signalTime: rebound.candleTime || null,
+      signalReboundPercent: Number(rebound.reboundPriceChangePercent ?? rebound.priceChangePercent) || null,
+      signalRsi: Number(rebound.rsi) || null,
+      signalOversoldRsi: Number(rebound.oversoldRsi ?? rebound.previousRsi) || null,
+      signalRsiRecovery: Number(rebound.rsiRecovery) || null,
+      signalVolumeRatio: Number(rebound.volumeRatio) || null,
+      signalCloseStrength: Number(rebound.closeStrength) || null,
+      signalTrendSlopePercent: Number(rebound.trendSlopePercent) || null,
+      signalRangePercent: Number(rebound.signalRangePercent) || null,
+      counterfactual: null,
+      tradingFee,
+      slippage
+    });
+    shadow.blockedEntries = shadow.blockedEntries.slice(-1000);
+    this.paperValidation.winnerShadow = shadow;
+  }
+
+  settleWinnerShadowBlockedEntries(coin, trade) {
+    if (!this.dryRun || !this.paperValidation?.active || !coin || !trade) return 0;
+    const shadow = this.paperValidation.winnerShadow;
+    if (!shadow || !Array.isArray(shadow.blockedEntries)) return 0;
+    const signalKey = trade.signalKey ? String(trade.signalKey) : '';
+    const exitMarketPrice = Number(trade.exitPrice);
+    if (!signalKey || !Number.isFinite(exitMarketPrice) || exitMarketPrice <= 0) return 0;
+    const settledAt = new Date(trade.exitTime || Date.now()).toISOString();
+    let settledCount = 0;
+    for (const entry of shadow.blockedEntries) {
+      if (entry.status !== 'pending' || entry.coin !== coin || entry.signalKey !== signalKey) continue;
+      const entryPrice = Number(entry.entryPrice);
+      const investAmount = Number(entry.investAmount);
+      const tradingFee = Number.isFinite(Number(entry.tradingFee)) ? Number(entry.tradingFee) : 0.0005;
+      const slippage = Number.isFinite(Number(entry.slippage)) ? Number(entry.slippage) : 0.001;
+      if (!Number.isFinite(entryPrice) || entryPrice <= 0 || !Number.isFinite(investAmount) || investAmount <= 0) continue;
+      const buyFee = investAmount * tradingFee;
+      const amount = (investAmount - buyFee) / entryPrice;
+      const exitPrice = exitMarketPrice * (1 - slippage);
+      const grossAmount = amount * exitPrice;
+      const sellFee = grossAmount * tradingFee;
+      const netProfit = grossAmount - sellFee - investAmount;
+      entry.status = 'settled';
+      entry.settledAt = settledAt;
+      entry.counterfactual = {
+        exitReason: trade.reason || 'STRICT_EXIT',
+        strictExitTimestamp: settledAt,
+        exitMarketPrice,
+        exitPrice,
+        netProfit,
+        profitPercent: (netProfit / investAmount) * 100,
+        strictNetProfit: Number.isFinite(Number(trade.profit)) ? Number(trade.profit) : null,
+        deltaVsStrict: Number.isFinite(Number(trade.profit)) ? netProfit - Number(trade.profit) : null
+      };
+      settledCount += 1;
+    }
+    return settledCount;
+  }
+
+  resolveWinnerShadowBlockedEntryAsNotFilled(coin, decision, reason, timestamp = new Date().toISOString()) {
+    if (!this.dryRun || !this.paperValidation?.active || !coin) return 0;
+    const signalKey = decision?.entrySignalKey || decision?.details?.rebound?.signalKey;
+    if (!signalKey) return 0;
+    const shadow = this.paperValidation.winnerShadow;
+    if (!shadow || !Array.isArray(shadow.blockedEntries)) return 0;
+    const resolvedAt = new Date(timestamp).toISOString();
+    const resolutionReason = String(reason || 'strict_entry_not_filled').slice(0, 160);
+    let resolvedCount = 0;
+    for (const entry of shadow.blockedEntries) {
+      if (entry.status !== 'pending' || entry.coin !== coin || entry.signalKey !== String(signalKey)) continue;
+      entry.status = 'not_filled';
+      entry.resolvedAt = resolvedAt;
+      entry.resolution = 'strict_entry_not_filled';
+      entry.resolutionReason = resolutionReason;
+      entry.counterfactual = null;
+      resolvedCount += 1;
+    }
+    if (resolvedCount > 0) {
+      this.paperValidation.winnerShadow = shadow;
+      this.savePaperValidation();
+    }
+    return resolvedCount;
+  }
+
   comparePaperValidationConfig(recordedSnapshot) {
     if (!recordedSnapshot || typeof recordedSnapshot !== 'object') {
       return { consistent: null, drift: ['config_snapshot_missing'] };
@@ -1106,6 +1648,19 @@ class MultiCoinTrader {
       maxRiskDataGapSeconds: this.isScalpingMode ? 30 : 0,
       maxAnalysisDataGapSeconds: this.isScalpingMode ? 60 : 0
     };
+    const recordedKeys = new Set(Object.keys(recordedSnapshot));
+    const currentKeys = new Set(Object.keys(currentSnapshot));
+    const missingKeys = [...currentKeys]
+      .filter(key => !recordedKeys.has(key));
+    const removedKeys = [...recordedKeys]
+      .filter(key => !currentKeys.has(key));
+    const backwardCompatibleMissing = missingKeys
+      .filter(key => Object.prototype.hasOwnProperty.call(backwardCompatibleDefaults, key))
+      .sort();
+    const schemaDrift = [
+      ...missingKeys.filter(key => !backwardCompatibleMissing.includes(key)),
+      ...removedKeys
+    ].sort();
     const keys = new Set([
       ...Object.keys(recordedSnapshot),
       ...Object.keys(currentSnapshot)
@@ -1119,9 +1674,16 @@ class MultiCoinTrader {
           : recordedSnapshot[key];
         return JSON.stringify(recordedValue) !== JSON.stringify(currentSnapshot[key]);
       });
+    const valueDrift = [...keys]
+      .filter(key => recordedKeys.has(key) && currentKeys.has(key))
+      .sort()
+      .filter(key => JSON.stringify(recordedSnapshot[key]) !== JSON.stringify(currentSnapshot[key]));
     return {
       consistent: drift.length === 0,
-      drift
+      drift,
+      schemaDrift,
+      valueDrift,
+      backwardCompatibleMissing
     };
   }
 
@@ -1158,6 +1720,7 @@ class MultiCoinTrader {
       ledgerKey
     });
     this.paperValidation.strictTrades = strictTrades.slice(-2000);
+    this.settleWinnerShadowBlockedEntries(coin, trade);
     this.registerRuntimeLoss({
       ...trade,
       exitTime
@@ -1366,7 +1929,10 @@ class MultiCoinTrader {
     const startedAt = new Date().toISOString();
     this.stopReason = null;
     this.riskMonitorState = createRiskMonitorState();
+    this.lastRiskStatePersistedAt = 0;
     this.analysisDataHealthState = createAnalysisDataHealthState();
+    this.analysisCycleProgress = null;
+    this.lastAnalysisStatePersistedAt = 0;
     this.paperValidation = {
       schemaVersion: 4,
       sessionId: `paper-${Date.now()}`,
@@ -1380,6 +1946,7 @@ class MultiCoinTrader {
       targetCoins: [...this.targetCoins],
       configSnapshot: this.getPaperValidationConfigSnapshot(),
       configSnapshotComplete: true,
+      paperExperiments: this.getPaperExperimentSnapshot(),
       baselineAssets,
       baselineIncludesHoldings: this.virtualPortfolio.holdings.size > 0,
       thresholds: {
@@ -1422,13 +1989,33 @@ class MultiCoinTrader {
         shadowMarketRegimeBlockedEntries: 0,
         looseShadowMarketRegimeBlockedEntries: 0,
         shadowCandidates: 0,
+        shadowEntryExecutionBlockedEntries: 0,
+        looseShadowEntryExecutionBlockedEntries: 0,
+        shadowEntryExecutionBlockReasons: {},
+        looseShadowEntryExecutionBlockReasons: {},
+        winnerShadowCandidates: 0,
+        winnerShadowCandidatesByCoin: {},
+        winnerShadowCircuitBlockedEntries: 0,
+        winnerShadowReboundBlockedEntries: 0,
         oversoldObservations: 0,
         strictReboundCandidates: 0,
         strictConfirmedCandidates: 0,
+        entryConfirmationAttempts: 0,
+        entryConfirmationSucceeded: 0,
+        entryConfirmationCancelled: 0,
+        entryConfirmationReasons: {},
+        lastEntryConfirmation: null,
         sellSignals: 0,
         holdDecisions: 0,
         reasonCounts: {},
         rejectionCounts: {},
+        signalTelemetryVersion: 1,
+        signalTelemetryCoverageStartedAt: startedAt,
+        uniqueSignalWindows: 0,
+        uniqueSignalWindowsByCoin: {},
+        uniqueReasonCounts: {},
+        uniqueRejectionCounts: {},
+        lastSignalTelemetryKeyByCoin: {},
         shadowCandidatesByCoin: {},
         lastMarketRegime: null,
         analysisIncompleteCycles: 0,
@@ -1460,6 +2047,7 @@ class MultiCoinTrader {
       shadow: {
         positions: {},
         lastSignalByCoin: {},
+        executionBoundaryBlockedEntries: [],
         closedTrades: [],
         entryCount: 0,
         realizedProfit: 0,
@@ -1475,6 +2063,26 @@ class MultiCoinTrader {
       looseShadow: {
         positions: {},
         lastSignalByCoin: {},
+        executionBoundaryBlockedEntries: [],
+        closedTrades: [],
+        entryCount: 0,
+        realizedProfit: 0,
+        totalInvested: 0,
+        winningTrades: 0,
+        losingTrades: 0,
+        cooldownUntilByCoin: {},
+        consecutiveLossesByCoin: {},
+        lossCircuitBreaker: createLossCircuitBreakerState(),
+        lastEntryAt: null,
+        lastExitAt: null
+      },
+      // Optional candidate book. It mirrors only confirmed strict BUY signals
+      // and applies the explicitly configured winner-hold experiment. It is
+      // never included in strict assets or promotion metrics.
+      winnerShadow: {
+        positions: {},
+        lastSignalByCoin: {},
+        blockedEntries: [],
         closedTrades: [],
         entryCount: 0,
         realizedProfit: 0,
@@ -1497,12 +2105,17 @@ class MultiCoinTrader {
     if (!this.paperValidation) {
       return { available: false, active: false };
     }
+    const pendingCounterfactualCount = ['shadow', 'looseShadow']
+      .reduce((count, stateKey) => count + (this.paperValidation[stateKey]?.executionBoundaryBlockedEntries || [])
+        .filter(entry => entry?.status === 'pending').length, 0);
+    this.resolveExecutionBoundaryBlockedEntriesAtStop(new Date().toISOString());
     const strictOpenPositions = this.getStrictOpenPositionSnapshot();
     const diagnosticOpenPositions = this.getPaperDiagnosticOpenPositionSnapshot();
     this.paperValidation.strictOpenPositions = strictOpenPositions;
     this.paperValidation.endedWithOpenPositions = strictOpenPositions.length > 0;
     this.paperValidation.endedWithDiagnosticOpenPositions = diagnosticOpenPositions.length > 0;
     this.paperValidation.diagnosticOpenPositionsAtStop = diagnosticOpenPositions;
+    this.paperValidation.pendingCounterfactualCountAtStop = pendingCounterfactualCount;
     const continuityStopReason = this.paperValidation.riskMonitor?.continuityEligible === false
       ? 'risk_data_gap'
       : this.paperValidation.analysisDataHealth?.continuityEligible === false
@@ -1513,6 +2126,8 @@ class MultiCoinTrader {
         ? 'stopped_with_unsettled_strict_positions'
         : diagnosticOpenPositions.length > 0
           ? 'stopped_with_unsettled_diagnostic_positions'
+          : pendingCounterfactualCount > 0
+            ? 'stopped_with_unsettled_boundary_counterfactuals'
           : 'stopped_cleanly');
     this.paperValidation.active = false;
     this.paperValidation.endedAt = new Date().toISOString();
@@ -1571,13 +2186,33 @@ class MultiCoinTrader {
       shadowMarketRegimeBlockedEntries: 0,
       looseShadowMarketRegimeBlockedEntries: 0,
       shadowCandidates: 0,
+      shadowEntryExecutionBlockedEntries: 0,
+      looseShadowEntryExecutionBlockedEntries: 0,
+      shadowEntryExecutionBlockReasons: {},
+      looseShadowEntryExecutionBlockReasons: {},
+      winnerShadowCandidates: 0,
+      winnerShadowCandidatesByCoin: {},
+      winnerShadowCircuitBlockedEntries: 0,
+      winnerShadowReboundBlockedEntries: 0,
       oversoldObservations: 0,
       strictReboundCandidates: 0,
       strictConfirmedCandidates: 0,
+      entryConfirmationAttempts: 0,
+      entryConfirmationSucceeded: 0,
+      entryConfirmationCancelled: 0,
+      entryConfirmationReasons: {},
+      lastEntryConfirmation: null,
       sellSignals: 0,
       holdDecisions: 0,
       reasonCounts: {},
       rejectionCounts: {},
+      signalTelemetryVersion: 1,
+      signalTelemetryCoverageStartedAt: null,
+      uniqueSignalWindows: 0,
+      uniqueSignalWindowsByCoin: {},
+      uniqueReasonCounts: {},
+      uniqueRejectionCounts: {},
+      lastSignalTelemetryKeyByCoin: {},
       shadowCandidatesByCoin: {},
       looseShadowCandidates: 0,
       looseShadowCandidatesByCoin: {},
@@ -1593,6 +2228,13 @@ class MultiCoinTrader {
     };
     telemetry.reasonCounts = telemetry.reasonCounts || {};
     telemetry.rejectionCounts = telemetry.rejectionCounts || {};
+    telemetry.signalTelemetryVersion = Number(telemetry.signalTelemetryVersion) || 1;
+    telemetry.signalTelemetryCoverageStartedAt = telemetry.signalTelemetryCoverageStartedAt || new Date().toISOString();
+    telemetry.uniqueSignalWindows = Number(telemetry.uniqueSignalWindows) || 0;
+    telemetry.uniqueSignalWindowsByCoin = telemetry.uniqueSignalWindowsByCoin || {};
+    telemetry.uniqueReasonCounts = telemetry.uniqueReasonCounts || {};
+    telemetry.uniqueRejectionCounts = telemetry.uniqueRejectionCounts || {};
+    telemetry.lastSignalTelemetryKeyByCoin = telemetry.lastSignalTelemetryKeyByCoin || {};
     telemetry.candleFreshnessBlockedSnapshots = Number(telemetry.candleFreshnessBlockedSnapshots) || 0;
     telemetry.candleFreshnessBlockedAnalyses = Number(telemetry.candleFreshnessBlockedAnalyses) || 0;
     telemetry.candleFreshnessBlockReasons = telemetry.candleFreshnessBlockReasons || {};
@@ -1612,9 +2254,22 @@ class MultiCoinTrader {
     };
     telemetry.lastCandleFreshnessBlock = telemetry.lastCandleFreshnessBlock || null;
     telemetry.shadowCandidatesByCoin = telemetry.shadowCandidatesByCoin || {};
+    telemetry.shadowEntryExecutionBlockedEntries = Number(telemetry.shadowEntryExecutionBlockedEntries) || 0;
+    telemetry.looseShadowEntryExecutionBlockedEntries = Number(telemetry.looseShadowEntryExecutionBlockedEntries) || 0;
+    telemetry.shadowEntryExecutionBlockReasons = telemetry.shadowEntryExecutionBlockReasons || {};
+    telemetry.looseShadowEntryExecutionBlockReasons = telemetry.looseShadowEntryExecutionBlockReasons || {};
+    telemetry.winnerShadowCandidates = Number(telemetry.winnerShadowCandidates) || 0;
+    telemetry.winnerShadowCandidatesByCoin = telemetry.winnerShadowCandidatesByCoin || {};
+    telemetry.winnerShadowCircuitBlockedEntries = Number(telemetry.winnerShadowCircuitBlockedEntries) || 0;
+    telemetry.winnerShadowReboundBlockedEntries = Number(telemetry.winnerShadowReboundBlockedEntries) || 0;
     telemetry.oversoldObservations = Number(telemetry.oversoldObservations) || 0;
     telemetry.strictReboundCandidates = Number(telemetry.strictReboundCandidates) || 0;
     telemetry.strictConfirmedCandidates = Number(telemetry.strictConfirmedCandidates) || 0;
+    telemetry.entryConfirmationAttempts = Number(telemetry.entryConfirmationAttempts) || 0;
+    telemetry.entryConfirmationSucceeded = Number(telemetry.entryConfirmationSucceeded) || 0;
+    telemetry.entryConfirmationCancelled = Number(telemetry.entryConfirmationCancelled) || 0;
+    telemetry.entryConfirmationReasons = telemetry.entryConfirmationReasons || {};
+    telemetry.lastEntryConfirmation = telemetry.lastEntryConfirmation || null;
     telemetry.lastMarketRegime = telemetry.lastMarketRegime || null;
     telemetry.circuitBlockedEntries = Number(telemetry.circuitBlockedEntries) || 0;
     telemetry.candleFreshnessBlockedEntries = Number(telemetry.candleFreshnessBlockedEntries) || 0;
@@ -1660,6 +2315,23 @@ class MultiCoinTrader {
       const rebound = analysis?.decision?.details?.rebound;
       const candleFreshEnough = analysis?.candleFreshness?.valid !== false &&
         analysis?.decision?.details?.candleFreshness?.valid !== false;
+      if (candleFreshEnough) {
+        this.updateExecutionBoundaryBlockedEntries(analysis, 'shadow', now);
+        this.updateExecutionBoundaryBlockedEntries(analysis, 'looseShadow', now);
+      }
+      const signalKey = rebound?.signalKey ? String(rebound.signalKey) : '';
+      const isNewFreshSignalWindow = Boolean(candleFreshEnough && signalKey &&
+        telemetry.lastSignalTelemetryKeyByCoin[coin] !== signalKey);
+      if (isNewFreshSignalWindow) {
+        telemetry.lastSignalTelemetryKeyByCoin[coin] = signalKey;
+        telemetry.uniqueSignalWindows += 1;
+        telemetry.uniqueSignalWindowsByCoin[coin] =
+          (telemetry.uniqueSignalWindowsByCoin[coin] || 0) + 1;
+        for (const rejectionReason of new Set(rebound?.rejectionReasons || [])) {
+          telemetry.uniqueRejectionCounts[rejectionReason] =
+            (telemetry.uniqueRejectionCounts[rejectionReason] || 0) + 1;
+        }
+      }
       if (candleFreshEnough && rebound?.previousWasOversold === true) {
         telemetry.oversoldObservations += 1;
       }
@@ -1675,28 +2347,57 @@ class MultiCoinTrader {
         telemetry.rejectionCounts[rejectionReason] =
           (telemetry.rejectionCounts[rejectionReason] || 0) + 1;
       }
-      const shadowCandidate = candleFreshEnough && rebound?.available === true &&
-        rebound.previousWasOversold === true &&
-        rebound.bullishCandle === true &&
-        Number(rebound.reboundPriceChangePercent ?? rebound.priceChangePercent) >= 0.1 &&
-        Number(rebound.rsiRecovery) >= 1 &&
-        regimeAllowsEntry;
-      const looseShadowCandidate = candleFreshEnough && rebound?.available === true &&
-        (rebound.previousWasOversold === true || rebound.currentWasOversold === true) &&
-        rebound.bullishCandle === true &&
-        Number(rebound.reboundPriceChangePercent ?? rebound.priceChangePercent) >= 0.05 &&
-        Number(rebound.rsiRecovery) >= 0.5 &&
-        regimeAllowsEntry;
-      const shadowCandidateBeforeRegime = rebound?.available === true &&
+      const shadowCandidateBeforeRegime = candleFreshEnough && rebound?.available === true &&
         rebound.previousWasOversold === true &&
         rebound.bullishCandle === true &&
         Number(rebound.reboundPriceChangePercent ?? rebound.priceChangePercent) >= 0.1 &&
         Number(rebound.rsiRecovery) >= 1;
-      const looseShadowCandidateBeforeRegime = rebound?.available === true &&
+      const looseShadowCandidateBeforeRegime = candleFreshEnough && rebound?.available === true &&
         (rebound.previousWasOversold === true || rebound.currentWasOversold === true) &&
         rebound.bullishCandle === true &&
         Number(rebound.reboundPriceChangePercent ?? rebound.priceChangePercent) >= 0.05 &&
         Number(rebound.rsiRecovery) >= 0.5;
+      const configuredMaxRetrace = Number(this.maxEntryRetracePercent);
+      const configuredMaxChase = Number(this.config.maxEntryChasePercent);
+      const shadowEntryExecution = inspectShadowEntryExecution(
+        analysis,
+        Number.isFinite(configuredMaxRetrace) && configuredMaxRetrace >= 0 ? configuredMaxRetrace : 0.25,
+        Number.isFinite(configuredMaxChase) && configuredMaxChase >= 0 ? configuredMaxChase : 0.35
+      );
+      const shadowCandidate = shadowCandidateBeforeRegime &&
+        shadowEntryExecution.valid && regimeAllowsEntry;
+      const looseShadowCandidate = looseShadowCandidateBeforeRegime &&
+        shadowEntryExecution.valid && regimeAllowsEntry;
+      const winnerShadowEnabled = this.winnerShadowExtendMinutes > 0 || this.winnerShadowMaxReboundPercent > 0;
+      const winnerShadowReboundWithinCeiling = this.winnerShadowMaxReboundPercent <= 0 ||
+        Number(rebound?.reboundPriceChangePercent ?? rebound?.priceChangePercent) <= this.winnerShadowMaxReboundPercent;
+      const winnerShadowCandidate = winnerShadowEnabled &&
+        candleFreshEnough &&
+        action === 'BUY' &&
+        rebound?.available === true &&
+        rebound.reboundConfirmed === true &&
+        winnerShadowReboundWithinCeiling &&
+        regimeAllowsEntry;
+      if (winnerShadowEnabled && action === 'BUY' && rebound?.reboundConfirmed === true &&
+        !winnerShadowReboundWithinCeiling) {
+        telemetry.winnerShadowReboundBlockedEntries += 1;
+        this.recordWinnerShadowBlockedEntry(analysis, now);
+      }
+      if (isNewFreshSignalWindow && shadowEntryExecution.enforceable && !shadowEntryExecution.valid) {
+        const reason = shadowEntryExecution.reason;
+        if (shadowCandidateBeforeRegime) {
+          telemetry.shadowEntryExecutionBlockedEntries += 1;
+          telemetry.shadowEntryExecutionBlockReasons[reason] =
+            (telemetry.shadowEntryExecutionBlockReasons[reason] || 0) + 1;
+          this.recordExecutionBoundaryBlockedEntry(analysis, 'shadow', reason, now);
+        }
+        if (looseShadowCandidateBeforeRegime) {
+          telemetry.looseShadowEntryExecutionBlockedEntries += 1;
+          telemetry.looseShadowEntryExecutionBlockReasons[reason] =
+            (telemetry.looseShadowEntryExecutionBlockReasons[reason] || 0) + 1;
+          this.recordExecutionBoundaryBlockedEntry(analysis, 'looseShadow', reason, now);
+        }
+      }
       if (this.config.marketRegimeEnabled === true && !regimeAllowsEntry) {
         if (shadowCandidateBeforeRegime) telemetry.shadowMarketRegimeBlockedEntries += 1;
         if (looseShadowCandidateBeforeRegime) telemetry.looseShadowMarketRegimeBlockedEntries += 1;
@@ -1710,14 +2411,26 @@ class MultiCoinTrader {
         telemetry.looseShadowCandidatesByCoin[coin] =
           (telemetry.looseShadowCandidatesByCoin[coin] || 0) + 1;
       }
+      if (winnerShadowCandidate) {
+        telemetry.winnerShadowCandidates += 1;
+        telemetry.winnerShadowCandidatesByCoin[coin] =
+          (telemetry.winnerShadowCandidatesByCoin[coin] || 0) + 1;
+      }
 
       const shadowResult = this.updatePaperShadowPosition(analysis, shadowCandidate && action !== 'BUY', now);
       const looseShadowResult = this.updatePaperShadowPosition(analysis, looseShadowCandidate && action !== 'BUY', now, 'looseShadow');
+      const winnerShadowResult = winnerShadowEnabled
+        ? this.updatePaperShadowPosition(analysis, winnerShadowCandidate, now, 'winnerShadow')
+        : null;
       if (shadowResult?.blockedByLossCircuit) telemetry.shadowCircuitBlockedEntries += 1;
       if (looseShadowResult?.blockedByLossCircuit) telemetry.looseShadowCircuitBlockedEntries += 1;
+      if (winnerShadowResult?.blockedByLossCircuit) telemetry.winnerShadowCircuitBlockedEntries += 1;
 
       const reason = String(analysis?.decision?.reason || 'unknown').slice(0, 120);
       telemetry.reasonCounts[reason] = (telemetry.reasonCounts[reason] || 0) + 1;
+      if (isNewFreshSignalWindow) {
+        telemetry.uniqueReasonCounts[reason] = (telemetry.uniqueReasonCounts[reason] || 0) + 1;
+      }
     }
 
     this.paperValidation.telemetry = telemetry;
@@ -1882,12 +2595,42 @@ class MultiCoinTrader {
     this.paperValidation.telemetry = telemetry;
   }
 
+  recordPaperEntryConfirmation(coin, outcome, reason = 'unknown') {
+    if (!this.dryRun || !this.paperValidation?.active) return;
+    const telemetry = this.paperValidation.telemetry || {};
+    telemetry.entryConfirmationAttempts = Number(telemetry.entryConfirmationAttempts) || 0;
+    telemetry.entryConfirmationSucceeded = Number(telemetry.entryConfirmationSucceeded) || 0;
+    telemetry.entryConfirmationCancelled = Number(telemetry.entryConfirmationCancelled) || 0;
+    telemetry.entryConfirmationReasons = telemetry.entryConfirmationReasons || {};
+    const normalizedOutcome = outcome === 'confirmed' ? 'confirmed' : 'cancelled';
+    const normalizedReason = String(reason || 'unknown').slice(0, 160);
+    if (outcome === 'attempt') {
+      telemetry.entryConfirmationAttempts += 1;
+    } else if (normalizedOutcome === 'confirmed') {
+      telemetry.entryConfirmationSucceeded += 1;
+    } else {
+      telemetry.entryConfirmationCancelled += 1;
+    }
+    if (outcome !== 'attempt') {
+      telemetry.entryConfirmationReasons[normalizedReason] =
+        (Number(telemetry.entryConfirmationReasons[normalizedReason]) || 0) + 1;
+    }
+    telemetry.lastEntryConfirmation = {
+      at: new Date().toISOString(),
+      coin: coin || null,
+      outcome: outcome === 'attempt' ? 'attempt' : normalizedOutcome,
+      reason: normalizedReason
+    };
+    this.paperValidation.telemetry = telemetry;
+  }
+
   getStrictOpenPositionSnapshot() {
     return [...this.strategies.entries()]
       .filter(([, strategy]) => strategy?.currentPosition)
       .map(([coin, strategy]) => {
         const position = strategy.currentPosition;
         const numericOrNull = value => Number.isFinite(Number(value)) ? Number(value) : null;
+        const excursion = derivePositionExcursion(position);
         return {
           coin,
           entryPrice: Number(position.entryPrice) || null,
@@ -1895,7 +2638,10 @@ class MultiCoinTrader {
           entryTime: position.entryTime instanceof Date
             ? position.entryTime.toISOString()
             : position.entryTime || null,
-          highestPrice: Number(position.highestPrice) || Number(position.entryPrice) || null,
+          highestPrice: excursion.highestPrice,
+          lowestPrice: excursion.lowestPrice,
+          maxFavorableExcursionPercent: excursion.maxFavorableExcursionPercent,
+          maxAdverseExcursionPercent: excursion.maxAdverseExcursionPercent,
           breakEvenArmed: position.breakEvenArmed === true,
           trailingArmed: position.trailingArmed === true,
           signalKey: position.signalKey || null,
@@ -1919,7 +2665,7 @@ class MultiCoinTrader {
   getPaperDiagnosticOpenPositionSnapshot() {
     if (!this.paperValidation) return [];
     const positions = [];
-    for (const stateKey of ['shadow', 'looseShadow']) {
+    for (const stateKey of ['shadow', 'looseShadow', 'winnerShadow']) {
       const book = this.paperValidation[stateKey];
       for (const [coin, position] of Object.entries(book?.positions || {})) {
         if (!position || typeof position !== 'object') continue;
@@ -1934,6 +2680,29 @@ class MultiCoinTrader {
   }
 
   /**
+   * Resolve the exit contract for a diagnostic book. The winner-shadow
+   * sidecar runs its own winner-hold candidate values; every other book
+   * shares the strict config. The mapping must live here — the risk-monitor
+   * path previously dropped it by omitting the call-site override, which
+   * silently closed the experiment at the strict max-hold boundary. An
+   * explicit configOverride still wins for callers that deliberately
+   * simulate a different contract.
+   */
+  resolveShadowExitConfig(stateKey, configOverride) {
+    const derived = stateKey === 'winnerShadow'
+      ? {
+          winnerExtendMinutes: this.winnerShadowExtendMinutes,
+          winnerExtendMinProfitPercent: this.winnerShadowExtendMinProfitPercent
+        }
+      : {};
+    return {
+      ...this.config,
+      ...derived,
+      ...(configOverride && typeof configOverride === 'object' ? configOverride : {})
+    };
+  }
+
+  /**
    * Relaxed shadow cohort for diagnosing filter starvation.
    *
    * This book is deliberately separate from the real virtual portfolio. It
@@ -1942,7 +2711,7 @@ class MultiCoinTrader {
    * purpose is to answer whether rejected candidates are worth a new
    * holdout study instead of silently loosening production filters.
    */
-  updatePaperShadowPosition(analysis, canEnter, timestamp, stateKey = 'shadow') {
+  updatePaperShadowPosition(analysis, canEnter, timestamp, stateKey = 'shadow', configOverride = {}) {
     const result = {
       entered: false,
       closed: false,
@@ -1954,6 +2723,7 @@ class MultiCoinTrader {
     const shadow = this.paperValidation[stateKey] || {
       positions: {},
       lastSignalByCoin: {},
+      executionBoundaryBlockedEntries: [],
       closedTrades: [],
       entryCount: 0,
       realizedProfit: 0,
@@ -1968,6 +2738,9 @@ class MultiCoinTrader {
     };
     shadow.positions = shadow.positions || {};
     shadow.lastSignalByCoin = shadow.lastSignalByCoin || {};
+    shadow.executionBoundaryBlockedEntries = Array.isArray(shadow.executionBoundaryBlockedEntries)
+      ? shadow.executionBoundaryBlockedEntries
+      : [];
     shadow.closedTrades = Array.isArray(shadow.closedTrades) ? shadow.closedTrades : [];
     shadow.entryCount = Number(shadow.entryCount) || 0;
     shadow.realizedProfit = Number(shadow.realizedProfit) || 0;
@@ -1986,43 +2759,44 @@ class MultiCoinTrader {
       return result;
     }
 
-    const tradingFee = Number.isFinite(Number(this.config.tradingFee))
-      ? Number(this.config.tradingFee)
+    const exitConfig = this.resolveShadowExitConfig(stateKey, configOverride);
+    const tradingFee = Number.isFinite(Number(exitConfig.tradingFee))
+      ? Number(exitConfig.tradingFee)
       : 0.0005;
-    const slippage = Number.isFinite(Number(this.config.slippage))
-      ? Number(this.config.slippage)
+    const slippage = Number.isFinite(Number(exitConfig.slippage))
+      ? Number(exitConfig.slippage)
       : 0.001;
-    const stopLossPercent = Number.isFinite(Number(this.config.stopLossPercent))
-      ? Number(this.config.stopLossPercent)
+    const stopLossPercent = Number.isFinite(Number(exitConfig.stopLossPercent))
+      ? Number(exitConfig.stopLossPercent)
       : 1.2;
-    const takeProfitPercent = Number.isFinite(Number(this.config.takeProfitPercent))
-      ? Number(this.config.takeProfitPercent)
+    const takeProfitPercent = Number.isFinite(Number(exitConfig.takeProfitPercent))
+      ? Number(exitConfig.takeProfitPercent)
       : 1.8;
-    const maxHoldMinutes = Number.isFinite(Number(this.config.maxHoldMinutes))
-      ? Number(this.config.maxHoldMinutes)
+    const maxHoldMinutes = Number.isFinite(Number(exitConfig.maxHoldMinutes))
+      ? Number(exitConfig.maxHoldMinutes)
       : 30;
-    const maxLosingHoldMinutes = Number.isFinite(Number(this.config.maxLosingHoldMinutes))
-      ? Number(this.config.maxLosingHoldMinutes)
+    const maxLosingHoldMinutes = Number.isFinite(Number(exitConfig.maxLosingHoldMinutes))
+      ? Number(exitConfig.maxLosingHoldMinutes)
       : 0;
-    const winnerExtendMinutes = Number.isFinite(Number(this.config.winnerExtendMinutes))
-      ? Number(this.config.winnerExtendMinutes)
+    const winnerExtendMinutes = Number.isFinite(Number(exitConfig.winnerExtendMinutes))
+      ? Number(exitConfig.winnerExtendMinutes)
       : 0;
-    const winnerExtendMinProfitPercent = Number.isFinite(Number(this.config.winnerExtendMinProfitPercent))
-      ? Number(this.config.winnerExtendMinProfitPercent)
+    const winnerExtendMinProfitPercent = Number.isFinite(Number(exitConfig.winnerExtendMinProfitPercent))
+      ? Number(exitConfig.winnerExtendMinProfitPercent)
       : 0;
-    const cooldownAfterLossMinutes = Number.isFinite(Number(this.config.cooldownAfterLossMinutes))
-      ? Number(this.config.cooldownAfterLossMinutes)
+    const cooldownAfterLossMinutes = Number.isFinite(Number(exitConfig.cooldownAfterLossMinutes))
+      ? Number(exitConfig.cooldownAfterLossMinutes)
       : 15;
-    const maxConsecutiveLosses = Number.isFinite(Number(this.config.maxConsecutiveLosses))
-      ? Number(this.config.maxConsecutiveLosses)
+    const maxConsecutiveLosses = Number.isFinite(Number(exitConfig.maxConsecutiveLosses))
+      ? Number(exitConfig.maxConsecutiveLosses)
       : 3;
-    const breakEvenTriggerPercent = Math.max(0, Number(this.config.breakEvenTriggerPercent) || 0);
-    const configuredBreakEvenOffset = Number(this.config.breakEvenOffsetPercent);
+    const breakEvenTriggerPercent = Math.max(0, Number(exitConfig.breakEvenTriggerPercent) || 0);
+    const configuredBreakEvenOffset = Number(exitConfig.breakEvenOffsetPercent);
     const breakEvenOffsetPercent = Number.isFinite(configuredBreakEvenOffset) && configuredBreakEvenOffset >= 0
       ? configuredBreakEvenOffset
       : 0.05;
-    const trailingActivationPercent = Math.max(0, Number(this.config.trailingActivationPercent) || 0);
-    const trailingStopPercent = Math.max(0, Number(this.config.trailingStopPercent) || 0);
+    const trailingActivationPercent = Math.max(0, Number(exitConfig.trailingActivationPercent) || 0);
+    const trailingStopPercent = Math.max(0, Number(exitConfig.trailingStopPercent) || 0);
     const nowMs = new Date(timestamp).getTime();
     const position = shadow.positions[coin];
     let closedThisCycle = false;
@@ -2031,7 +2805,7 @@ class MultiCoinTrader {
       const entryTimestamp = new Date(position.entryTimestamp).getTime();
       const stopPrice = position.entryPrice * (1 - stopLossPercent / 100);
       const takePrice = position.entryPrice * (1 + takeProfitPercent / 100);
-      position.highestPrice = Math.max(Number(position.highestPrice) || position.entryPrice, currentPrice);
+      updatePositionExcursion(position, currentPrice);
       const gainPercent = ((currentPrice - position.entryPrice) / position.entryPrice) * 100;
       if (breakEvenTriggerPercent > 0 && gainPercent >= breakEvenTriggerPercent) {
         position.breakEvenArmed = true;
@@ -2115,6 +2889,9 @@ class MultiCoinTrader {
           signalRangePercent: numericOrNull(position.signalRangePercent),
           entryDelayMs: numericOrNull(position.entryDelayMs),
           executionDriftPercent: numericOrNull(position.executionDriftPercent),
+          lowestPrice: numericOrNull(position.lowestPrice),
+          maxFavorableExcursionPercent: numericOrNull(position.maxFavorableExcursionPercent),
+          maxAdverseExcursionPercent: numericOrNull(position.maxAdverseExcursionPercent),
           winnerExtended: position.winnerExtended === true,
           rejectionReasons: Array.isArray(position.rejectionReasons)
             ? position.rejectionReasons
@@ -2207,6 +2984,9 @@ class MultiCoinTrader {
                 ? ((currentPrice - Number(rebound.referencePrice)) / Number(rebound.referencePrice)) * 100
                 : null,
               highestPrice: currentPrice,
+              lowestPrice: currentPrice,
+              maxFavorableExcursionPercent: 0,
+              maxAdverseExcursionPercent: 0,
               winnerExtended: false,
               breakEvenArmed: false,
               trailingArmed: false,
@@ -2252,6 +3032,7 @@ class MultiCoinTrader {
       ? ownerProcessAlive === false ? 'owner_process_missing' : 'heartbeat_stale'
       : null;
     const configComparison = this.comparePaperValidationConfig(session.configSnapshot);
+    const experimentComparison = this.comparePaperExperimentConfig(session.paperExperiments);
     const configSnapshotComplete = session.configSnapshotComplete === true;
     const snapshots = [
       { timestamp: session.startedAt, totalAssets: session.baselineAssets },
@@ -2303,6 +3084,22 @@ class MultiCoinTrader {
     const realizedProfit = startedTrades.reduce((sum, trade) => sum + (Number(trade.profit) || 0), 0);
     const strictWinningTrades = startedTrades.filter(trade => Number(trade.profit) > 0).length;
     const strictLosingTrades = startedTrades.filter(trade => Number(trade.profit) <= 0).length;
+    const strictRecentTrades = startedTrades.slice(-5).map(trade => ({
+      action: trade.action || 'CLOSE',
+      coin: trade.coin || null,
+      reason: trade.reason || null,
+      entryPrice: Number.isFinite(Number(trade.entryPrice)) ? Number(trade.entryPrice) : null,
+      exitPrice: Number.isFinite(Number(trade.exitPrice)) ? Number(trade.exitPrice) : null,
+      profit: Number.isFinite(Number(trade.profit)) ? Number(trade.profit) : null,
+      profitPercent: Number.isFinite(Number(trade.profitPercent)) ? Number(trade.profitPercent) : null,
+      maxFavorableExcursionPercent: Number.isFinite(Number(trade.maxFavorableExcursionPercent))
+        ? Number(trade.maxFavorableExcursionPercent)
+        : null,
+      maxAdverseExcursionPercent: Number.isFinite(Number(trade.maxAdverseExcursionPercent))
+        ? Number(trade.maxAdverseExcursionPercent)
+        : null,
+      exitTime: trade.exitTime || null
+    }));
     const shadow = session.shadow || {};
     const shadowClosedTrades = Array.isArray(shadow.closedTrades) ? shadow.closedTrades : [];
     const shadowRealizedProfit = Number(shadow.realizedProfit) || 0;
@@ -2323,6 +3120,58 @@ class MultiCoinTrader {
       ? looseClosedTrades.filter(trade => Number(trade.netProfit) > 0).reduce((sum, trade) => sum + Number(trade.netProfit), 0) /
         Math.abs(looseClosedTrades.filter(trade => Number(trade.netProfit) <= 0).reduce((sum, trade) => sum + Number(trade.netProfit), 0))
       : looseWinners > 0 ? Infinity : 0;
+    const winnerShadow = session.winnerShadow || {};
+    const winnerShadowClosedTrades = Array.isArray(winnerShadow.closedTrades) ? winnerShadow.closedTrades : [];
+    const winnerShadowRealizedProfit = Number(winnerShadow.realizedProfit) || 0;
+    const winnerShadowTotalInvested = Number(winnerShadow.totalInvested) || 0;
+    const winnerShadowWinners = Number(winnerShadow.winningTrades) || winnerShadowClosedTrades.filter(trade => Number(trade.netProfit) > 0).length;
+    const winnerShadowLosers = Number(winnerShadow.losingTrades) || winnerShadowClosedTrades.filter(trade => Number(trade.netProfit) <= 0).length;
+    const winnerShadowProfitFactor = winnerShadowLosers > 0
+      ? winnerShadowClosedTrades.filter(trade => Number(trade.netProfit) > 0).reduce((sum, trade) => sum + Number(trade.netProfit), 0) /
+        Math.abs(winnerShadowClosedTrades.filter(trade => Number(trade.netProfit) <= 0).reduce((sum, trade) => sum + Number(trade.netProfit), 0))
+      : winnerShadowWinners > 0 ? Infinity : 0;
+    const summarizeDiagnosticTrades = trades => trades.slice(-5).map(trade => ({
+      coin: trade.coin || null,
+      reason: trade.reason || null,
+      entryPrice: Number.isFinite(Number(trade.entryPrice)) ? Number(trade.entryPrice) : null,
+      exitPrice: Number.isFinite(Number(trade.exitPrice)) ? Number(trade.exitPrice) : null,
+      netProfit: Number.isFinite(Number(trade.netProfit)) ? Number(trade.netProfit) : null,
+      profitPercent: Number.isFinite(Number(trade.profitPercent)) ? Number(trade.profitPercent) : null,
+      maxFavorableExcursionPercent: Number.isFinite(Number(trade.maxFavorableExcursionPercent))
+        ? Number(trade.maxFavorableExcursionPercent)
+        : null,
+      maxAdverseExcursionPercent: Number.isFinite(Number(trade.maxAdverseExcursionPercent))
+        ? Number(trade.maxAdverseExcursionPercent)
+        : null,
+      exitTimestamp: trade.exitTimestamp || trade.exitTime || null,
+      winnerExtended: trade.winnerExtended === true,
+      rejectionReasons: Array.isArray(trade.rejectionReasons) ? trade.rejectionReasons.slice() : []
+    }));
+    const shadowRecentTrades = summarizeDiagnosticTrades(shadowClosedTrades);
+    const looseRecentTrades = summarizeDiagnosticTrades(looseClosedTrades);
+    const winnerShadowRecentTrades = summarizeDiagnosticTrades(winnerShadowClosedTrades);
+    const winnerShadowBlockedEntries = Array.isArray(winnerShadow.blockedEntries)
+      ? winnerShadow.blockedEntries
+      : [];
+    const winnerShadowSettledBlockedEntries = winnerShadowBlockedEntries
+      .filter(entry => entry?.status === 'settled' && entry.counterfactual);
+    const winnerShadowPendingBlockedEntries = winnerShadowBlockedEntries
+      .filter(entry => entry?.status === 'pending');
+    const winnerShadowNotFilledBlockedEntries = winnerShadowBlockedEntries
+      .filter(entry => entry?.status === 'not_filled');
+    const winnerShadowCounterfactualProfit = winnerShadowSettledBlockedEntries
+      .reduce((sum, entry) => sum + (Number(entry.counterfactual?.netProfit) || 0), 0);
+    const winnerShadowCounterfactualWinners = winnerShadowSettledBlockedEntries
+      .filter(entry => Number(entry.counterfactual?.netProfit) > 0).length;
+    const winnerShadowCounterfactualLosers = winnerShadowSettledBlockedEntries.length - winnerShadowCounterfactualWinners;
+    const winnerShadowCounterfactualProfitFactor = winnerShadowCounterfactualLosers > 0
+      ? winnerShadowSettledBlockedEntries
+        .filter(entry => Number(entry.counterfactual?.netProfit) > 0)
+        .reduce((sum, entry) => sum + Number(entry.counterfactual.netProfit), 0) /
+        Math.abs(winnerShadowSettledBlockedEntries
+          .filter(entry => Number(entry.counterfactual?.netProfit) <= 0)
+          .reduce((sum, entry) => sum + Number(entry.counterfactual.netProfit), 0))
+      : winnerShadowCounterfactualWinners > 0 ? Infinity : 0;
     const summarizeRejectionOutcomes = closedTrades => {
       const grouped = new Map();
       for (const trade of closedTrades) {
@@ -2359,9 +3208,12 @@ class MultiCoinTrader {
     };
     const shadowRejectionOutcomes = summarizeRejectionOutcomes(shadowClosedTrades);
     const looseRejectionOutcomes = summarizeRejectionOutcomes(looseClosedTrades);
+    const shadowExecutionBoundary = this.getExecutionBoundaryBlockedEntrySummary(shadow);
+    const looseExecutionBoundary = this.getExecutionBoundaryBlockedEntrySummary(looseShadow);
     const strictLossCircuitBreaker = this.getLossCircuitBreakerStatus('strict');
     const shadowLossCircuitBreaker = this.getLossCircuitBreakerStatus('shadow');
     const looseShadowLossCircuitBreaker = this.getLossCircuitBreakerStatus('looseShadow');
+    const winnerShadowLossCircuitBreaker = this.getLossCircuitBreakerStatus('winnerShadow');
     const baselineAssets = Number(session.baselineAssets) || 0;
     const returnPercent = baselineAssets > 0 ? ((currentAssets / baselineAssets) - 1) * 100 : 0;
     const thresholds = session.thresholds || {};
@@ -2396,12 +3248,44 @@ class MultiCoinTrader {
       !endedWithDiagnosticOpenPositions &&
       configSnapshotComplete &&
       configComparison.consistent === true &&
+      experimentComparison.consistent === true &&
       elapsedDays >= (Number(thresholds.minDays) || 7) &&
       startedTrades.length >= (Number(thresholds.minTrades) || 20) &&
       strictConfidenceGate.passed &&
       returnPercent >= (Number(thresholds.minReturnPercent) || 0.2) &&
       maxDrawdownPercent <= (Number(thresholds.maxDrawdownPercent) || 15);
     const telemetry = session.telemetry || null;
+    // Freshness cohort selection is deliberately diagnostic-only. It makes
+    // the next isolated paper run reproducible when a universe contains
+    // inactive markets, but it never changes this session's target list,
+    // strict metrics, or live-promotion gate.
+    const configuredMinimumMarketObservations = Number(process.env.SCALP_MARKET_QUALITY_MIN_OBSERVATIONS);
+    const configuredMaximumFreshnessBlockRate = Number(process.env.SCALP_MARKET_QUALITY_MAX_STALE_RATE);
+    const marketFreshnessCohort = selectFreshMarketCohort({
+      markets: session.targetCoins || this.targetCoins,
+      telemetry: telemetry || {},
+      minObservations: Number.isFinite(configuredMinimumMarketObservations) && configuredMinimumMarketObservations > 0
+        ? configuredMinimumMarketObservations
+        : MARKET_QUALITY_DEFAULTS.minObservations,
+      maxFreshnessBlockRate: Number.isFinite(configuredMaximumFreshnessBlockRate) && configuredMaximumFreshnessBlockRate >= 0 && configuredMaximumFreshnessBlockRate <= 1
+        ? configuredMaximumFreshnessBlockRate
+        : MARKET_QUALITY_DEFAULTS.maxFreshnessBlockRate,
+      maxMarkets: session.targetCoins?.length || this.targetCoins.length || Infinity
+    });
+    const signalTelemetryAvailable = telemetry?.signalTelemetryVersion === 1 &&
+      Boolean(telemetry.signalTelemetryCoverageStartedAt);
+    const uniqueSignalWindows = signalTelemetryAvailable
+      ? Number(telemetry.uniqueSignalWindows) || 0
+      : null;
+    const uniqueSignalWindowsByCoin = signalTelemetryAvailable
+      ? telemetry.uniqueSignalWindowsByCoin || {}
+      : {};
+    const uniqueReasonCounts = signalTelemetryAvailable
+      ? telemetry.uniqueReasonCounts || {}
+      : {};
+    const uniqueRejectionCounts = signalTelemetryAvailable
+      ? telemetry.uniqueRejectionCounts || {}
+      : {};
     const strictReboundCandidates = telemetry && Number.isFinite(Number(telemetry.strictReboundCandidates))
       ? Number(telemetry.strictReboundCandidates)
       : Number(telemetry?.shadowCandidates) || 0;
@@ -2424,13 +3308,18 @@ class MultiCoinTrader {
       strictConfirmedCandidates === 0);
     const suggestedAdjustments = [];
     if (filterStarvation) {
-      const reasonCounts = telemetry.reasonCounts || {};
+      const reasonCounts = signalTelemetryAvailable && Object.keys(uniqueReasonCounts).length > 0
+        ? uniqueReasonCounts
+        : telemetry.reasonCounts || {};
       const reasonText = Object.keys(reasonCounts).join(' ');
-      const rejectionCounts = telemetry.rejectionCounts || {};
+      const rejectionCounts = signalTelemetryAvailable && Object.keys(uniqueRejectionCounts).length > 0
+        ? uniqueRejectionCounts
+        : telemetry.rejectionCounts || {};
       const rejectionSuggestions = {
         previous_rsi_not_oversold: 'oversoldLookback=3 후보를 별도 holdout 검증',
         volume_confirmation_failed: 'minVolumeRatio=0.8 후보를 별도 holdout 검증',
         price_rebound_below_threshold: 'minReboundPercent=0.10 후보를 별도 holdout 검증',
+        price_rebound_above_threshold: 'maxReboundPercent=0.40 후보를 별도 holdout 검증',
         previous_high_break_failed: '직전 고가 돌파 필터 유지/완화 프로파일을 병렬 비교',
         rsi_recovery_below_threshold: 'minRsiRecovery=1 후보를 별도 holdout 검증',
         close_strength_failed: 'minCloseStrength=0.55 후보를 별도 holdout 검증',
@@ -2441,6 +3330,7 @@ class MultiCoinTrader {
         previous_rsi_not_oversold: '현재 RSI 과매도 필터 유지',
         volume_confirmation_failed: 'minVolumeRatio=1.0 필터 유지',
         price_rebound_below_threshold: 'minReboundPercent=0.15 필터 유지',
+        price_rebound_above_threshold: '과대 반등 상한은 별도 검증 전 적용 금지',
         previous_high_break_failed: '직전 고가 돌파 필터 유지',
         rsi_recovery_below_threshold: 'minRsiRecovery=2 필터 유지',
         close_strength_failed: 'minCloseStrength=0.65 필터 유지',
@@ -2495,8 +3385,14 @@ class MultiCoinTrader {
       strategyMode: session.strategyMode,
       strategyProfile: session.strategyProfile,
       configSnapshot: session.configSnapshot || null,
+      paperExperiments: session.paperExperiments || null,
+      paperExperimentConsistent: experimentComparison.consistent,
+      paperExperimentDrift: experimentComparison.drift,
       configConsistent: configComparison.consistent,
       configDrift: configComparison.drift,
+      configSchemaDrift: configComparison.schemaDrift,
+      configValueDrift: configComparison.valueDrift,
+      configBackwardCompatibleMissing: configComparison.backwardCompatibleMissing,
       configSnapshotComplete,
       startedAt: session.startedAt,
       endedAt: session.endedAt,
@@ -2509,6 +3405,7 @@ class MultiCoinTrader {
       returnPercent,
       realizedProfit,
       closedTradeCount: startedTrades.length,
+      strictRecentTrades,
       maxDrawdownPercent,
       baselineIncludesHoldings: session.baselineIncludesHoldings === true,
       endedWithOpenPositions,
@@ -2517,7 +3414,9 @@ class MultiCoinTrader {
       diagnosticOpenPositionsAtStop: Array.isArray(session.diagnosticOpenPositionsAtStop)
         ? session.diagnosticOpenPositionsAtStop
         : [],
+      pendingCounterfactualCountAtStop: Number(session.pendingCounterfactualCountAtStop) || 0,
       stopReason: session.stopReason || null,
+      terminalError: session.terminalError || session.lastError || null,
       thresholds,
       snapshotCount: snapshots.length,
       lastSnapshotAt: snapshots.at(-1)?.timestamp || session.startedAt,
@@ -2535,6 +3434,7 @@ class MultiCoinTrader {
         winningTrades: strictWinningTrades,
         losingTrades: strictLosingTrades,
         winRate: startedTrades.length > 0 ? (strictWinningTrades / startedTrades.length) * 100 : null,
+        recentTrades: strictRecentTrades,
         tradeReturnConfidence: strictTradeConfidence,
         confidenceGate: strictConfidenceGate,
         lossCircuitBreaker: strictLossCircuitBreaker,
@@ -2603,7 +3503,30 @@ class MultiCoinTrader {
         insufficientByCoin: telemetry?.insufficientCandleDataByCoin || {},
         minimumCandleCount: Math.max(50, (Number(this.config?.rsiPeriod) || 14) + 10)
       },
+      marketFreshnessCohort: {
+        diagnosticOnly: true,
+        minObservations: marketFreshnessCohort.minObservations,
+        maxFreshnessBlockRate: marketFreshnessCohort.maxFreshnessBlockRate,
+        maxMarkets: marketFreshnessCohort.maxMarkets,
+        observedMarketCount: marketFreshnessCohort.selectedRows.length + marketFreshnessCohort.excludedRows.length,
+        ready: marketFreshnessCohort.selectedMarkets.length > 0,
+        selectedMarkets: marketFreshnessCohort.selectedMarkets,
+        selectedRows: marketFreshnessCohort.selectedRows,
+        excludedRows: marketFreshnessCohort.excludedRows
+      },
       telemetry,
+      signalTelemetry: {
+        available: signalTelemetryAvailable,
+        coverageStartedAt: signalTelemetryAvailable
+          ? telemetry.signalTelemetryCoverageStartedAt
+          : null,
+        dedupeKey: 'coin:rebound.signalKey',
+        uniqueSignalWindows,
+        uniqueSignalWindowsByCoin,
+        uniqueReasonCounts,
+        uniqueRejectionCounts,
+        note: 'cycle 반복을 제거한 고유 완료 캔들 window 기준입니다. 구버전 ledger는 새 source로 다시 관측할 때부터 집계합니다.'
+      },
       shadowEvaluation: {
         activePositions: Object.keys(shadow.positions || {}).length,
         entryCount: Number(shadow.entryCount) || 0,
@@ -2616,6 +3539,8 @@ class MultiCoinTrader {
         profitFactor: shadowProfitFactor,
         lossCircuitBreaker: shadowLossCircuitBreaker,
         rejectionOutcomes: shadowRejectionOutcomes,
+        executionBoundary: shadowExecutionBoundary,
+        recentTrades: shadowRecentTrades,
         lastEntryAt: shadow.lastEntryAt || null,
         lastExitAt: shadow.lastExitAt || null,
         note: 'soft 후보를 별도 가상 장부로 추적한 참고치이며 strict paper 자산과 실전 승격 판정에는 포함하지 않습니다.'
@@ -2632,16 +3557,55 @@ class MultiCoinTrader {
         profitFactor: looseProfitFactor,
         lossCircuitBreaker: looseShadowLossCircuitBreaker,
         rejectionOutcomes: looseRejectionOutcomes,
+        executionBoundary: looseExecutionBoundary,
+        recentTrades: looseRecentTrades,
         lastEntryAt: looseShadow.lastEntryAt || null,
         lastExitAt: looseShadow.lastExitAt || null,
         note: '더 완화된 후보를 별도 추적한 진단용 장부이며 strict paper 자산·승격 판정에 포함하지 않습니다.'
+      },
+      winnerShadowEvaluation: {
+        enabled: session.paperExperiments?.winnerShadow?.enabled === true ||
+          this.winnerShadowExtendMinutes > 0 || this.winnerShadowMaxReboundPercent > 0,
+        entryContract: session.paperExperiments?.winnerShadow?.entryContract ||
+          (this.winnerShadowMaxReboundPercent > 0
+            ? 'strict_confirmed_buy_signal_with_optional_rebound_ceiling'
+            : 'strict_confirmed_buy_signal'),
+        winnerExtendMinutes: Number(session.paperExperiments?.winnerShadow?.winnerExtendMinutes ?? this.winnerShadowExtendMinutes) || 0,
+        winnerExtendMinProfitPercent: Number(session.paperExperiments?.winnerShadow?.winnerExtendMinProfitPercent ?? this.winnerShadowExtendMinProfitPercent) || 0,
+        entryMaxReboundPercent: Number(session.paperExperiments?.winnerShadow?.entryMaxReboundPercent ?? this.winnerShadowMaxReboundPercent) || 0,
+        activePositions: Object.keys(winnerShadow.positions || {}).length,
+        entryCount: Number(winnerShadow.entryCount) || 0,
+        closedTradeCount: winnerShadowClosedTrades.length,
+        realizedProfit: winnerShadowRealizedProfit,
+        realizedReturnPercent: winnerShadowTotalInvested > 0 ? (winnerShadowRealizedProfit / winnerShadowTotalInvested) * 100 : 0,
+        winningTrades: winnerShadowWinners,
+        losingTrades: winnerShadowLosers,
+        winRate: winnerShadowClosedTrades.length > 0 ? (winnerShadowWinners / winnerShadowClosedTrades.length) * 100 : 0,
+        profitFactor: winnerShadowProfitFactor,
+        lossCircuitBreaker: winnerShadowLossCircuitBreaker,
+        reboundBlockedEntries: Number(telemetry?.winnerShadowReboundBlockedEntries) || 0,
+        blockedEntryCount: winnerShadowBlockedEntries.length,
+        pendingBlockedEntryCount: winnerShadowPendingBlockedEntries.length,
+        notFilledBlockedEntryCount: winnerShadowNotFilledBlockedEntries.length,
+        resolvedBlockedEntryCount: winnerShadowSettledBlockedEntries.length + winnerShadowNotFilledBlockedEntries.length,
+        settledBlockedEntryCount: winnerShadowSettledBlockedEntries.length,
+        counterfactualRealizedProfit: winnerShadowCounterfactualProfit,
+        counterfactualWinningTrades: winnerShadowCounterfactualWinners,
+        counterfactualLosingTrades: winnerShadowCounterfactualLosers,
+        counterfactualProfitFactor: winnerShadowCounterfactualProfitFactor,
+        recentBlockedEntries: winnerShadowBlockedEntries.slice(-5),
+        recentTrades: winnerShadowRecentTrades,
+        lastEntryAt: winnerShadow.lastEntryAt || null,
+        lastExitAt: winnerShadow.lastExitAt || null,
+        note: 'strict confirmed BUY 신호를 같은 entry 장부로 재생하고 winner-hold exit 후보만 적용하는 연구용 장부입니다. strict 자산·승격 판정에는 포함하지 않습니다.'
       },
       filterStarvation,
       marketQuiet,
       signalAvailability: {
         oversoldObservations,
         strictReboundCandidates,
-        strictConfirmedCandidates
+        strictConfirmedCandidates,
+        uniqueSignalWindows
       },
       suggestedAdjustments
     };
@@ -2677,6 +3641,7 @@ class MultiCoinTrader {
 
     this.isRunning = true;
     this.startPositionRiskMonitor();
+    this.startAnalysisDataWatchdog();
 
     // 스캘핑은 뉴스 수집 지연과 장기 감성을 매수 조건에서 제외한다.
     if (this.useNews) {
@@ -2735,56 +3700,7 @@ class MultiCoinTrader {
     }
 
     const currentSnapshot = this.getPaperValidationConfigSnapshot();
-    const comparableKeys = [
-      'signalProfile',
-      'candleUnit',
-      'rsiPeriod',
-      'rsiOversold',
-      'rsiOverbought',
-      'oversoldLookback',
-      'minReboundPercent',
-      'minRsiRecovery',
-      'minVolumeRatio',
-      'volumeLookback',
-      'minCloseStrength',
-      'trendPeriod',
-      'trendSlopeLookback',
-      'minTrendSlopePercent',
-      'requirePreviousHighBreak',
-      'maxSignalRangePercent',
-      'minSignalRangePercent',
-      'marketRegimeEnabled',
-      'marketRegimeLookback',
-      'marketRegimeMinBreadth',
-      'marketRegimeMinReturnPercent',
-      'requireReboundBelowOverbought',
-      'stopLossPercent',
-      'takeProfitPercent',
-      'maxHoldMinutes',
-      'maxLosingHoldMinutes',
-      'winnerExtendMinutes',
-      'winnerExtendMinProfitPercent',
-      'maxEntriesPerSignalWindow',
-      'breakEvenTriggerPercent',
-      'breakEvenOffsetPercent',
-      'trailingActivationPercent',
-      'trailingStopPercent',
-      'cooldownAfterLossMinutes',
-      'maxConsecutiveLosses',
-      'lossCircuitBreakerCount',
-      'lossCircuitBreakerWindowMinutes',
-      'lossCircuitBreakerCooldownMinutes',
-      'investmentRatio',
-      'tradingFee',
-      'slippage',
-      'entryDelayMinMs',
-      'entryDelayMaxMs',
-      'maxRiskDataGapSeconds',
-      'maxAnalysisDataGapSeconds',
-      'maxEntryRetracePercent',
-      'maxEntryChasePercent',
-      'maxCandleAgeSeconds'
-    ];
+    const comparableKeys = LIVE_GATE_COMPARABLE_KEYS;
     const reportConfig = report.config || {};
     const backwardCompatibleReportDefaults = {
       maxRiskDataGapSeconds: 30,
@@ -2842,6 +3758,21 @@ class MultiCoinTrader {
     this.paperValidation.telemetry.riskMonitor = { ...this.riskMonitorState };
   }
 
+  persistRiskMonitorStateIfDue(now = Date.now(), force = false) {
+    if (!this.dryRun || !this.paperValidation?.active || !this.paperValidation?.sessionId) {
+      return false;
+    }
+    const timestamp = Number.isFinite(Number(now)) ? Number(now) : Date.now();
+    if (!force && this.lastRiskStatePersistedAt > 0 &&
+      timestamp - this.lastRiskStatePersistedAt < this.riskStatePersistIntervalMs) {
+      return false;
+    }
+    this.syncRiskMonitorState();
+    this.savePaperValidation();
+    this.lastRiskStatePersistedAt = timestamp;
+    return true;
+  }
+
   getRiskMonitorStatus(now = Date.now()) {
     return getRiskMonitorStatus(
       this.riskMonitorState,
@@ -2851,9 +3782,26 @@ class MultiCoinTrader {
   }
 
   recordRiskMonitorSuccess(now = Date.now()) {
-    this.riskMonitorState = recordRiskMonitorSuccess(this.riskMonitorState, now);
+    this.riskMonitorState = recordRiskMonitorSuccess(
+      this.riskMonitorState,
+      now,
+      this.maxRiskDataGapSeconds
+    );
     this.syncRiskMonitorState();
-    return this.getRiskMonitorStatus(now);
+    const status = this.getRiskMonitorStatus(now);
+    if (this.riskMonitorState.lastFailureCode === 'RISK_CHECK_STALE' &&
+      this.riskMonitorState.continuityEligible === false &&
+      this.isRunning) {
+      this.persistRiskMonitorStateIfDue(now, true);
+      console.error(
+        `\n🛑 늦은 risk ticker 성공 callback으로 확인된 시세 공백 ${status.currentOutageDurationSeconds.toFixed(1)}초 초과 - ` +
+        'paper/live 관찰을 중지합니다.'
+      );
+      this.stop('risk_data_gap');
+    } else {
+      this.persistRiskMonitorStateIfDue(now);
+    }
+    return status;
   }
 
   recordRiskMonitorFailure(error, now = Date.now()) {
@@ -2865,7 +3813,45 @@ class MultiCoinTrader {
     );
     this.riskMonitorState = result.state;
     this.syncRiskMonitorState();
-    if (this.dryRun && this.paperValidation?.active) this.savePaperValidation();
+    if (this.dryRun && this.paperValidation?.active) {
+      this.savePaperValidation();
+      this.lastRiskStatePersistedAt = Date.now();
+    }
+    return {
+      ...result,
+      status: this.getRiskMonitorStatus(now)
+    };
+  }
+
+  /**
+   * A risk ticker request can be in-flight without throwing yet. Check the
+   * timestamp age independently of the request's eventual callback so an
+   * open position cannot remain unprotected while the event loop waits on
+   * network I/O.
+   */
+  enforceRiskMonitorFreshness(now = Date.now()) {
+    const status = this.getRiskMonitorStatus(now);
+    // Explicit request failures already flow through handleRiskMonitorFailure.
+    // This guard is specifically for the previously invisible in-flight case
+    // where no failure callback has created currentOutageStartedAt yet.
+    if (!status.failClosed || status.staleReason !== 'risk_check_stale' || !this.isRunning) {
+      return status;
+    }
+
+    const result = recordRiskMonitorStale(
+      this.riskMonitorState,
+      now,
+      this.maxRiskDataGapSeconds
+    );
+    this.riskMonitorState = result.state;
+    this.syncRiskMonitorState();
+    this.persistRiskMonitorStateIfDue(now, true);
+
+    console.error(
+      `\n🛑 리스크 시세 freshness ${result.outageDurationSeconds.toFixed(1)}초 초과 - ` +
+      '실패 callback 없이도 paper/live 관찰을 중지합니다.'
+    );
+    this.stop('risk_data_gap');
     return {
       ...result,
       status: this.getRiskMonitorStatus(now)
@@ -2893,12 +3879,78 @@ class MultiCoinTrader {
     this.paperValidation.telemetry.analysisDataHealth = { ...this.analysisDataHealthState };
   }
 
+  persistAnalysisDataStateIfDue(now = Date.now(), force = false) {
+    if (!this.dryRun || !this.paperValidation?.active || !this.paperValidation?.sessionId) {
+      return false;
+    }
+    const timestamp = Number.isFinite(Number(now)) ? Number(now) : Date.now();
+    if (!force && this.lastAnalysisStatePersistedAt > 0 &&
+      timestamp - this.lastAnalysisStatePersistedAt < this.riskStatePersistIntervalMs) {
+      return false;
+    }
+    this.syncAnalysisDataHealthState();
+    this.savePaperValidation();
+    this.lastAnalysisStatePersistedAt = timestamp;
+    return true;
+  }
+
+  beginAnalysisDataCycle(now = Date.now()) {
+    const wasActive = this.analysisDataHealthState.analysisActive === true;
+    this.analysisDataHealthState = recordAnalysisDataAttempt(
+      this.analysisDataHealthState,
+      now
+    );
+    this.analysisCycleProgress = new Set();
+    this.syncAnalysisDataHealthState();
+    if (!wasActive) this.persistAnalysisDataStateIfDue(now, true);
+    return this.getAnalysisDataHealthStatus(now);
+  }
+
   getAnalysisDataHealthStatus(now = Date.now()) {
     return getAnalysisDataHealthStatus(
       this.analysisDataHealthState,
       now,
       this.maxAnalysisDataGapSeconds
     );
+  }
+
+  enforceAnalysisDataFreshness(now = Date.now()) {
+    const status = this.getAnalysisDataHealthStatus(now);
+    if (!status.failClosed || status.staleReason !== 'analysis_cycle_stale' || !this.isRunning) {
+      return status;
+    }
+
+    const expectedMarkets = [...new Set((this.targetCoins || [])
+      .map(coin => String(coin || '').trim().toUpperCase())
+      .filter(Boolean))];
+    const analyzedMarkets = this.analysisCycleProgress instanceof Set
+      ? [...this.analysisCycleProgress]
+      : [];
+    const missingMarkets = expectedMarkets.filter(coin => !analyzedMarkets.includes(coin));
+    const result = recordAnalysisDataStale(
+      this.analysisDataHealthState,
+      {
+        expectedMarketCount: expectedMarkets.length,
+        analyzedMarketCount: analyzedMarkets.length,
+        missingMarkets
+      },
+      now,
+      this.maxAnalysisDataGapSeconds
+    );
+    this.analysisDataHealthState = result.state;
+    this.analysisCycleProgress = null;
+    this.syncAnalysisDataHealthState();
+    this.persistAnalysisDataStateIfDue(now, true);
+
+    console.error(
+      `\n🛑 분석 cycle freshness ${result.gapDurationSeconds.toFixed(1)}초 초과 - ` +
+      'paper/live 관찰을 중지합니다.'
+    );
+    this.stop('analysis_data_gap');
+    return {
+      ...result,
+      status: this.getAnalysisDataHealthStatus(now)
+    };
   }
 
   /**
@@ -2925,6 +3977,7 @@ class MultiCoinTrader {
         details,
         now
       );
+      this.analysisCycleProgress = null;
       this.syncAnalysisDataHealthState();
       return {
         complete: true,
@@ -2941,6 +3994,7 @@ class MultiCoinTrader {
       this.maxAnalysisDataGapSeconds
     );
     this.analysisDataHealthState = result.state;
+    this.analysisCycleProgress = null;
     this.syncAnalysisDataHealthState();
     return {
       complete: false,
@@ -2996,11 +4050,27 @@ class MultiCoinTrader {
     this._stopRequested = true;
     this.isRunning = false;
     this.stopPositionRiskMonitor();
+    this.stopAnalysisDataWatchdog();
+  }
+
+  startAnalysisDataWatchdog() {
+    if (this.analysisWatchdogTimer || this.maxAnalysisDataGapSeconds <= 0) return;
+    this.analysisWatchdogTimer = setInterval(() => {
+      this.enforceAnalysisDataFreshness();
+    }, 1000);
+  }
+
+  stopAnalysisDataWatchdog() {
+    if (!this.analysisWatchdogTimer) return;
+    clearInterval(this.analysisWatchdogTimer);
+    this.analysisWatchdogTimer = null;
   }
 
   startPositionRiskMonitor() {
     if (this.positionRiskTimer || this.positionRiskCheckIntervalMs <= 0) return;
     this.positionRiskTimer = setInterval(() => {
+      this.enforceRiskMonitorFreshness();
+      if (!this.isRunning) return;
       this.monitorOpenPositions().catch(error => {
         console.error(`\n❌ 포지션 리스크 모니터 오류: ${error.message}`);
       });
@@ -3016,11 +4086,17 @@ class MultiCoinTrader {
   async monitorOpenPositions() {
     if (!this.isRunning || this._riskCheckInProgress || this._orderInProgress) return;
 
+    const riskFreshness = this.enforceRiskMonitorFreshness();
+    if (riskFreshness.failClosed && riskFreshness.staleReason === 'risk_check_stale') return;
+
     const strictPositions = [...this.strategies.entries()]
       .filter(([, strategy]) => strategy?.currentPosition)
       .map(([coin, strategy]) => ({ coin, strategy }));
+    const winnerShadowActive = this.winnerShadowExtendMinutes > 0 ||
+      this.winnerShadowMaxReboundPercent > 0 ||
+      Object.keys(this.paperValidation?.winnerShadow?.positions || {}).length > 0;
     const shadowStates = this.dryRun && this.paperValidation?.active
-      ? ['shadow', 'looseShadow']
+      ? ['shadow', 'looseShadow', ...(winnerShadowActive ? ['winnerShadow'] : [])]
         .map(stateKey => ({ stateKey, book: this.paperValidation[stateKey] }))
         .filter(({ book }) => book?.positions && Object.keys(book.positions).length > 0)
       : [];
@@ -3029,11 +4105,32 @@ class MultiCoinTrader {
       ...strictPositions.map(position => position.coin),
       ...shadowCoins
     ])];
-    if (monitoredCoins.length === 0) return;
+    if (monitoredCoins.length === 0) {
+      if (this.riskMonitorState.monitoringActive === true) {
+        this.riskMonitorState = recordRiskMonitorIdle(this.riskMonitorState);
+        this.syncRiskMonitorState();
+        this.persistRiskMonitorStateIfDue(Date.now(), true);
+      }
+      return;
+    }
+
+    const wasMonitoringRisk = this.riskMonitorState.monitoringActive === true;
+    const shouldPersistRiskAttempt = !wasMonitoringRisk &&
+      this.dryRun &&
+      this.paperValidation?.active &&
+      this.paperValidation?.sessionId &&
+      this.paperValidation?.riskMonitor;
+    this.riskMonitorState = recordRiskMonitorAttempt(this.riskMonitorState);
+    this.syncRiskMonitorState();
+    // Persist the transition before awaiting the network request so a
+    // read-only observer can see that an open position is being protected.
+    if (shouldPersistRiskAttempt) {
+      this.persistRiskMonitorStateIfDue(Date.now(), true);
+    }
 
     this._riskCheckInProgress = true;
     try {
-      const tickers = await this.riskUpbit.getTicker(monitoredCoins);
+      const tickers = await this.riskUpbit.getTicker(monitoredCoins, { priority: 'risk' });
       const priceMap = new Map(
         (Array.isArray(tickers) ? tickers : [])
           .filter(ticker => ticker?.market && Number.isFinite(Number(ticker.trade_price)))
@@ -3229,6 +4326,7 @@ class MultiCoinTrader {
    * 다중 코인 매매 사이클
    */
   async executeTradingCycle() {
+    this.beginAnalysisDataCycle();
     const now = new Date();
     console.log(`\n⏰ [${now.toLocaleString('ko-KR')}] 다중 코인 매매 분석 시작`);
     console.log('='.repeat(80));
@@ -3283,6 +4381,7 @@ class MultiCoinTrader {
           prefetchedTicker ? { ticker: prefetchedTicker } : {}
         );
         coinAnalyses.push(analysis);
+        this.analysisCycleProgress?.add(coin);
       } catch (error) {
         console.error(`\n❌ ${coin} 분석 오류:`, error.message);
       }
@@ -3533,10 +4632,13 @@ class MultiCoinTrader {
       ? requestedDelay
       : strategy.getEntryDelayMs()));
 
+    this.recordPaperEntryConfirmation(coin, 'attempt', 'pending');
     console.log(`\n⏳ [${coin}] 반등 확인 완료 - ${delayMs}ms 후 주문 재검증`);
     await this.sleep(delayMs);
 
     if (this._stopRequested) {
+      this.recordPaperEntryConfirmation(coin, 'cancelled', 'stop_requested');
+      this.resolveWinnerShadowBlockedEntryAsNotFilled(coin, decision, 'stop_requested');
       console.log(`  ⛔ [${coin}] 중지 요청으로 진입 취소`);
       return null;
     }
@@ -3549,12 +4651,16 @@ class MultiCoinTrader {
         this.upbit.getMinuteCandles(coin, this.candleUnit, this.candleCount)
       ]);
     } catch (error) {
+      this.recordPaperEntryConfirmation(coin, 'cancelled', 'revalidation_request_failed');
+      this.resolveWinnerShadowBlockedEntryAsNotFilled(coin, decision, 'revalidation_request_failed');
       console.log(`  ⚠️  [${coin}] 지연 후 재검증 조회 실패: ${error.message}`);
       return null;
     }
 
     const latestPrice = ticker?.[0]?.trade_price;
     if (!Number.isFinite(latestPrice) || !Array.isArray(candles)) {
+      this.recordPaperEntryConfirmation(coin, 'cancelled', 'invalid_revalidation_payload');
+      this.resolveWinnerShadowBlockedEntryAsNotFilled(coin, decision, 'invalid_revalidation_payload');
       console.log(`  ⚠️  [${coin}] 지연 후 가격/캔들 데이터가 유효하지 않아 진입 취소`);
       return null;
     }
@@ -3566,6 +4672,8 @@ class MultiCoinTrader {
     this.recordPaperCandleFreshnessObservation(coin, candleFreshness);
     if (!candleFreshness.valid) {
       this.recordPaperCandleFreshnessBlock(candleFreshness.reason, candleFreshness, 'entry_confirmation', coin);
+      this.recordPaperEntryConfirmation(coin, 'cancelled', candleFreshness.reason);
+      this.resolveWinnerShadowBlockedEntryAsNotFilled(coin, decision, candleFreshness.reason);
       console.log(`  ⛔ [${coin}] 지연 후 캔들 신선도 실패: ${candleFreshness.reason}`);
       return null;
     }
@@ -3573,10 +4681,14 @@ class MultiCoinTrader {
     const technicalAnalysis = this.buildTechnicalAnalysis(candles);
     const validation = strategy.validateEntry(technicalAnalysis, latestPrice, decision);
     if (!validation.valid) {
+      const reason = validation.reason || 'entry_validation_invalid';
+      this.recordPaperEntryConfirmation(coin, 'cancelled', reason);
+      this.resolveWinnerShadowBlockedEntryAsNotFilled(coin, decision, reason);
       console.log(`  ⛔ [${coin}] 지연 후 반등 무효화: ${validation.reason}`);
       return null;
     }
 
+    this.recordPaperEntryConfirmation(coin, 'confirmed', 'entry_revalidation_passed');
     console.log(`  ✅ [${coin}] 지연 후 반등 유지 - 현재가 ${latestPrice.toLocaleString()}원`);
     return { currentPrice: latestPrice, technicalAnalysis, delayMs, candleFreshness };
   }
@@ -3617,11 +4729,13 @@ class MultiCoinTrader {
       // 이미 포지션이 있는 경우
       if (strategy.currentPosition) {
         if (!this.allowAveraging) {
+          this.resolveWinnerShadowBlockedEntryAsNotFilled(coin, decision, 'strict_position_already_open');
           console.log(`\n⚠️  [${coin}] 이미 포지션 보유중 (추가 매수 비활성화)`);
           return;
         }
         // 추가 매수는 STRONG 이상 신호에서만 허용
         if (!isStrongSignal) {
+          this.resolveWinnerShadowBlockedEntryAsNotFilled(coin, decision, 'averaging_signal_not_strong');
           console.log(`\n⚠️  [${coin}] 포지션 보유중 - 추가 매수는 STRONG 이상 신호 필요 (현재: ${signalStrength.level})`);
           return;
         }
@@ -3629,6 +4743,7 @@ class MultiCoinTrader {
       }
 
       if (!strategy.currentPosition && currentPositions >= this.maxPositions) {
+        this.resolveWinnerShadowBlockedEntryAsNotFilled(coin, decision, 'max_positions_reached');
         console.log(`\n⚠️  [${coin}] 최대 포지션 수(${this.maxPositions}개)에 도달하여 진입하지 않음`);
         return;
       }
@@ -3637,6 +4752,7 @@ class MultiCoinTrader {
         const circuit = this.getLossCircuitBreakerStatus('strict');
         const remainingMinutes = Math.ceil((circuit.cooldownRemainingMs || 0) / 60000);
         this.recordPaperCircuitBlock();
+        this.resolveWinnerShadowBlockedEntryAsNotFilled(coin, decision, 'loss_circuit_breaker');
         console.log(`\n🛑 [${coin}] 전역 손실 회로차단기 쿨다운 중 - 신규 진입 차단 (${remainingMinutes}분 남음)`);
         return;
       }
@@ -3646,6 +4762,7 @@ class MultiCoinTrader {
         this.isStrictEntryBlockedBySignalWindow(entrySignalKey)) {
         const signalWindow = this.getStrictSignalWindowStatus();
         this.recordPaperSignalWindowBlock();
+        this.resolveWinnerShadowBlockedEntryAsNotFilled(coin, decision, 'signal_window_limit');
         console.log(`\n🧭 [${coin}] 동일 signal window 동시 진입 상한 도달 - 신규 진입 차단 (${signalWindow.lastEntryCount}/${signalWindow.maxEntriesPerSignalWindow})`);
         return;
       }
@@ -3653,6 +4770,7 @@ class MultiCoinTrader {
       if (this.isScalpingMode && this.config.marketRegimeEnabled === true &&
         decision.details?.marketRegime?.confirmed !== true) {
         this.recordPaperMarketRegimeBlock();
+        this.resolveWinnerShadowBlockedEntryAsNotFilled(coin, decision, 'market_regime_blocked');
         const regime = decision.details?.marketRegime;
         console.log(`\n⛔ [${coin}] 시장 regime gate 미통과 - breadth ${Number(regime?.breadth || 0).toFixed(2)} / 평균 ${Number(regime?.averageReturnPercent || 0).toFixed(2)}%`);
         return;
@@ -3667,6 +4785,7 @@ class MultiCoinTrader {
         // 지연 중 수동 주문/다른 경로에서 포지션이 먼저 생겼다면
         // 스캘핑 모드에서는 추가 매수하지 않는다.
         if (strategy.currentPosition && !this.allowAveraging) {
+          this.resolveWinnerShadowBlockedEntryAsNotFilled(coin, decision, 'position_created_during_confirmation');
           console.log(`  ⛔ [${coin}] 지연 중 포지션이 생성되어 중복 진입 취소`);
           return;
         }
@@ -3677,6 +4796,7 @@ class MultiCoinTrader {
         krwBalance = this.getKRWBalance(latestAccounts);
         currentPositions = this.getCurrentPositionCount();
         if (!strategy.currentPosition && currentPositions >= this.maxPositions) {
+          this.resolveWinnerShadowBlockedEntryAsNotFilled(coin, decision, 'max_positions_reached_after_confirmation');
           console.log(`  ⛔ [${coin}] 지연 중 최대 포지션 수(${this.maxPositions}개)에 도달하여 진입 취소`);
           return;
         }
@@ -3711,6 +4831,7 @@ class MultiCoinTrader {
       console.log(`     (기본 ${baseInvestment.toLocaleString()}원 × ${signalStrength.multiplier} = ${dynamicInvestment.toLocaleString()}원)`);
 
       if (investmentAmount < 5000) {
+        this.resolveWinnerShadowBlockedEntryAsNotFilled(coin, decision, 'investment_below_minimum');
         console.log(`\n⚠️  [${coin}] 매수 불가: 잔액 부족 (${krwBalance.toLocaleString()}원)`);
         return;
       }
@@ -3732,6 +4853,7 @@ class MultiCoinTrader {
         // 가상 포트폴리오 업데이트 - 마이너스 방지 체크
         const currentBalance = this.virtualPortfolio.krwBalance || 0;
         if (currentBalance < investmentAmount) {
+          this.resolveWinnerShadowBlockedEntryAsNotFilled(coin, decision, 'balance_insufficient');
           console.log(`\n⚠️  [${coin}] 매수 취소: 실시간 잔액 부족 (${currentBalance.toLocaleString()}원 < ${investmentAmount.toLocaleString()}원)`);
           return;
         }

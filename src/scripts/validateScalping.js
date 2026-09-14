@@ -4,6 +4,10 @@ import axios from 'axios';
 import UpbitAPI from '../api/upbit.js';
 import { walkForwardValidate } from '../backtest/scalpingBacktest.js';
 import { resolveMaxCandleAgeSeconds } from '../risk/candleFreshness.js';
+import {
+  loadPaperValidationConfigSnapshot,
+  mergePaperValidationConfig
+} from '../research/scalpingValidationConfig.js';
 
 dotenv.config();
 
@@ -67,7 +71,7 @@ async function selectMarkets(upbit) {
 function baseConfig(candleUnit = 1) {
   return {
     initialBalance: number(process.env.SCALP_VALIDATION_INITIAL_BALANCE, 1_000_000),
-    tradingFee: 0.0005,
+    tradingFee: number(process.env.SCALP_VALIDATION_FEE, 0.0005),
     slippage: number(process.env.SCALP_VALIDATION_SLIPPAGE, 0.001),
     investmentRatio: number(process.env.SCALP_INVESTMENT_RATIO, 0.02),
     maxCandleAgeSeconds: resolveMaxCandleAgeSeconds(
@@ -89,12 +93,19 @@ function baseConfig(candleUnit = 1) {
     requirePreviousHighBreak: process.env.SCALP_REQUIRE_PREVIOUS_HIGH_BREAK !== 'false',
     maxSignalRangePercent: number(process.env.SCALP_MAX_SIGNAL_RANGE_PERCENT, 0),
     minSignalRangePercent: number(process.env.SCALP_MIN_SIGNAL_RANGE_PERCENT, 0),
+    maxReboundPercent: number(process.env.SCALP_MAX_REBOUND_PERCENT, 0),
     marketRegimeEnabled: process.env.SCALP_MARKET_REGIME_ENABLED === 'true',
     marketRegimeLookback: number(process.env.SCALP_MARKET_REGIME_LOOKBACK, 5),
     marketRegimeMinBreadth: number(process.env.SCALP_MARKET_REGIME_MIN_BREADTH, 0.5),
     marketRegimeMinReturnPercent: number(process.env.SCALP_MARKET_REGIME_MIN_RETURN_PERCENT, -0.2),
     requireReboundBelowOverbought: process.env.SCALP_REQUIRE_REBOUND_BELOW_OVERBOUGHT === 'true',
     signalProfile: process.env.SCALP_SIGNAL_PROFILE || 'rsi_rebound',
+    bbPeriod: number(process.env.BB_PERIOD, 20),
+    bbStdDev: number(process.env.BB_STD_DEV, 2),
+    emaPeriod: number(process.env.EMA_LONG, 60),
+    maxPositions: number(process.env.SCALP_MAX_POSITIONS, 3),
+    portfolioAllocation: number(process.env.SCALP_PORTFOLIO_ALLOCATION, 0.1),
+    requireNextCandleBullish: process.env.SCALP_PORTFOLIO_REQUIRE_NEXT_CANDLE_BULLISH === 'true',
     maxEntryRetracePercent: number(process.env.SCALP_MAX_ENTRY_RETRACE_PERCENT, 0.25),
     maxEntryChasePercent: number(process.env.SCALP_MAX_ENTRY_CHASE_PERCENT, 0.35),
     breakEvenTriggerPercent: number(process.env.SCALP_BREAK_EVEN_TRIGGER_PERCENT, 0),
@@ -110,6 +121,8 @@ function baseConfig(candleUnit = 1) {
     maxEntriesPerSignalWindow: number(process.env.SCALP_MAX_ENTRIES_PER_SIGNAL_WINDOW, 0),
     maxRiskDataGapSeconds: number(process.env.SCALP_MAX_RISK_DATA_GAP_SECONDS, 30),
     maxAnalysisDataGapSeconds: number(process.env.SCALP_MAX_ANALYSIS_DATA_GAP_SECONDS, 60),
+    entryDelayMinMs: number(process.env.SCALP_ENTRY_DELAY_MIN_MS, 1000),
+    entryDelayMaxMs: number(process.env.SCALP_ENTRY_DELAY_MAX_MS, 5000),
     cooldownAfterLossMinutes: number(process.env.SCALP_COOLDOWN_AFTER_LOSS_MINUTES, 15),
     maxConsecutiveLosses: number(process.env.SCALP_MAX_CONSECUTIVE_LOSSES, 3),
     lossCircuitBreakerCount: number(process.env.SCALP_LOSS_CIRCUIT_BREAKER_COUNT, 0),
@@ -119,12 +132,40 @@ function baseConfig(candleUnit = 1) {
   };
 }
 
+function loadCandleCache(cacheFile) {
+  if (!cacheFile) return null;
+  if (!fs.existsSync(cacheFile)) {
+    throw new Error(`지정한 validation candle cache가 없습니다: ${cacheFile}`);
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(fs.readFileSync(cacheFile, 'utf8'));
+  } catch (error) {
+    throw new Error(`validation candle cache를 읽을 수 없습니다 (${cacheFile}): ${error.message}`);
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error(`validation candle cache 형식이 잘못되었습니다: ${cacheFile}`);
+  }
+  return parsed;
+}
+
 async function main() {
   const upbit = new UpbitAPI('', '');
-  const unit = number(process.env.SCALP_VALIDATION_CANDLE_UNIT, 1);
+  const snapshotFile = process.env.SCALP_VALIDATION_CONFIG_SNAPSHOT_FILE || '';
+  const paperSnapshot = loadPaperValidationConfigSnapshot(snapshotFile);
+  const explicitUnit = process.env.SCALP_VALIDATION_CANDLE_UNIT;
+  const unit = explicitUnit === undefined || explicitUnit === ''
+    ? number(paperSnapshot?.config?.candleUnit, 1)
+    : number(explicitUnit, 1);
   const candleCount = number(process.env.SCALP_VALIDATION_CANDLE_COUNT, 10080);
   const markets = await selectMarkets(upbit);
-  const config = { ...baseConfig(unit), candleUnit: unit };
+  const config = mergePaperValidationConfig(
+    { ...baseConfig(unit), candleUnit: unit },
+    paperSnapshot,
+    unit
+  );
+  const candleCacheFile = process.env.SCALP_VALIDATION_CANDLES_FILE || '';
+  const candleCache = loadCandleCache(candleCacheFile);
   const fixedConfigValidation = process.env.SCALP_VALIDATION_FIXED === 'true';
   const requireStatisticalConfidence = fixedConfigValidation &&
     process.env.SCALP_VALIDATION_REQUIRE_STATISTICAL_CONFIDENCE !== 'false';
@@ -150,12 +191,22 @@ async function main() {
   console.log(`마켓: ${markets.join(', ')}`);
   console.log(`캔들: ${unit}분봉 ${candleCount}개 / 수수료 ${(config.tradingFee * 100).toFixed(3)}% / 슬리피지 ${(config.slippage * 100).toFixed(3)}%`);
   console.log(`검증 모드: ${fixedConfigValidation ? 'fixed_config (현재 설정 그대로)' : 'tuned_holdout (학습 구간 튜닝)'}`);
+  console.log(paperSnapshot
+    ? `설정 source: paper snapshot ${paperSnapshot.filePath} (session ${paperSnapshot.sessionId || 'unknown'})`
+    : '설정 source: environment/defaults');
 
   for (const market of markets) {
     try {
-      console.log(`\n⏳ ${market} 데이터 수집 중...`);
-      const candles = await getHistoricalCandles(upbit, market, unit, candleCount);
-      console.log(`   수집 완료: ${candles.length}개`);
+      const cachedCandles = candleCache?.[market];
+      if (candleCacheFile && !Array.isArray(cachedCandles)) {
+        throw new Error(`validation candle cache에 ${market} 데이터가 없습니다. 혼합 window를 만들지 않고 중단합니다.`);
+      }
+      const fromCache = Array.isArray(cachedCandles);
+      console.log(`\n⏳ ${market} ${fromCache ? 'cache 확인' : '데이터 수집'} 중...`);
+      const candles = fromCache
+        ? cachedCandles
+        : await getHistoricalCandles(upbit, market, unit, candleCount);
+      console.log(`   ${fromCache ? 'cache 사용' : '수집 완료'}: ${candles.length}개`);
 
       const validation = walkForwardValidate(candles, config, {
         grid: fixedConfigValidation ? {} : undefined,
@@ -175,7 +226,12 @@ async function main() {
         minimumConfidenceLowerBoundPercent
       });
 
-      results.push({ market, fetchedCandles: candles.length, validation });
+      results.push({
+        market,
+        fetchedCandles: candles.length,
+        candleSource: fromCache ? 'cache' : 'upbit',
+        validation
+      });
       const metrics = validation.validation;
       if (metrics) {
         console.log(`   학습 수익률: ${validation.tuning.metrics.totalReturnPercent.toFixed(2)}%`);
@@ -196,6 +252,16 @@ async function main() {
     strategyMode: 'oversold_reaction_scalping',
     candleUnit: unit,
     candleCount,
+    candleCacheFile: candleCacheFile || null,
+    configSource: paperSnapshot
+      ? {
+          type: 'paper_validation_snapshot',
+          filePath: paperSnapshot.filePath,
+          sessionId: paperSnapshot.sessionId,
+          startedAt: paperSnapshot.startedAt,
+          configSnapshotComplete: paperSnapshot.configSnapshotComplete
+        }
+      : { type: 'environment_or_defaults' },
     validationMode: fixedConfigValidation ? 'fixed_config' : 'tuned_holdout',
     config,
     markets,

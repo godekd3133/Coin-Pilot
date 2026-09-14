@@ -59,6 +59,18 @@ test('down bar blocks entry even with high RSI and positive trend', () => {
   assert.equal(r.reason, 'bar_not_up');
 });
 
+test('minUpBars=2 requires two consecutive completed up bars', () => {
+  const closes = trendingSeries();
+  closes[closes.length - 2] = closes[closes.length - 3] * 0.995;
+  closes[closes.length - 1] = closes[closes.length - 2] * 1.01;
+  const oneBar = new RegimeMomentumStrategy({ minUpBars: 1 });
+  const twoBars = new RegimeMomentumStrategy({ minUpBars: 2 });
+
+  assert.equal(oneBar.analyze(makeCandles(closes)).signal, 'BUY');
+  assert.equal(twoBars.analyze(makeCandles(closes)).signal, null);
+  assert.equal(twoBars.analyze(makeCandles(closes)).reason, 'bar_not_up');
+});
+
 test('duplicate signal key is rejected until consumed candle changes', () => {
   const s = new RegimeMomentumStrategy();
   const candles = makeCandles(trendingSeries());

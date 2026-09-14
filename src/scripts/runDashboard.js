@@ -53,6 +53,12 @@ export function attachReadOnlyPaperLedger(trader, ledgerFile) {
       }
     }
     trader.strategyConfig = { ...trader.strategyConfig, ...snapshot };
+    const winnerShadow = ledger?.paperExperiments?.winnerShadow;
+    if (winnerShadow && typeof winnerShadow === 'object') {
+      trader.winnerShadowExtendMinutes = Math.max(0, Number(winnerShadow.winnerExtendMinutes) || 0);
+      trader.winnerShadowExtendMinProfitPercent = Math.max(0, Number(winnerShadow.winnerExtendMinProfitPercent) || 0);
+      trader.winnerShadowMaxReboundPercent = Math.max(0, Number(winnerShadow.entryMaxReboundPercent) || 0);
+    }
   };
 
   trader.paperValidationFile = resolvedLedgerFile;

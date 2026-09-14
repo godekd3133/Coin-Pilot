@@ -223,3 +223,20 @@ test('trailing 보호 출구는 관찰된 최고가에서 되밀림을 제한한
   assert.equal(protectedExit.shouldClose, true);
   assert.equal(protectedExit.type, 'TRAILING_STOP');
 });
+
+test('포지션 MFE/MAE는 관찰 중 갱신되고 close ledger에 보존된다', () => {
+  const strategy = new OversoldReactionStrategy({
+    stopLossPercent: 10,
+    takeProfitPercent: 10
+  });
+  strategy.openPosition(100, 1, 'BUY');
+
+  assert.equal(strategy.checkPosition(103).shouldClose, false);
+  assert.equal(strategy.checkPosition(98).shouldClose, false);
+  assert.equal(strategy.currentPosition.maxFavorableExcursionPercent, 3);
+  assert.equal(strategy.currentPosition.maxAdverseExcursionPercent, -2);
+
+  const closed = strategy.closePosition(101, 'MFE/MAE 테스트');
+  assert.equal(closed.maxFavorableExcursionPercent, 3);
+  assert.equal(closed.maxAdverseExcursionPercent, -2);
+});

@@ -14,6 +14,69 @@ dotenv.config();
 
 const number = (value, fallback) => Number.isFinite(Number(value)) ? Number(value) : fallback;
 
+// Keep the active paper session recoverable when the runner itself fails.
+// SIGKILL/host termination cannot be intercepted, so the dashboard still
+// treats a missing owner or stale heartbeat as orphaned and fail-closed.
+let activeRuntime = null;
+
+function serializeRuntimeError(error, source) {
+  return {
+    source,
+    name: error?.name || 'Error',
+    code: error?.code || null,
+    message: error?.message || String(error),
+    recordedAt: new Date().toISOString()
+  };
+}
+
+async function failSafeShutdown(error, source = 'runner_error') {
+  const runtime = activeRuntime;
+  if (!runtime) {
+    console.error(`❌ paper runner 오류 (${source}):`, error?.message || String(error));
+    return;
+  }
+  if (runtime.failurePromise) return runtime.failurePromise;
+
+  runtime.failurePromise = (async () => {
+    const terminalError = serializeRuntimeError(error, source);
+    try {
+      if (runtime.statusTimer) clearInterval(runtime.statusTimer);
+      const trader = runtime.trader;
+      if (trader?.paperValidation?.active === true) {
+        trader.stop(`runner_error:${source}`);
+        trader.paperValidation.terminalError = terminalError;
+        trader.paperValidation.lastError = terminalError;
+        try {
+          trader.savePaperValidation();
+        } catch (persistError) {
+          console.error('❌ paper runner 오류 상태 저장 실패:', persistError.message);
+        }
+        await trader.stopPaperValidationSession();
+      }
+      if (runtime.paperAiMonitor) await runtime.paperAiMonitor.stop();
+    } catch (cleanupError) {
+      console.error('❌ paper runner 오류 정리 실패:', cleanupError.message);
+    } finally {
+      runtime.paperSessionLock?.release();
+      activeRuntime = null;
+    }
+    console.error(`❌ paper runner 종료 (${source}):`, terminalError.message);
+  })();
+
+  return runtime.failurePromise;
+}
+
+process.on('uncaughtException', error => {
+  failSafeShutdown(error, 'uncaught_exception')
+    .finally(() => process.exit(1));
+});
+
+process.on('unhandledRejection', reason => {
+  const error = reason instanceof Error ? reason : new Error(String(reason));
+  failSafeShutdown(error, 'unhandled_rejection')
+    .finally(() => process.exit(1));
+});
+
 function assertSufficientStorage(outputDir, minimumMiB = 1024) {
   if (typeof fs.statfsSync !== 'function') return;
   const stats = fs.statfsSync(outputDir);
@@ -58,12 +121,16 @@ function buildConfig(portfolioFile, paperFile, markets) {
     requirePreviousHighBreak: process.env.SCALP_REQUIRE_PREVIOUS_HIGH_BREAK !== 'false',
     maxSignalRangePercent: number(process.env.SCALP_MAX_SIGNAL_RANGE_PERCENT, 0),
     minSignalRangePercent: number(process.env.SCALP_MIN_SIGNAL_RANGE_PERCENT, 0),
+    maxReboundPercent: number(process.env.SCALP_MAX_REBOUND_PERCENT, 0),
     marketRegimeEnabled: process.env.SCALP_MARKET_REGIME_ENABLED === 'true',
     marketRegimeLookback: number(process.env.SCALP_MARKET_REGIME_LOOKBACK, 5),
     marketRegimeMinBreadth: number(process.env.SCALP_MARKET_REGIME_MIN_BREADTH, 0.5),
     marketRegimeMinReturnPercent: number(process.env.SCALP_MARKET_REGIME_MIN_RETURN_PERCENT, -0.2),
     requireReboundBelowOverbought: process.env.SCALP_REQUIRE_REBOUND_BELOW_OVERBOUGHT === 'true',
     signalProfile: process.env.SCALP_SIGNAL_PROFILE || 'rsi_rebound',
+    bbPeriod: number(process.env.BB_PERIOD, 20),
+    bbStdDev: number(process.env.BB_STD_DEV, 2),
+    emaLong: number(process.env.EMA_LONG, 60),
     entryDelayMinMs: number(process.env.SCALP_ENTRY_DELAY_MIN_MS, 1000),
     entryDelayMaxMs: number(process.env.SCALP_ENTRY_DELAY_MAX_MS, 5000),
     maxEntryRetracePercent: number(process.env.SCALP_MAX_ENTRY_RETRACE_PERCENT, 0.25),
@@ -76,6 +143,9 @@ function buildConfig(portfolioFile, paperFile, markets) {
     maxLosingHoldMinutes: number(process.env.SCALP_MAX_LOSING_HOLD_MINUTES, 0),
     winnerExtendMinutes: number(process.env.SCALP_WINNER_EXTEND_MINUTES, 0),
     winnerExtendMinProfitPercent: number(process.env.SCALP_WINNER_EXTEND_MIN_PROFIT_PERCENT, 0),
+    winnerShadowExtendMinutes: number(process.env.SCALP_WINNER_SHADOW_EXTEND_MINUTES, 0),
+    winnerShadowExtendMinProfitPercent: number(process.env.SCALP_WINNER_SHADOW_EXTEND_MIN_PROFIT_PERCENT, 0),
+    winnerShadowMaxReboundPercent: number(process.env.SCALP_WINNER_SHADOW_MAX_REBOUND_PERCENT, 0),
     maxEntriesPerSignalWindow: number(process.env.SCALP_MAX_ENTRIES_PER_SIGNAL_WINDOW, 0),
     positionRiskCheckIntervalMs: number(process.env.SCALP_RISK_CHECK_INTERVAL_MS, 1000),
     maxRiskDataGapSeconds: number(process.env.SCALP_MAX_RISK_DATA_GAP_SECONDS, 30),
@@ -174,6 +244,13 @@ async function main() {
     config,
     outputDir
   });
+  activeRuntime = {
+    trader,
+    paperSessionLock,
+    paperAiMonitor,
+    statusTimer: null,
+    failurePromise: null
+  };
   const originalConsoleLog = console.log.bind(console);
   const quietForward = forwardMode && process.env.PAPER_FORWARD_VERBOSE !== 'true';
   let statusTimer = null;
@@ -193,6 +270,9 @@ async function main() {
   const hasActivePaperSession = trader.paperValidation?.active === true && existingPaperStatus?.orphaned !== true;
   if (forwardMode && trader.paperValidation?.active === true && existingPaperStatus?.configConsistent === false) {
     throw new Error(`기존 forward paper 설정 drift 감지: ${existingPaperStatus.configDrift.join(', ')}. 새 출력 디렉터리에서 별도 세션을 시작하세요.`);
+  }
+  if (forwardMode && trader.paperValidation?.active === true && existingPaperStatus?.paperExperimentConsistent === false) {
+    throw new Error(`기존 forward paper 연구 실험 설정 drift 감지: ${(existingPaperStatus.paperExperimentDrift || []).join(', ')}. 새 출력 디렉터리에서 별도 세션을 시작하세요.`);
   }
   const canResumeOrphanedForward = forwardMode &&
     trader.paperValidation?.active === true &&
@@ -252,6 +332,7 @@ async function main() {
         originalConsoleLog(`[paper] status error: ${error.message}`);
       }
     }, 60_000);
+    activeRuntime.statusTimer = statusTimer;
   }
 
   const stopTimer = forwardMode ? null : setTimeout(() => trader.stop(), durationSeconds * 1000);
@@ -269,6 +350,7 @@ async function main() {
         if (aiEffectiveness) originalConsoleLog(`🧠 AI monitoring 세션 중지: ${aiEffectiveness.evaluatedConsultations}개 평가 표본`);
       } finally {
         paperSessionLock.release();
+        activeRuntime = null;
         process.exit(0);
       }
     };
@@ -304,9 +386,10 @@ async function main() {
       : null
   }, null, 2));
   paperSessionLock.release();
+  activeRuntime = null;
 }
 
 main().catch(error => {
-  console.error('❌ paper smoke 오류:', error.message);
-  process.exitCode = 1;
+  failSafeShutdown(error, 'main_rejection')
+    .finally(() => process.exit(1));
 });

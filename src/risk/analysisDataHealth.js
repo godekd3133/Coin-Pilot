@@ -43,6 +43,9 @@ export function resolveMaxAnalysisDataGapSeconds(value, fallback = DEFAULT_MAX_A
 
 export function createAnalysisDataHealthState(existing = {}) {
   return {
+    analysisActive: existing.analysisActive === true,
+    analysisStartedAt: asIsoTimestamp(existing.analysisStartedAt),
+    lastAttemptAt: asIsoTimestamp(existing.lastAttemptAt),
     lastCompleteAt: asIsoTimestamp(existing.lastCompleteAt),
     lastIncompleteAt: asIsoTimestamp(existing.lastIncompleteAt),
     currentGapStartedAt: asIsoTimestamp(existing.currentGapStartedAt),
@@ -60,6 +63,32 @@ export function createAnalysisDataHealthState(existing = {}) {
   };
 }
 
+/**
+ * Mark a new full-market analysis cycle before the first network request.
+ * Keeping this separate from lastCompleteAt makes an in-flight cycle visible
+ * to the health watchdog and read-only observer.
+ */
+export function recordAnalysisDataAttempt(existing = {}, now = Date.now()) {
+  const timestamp = asTimestamp(now) || Date.now();
+  const state = createAnalysisDataHealthState(existing);
+  const isoTimestamp = new Date(timestamp).toISOString();
+  state.analysisActive = true;
+  state.lastAttemptAt = isoTimestamp;
+  state.analysisStartedAt = state.analysisStartedAt || isoTimestamp;
+  return state;
+}
+
+/**
+ * Clear the in-flight marker when there is no analysis request to account for.
+ * This prevents an old completed timestamp from invalidating an idle runner.
+ */
+export function recordAnalysisDataIdle(existing = {}) {
+  const state = createAnalysisDataHealthState(existing);
+  state.analysisActive = false;
+  state.analysisStartedAt = null;
+  return state;
+}
+
 export function recordAnalysisDataSuccess(existing = {}, details = {}, now = Date.now()) {
   const timestamp = asTimestamp(now) || Date.now();
   const state = createAnalysisDataHealthState(existing);
@@ -72,6 +101,9 @@ export function recordAnalysisDataSuccess(existing = {}, details = {}, now = Dat
   }
   state.lastCompleteAt = new Date(timestamp).toISOString();
   state.lastCheckedAt = state.lastCompleteAt;
+  state.lastAttemptAt = state.lastCompleteAt;
+  state.analysisActive = false;
+  state.analysisStartedAt = null;
   state.currentGapStartedAt = null;
   state.consecutiveIncompleteCycles = 0;
   state.expectedMarketCount = nonNegativeInteger(details.expectedMarketCount);
@@ -96,6 +128,9 @@ export function recordAnalysisDataFailure(
   const missingMarkets = normalizeMarkets(details.missingMarkets);
   state.lastIncompleteAt = new Date(timestamp).toISOString();
   state.lastCheckedAt = state.lastIncompleteAt;
+  state.lastAttemptAt = state.lastIncompleteAt;
+  state.analysisActive = false;
+  state.analysisStartedAt = null;
   state.consecutiveIncompleteCycles += 1;
   state.totalIncompleteCycles += 1;
   state.totalMissingMarkets += missingMarkets.length;
@@ -117,6 +152,59 @@ export function recordAnalysisDataFailure(
   };
 }
 
+/**
+ * Convert a cycle that stayed in-flight past the configured budget into a
+ * durable continuity failure. The gap starts at the last complete cycle (or
+ * the first attempt if no cycle completed), not at watchdog observation time.
+ */
+export function recordAnalysisDataStale(
+  existing = {},
+  details = {},
+  now = Date.now(),
+  maxGapSeconds = DEFAULT_MAX_ANALYSIS_DATA_GAP_SECONDS
+) {
+  const timestamp = asTimestamp(now) || Date.now();
+  const state = createAnalysisDataHealthState(existing);
+  const existingGapStartedAt = asTimestamp(state.currentGapStartedAt);
+  const staleSince = existingGapStartedAt ||
+    asTimestamp(state.lastCompleteAt) ||
+    asTimestamp(state.analysisStartedAt) ||
+    asTimestamp(state.lastAttemptAt) ||
+    timestamp;
+  state.analysisActive = false;
+  state.analysisStartedAt = null;
+  state.lastAttemptAt = new Date(timestamp).toISOString();
+  if (existingGapStartedAt === null) {
+    state.currentGapStartedAt = new Date(staleSince).toISOString();
+  }
+
+  const gapStartedAt = asTimestamp(state.currentGapStartedAt) || staleSince;
+  const gapDurationSeconds = Math.max(0, (timestamp - gapStartedAt) / 1000);
+  const missingMarkets = normalizeMarkets(details.missingMarkets);
+  state.lastIncompleteAt = new Date(timestamp).toISOString();
+  state.lastCheckedAt = state.lastIncompleteAt;
+  state.consecutiveIncompleteCycles += 1;
+  state.totalIncompleteCycles += 1;
+  state.totalMissingMarkets += missingMarkets.length;
+  state.expectedMarketCount = nonNegativeInteger(details.expectedMarketCount);
+  state.analyzedMarketCount = nonNegativeInteger(details.analyzedMarketCount);
+  state.lastMissingMarkets = missingMarkets;
+  state.maxObservedGapSeconds = Math.max(state.maxObservedGapSeconds, gapDurationSeconds);
+
+  const resolvedMaxGapSeconds = resolveMaxAnalysisDataGapSeconds(maxGapSeconds);
+  const failClosed = resolvedMaxGapSeconds > 0 && gapDurationSeconds >= resolvedMaxGapSeconds;
+  if (failClosed) state.continuityEligible = false;
+
+  return {
+    state,
+    gapDurationSeconds,
+    maxAnalysisDataGapSeconds: resolvedMaxGapSeconds,
+    failClosed,
+    stale: true,
+    continuityEligible: state.continuityEligible && !failClosed
+  };
+}
+
 export function getAnalysisDataHealthStatus(
   existing = {},
   now = Date.now(),
@@ -126,10 +214,21 @@ export function getAnalysisDataHealthStatus(
   const resolvedMaxGapSeconds = resolveMaxAnalysisDataGapSeconds(maxGapSeconds);
   const gapStartedAt = asTimestamp(state.currentGapStartedAt);
   const timestamp = asTimestamp(now) || Date.now();
-  const currentGapDurationSeconds = gapStartedAt === null
+  const activeObservationAt = state.analysisActive === true
+    ? asTimestamp(state.lastCompleteAt) ||
+      asTimestamp(state.analysisStartedAt) ||
+      asTimestamp(state.lastAttemptAt)
+    : null;
+  const staleCycle = gapStartedAt === null && activeObservationAt !== null &&
+    resolvedMaxGapSeconds > 0 &&
+    Math.max(0, (timestamp - activeObservationAt) / 1000) >= resolvedMaxGapSeconds;
+  const gapStartForStatus = gapStartedAt === null && staleCycle
+    ? activeObservationAt
+    : gapStartedAt;
+  const currentGapDurationSeconds = gapStartForStatus === null
     ? 0
-    : Math.max(0, (timestamp - gapStartedAt) / 1000);
-  const failClosed = resolvedMaxGapSeconds > 0 && gapStartedAt !== null &&
+    : Math.max(0, (timestamp - gapStartForStatus) / 1000);
+  const failClosed = resolvedMaxGapSeconds > 0 && gapStartForStatus !== null &&
     currentGapDurationSeconds >= resolvedMaxGapSeconds;
   return {
     ...state,
@@ -137,6 +236,7 @@ export function getAnalysisDataHealthStatus(
     currentGapDurationSeconds,
     analysisDataFresh: !failClosed,
     failClosed,
+    staleReason: staleCycle ? 'analysis_cycle_stale' : null,
     continuityEligible: state.continuityEligible && !failClosed
   };
 }

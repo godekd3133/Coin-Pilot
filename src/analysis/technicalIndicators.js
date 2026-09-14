@@ -252,6 +252,10 @@ export function calculateClosedCandleRebound(candles, config = {}) {
     requirePreviousHighBreak = false,
     maxSignalRangePercent = 0,
     minSignalRangePercent = 0,
+    // Optional exhaustion guard. Zero keeps the existing lower-bound-only
+    // rebound contract; positive values reject a candle that already moved
+    // too far before the delayed entry can be confirmed.
+    maxReboundPercent = 0,
     requireReboundBelowOverbought = false,
     signalProfile = 'rsi_rebound',
     bbPeriod = 20,
@@ -282,6 +286,7 @@ export function calculateClosedCandleRebound(candles, config = {}) {
     signalRangePercent: null,
     volatilityConfirmed: false,
     signalRangeFloorConfirmed: false,
+    reboundCeilingConfirmed: false,
     closeStrength: null,
     closeStrengthConfirmed: false,
     trendSlopePercent: null,
@@ -455,6 +460,11 @@ export function calculateClosedCandleRebound(candles, config = {}) {
     ? ((currentClose - oversoldReferenceClose) / oversoldReferenceClose) * 100
     : priceChangePercent;
   const rsiRecovery = oversoldReference ? rsi - oversoldReference.rsi : immediateRsiRecovery;
+  const configuredMaxReboundPercent = Number(maxReboundPercent);
+  const reboundCeilingConfirmed = signalProfile === 'momentum_breakout' ||
+    !Number.isFinite(configuredMaxReboundPercent) ||
+    configuredMaxReboundPercent <= 0 ||
+    reboundPriceChangePercent <= configuredMaxReboundPercent;
   const oversoldReboundConfirmed = previousWasOversold &&
     bullishCandle &&
     reboundPriceChangePercent >= minReboundPercent &&
@@ -466,6 +476,7 @@ export function calculateClosedCandleRebound(candles, config = {}) {
     trendConfirmed &&
     previousHighBreakConfirmed &&
     reboundOverboughtConfirmed &&
+    reboundCeilingConfirmed &&
     profileConfirmed;
   const momentumBreakoutConfirmed = signalProfile === 'momentum_breakout' &&
     bullishCandle &&
@@ -489,6 +500,7 @@ export function calculateClosedCandleRebound(candles, config = {}) {
     if (!momentumRsiConfirmed) rejectionReasons.push('rsi_overbought_blocked');
   } else {
     if (reboundPriceChangePercent < minReboundPercent) rejectionReasons.push('price_rebound_below_threshold');
+    if (!reboundCeilingConfirmed) rejectionReasons.push('price_rebound_above_threshold');
     if (rsiRecovery < minRsiRecovery) rejectionReasons.push('rsi_recovery_below_threshold');
     if (!reboundOverboughtConfirmed) rejectionReasons.push('rsi_overbought_blocked');
   }
@@ -534,6 +546,7 @@ export function calculateClosedCandleRebound(candles, config = {}) {
     signalRangePercent,
     volatilityConfirmed,
     signalRangeFloorConfirmed,
+    reboundCeilingConfirmed,
     closeStrength,
     closeStrengthConfirmed,
     trendSlopePercent,
@@ -582,6 +595,7 @@ export function comprehensiveAnalysis(candles, config = {}) {
     requirePreviousHighBreak = false,
     maxSignalRangePercent = 0,
     minSignalRangePercent = 0,
+    maxReboundPercent = 0,
     requireReboundBelowOverbought = false,
     signalProfile = 'rsi_rebound',
     emaPeriod = 20
@@ -609,6 +623,7 @@ export function comprehensiveAnalysis(candles, config = {}) {
       requirePreviousHighBreak,
       maxSignalRangePercent,
       minSignalRangePercent,
+      maxReboundPercent,
       requireReboundBelowOverbought,
       signalProfile,
       bbPeriod,

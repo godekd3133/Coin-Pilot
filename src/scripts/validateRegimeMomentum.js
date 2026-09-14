@@ -255,7 +255,11 @@ function main() {
     const barsSegments = [];
     for (const seg of segList) {
       const bars = resampleCandles(seg.candles || seg, CONFIG.signalUnitMinutes);
-      if (bars.length >= 400) barsSegments.push(bars);
+      // Segment must hold the trend lookback + RSI warmup + at least ~10
+      // evaluable bars beyond it to carry any signal evidence.
+      const minBars = Math.ceil((CONFIG.trendLookbackHours * 60) / CONFIG.signalUnitMinutes)
+        + CONFIG.rsiPeriod + 12;
+      if (bars.length >= minBars) barsSegments.push(bars);
     }
     if (!barsSegments.length) {
       report.dataQuality[market].excluded = 'no_contiguous_segment';

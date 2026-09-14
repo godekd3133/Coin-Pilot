@@ -16,6 +16,7 @@ import createOptimizationRoutes from './routes/optimization.js';
 import createConfigRoutes from './routes/config.js';
 import createTradingRoutes from './routes/trading.js';
 import createAiRoutes from './routes/ai.js';
+import createResearchRoutes from './routes/research.js';
 import AIAdvisorService from '../ai/aiAdvisorService.js';
 import MonitoringSessionService from '../ai/monitoringSessionService.js';
 
@@ -260,6 +261,7 @@ class DashboardServer {
     this.app.use('/api', createConfigRoutes(this));
     this.app.use('/api', createTradingRoutes(this));
     this.app.use('/api', createAiRoutes(this));
+    this.app.use('/api', createResearchRoutes(this));
 
     // ========================================
     // 추가 라우트 (dashboardServer 전용)
