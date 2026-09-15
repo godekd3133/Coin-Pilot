@@ -314,6 +314,9 @@ export function simulateDailyMomentumPortfolio(rawCandlesByMarket, config = {}) 
   const entryExecution = options.entryExecution === 'next_open' ? 'next_open' : 'close';
   const exitExecution = options.exitExecution === 'next_open' ? 'next_open' : 'close';
   const maxEntryGapPercent = Math.max(0, finite(options.maxEntryGapPercent, 0));
+  // The forward runner enforces Upbit's 5,000 KRW minimum order. Zero keeps
+  // the research simulator floor-free; forward-parity runs should set 5000.
+  const minOrderAmount = Math.max(0, finite(options.minOrderAmount, 0));
   const maxHoldDays = Math.max(1, finite(options.maxHoldDays, mode === 'regime' ? 3650 : 3));
   const prepared = prepareDailyMomentumCandles(rawCandlesByMarket, {
     ...options,
@@ -478,7 +481,8 @@ export function simulateDailyMomentumPortfolio(rawCandlesByMarket, config = {}) 
         }
         const entryCandle = normalized[pending.market][index];
         const entryPrice = entryCandle?.openingPrice;
-        if (!Number.isFinite(entryPrice) || entryPrice <= 0 || pending.size > balance) {
+        if (!Number.isFinite(entryPrice) || entryPrice <= 0 || pending.size > balance ||
+          pending.size < minOrderAmount) {
           blockedSignalCount += 1;
           continue;
         }
@@ -606,7 +610,9 @@ export function simulateDailyMomentumPortfolio(rawCandlesByMarket, config = {}) 
         continue;
       }
       const size = plannedBalance * positionFraction * benchmarkExposureScale * candidate.volatilityScale;
-      if (size <= 0) continue;
+      // A below-minimum entry is skipped, not executed, matching the forward
+      // runner's `size < 5000` gate when minOrderAmount is enabled.
+      if (size <= 0 || size < minOrderAmount) continue;
       plannedBalance -= size;
       if (entryExecution === 'next_open') {
         pendingEntries.push({
@@ -728,7 +734,8 @@ export function simulateDailyMomentumPortfolio(rawCandlesByMarket, config = {}) 
       maxPortfolioDrawdownPercent,
       entryExecution,
       exitExecution,
-      maxEntryGapPercent
+      maxEntryGapPercent,
+      minOrderAmount
     },
     dataQuality,
     metrics,

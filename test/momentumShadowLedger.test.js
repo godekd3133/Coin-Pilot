@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   ensureMomentumShadowInitialBalance,
   getMomentumShadowEquity,
+  isMomentumShadowPositionCoveredByBar,
   markMomentumShadowPosition,
   markMomentumShadowPositions,
   updateMomentumShadowEquity
@@ -101,4 +102,23 @@ test('momentum shadow initial balance is backfilled without changing an existing
   assert.equal(ensureMomentumShadowInitialBalance(ledger, 1234), 1234);
   assert.equal(ledger.initialBalance, 1234);
   assert.equal(ensureMomentumShadowInitialBalance(ledger, 9999), 1234);
+});
+
+test('momentum shadow covered-by-bar check only trusts post-entry completed bars', () => {
+  const position = { entryTs: '2026-01-03T00:00:00' };
+  assert.equal(
+    isMomentumShadowPositionCoveredByBar(position, { ts: '2026-01-03T00:00:00' }),
+    true
+  );
+  assert.equal(
+    isMomentumShadowPositionCoveredByBar(position, { ts: '2026-01-02T00:00:00' }),
+    false
+  );
+  // Unparseable timestamps cannot prove pre-entry, so they keep evaluation
+  // instead of silently freezing a position's exit checks.
+  assert.equal(isMomentumShadowPositionCoveredByBar(position, { ts: 'n/a' }), true);
+  assert.equal(
+    isMomentumShadowPositionCoveredByBar({ entryTs: 'n/a' }, { ts: '2026-01-02T00:00:00' }),
+    true
+  );
 });

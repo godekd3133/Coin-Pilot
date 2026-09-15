@@ -40,13 +40,13 @@
   "initialBalance": 100000000,
   "positions": {},
   "trades": [],
-  "cycles": 72,
-  "runnerState": "stopped",
-  "runnerPid": 16752,
-  "runnerStartedAt": "2026-09-15T07:12:53.143Z",
-  "runnerLastHeartbeatAt": "2026-09-15T07:13:03.020Z",
-  "runnerStoppedAt": "2026-09-15T07:25:35.225Z",
-  "runnerStopReason": "signal:SIGTERM",
+  "cycles": 74,
+  "runnerState": "running",
+  "runnerPid": 94810,
+  "runnerStartedAt": "2026-09-15T08:06:44.483Z",
+  "runnerLastHeartbeatAt": "2026-09-15T08:21:57.334Z",
+  "runnerStoppedAt": null,
+  "runnerStopReason": null,
   "runnerLastError": null,
   "runnerEvents": [
     {
@@ -84,15 +84,20 @@
       "pid": 16752,
       "reason": "signal:SIGTERM",
       "error": null
+    },
+    {
+      "type": "started",
+      "at": "2026-09-15T08:06:44.483Z",
+      "pid": 94810
     }
   ],
-  "heartbeatAt": "2026-09-15T07:25:35.230Z",
-  "ownerPid": 16752,
+  "heartbeatAt": "2026-09-15T08:21:57.334Z",
+  "ownerPid": 94810,
   "benchmarkMarket": "KRW-BTC",
   "benchmarkTrendPercent": -1.8836919991830217,
   "benchmarkGateOpen": false,
   "benchmarkAvailable": true,
-  "lastCycleAt": "2026-09-15T07:13:02.753Z",
+  "lastCycleAt": "2026-09-15T08:21:57.333Z",
   "breadth": 3,
   "trends": {
     "KRW-BTC": -1.8836919991830217,
@@ -108,7 +113,7 @@
     "KRW-ETC": -5.10677808727948,
     "KRW-SUI": -12.634408602150538
   },
-  "markedAt": "2026-09-15T07:13:02.753Z",
+  "markedAt": "2026-09-15T08:21:57.333Z",
   "markedEquity": 100000000,
   "markedOpenValue": 0,
   "investedOpen": 0,
@@ -154,7 +159,7 @@
   "cooldownUntilByMarket": {},
   "peakEquity": 100000000,
   "drawdownPercent": 0,
-  "benchmarkBlocked": 57,
+  "benchmarkBlocked": 63,
   "fetchErrors": 61,
   "pendingEntries": [],
   "consumedSignalKeyByMarket": {},
@@ -182,18 +187,18 @@
       "KRW-SUI": "2026-09-14T00:00:00.000Z"
     },
     "latestAgeSecondsByMarket": {
-      "KRW-BTC": 112373,
-      "KRW-ETH": 112373,
-      "KRW-XRP": 112373,
-      "KRW-SOL": 112373,
-      "KRW-DOGE": 112373,
-      "KRW-ADA": 112373,
-      "KRW-DOT": 112373,
-      "KRW-LINK": 112373,
-      "KRW-ATOM": 112373,
-      "KRW-NEAR": 112373,
-      "KRW-ETC": 112373,
-      "KRW-SUI": 112373
+      "KRW-BTC": 116511,
+      "KRW-ETH": 116511,
+      "KRW-XRP": 116511,
+      "KRW-SOL": 116511,
+      "KRW-DOGE": 116511,
+      "KRW-ADA": 116511,
+      "KRW-DOT": 116511,
+      "KRW-LINK": 116511,
+      "KRW-ATOM": 116511,
+      "KRW-NEAR": 116511,
+      "KRW-ETC": 116511,
+      "KRW-SUI": 116511
     },
     "maxAgeHours": 36
   },

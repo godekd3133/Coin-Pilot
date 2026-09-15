@@ -745,3 +745,38 @@ test('daily momentum variant evaluation keeps every candidate research-only', ()
   assert.equal(report.variants[0].promoted, false);
   assert.equal(report.variants[0].segments.length, 2);
 });
+
+test('daily momentum minOrderAmount mirrors the forward runner order floor when enabled', () => {
+  const candles = {
+    'KRW-BTC': daily([100, 101, 102, 103, 102]),
+    'KRW-ETH': daily([100, 101, 102, 103, 102])
+  };
+  const base = {
+    ...DEFAULT_DAILY_MOMENTUM_CONFIG,
+    initialBalance: 1_000,
+    trendLookbackDays: 2,
+    maxHoldDays: 2,
+    positionFraction: 0.5,
+    breadthMin: 2,
+    maxPositions: 1,
+    mode: 'fixed'
+  };
+
+  // Zero keeps the floor-free research contract and leaves entries intact.
+  const unfloored = simulateDailyMomentumPortfolio(candles, base);
+  assert.equal(unfloored.entryCount, 1);
+  assert.equal(unfloored.config.minOrderAmount, 0);
+
+  // With the exchange floor enabled, a planned size below it is skipped in
+  // close mode and a pending next-open fill is blocked at execution.
+  const floored = simulateDailyMomentumPortfolio(candles, { ...base, minOrderAmount: 5_000 });
+  assert.equal(floored.entryCount, 0);
+  assert.equal(floored.config.minOrderAmount, 5_000);
+
+  const flooredNextOpen = simulateDailyMomentumPortfolio(candles, {
+    ...base,
+    entryExecution: 'next_open',
+    minOrderAmount: 5_000
+  });
+  assert.equal(flooredNextOpen.entryCount, 0);
+});

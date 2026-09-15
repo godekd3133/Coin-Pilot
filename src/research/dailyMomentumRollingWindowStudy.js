@@ -163,4 +163,3 @@ export function evaluateDailyMomentumRollingWindows(rawCandlesByMarket, {
     note: 'Trailing window observations are diagnostic evidence only; they do not authorize a runner, promotion, or live order.'
   };
 }
-

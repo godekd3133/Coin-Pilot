@@ -1,5 +1,7 @@
 import { analyzeHistoricalCandleContinuity } from '../backtest/scalpingBacktest.js';
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
 function timestampOf(candle) {
   const raw = candle?.ts ?? candle?.candle_date_time_utc ?? candle?.timestamp;
   if (raw instanceof Date) return raw.getTime();
@@ -9,6 +11,20 @@ function timestampOf(candle) {
   const normalized = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(text) ? text : `${text}Z`;
   const parsed = Date.parse(normalized);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+/**
+ * A daily bar is usable evidence only once its full UTC day has elapsed.
+ * Comparing each candle's open+1d to the observation timestamp — instead of
+ * matching a calendar date — keeps a response that crosses the UTC midnight
+ * boundary from promoting the newly-forming candle or dropping the bar that
+ * just closed.
+ */
+export function isMomentumShadowDailyCandleComplete(candle, nowMs) {
+  const openMs = timestampOf(candle);
+  const cutoff = Number(nowMs);
+  if (openMs === null || !Number.isFinite(cutoff)) return false;
+  return openMs + DAY_MS <= cutoff;
 }
 
 /**
@@ -49,13 +65,17 @@ export function assessMomentumShadowDailyGrid(
     const latest = timestampOf(candles.at(-1));
     latestByMarket[market] = latest === null ? null : new Date(latest).toISOString();
     if (latest === null) {
-      invalidMarkets.push({ market, reason: 'latest_timestamp_missing' });
+      if (!invalidMarkets.some(entry => entry.market === market)) {
+        invalidMarkets.push({ market, reason: 'latest_timestamp_missing' });
+      }
     } else if (maxAgeMs !== null) {
       const ageSeconds = Math.max(0, Math.round((nowMs - latest) / 1000));
       latestAgeSecondsByMarket[market] = ageSeconds;
       if (ageSeconds * 1000 > maxAgeMs) {
         staleMarkets.push(market);
-        invalidMarkets.push({ market, reason: 'daily_market_stale' });
+        if (!invalidMarkets.some(entry => entry.market === market)) {
+          invalidMarkets.push({ market, reason: 'daily_market_stale' });
+        }
       }
     }
   }

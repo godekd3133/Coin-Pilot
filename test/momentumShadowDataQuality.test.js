@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { assessMomentumShadowDailyGrid } from '../src/research/momentumShadowDataQuality.js';
+import {
+  assessMomentumShadowDailyGrid,
+  isMomentumShadowDailyCandleComplete
+} from '../src/research/momentumShadowDataQuality.js';
 
 function daily(prices, start = '2026-01-01T00:00:00.000Z') {
   const first = Date.parse(start);
@@ -67,4 +70,42 @@ test('momentum shadow daily grid rejects an aligned but stale completed candle',
   assert.deepEqual(result.staleMarkets, ['KRW-BTC', 'KRW-ETH']);
   assert.equal(result.latestAgeSecondsByMarket['KRW-BTC'], 216000);
   assert.equal(result.maxAgeHours, 36);
+});
+
+test('daily candle completion follows the candle end time across the UTC boundary', () => {
+  const completed = { candle_date_time_utc: '2026-01-02T00:00:00' };
+  const justClosed = { candle_date_time_utc: '2026-01-03T00:00:00' };
+  const forming = { candle_date_time_utc: '2026-01-04T00:00:00' };
+
+  // A cycle snapshot taken just before midnight: the 01-03 candle has not
+  // finished its UTC day at the snapshot and the 01-04 candle does not yet
+  // exist, so neither may enter the completed series.
+  const beforeMidnight = Date.parse('2026-01-03T23:59:59.900Z');
+  assert.equal(isMomentumShadowDailyCandleComplete(completed, beforeMidnight), true);
+  assert.equal(isMomentumShadowDailyCandleComplete(justClosed, beforeMidnight), false);
+  assert.equal(isMomentumShadowDailyCandleComplete(forming, beforeMidnight), false);
+
+  // A response that arrives just after midnight keeps the bar that actually
+  // closed and still refuses the newly-forming candle.
+  const afterMidnight = Date.parse('2026-01-04T00:00:00.400Z');
+  assert.equal(isMomentumShadowDailyCandleComplete(justClosed, afterMidnight), true);
+  assert.equal(isMomentumShadowDailyCandleComplete(forming, afterMidnight), false);
+
+  // An unparseable or missing timestamp is never complete.
+  assert.equal(isMomentumShadowDailyCandleComplete({ candle_date_time_utc: 'n/a' }, afterMidnight), false);
+  assert.equal(isMomentumShadowDailyCandleComplete({}, afterMidnight), false);
+  assert.equal(isMomentumShadowDailyCandleComplete(justClosed, Number.NaN), false);
+});
+
+test('momentum shadow daily grid lists an invalid market once even with stacked defects', () => {
+  const gapped = daily([100, 101, 102]);
+  gapped[2].ts = 'not-a-timestamp';
+  const result = assessMomentumShadowDailyGrid({
+    'KRW-BTC': daily([100, 101, 102]),
+    'KRW-ETH': gapped
+  }, ['KRW-BTC', 'KRW-ETH'], { now: Date.parse('2026-01-04T12:00:00.000Z') });
+
+  assert.equal(result.valid, false);
+  const ethEntries = result.invalidMarkets.filter(entry => entry.market === 'KRW-ETH');
+  assert.equal(ethEntries.length, 1);
 });

@@ -8,6 +8,7 @@ import { createNotifier } from '../utils/notify.js';
 import {
   ensureMomentumShadowInitialBalance,
   getMomentumShadowEquity,
+  isMomentumShadowPositionCoveredByBar,
   markMomentumShadowPositions,
   updateMomentumShadowEquity
 } from '../research/momentumShadowLedger.js';
@@ -28,7 +29,10 @@ import {
   calculateVolatilityPositionScale
 } from '../research/momentumShadowVolatility.js';
 import { rankMomentumShadowEntryCandidates } from '../research/momentumShadowCandidateSelection.js';
-import { assessMomentumShadowDailyGrid } from '../research/momentumShadowDataQuality.js';
+import {
+  assessMomentumShadowDailyGrid,
+  isMomentumShadowDailyCandleComplete
+} from '../research/momentumShadowDataQuality.js';
 import {
   ensureMomentumShadowConsumedSignalState,
   isMomentumShadowSignalConsumed,
@@ -301,10 +305,13 @@ async function fetchOrderbookQuotes() {
 
 function toBars(candles, now = new Date()) {
   // Upbit's /candles/days includes today's still-forming candle; only
-  // completed daily bars are eligible for signals and exits.
-  const todayUtc = now.toISOString().slice(0, 10);
+  // completed daily bars are eligible for signals and exits. Completion is
+  // decided by each candle's own end timestamp against the shared cycle
+  // snapshot: a response that arrives just after the UTC boundary can
+  // neither promote the newly-forming candle nor drop the bar that closed.
+  const cutoffMs = now instanceof Date ? now.getTime() : timestampMs(now);
   return candles
-    .filter((c) => String(c.candle_date_time_utc).slice(0, 10) !== todayUtc)
+    .filter((c) => isMomentumShadowDailyCandleComplete(c, cutoffMs))
     .map((c) => ({
       ts: c.candle_date_time_utc,
       trade_price: c.trade_price,
@@ -335,12 +342,11 @@ function currentDailyOpen(candles, nowMs) {
   };
 }
 
-function completedBarCoversPosition(lastBar, position) {
-  const barTimestamp = timestampMs(lastBar?.ts);
-  const entryTimestamp = timestampMs(position?.entryTs);
-  // An unparseable timestamp cannot prove pre-entry, so keep the legacy
-  // evaluation rather than silently freezing a position's exit checks.
-  return barTimestamp === null || entryTimestamp === null || barTimestamp >= entryTimestamp;
+function positionNeedsCompletedEntryBar(position) {
+  // The guard follows the position's own recorded execution mode. A runner
+  // restarted with a different entryExecution cannot downgrade the
+  // protection for a next-open fill that is still inside its entry candle.
+  return (position?.entryExecution || ENTRY_EXECUTION) === 'next_open';
 }
 
 function trailingTrend(bars, i, days = 7) {
@@ -442,7 +448,8 @@ async function cycle(ledger, strategies) {
     // When a next-open fill used the currently forming candle, there is no
     // completed close at or after the entry yet. Never evaluate a pre-entry
     // close as an immediate exit or drawdown stop.
-    if (ENTRY_EXECUTION === 'next_open' && !completedBarCoversPosition(last, pos)) continue;
+    if (positionNeedsCompletedEntryBar(pos) &&
+      !isMomentumShadowPositionCoveredByBar(pos, last)) continue;
     let ex = strategies[m].checkPosition(
       { entryPrice: pos.entryPrice, entryTimeMs: pos.entryTimeMs }, last.trade_price, now);
     if (!ex.exit && MODE === 'regime') {
@@ -483,7 +490,8 @@ async function cycle(ledger, strategies) {
       const bars = series[m];
       const last = bars?.at(-1);
       if (!last) continue;
-      if (ENTRY_EXECUTION === 'next_open' && !completedBarCoversPosition(last, pos)) continue;
+      if (positionNeedsCompletedEntryBar(pos) &&
+        !isMomentumShadowPositionCoveredByBar(pos, last)) continue;
       const rawProfitPercent = ((last.trade_price - pos.entryPrice) / pos.entryPrice) * 100;
       const profit = rawProfitPercent - COST_PERCENT;
       ledger.balance += pos.size * (1 + profit / 100);

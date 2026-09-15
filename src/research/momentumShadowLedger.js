@@ -48,6 +48,19 @@ export function markMomentumShadowPosition(position, markPrice, markTimestamp, c
 }
 
 /**
+ * Report whether a completed bar covers a position's entry timestamp. A
+ * next-open forward fill can be observed before its candle closes, so a bar
+ * that predates the entry must not be used as a mark or exit reference. An
+ * unparseable timestamp cannot prove pre-entry, so it keeps the legacy
+ * evaluation instead of silently freezing the position's checks.
+ */
+export function isMomentumShadowPositionCoveredByBar(position, bar) {
+  const barTimestamp = timestampOf(bar?.ts ?? bar?.timestamp);
+  const entryTimestamp = timestampOf(position?.entryTs ?? position?.entryTimestamp);
+  return barTimestamp === null || entryTimestamp === null || barTimestamp >= entryTimestamp;
+}
+
+/**
  * Mark every open position for which a later completed candle is available.
  * Missing market data is left untouched rather than imputed.
  */
@@ -57,9 +70,7 @@ export function markMomentumShadowPositions(ledger, seriesByMarket, costPercent 
   for (const [market, position] of Object.entries(ledger.positions)) {
     const bars = seriesByMarket[market];
     const latest = Array.isArray(bars) && bars.length > 0 ? bars[bars.length - 1] : null;
-    const latestTimestamp = timestampOf(latest?.ts ?? latest?.timestamp);
-    const entryTimestamp = timestampOf(position?.entryTs ?? position?.entryTimestamp);
-    if (latestTimestamp !== null && entryTimestamp !== null && latestTimestamp < entryTimestamp) {
+    if (!isMomentumShadowPositionCoveredByBar(position, latest)) {
       // A next-open forward fill can be observed before its candle closes. The
       // last completed candle predates the fill and must not be used as a
       // fabricated mark or exit reference.

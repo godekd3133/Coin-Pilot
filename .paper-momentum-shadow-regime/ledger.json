@@ -121,9 +121,9 @@
       "profitPercent": -3.3598513011152416
     }
   ],
-  "cycles": 313,
+  "cycles": 318,
   "entries": 5,
-  "lastCycleAt": "2026-09-15T07:23:20.415Z",
+  "lastCycleAt": "2026-09-15T08:27:16.592Z",
   "breadth": 3,
   "trends": {
     "KRW-BTC": -1.8836919991830217,
@@ -139,8 +139,8 @@
     "KRW-ETC": -5.10677808727948,
     "KRW-SUI": -12.634408602150538
   },
-  "heartbeatAt": "2026-09-15T07:25:35.226Z",
-  "ownerPid": 16751,
+  "heartbeatAt": "2026-09-15T08:27:16.594Z",
+  "ownerPid": 94809,
   "initialBalance": 100000000,
   "configDrift": {
     "previous": {
@@ -281,16 +281,21 @@
       "pid": 16751,
       "reason": "signal:SIGTERM",
       "error": null
+    },
+    {
+      "type": "started",
+      "at": "2026-09-15T08:06:44.483Z",
+      "pid": 94809
     }
   ],
-  "runnerState": "stopped",
-  "runnerPid": 16751,
-  "runnerStartedAt": "2026-09-15T07:12:53.445Z",
-  "runnerLastHeartbeatAt": "2026-09-15T07:23:20.444Z",
-  "runnerStoppedAt": "2026-09-15T07:25:35.225Z",
-  "runnerStopReason": "signal:SIGTERM",
+  "runnerState": "running",
+  "runnerPid": 94809,
+  "runnerStartedAt": "2026-09-15T08:06:44.483Z",
+  "runnerLastHeartbeatAt": "2026-09-15T08:27:16.594Z",
+  "runnerStoppedAt": null,
+  "runnerStopReason": null,
   "runnerLastError": null,
-  "markedAt": "2026-09-15T07:23:20.415Z",
+  "markedAt": "2026-09-15T08:27:16.592Z",
   "markedEquity": 98740069.77400717,
   "markedOpenValue": 57035882.37141364,
   "investedOpen": 57150182.73688741,
@@ -335,18 +340,18 @@
       "KRW-SUI": "2026-09-14T00:00:00.000Z"
     },
     "latestAgeSecondsByMarket": {
-      "KRW-BTC": 112990,
-      "KRW-ETH": 112990,
-      "KRW-XRP": 112990,
-      "KRW-SOL": 112990,
-      "KRW-DOGE": 112990,
-      "KRW-ADA": 112990,
-      "KRW-DOT": 112990,
-      "KRW-LINK": 112990,
-      "KRW-ATOM": 112990,
-      "KRW-NEAR": 112990,
-      "KRW-ETC": 112990,
-      "KRW-SUI": 112990
+      "KRW-BTC": 116830,
+      "KRW-ETH": 116830,
+      "KRW-XRP": 116830,
+      "KRW-SOL": 116830,
+      "KRW-DOGE": 116830,
+      "KRW-ADA": 116830,
+      "KRW-DOT": 116830,
+      "KRW-LINK": 116830,
+      "KRW-ATOM": 116830,
+      "KRW-NEAR": 116830,
+      "KRW-ETC": 116830,
+      "KRW-SUI": 116830
     },
     "maxAgeHours": 36
   },
