@@ -36,6 +36,136 @@ test('robustness grid expands risk controls without changing the live contract',
   assert.equal(variants[0].config.benchmarkMarket, 'KRW-BTC');
   assert.equal(variants[0].config.benchmarkTrendMinPercent, 2);
   assert.equal(variants[0].config.minUpBars, 1);
+  assert.equal(variants[0].config.benchmarkExitConfirmationBars, 1);
+  assert.equal(variants[0].config.regimeExitConfirmationBars, 1);
+  assert.equal(variants[0].config.relativeTrendMinPercent, null);
+  assert.equal(variants[0].config.stopLossPercent, 0);
+});
+
+test('robustness grid can explicitly compare fixed exit modes and hold windows', () => {
+  const variants = buildDailyMomentumRobustnessVariants({
+    mode: ['fixed'],
+    maxHoldDays: [1],
+    trendMinPercent: [2],
+    breadthMin: [3],
+    positionFraction: [0.125],
+    maxPositions: [2],
+    cooldownAfterLossDays: [3],
+    maxPortfolioDrawdownPercent: [15]
+  });
+
+  assert.equal(variants.length, 1);
+  assert.equal(variants[0].name, 'fixed_h1_g2_u1_t2_b3_f0p125_p2_c3_dd15');
+  assert.equal(variants[0].config.mode, 'fixed');
+  assert.equal(variants[0].config.maxHoldDays, 1);
+});
+
+test('robustness grid names non-default exit confirmation candidates without changing baseline names', () => {
+  const variants = buildDailyMomentumRobustnessVariants({
+    trendMinPercent: [2],
+    breadthMin: [2],
+    positionFraction: [0.125],
+    maxPositions: [2],
+    cooldownAfterLossDays: [3],
+    maxPortfolioDrawdownPercent: [0],
+    benchmarkTrendMinPercent: [2],
+    minUpBars: [2],
+    benchmarkExitConfirmationBars: [1, 2],
+    regimeExitConfirmationBars: [1, 2],
+    relativeTrendMinPercent: [null, 1]
+  });
+
+  assert.equal(variants.length, 8);
+  assert.equal(variants[0].name, 'regime_g2_u2_t2_b2_f0p125_p2_c3_dd0');
+  assert.equal(variants[0].config.benchmarkExitConfirmationBars, 1);
+  assert.equal(variants[0].config.regimeExitConfirmationBars, 1);
+  assert.equal(variants[1].name, 'regime_g2_u2_t2_b2_f0p125_p2_c3_dd0_rel1');
+  assert.equal(variants[1].config.relativeTrendMinPercent, 1);
+  assert.equal(variants[6].name, 'regime_g2_u2_t2_b2_f0p125_p2_c3_dd0_bx2_rx2');
+  assert.equal(variants[6].config.benchmarkExitConfirmationBars, 2);
+  assert.equal(variants[6].config.regimeExitConfirmationBars, 2);
+  assert.equal(variants[7].name, 'regime_g2_u2_t2_b2_f0p125_p2_c3_dd0_bx2_rx2_rel1');
+});
+
+test('robustness grid names volatility-target candidates and preserves the disabled baseline', () => {
+  const variants = buildDailyMomentumRobustnessVariants({
+    trendMinPercent: [2],
+    breadthMin: [2],
+    positionFraction: [0.125],
+    maxPositions: [2],
+    cooldownAfterLossDays: [3],
+    maxPortfolioDrawdownPercent: [0],
+    benchmarkTrendMinPercent: [2],
+    minUpBars: [2],
+    benchmarkExitConfirmationBars: [1],
+    regimeExitConfirmationBars: [1],
+    relativeTrendMinPercent: [null],
+    volatilityLookbackDays: [7],
+    volatilityTargetPercent: [1]
+  });
+
+  assert.equal(variants.length, 1);
+  assert.equal(variants[0].name, 'regime_g2_u2_t2_b2_f0p125_p2_c3_dd0_vol1_vlb7');
+  assert.equal(variants[0].config.volatilityLookbackDays, 7);
+  assert.equal(variants[0].config.volatilityTargetPercent, 1);
+});
+
+test('robustness grid names next-open gap-ceiling candidates', () => {
+  const variants = buildDailyMomentumRobustnessVariants({
+    trendMinPercent: [2],
+    breadthMin: [3],
+    positionFraction: [0.125],
+    maxPositions: [2],
+    cooldownAfterLossDays: [3],
+    maxPortfolioDrawdownPercent: [15],
+    benchmarkTrendMinPercent: [1],
+    minUpBars: [2],
+    benchmarkExitConfirmationBars: [1],
+    regimeExitConfirmationBars: [1],
+    relativeTrendMinPercent: [null],
+    volatilityLookbackDays: [14],
+    volatilityTargetPercent: [1],
+    stopLossPercent: [0],
+    maxEntryGapPercent: [0.2]
+  }, { costPercent: 0.3, entryExecution: 'next_open' });
+
+  assert.equal(variants.length, 1);
+  assert.equal(variants[0].name, 'regime_g1_u2_t2_b3_f0p125_p2_c3_dd15_vol1_vlb14_gap0p2');
+  assert.equal(variants[0].config.maxEntryGapPercent, 0.2);
+  assert.equal(variants[0].config.entryExecution, 'next_open');
+});
+
+test('robustness generated variants retain execution-boundary base config', () => {
+  const candles = {
+    'KRW-BTC': daily([100, 101, 102, 103, 104, 105]),
+    'KRW-ETH': daily([100, 101, 102, 103, 104, 105])
+  };
+  const report = evaluateDailyMomentumRobustness(candles, {
+    baseConfig: { entryExecution: 'next_open' },
+    grid: {
+      trendMinPercent: [2],
+      breadthMin: [2],
+      positionFraction: [0.125],
+      maxPositions: [2],
+      cooldownAfterLossDays: [3],
+      maxPortfolioDrawdownPercent: [0],
+      benchmarkTrendMinPercent: [2],
+      minUpBars: [1],
+      benchmarkExitConfirmationBars: [1],
+      regimeExitConfirmationBars: [1],
+      relativeTrendMinPercent: [null],
+      volatilityLookbackDays: [14],
+      volatilityTargetPercent: [null],
+      stopLossPercent: [0]
+    },
+    minimumFullReturnPercent: -100,
+    maximumDrawdownPercent: 100,
+    minimumWorstSegmentReturnPercent: -100,
+    minimumTradeCount: 1
+  });
+
+  assert.equal(report.variants.length, 1);
+  assert.equal(report.variants[0].config.entryExecution, 'next_open');
 });
 
 test('robustness report keeps historical eligibility separate from promotion', () => {

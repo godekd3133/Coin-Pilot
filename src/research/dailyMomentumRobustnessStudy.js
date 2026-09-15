@@ -6,6 +6,8 @@ import {
 } from './dailyMomentumStudy.js';
 
 const DEFAULT_GRID = Object.freeze({
+  mode: Object.freeze(['regime']),
+  maxHoldDays: Object.freeze([3650]),
   trendMinPercent: Object.freeze([1, 2]),
   breadthMin: Object.freeze([2, 3]),
   positionFraction: Object.freeze([0.125, 0.2, 0.25]),
@@ -13,7 +15,14 @@ const DEFAULT_GRID = Object.freeze({
   cooldownAfterLossDays: Object.freeze([0, 3]),
   maxPortfolioDrawdownPercent: Object.freeze([0, 10, 15]),
   benchmarkTrendMinPercent: Object.freeze([2]),
-  minUpBars: Object.freeze([1])
+  minUpBars: Object.freeze([1]),
+  benchmarkExitConfirmationBars: Object.freeze([1]),
+  regimeExitConfirmationBars: Object.freeze([1]),
+  relativeTrendMinPercent: Object.freeze([null]),
+  volatilityLookbackDays: Object.freeze([14]),
+  volatilityTargetPercent: Object.freeze([null]),
+  stopLossPercent: Object.freeze([0]),
+  maxEntryGapPercent: Object.freeze([0])
 });
 
 export const DEFAULT_DAILY_MOMENTUM_ROBUSTNESS_CONFIG = Object.freeze({
@@ -41,6 +50,18 @@ function asFiniteArray(value, fallback) {
     .filter(item => Number.isFinite(item));
 }
 
+function asModeArray(value, fallback) {
+  const values = Array.isArray(value) ? value : fallback;
+  return values.filter(item => item === 'fixed' || item === 'regime');
+}
+
+function asOptionalFiniteArray(value, fallback) {
+  const values = Array.isArray(value) ? value : fallback;
+  return values
+    .map(item => item === null || item === undefined || item === '' ? null : Number(item))
+    .filter(item => item === null || Number.isFinite(item));
+}
+
 function safeName(value) {
   const parsed = Number(value);
   const text = Number.isInteger(parsed)
@@ -51,6 +72,9 @@ function safeName(value) {
 
 export function buildDailyMomentumRobustnessVariants(grid = DEFAULT_GRID, baseConfig = {}) {
   const axes = {
+    mode: asModeArray(grid.mode, DEFAULT_GRID.mode),
+    maxHoldDays: asFiniteArray(grid.maxHoldDays, DEFAULT_GRID.maxHoldDays)
+      .map(value => Math.max(1, Math.floor(value))),
     trendMinPercent: asFiniteArray(grid.trendMinPercent, DEFAULT_GRID.trendMinPercent),
     breadthMin: asFiniteArray(grid.breadthMin, DEFAULT_GRID.breadthMin),
     positionFraction: asFiniteArray(grid.positionFraction, DEFAULT_GRID.positionFraction),
@@ -64,36 +88,109 @@ export function buildDailyMomentumRobustnessVariants(grid = DEFAULT_GRID, baseCo
       grid.benchmarkTrendMinPercent,
       DEFAULT_GRID.benchmarkTrendMinPercent
     ),
-    minUpBars: asFiniteArray(grid.minUpBars, DEFAULT_GRID.minUpBars)
+    minUpBars: asFiniteArray(grid.minUpBars, DEFAULT_GRID.minUpBars),
+    benchmarkExitConfirmationBars: asFiniteArray(
+      grid.benchmarkExitConfirmationBars,
+      DEFAULT_GRID.benchmarkExitConfirmationBars
+    ),
+    regimeExitConfirmationBars: asFiniteArray(
+      grid.regimeExitConfirmationBars,
+      DEFAULT_GRID.regimeExitConfirmationBars
+    ),
+    relativeTrendMinPercent: asOptionalFiniteArray(
+      grid.relativeTrendMinPercent,
+      DEFAULT_GRID.relativeTrendMinPercent
+    ),
+    volatilityLookbackDays: asFiniteArray(
+      grid.volatilityLookbackDays,
+      DEFAULT_GRID.volatilityLookbackDays
+    ),
+    volatilityTargetPercent: asOptionalFiniteArray(
+      grid.volatilityTargetPercent,
+      DEFAULT_GRID.volatilityTargetPercent
+    ),
+    stopLossPercent: asFiniteArray(
+      grid.stopLossPercent,
+      DEFAULT_GRID.stopLossPercent
+    ),
+    maxEntryGapPercent: asFiniteArray(
+      grid.maxEntryGapPercent,
+      DEFAULT_GRID.maxEntryGapPercent
+    )
   };
   const variants = [];
-  for (const trendMinPercent of axes.trendMinPercent) {
-    for (const breadthMin of axes.breadthMin) {
-      for (const positionFraction of axes.positionFraction) {
-        for (const maxPositions of axes.maxPositions) {
-          for (const cooldownAfterLossDays of axes.cooldownAfterLossDays) {
-            for (const maxPortfolioDrawdownPercent of axes.maxPortfolioDrawdownPercent) {
-              for (const benchmarkTrendMinPercent of axes.benchmarkTrendMinPercent) {
-                for (const minUpBars of axes.minUpBars) {
-                  const config = {
-                    ...baseConfig,
-                    mode: 'regime',
-                    trendMinPercent,
-                    breadthMin,
-                    minUpBars,
-                    maxHoldDays: 3650,
-                    benchmarkMarket: 'KRW-BTC',
-                    benchmarkTrendMinPercent,
-                    exitOnBenchmarkOff: true,
-                    positionFraction,
-                    maxPositions,
-                    cooldownAfterLossDays,
-                    maxPortfolioDrawdownPercent
-                  };
-                  variants.push({
-                    name: `regime_g${safeName(benchmarkTrendMinPercent)}_u${safeName(minUpBars)}_t${safeName(trendMinPercent)}_b${safeName(breadthMin)}_f${safeName(positionFraction)}_p${safeName(maxPositions)}_c${safeName(cooldownAfterLossDays)}_dd${safeName(maxPortfolioDrawdownPercent)}`,
-                    config
-                  });
+  for (const mode of axes.mode) {
+    for (const maxHoldDays of axes.maxHoldDays) {
+      for (const trendMinPercent of axes.trendMinPercent) {
+        for (const breadthMin of axes.breadthMin) {
+          for (const positionFraction of axes.positionFraction) {
+            for (const maxPositions of axes.maxPositions) {
+              for (const cooldownAfterLossDays of axes.cooldownAfterLossDays) {
+                for (const maxPortfolioDrawdownPercent of axes.maxPortfolioDrawdownPercent) {
+                  for (const benchmarkTrendMinPercent of axes.benchmarkTrendMinPercent) {
+                    for (const minUpBars of axes.minUpBars) {
+                      for (const benchmarkExitConfirmationBars of axes.benchmarkExitConfirmationBars) {
+                        for (const regimeExitConfirmationBars of axes.regimeExitConfirmationBars) {
+                          for (const relativeTrendMinPercent of axes.relativeTrendMinPercent) {
+                            for (const volatilityLookbackDays of axes.volatilityLookbackDays) {
+                              for (const volatilityTargetPercent of axes.volatilityTargetPercent) {
+                                for (const stopLossPercent of axes.stopLossPercent) {
+                                  for (const maxEntryGapPercent of axes.maxEntryGapPercent) {
+                              const config = {
+                                ...baseConfig,
+                                mode,
+                                trendMinPercent,
+                                breadthMin,
+                                minUpBars,
+                                maxHoldDays,
+                                benchmarkMarket: 'KRW-BTC',
+                                benchmarkTrendMinPercent,
+                                exitOnBenchmarkOff: true,
+                                benchmarkExitConfirmationBars,
+                                regimeExitConfirmationBars,
+                                relativeTrendMinPercent,
+                                volatilityLookbackDays,
+                                volatilityTargetPercent,
+                                stopLossPercent,
+                                maxEntryGapPercent,
+                                positionFraction,
+                                maxPositions,
+                                cooldownAfterLossDays,
+                                maxPortfolioDrawdownPercent
+                              };
+                              const confirmationSuffix = benchmarkExitConfirmationBars === 1 &&
+                                regimeExitConfirmationBars === 1
+                                ? ''
+                                : `_bx${safeName(benchmarkExitConfirmationBars)}_rx${safeName(regimeExitConfirmationBars)}`;
+                              const relativeSuffix = relativeTrendMinPercent === null
+                                ? ''
+                                : `_rel${safeName(relativeTrendMinPercent)}`;
+                              const volatilitySuffix = volatilityTargetPercent === null
+                                ? ''
+                                : `_vol${safeName(volatilityTargetPercent)}_vlb${safeName(volatilityLookbackDays)}`;
+                              const stopSuffix = stopLossPercent === 0
+                                ? ''
+                                : `_sl${safeName(stopLossPercent)}`;
+                              const gapSuffix = maxEntryGapPercent === 0
+                                ? ''
+                                : `_gap${safeName(maxEntryGapPercent)}`;
+                              const modeName = mode === 'regime' ? 'regime' : 'fixed';
+                              const holdSuffix = mode === 'regime' && maxHoldDays === 3650
+                                ? ''
+                                : `_h${safeName(maxHoldDays)}`;
+                              variants.push({
+                                name: `${modeName}${holdSuffix}_g${safeName(benchmarkTrendMinPercent)}_u${safeName(minUpBars)}_t${safeName(trendMinPercent)}_b${safeName(breadthMin)}_f${safeName(positionFraction)}_p${safeName(maxPositions)}_c${safeName(cooldownAfterLossDays)}_dd${safeName(maxPortfolioDrawdownPercent)}${confirmationSuffix}${relativeSuffix}${volatilitySuffix}${stopSuffix}${gapSuffix}`,
+                                config
+                              });
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
                 }
               }
             }
@@ -189,6 +286,8 @@ function evaluateContinuousSegments(rawCandlesByMarket, config, segmentCount) {
         available: false,
         metrics: null,
         unknownBoundaryPositionCount: 0,
+        unknownBoundaryEntryCount: 0,
+        unknownBoundaryExitCount: 0,
         dataQuality: { ...dataQuality, segmentRange: range }
       };
     }
@@ -208,6 +307,12 @@ function evaluateContinuousSegments(rawCandlesByMarket, config, segmentCount) {
     const unknownBoundaryPositionCount = endIndex === timestamps.length - 1
       ? Number(full.unknownBoundaryPositionCount) || 0
       : 0;
+    const unknownBoundaryEntryCount = endIndex === timestamps.length - 1
+      ? Number(full.unknownBoundaryEntryCount) || 0
+      : 0;
+    const unknownBoundaryExitCount = endIndex === timestamps.length - 1
+      ? Number(full.unknownBoundaryExitCount) || 0
+      : 0;
     return {
       segment,
       range,
@@ -220,12 +325,17 @@ function evaluateContinuousSegments(rawCandlesByMarket, config, segmentCount) {
         trades: segmentTrades
       }),
       unknownBoundaryPositionCount,
+      unknownBoundaryEntryCount,
+      unknownBoundaryExitCount,
       dataQuality: { ...dataQuality, segmentRange: range }
     };
   });
   const allSegmentsAvailable = segments.every(segment => segment.available);
   const allSegmentsNonNegative = allSegmentsAvailable && segments.every(segment =>
-    segment.metrics.totalReturnPercent >= 0 && segment.unknownBoundaryPositionCount === 0
+    segment.metrics.totalReturnPercent >= 0 &&
+    segment.unknownBoundaryPositionCount === 0 &&
+    segment.unknownBoundaryEntryCount === 0 &&
+    segment.unknownBoundaryExitCount === 0
   );
   return { full, segments, allSegmentsAvailable, allSegmentsNonNegative };
 }
@@ -240,7 +350,13 @@ function summarizeVariant(variant, criteria) {
   const positiveSegmentCount = segmentReturns.filter(value => value >= 0).length;
   const allSegmentsAvailable = variant.allSegmentsAvailable === true;
   const noUnknownBoundary = Number(variant.full?.unknownBoundaryPositionCount) === 0 &&
-    (variant.segments || []).every(segment => Number(segment.unknownBoundaryPositionCount) === 0);
+    Number(variant.full?.unknownBoundaryEntryCount) === 0 &&
+    Number(variant.full?.unknownBoundaryExitCount) === 0 &&
+    (variant.segments || []).every(segment =>
+      Number(segment.unknownBoundaryPositionCount) === 0 &&
+      Number(segment.unknownBoundaryEntryCount) === 0 &&
+      Number(segment.unknownBoundaryExitCount) === 0
+    );
   const eligibilityBlockers = [];
   if (!allSegmentsAvailable) eligibilityBlockers.push('segment_data_unavailable');
   if (!noUnknownBoundary) eligibilityBlockers.push('unknown_boundary_position');
@@ -299,10 +415,7 @@ export function evaluateDailyMomentumRobustness(rawCandlesByMarket, options = {}
   };
   const variants = options.variants || buildDailyMomentumRobustnessVariants(
     options.grid || DEFAULT_GRID,
-    {
-      initialBalance: baseConfig.initialBalance,
-      costPercent: baseConfig.costPercent
-    }
+    baseConfig
   );
   const segmentCount = Math.max(2, Math.floor(Number(config.segmentCount) || 8));
   const evaluated = variants.map(variant => {
@@ -322,6 +435,8 @@ export function evaluateDailyMomentumRobustness(rawCandlesByMarket, options = {}
             available: continuous.full.available,
           metrics: continuous.full.metrics,
           unknownBoundaryPositionCount: continuous.full.unknownBoundaryPositionCount,
+          unknownBoundaryEntryCount: continuous.full.unknownBoundaryEntryCount,
+          unknownBoundaryExitCount: continuous.full.unknownBoundaryExitCount,
           dataQuality: continuous.full.dataQuality,
           drawdownStopTriggered: continuous.full.drawdownStopTriggered === true,
           drawdownStopAt: continuous.full.drawdownStopAt || null

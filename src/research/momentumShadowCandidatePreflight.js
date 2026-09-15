@@ -23,18 +23,32 @@ function ownerAlive(pid) {
 function normalizedConfig(config = {}) {
   return {
     mode: config.mode || 'regime',
+    maxHoldHours: Math.max(1, Number(config.maxHoldHours) || 0),
     markets: Array.isArray(config.markets) ? [...config.markets] : [],
     trendMinPercent: Number(config.trendMinPercent) || 0,
     breadthMin: Number(config.breadthMin) || 0,
     minUpBars: Number(config.minUpBars) || 1,
     positionFraction: Number(config.positionFraction) || 0,
     maxPositions: Number(config.maxPositions) || 0,
+    costPercent: Math.max(0, Number(config.costPercent) || 0),
     benchmarkMarket: config.benchmarkMarket || null,
     benchmarkTrendMinPercent: Number.isFinite(Number(config.benchmarkTrendMinPercent))
       ? Number(config.benchmarkTrendMinPercent)
       : null,
     exitOnBenchmarkOff: config.exitOnBenchmarkOff === true,
     cooldownAfterLossDays: Number(config.cooldownAfterLossDays) || 0,
+    volatilityLookbackDays: Math.max(2, Number(config.volatilityLookbackDays) || 14),
+    volatilityTargetPercent: Number.isFinite(Number(config.volatilityTargetPercent)) &&
+      Number(config.volatilityTargetPercent) > 0
+      ? Number(config.volatilityTargetPercent)
+      : null,
+    entryExecution: config.entryExecution === 'next_open' ? 'next_open' : 'close',
+    maxEntryGapPercent: Math.max(0, Number(config.maxEntryGapPercent) || 0),
+    maxDailyCandleAgeHours: Math.max(0, Number(config.maxDailyCandleAgeHours) || 0),
+    maxSpreadPercent: Math.max(0, Number(config.maxSpreadPercent) || 0),
+    requestIntervalMs: Math.max(100, Number(config.requestIntervalMs) || 500),
+    stopLossPercent: Math.max(0, Number(config.stopLossPercent) || 0),
+    takeProfitPercent: Math.max(0, Number(config.takeProfitPercent) || 0),
     maxPortfolioDrawdownPercent: Number(config.maxPortfolioDrawdownPercent) || 0,
     pollMs: Number(config.pollMs) || 0
   };
@@ -100,6 +114,9 @@ export function inspectMomentumShadowCandidate({
   const liveOwnerCount = owners.filter(owner => owner.alive && owner.runnerState === 'running').length;
   if (liveOwnerCount > 0) warnings.push(`existing_live_owner_count:${liveOwnerCount}`);
 
+  const expectedBenchmarkThreshold = Number.isFinite(Number(expectedConfig?.benchmarkTrendMinPercent))
+    ? Number(expectedConfig.benchmarkTrendMinPercent)
+    : null;
   const benchmark = readJson(path.join(path.resolve(benchmarkDir || ''), 'ledger.json'));
   let benchmarkHeartbeatAgeSeconds = null;
   let benchmarkHeartbeatFresh = false;
@@ -107,6 +124,9 @@ export function inspectMomentumShadowCandidate({
   let benchmarkStaleLimitMs = null;
   let benchmarkNextPollAt = null;
   let benchmarkNextPollDueInSeconds = null;
+  let benchmarkTrend = null;
+  let benchmarkCandidateGateOpen = false;
+  let benchmarkSourceGateOpen = false;
   if (!benchmark) {
     blockers.push('benchmark_ledger_missing');
   } else {
@@ -126,13 +146,21 @@ export function inspectMomentumShadowCandidate({
     benchmarkNextPollDueInSeconds = nextPollAtMs === null
       ? null
       : Math.max(0, Math.ceil((nextPollAtMs - Number(now)) / 1000));
+    const rawBenchmarkTrend = benchmark.benchmarkTrendPercent;
+    benchmarkTrend = rawBenchmarkTrend === null ||
+      rawBenchmarkTrend === undefined || rawBenchmarkTrend === ''
+      ? null
+      : Number(rawBenchmarkTrend);
+    benchmarkCandidateGateOpen = expectedBenchmarkThreshold !== null &&
+      Number.isFinite(benchmarkTrend) && benchmarkTrend > expectedBenchmarkThreshold;
+    benchmarkSourceGateOpen = benchmark.benchmarkGateOpen === true;
     if (benchmark.runnerState !== 'running' || !ownerAlive(benchmark.ownerPid)) {
       blockers.push('benchmark_owner_not_running');
     }
     if (!heartbeatFresh) {
       blockers.push('benchmark_heartbeat_stale');
     }
-    if (requireBenchmarkOpen && benchmark.benchmarkGateOpen !== true) {
+    if (requireBenchmarkOpen && !benchmarkCandidateGateOpen) {
       blockers.push('benchmark_gate_closed');
     }
     if (pollMs < minimumPollMs) warnings.push('benchmark_poll_below_candidate_budget');
@@ -154,10 +182,13 @@ export function inspectMomentumShadowCandidate({
     benchmark: benchmark ? {
       ownerPid: benchmark.ownerPid || null,
       runnerState: benchmark.runnerState || null,
-      gateOpen: benchmark.benchmarkGateOpen === true,
-      trendPercent: Number.isFinite(Number(benchmark.benchmarkTrendPercent))
-        ? Number(benchmark.benchmarkTrendPercent)
+      gateOpen: benchmarkCandidateGateOpen,
+      sourceGateOpen: benchmarkSourceGateOpen,
+      candidateThresholdPercent: expectedBenchmarkThreshold,
+      sourceThresholdPercent: Number.isFinite(Number(benchmark.config?.benchmarkTrendMinPercent))
+        ? Number(benchmark.config.benchmarkTrendMinPercent)
         : null,
+      trendPercent: Number.isFinite(benchmarkTrend) ? benchmarkTrend : null,
       heartbeatAt: benchmark.heartbeatAt || null,
       heartbeatAgeSeconds: benchmarkHeartbeatAgeSeconds,
       heartbeatFresh: benchmarkHeartbeatFresh,

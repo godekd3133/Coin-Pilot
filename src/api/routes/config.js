@@ -25,7 +25,7 @@ export default function createConfigRoutes(server) {
       emaLong: { min: 3, max: 500, step: 1, label: 'EMA 장기', description: '장기 지수이동평균 기간 (3~500)', category: 'EMA' },
       stopLossPercent: { min: 0.1, max: 100, step: 0.1, label: '손절률 (%)', description: '손절 실행 기준 하락률 (0.1%~100%)', category: 'Trading' },
       takeProfitPercent: { min: 0.1, max: 1000, step: 0.1, label: '익절률 (%)', description: '익절 실행 기준 상승률 (0.1%~1000%)', category: 'Trading' },
-      trailingStopPercent: { min: 0, max: 50, step: 0.05, label: '트레일링 스탑 (%)', description: '스캘핑은 0으로 비활성화; 활성화 시 고점 대비 하락폭', category: 'Trading' },
+      trailingStopPercent: { min: 0, max: 5, step: 0.05, label: '트레일링 스탑 (%)', description: '스캘핑은 0으로 비활성화; 활성화 시 고점 대비 하락폭 (최대 5%)', category: 'Trading' },
       minReboundPercent: { min: 0.01, max: 5, step: 0.01, label: '최소 반등률 (%)', description: '과매도 이후 완료 캔들의 최소 반등률', category: 'Scalping' },
       maxReboundPercent: { min: 0, max: 10, step: 0.05, label: '최대 반등률 (%)', description: '0은 비활성화; 이미 과대 반등한 캔들의 추격 진입을 차단하는 상한', category: 'Scalping' },
       minRsiRecovery: { min: 0.1, max: 30, step: 0.1, label: '최소 RSI 회복', description: '직전 완료 캔들 대비 RSI 회복 폭', category: 'Scalping' },
@@ -165,7 +165,7 @@ export default function createConfigRoutes(server) {
             macdFast: 19, macdSlow: 39, macdSignal: 14,
             bbPeriod: 30, bbStdDev: 2.2,
             emaShort: 20, emaMid: 60, emaLong: 200,
-            stopLossPercent: 12, takeProfitPercent: 25, trailingStopPercent: 8,
+            stopLossPercent: 12, takeProfitPercent: 25, trailingStopPercent: 5,
             buyThreshold: 65, sellThreshold: 65,
             volumeMultiplier: 1.3, volumePeriod: 40,
             investmentRatio: 0.05

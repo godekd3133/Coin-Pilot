@@ -1,3 +1,8 @@
+import {
+  calculateCloseVolatilityPercent,
+  calculateVolatilityPositionScale
+} from './momentumShadowVolatility.js';
+
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 export const DEFAULT_DAILY_MOMENTUM_CONFIG = Object.freeze({
@@ -14,11 +19,30 @@ export const DEFAULT_DAILY_MOMENTUM_CONFIG = Object.freeze({
   cooldownAfterLossDays: 0,
   benchmarkMarket: null,
   benchmarkTrendMinPercent: null,
+  benchmarkMinUpBars: 1,
+  benchmarkExitConfirmationBars: 1,
+  regimeExitConfirmationBars: 1,
+  relativeTrendMinPercent: null,
+  volatilityLookbackDays: 14,
+  volatilityTargetPercent: null,
+  excludeBenchmarkFromEntries: false,
+  excludeBenchmarkFromBreadth: false,
   benchmarkExposureMinPercent: null,
   benchmarkExposureMaxPercent: null,
   exitOnBenchmarkOff: false,
+  stopLossPercent: 0,
   maxPortfolioDrawdownPercent: 0,
   mode: 'fixed',
+  // `close` preserves the original diagnostic contract. `next_open` is an
+  // explicit execution-boundary stress lane: a signal observed at the
+  // completed close is filled at the following candle's opening price.
+  entryExecution: 'close',
+  // `close` preserves the original exit contract. `next_open` defers a
+  // close-based exit signal to the following candle's opening price.
+  exitExecution: 'close',
+  // Research-only ceiling for adverse overnight gaps on next-open entries.
+  // Zero disables the guard and preserves the original execution contract.
+  maxEntryGapPercent: 0,
   excludeCurrentUtcDay: true
 });
 
@@ -52,8 +76,18 @@ function finite(value, fallback = null) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function optionalFinite(value, fallback = null) {
+  return value === null || value === undefined || value === ''
+    ? fallback
+    : finite(value, fallback);
+}
+
 function closeOf(candle) {
   return finite(candle?.trade_price ?? candle?.close ?? candle?.c);
+}
+
+function openingPriceOf(candle) {
+  return finite(candle?.opening_price ?? candle?.open ?? candle?.o);
 }
 
 function timestampOf(candle) {
@@ -80,7 +114,8 @@ function normalizeDailyCandles(rawCandles, options) {
     byTimestamp.set(timestamp, {
       ...candle,
       timestamp,
-      close
+      close,
+      openingPrice: openingPriceOf(candle)
     });
   }
   return [...byTimestamp.values()].sort((a, b) => a.timestamp - b.timestamp);
@@ -224,8 +259,13 @@ function failureResult(options, dataQuality) {
     openPositions: [],
     unknownBoundaryPositions: [],
     unknownBoundaryPositionCount: 0,
+    unknownBoundaryEntries: [],
+    unknownBoundaryEntryCount: 0,
+    unknownBoundaryExits: [],
+    unknownBoundaryExitCount: 0,
     entryCount: 0,
     blockedSignalCount: 0,
+    entryGapBlockedCount: 0,
     signals: 0,
     promotion: 'research_only_never_authorizes_live_orders'
   };
@@ -234,7 +274,11 @@ function failureResult(options, dataQuality) {
 /**
  * Shared-balance daily replay for the defensive momentum candidate.
  * Signals and exits use only the completed daily close at the current index;
- * no future candle is used to decide the same index's entry.
+ * no future candle is used to decide the same index's entry. The default
+ * `entryExecution=close` contract keeps the original close-fill diagnostic.
+ * The explicit `next_open` lane delays only entry execution to the following
+ * candle's opening price, making the boundary assumption measurable without
+ * silently changing the existing candidate.
  */
 export function simulateDailyMomentumPortfolio(rawCandlesByMarket, config = {}) {
   const options = { ...DEFAULT_DAILY_MOMENTUM_CONFIG, ...config };
@@ -249,11 +293,27 @@ export function simulateDailyMomentumPortfolio(rawCandlesByMarket, config = {}) 
   const cooldownAfterLossDays = Math.max(0, finite(options.cooldownAfterLossDays, 0));
   const benchmarkMarket = options.benchmarkMarket || null;
   const benchmarkTrendMinPercent = finite(options.benchmarkTrendMinPercent, null);
+  const benchmarkMinUpBars = Math.max(1, Math.floor(finite(options.benchmarkMinUpBars, 1)));
+  const benchmarkExitConfirmationBars = Math.max(
+    1,
+    Math.floor(finite(options.benchmarkExitConfirmationBars, 1))
+  );
+  const regimeExitConfirmationBars = Math.max(
+    1,
+    Math.floor(finite(options.regimeExitConfirmationBars, 1))
+  );
+  const relativeTrendMinPercent = optionalFinite(options.relativeTrendMinPercent, null);
+  const volatilityLookbackDays = Math.max(2, Math.floor(finite(options.volatilityLookbackDays, 14)));
+  const volatilityTargetPercent = optionalFinite(options.volatilityTargetPercent, null);
   const benchmarkExposureMinPercent = finite(options.benchmarkExposureMinPercent, null);
   const benchmarkExposureMaxPercent = finite(options.benchmarkExposureMaxPercent, null);
   const exitOnBenchmarkOff = options.exitOnBenchmarkOff === true;
+  const stopLossPercent = Math.max(0, finite(options.stopLossPercent, 0));
   const maxPortfolioDrawdownPercent = Math.max(0, finite(options.maxPortfolioDrawdownPercent, 0));
   const mode = options.mode === 'regime' ? 'regime' : 'fixed';
+  const entryExecution = options.entryExecution === 'next_open' ? 'next_open' : 'close';
+  const exitExecution = options.exitExecution === 'next_open' ? 'next_open' : 'close';
+  const maxEntryGapPercent = Math.max(0, finite(options.maxEntryGapPercent, 0));
   const maxHoldDays = Math.max(1, finite(options.maxHoldDays, mode === 'regime' ? 3650 : 3));
   const prepared = prepareDailyMomentumCandles(rawCandlesByMarket, {
     ...options,
@@ -270,8 +330,36 @@ export function simulateDailyMomentumPortfolio(rawCandlesByMarket, config = {}) 
       benchmarkMarket
     });
   }
+  if (relativeTrendMinPercent !== null && benchmarkMarket === null) {
+    return failureResult({ ...options, initialBalance }, {
+      ...dataQuality,
+      valid: false,
+      reason: 'relative_benchmark_missing'
+    });
+  }
 
   const markets = Object.keys(normalized);
+  if (entryExecution === 'next_open' || exitExecution === 'next_open') {
+    const missingOpeningPriceMarkets = markets.filter(market =>
+      normalized[market].some(candle => !Number.isFinite(candle.openingPrice) || candle.openingPrice <= 0)
+    );
+    if (missingOpeningPriceMarkets.length) {
+      return failureResult({ ...options, initialBalance, entryExecution }, {
+        ...dataQuality,
+        valid: false,
+        reason: entryExecution === 'next_open'
+          ? 'daily_entry_open_price_missing'
+          : 'daily_exit_open_price_missing',
+        missingOpeningPriceMarkets
+      });
+    }
+  }
+  const entryMarkets = benchmarkMarket && options.excludeBenchmarkFromEntries === true
+    ? markets.filter(market => market !== benchmarkMarket)
+    : markets;
+  const breadthMarkets = benchmarkMarket && options.excludeBenchmarkFromBreadth === true
+    ? markets.filter(market => market !== benchmarkMarket)
+    : markets;
   const timestamps = normalized[markets[0]].map(candle => candle.timestamp);
   let balance = initialBalance;
   const positions = new Map();
@@ -285,6 +373,9 @@ export function simulateDailyMomentumPortfolio(rawCandlesByMarket, config = {}) 
   let peakEquity = initialBalance;
   let drawdownStopTriggered = false;
   let drawdownStopAt = null;
+  let pendingEntries = [];
+  let pendingExits = [];
+  let entryGapBlockedCount = 0;
 
   const trendAt = (market, index) => {
     const candles = normalized[market];
@@ -293,13 +384,153 @@ export function simulateDailyMomentumPortfolio(rawCandlesByMarket, config = {}) 
     return reference > 0 ? ((candles[index].close - reference) / reference) * 100 : null;
   };
 
+  const isTrendOffConfirmed = (market, index, threshold, confirmationBars) => {
+    for (let offset = 0; offset < confirmationBars; offset += 1) {
+      const trend = trendAt(market, index - offset);
+      if (trend === null || trend > threshold) return false;
+    }
+    return true;
+  };
+
+  const volatilityScaleAt = (market, index) => {
+    if (volatilityTargetPercent === null || volatilityTargetPercent <= 0) return 1;
+    const candles = normalized[market];
+    const volatilityPercent = calculateCloseVolatilityPercent(
+      candles,
+      index,
+      volatilityLookbackDays
+    );
+    if (volatilityPercent === null) return null;
+    return calculateVolatilityPositionScale(volatilityPercent, volatilityTargetPercent);
+  };
+
+  const realizeExit = (
+    market,
+    position,
+    exitPrice,
+    exitTimestamp,
+    exit,
+    effectiveExitTimestamp = exitTimestamp,
+    exitIsNextOpen = false
+  ) => {
+    const rawProfitPercent = ((exitPrice - position.entryPrice) / position.entryPrice) * 100;
+    const profitPercent = rawProfitPercent - costPercent;
+    const profitAmount = position.size * (profitPercent / 100);
+    balance += position.size + profitAmount;
+    // Recorded timestamps are candle-open times while a close execution
+    // semantically happens at that candle's close, so heldDays compares
+    // semantic times; otherwise a close entry with a next-open exit is
+    // counted one day too long.
+    const heldEntryTimestamp = position.entryTimestamp +
+      (entryExecution === 'next_open' ? 0 : DAY_MS);
+    const heldExitTimestamp = exitTimestamp + (exitIsNextOpen ? 0 : DAY_MS);
+    trades.push({
+      market,
+      entryTimestamp: new Date(position.entryTimestamp).toISOString(),
+      entryPrice: position.entryPrice,
+      exitTimestamp: new Date(exitTimestamp).toISOString(),
+      exitPrice,
+      exit,
+      entryGapPercent: position.entryGapPercent ?? null,
+      profitPercent,
+      profitAmount,
+      heldDays: (heldExitTimestamp - heldEntryTimestamp) / DAY_MS
+    });
+    positions.delete(market);
+    cooldownUntilByMarket.set(
+      market,
+      profitPercent < 0 ? effectiveExitTimestamp + cooldownAfterLossDays * DAY_MS : 0
+    );
+  };
+
   for (let index = trendLookbackDays; index < timestamps.length; index += 1) {
     const timestamp = timestamps[index];
+    const candleCloseTimestamp = timestamp +
+      (entryExecution === 'next_open' ? DAY_MS : 0);
+
+    if (exitExecution === 'next_open' && pendingExits.length > 0) {
+      const openingExits = pendingExits;
+      pendingExits = [];
+      for (const pending of openingExits) {
+        const exitCandle = normalized[pending.market][index];
+        const exitPrice = exitCandle?.openingPrice;
+        if (!Number.isFinite(exitPrice) || exitPrice <= 0) {
+          pendingExits.push(pending);
+          continue;
+        }
+        const position = positions.get(pending.market);
+        if (!position) continue;
+        realizeExit(pending.market, position, exitPrice, timestamp, pending.exit, timestamp, true);
+      }
+    }
+
+    // A next-open entry is planned from the preceding completed close and is
+    // filled before observing this candle's close. Planned size is reserved
+    // using the prior close's available cash, but cash is debited only at the
+    // modeled fill so the interim equity curve does not invent an asset mark.
+    if (entryExecution === 'next_open' && pendingEntries.length > 0) {
+      const openingEntries = pendingEntries;
+      pendingEntries = [];
+      for (const pending of openingEntries) {
+        if (positions.has(pending.market) || positions.size >= maxPositions) {
+          blockedSignalCount += 1;
+          continue;
+        }
+        const entryCandle = normalized[pending.market][index];
+        const entryPrice = entryCandle?.openingPrice;
+        if (!Number.isFinite(entryPrice) || entryPrice <= 0 || pending.size > balance) {
+          blockedSignalCount += 1;
+          continue;
+        }
+        const signalClosePrice = Number(pending.signalClosePrice);
+        const entryGapPercent = Number.isFinite(signalClosePrice) && signalClosePrice > 0
+          ? ((entryPrice - signalClosePrice) / signalClosePrice) * 100
+          : null;
+        if (maxEntryGapPercent > 0 && (
+          entryGapPercent === null || entryGapPercent > maxEntryGapPercent
+        )) {
+          entryGapBlockedCount += 1;
+          continue;
+        }
+        balance -= pending.size;
+        positions.set(pending.market, {
+          market: pending.market,
+          entryTimestamp: timestamp,
+          entryPrice,
+          size: pending.size,
+          benchmarkExposureScale: pending.benchmarkExposureScale,
+          volatilityScale: pending.volatilityScale,
+          trendPercent: pending.trendPercent,
+          breadth: pending.breadth,
+          entryGapPercent,
+          signalTimestamp: pending.signalTimestamp,
+          entryExecution
+        });
+      }
+    }
+
     const benchmarkTrend = benchmarkMarket ? trendAt(benchmarkMarket, index) : null;
-    const benchmarkGateOpen = benchmarkMarket === null || benchmarkTrend === null ||
-      benchmarkTrend > (benchmarkTrendMinPercent ?? -Infinity);
-  const benchmarkOff = benchmarkMarket !== null && benchmarkTrend !== null &&
-      benchmarkTrend <= (benchmarkTrendMinPercent ?? -Infinity);
+    const benchmarkThreshold = benchmarkTrendMinPercent ?? -Infinity;
+    const benchmarkCurrentOpen = benchmarkMarket === null || benchmarkTrend === null ||
+      benchmarkTrend > benchmarkThreshold;
+    let benchmarkGateOpen = benchmarkCurrentOpen;
+    if (benchmarkMarket !== null && benchmarkCurrentOpen && benchmarkMinUpBars > 1) {
+      for (let offset = 1; offset < benchmarkMinUpBars; offset += 1) {
+        const priorTrend = trendAt(benchmarkMarket, index - offset);
+        if (priorTrend === null || priorTrend <= benchmarkThreshold) {
+          benchmarkGateOpen = false;
+          break;
+        }
+      }
+    }
+    const benchmarkOff = benchmarkMarket !== null && benchmarkTrend !== null &&
+      benchmarkTrend <= benchmarkThreshold;
+    const benchmarkOffConfirmed = benchmarkOff && isTrendOffConfirmed(
+      benchmarkMarket,
+      index,
+      benchmarkThreshold,
+      benchmarkExitConfirmationBars
+    );
     const benchmarkExposureScale = benchmarkMarket && benchmarkTrend !== null &&
       benchmarkExposureMinPercent !== null && benchmarkExposureMaxPercent !== null &&
       benchmarkExposureMaxPercent > benchmarkExposureMinPercent
@@ -307,42 +538,46 @@ export function simulateDailyMomentumPortfolio(rawCandlesByMarket, config = {}) 
         (benchmarkExposureMaxPercent - benchmarkExposureMinPercent)))
       : 1;
 
-    // Exits happen before entries, matching the forward runner. Newly opened
-    // positions cannot exit on their own entry candle.
+    // Exits happen before entries, matching the forward runner. A close-fill
+    // position cannot exit on its entry candle; a next-open position can reach
+    // its first completed close after one full daily candle.
     for (const [market, position] of [...positions.entries()]) {
       const candle = normalized[market][index];
       const rawProfitPercent = ((candle.close - position.entryPrice) / position.entryPrice) * 100;
-      const trendPercent = trendAt(market, index);
-      const heldDays = (timestamp - position.entryTimestamp) / DAY_MS;
+      // A next-open position is entered at the current candle's opening
+      // timestamp but its close is observed one day later. The forward
+      // shadow runner uses entryTimeMs plus maxHoldHours and exits against
+      // that completed candle close, so include the candle duration here to
+      // keep a 24-hour fixed contract aligned across research and forward.
+      const heldDays = (candleCloseTimestamp - position.entryTimestamp) / DAY_MS;
       const fixedExit = mode === 'fixed' && heldDays >= maxHoldDays;
-      const regimeExit = mode === 'regime' && trendPercent !== null && trendPercent <= trendMinPercent;
-      const benchmarkExit = mode === 'regime' && exitOnBenchmarkOff && benchmarkOff;
-      if (!fixedExit && !regimeExit && !benchmarkExit) continue;
-      const profitPercent = rawProfitPercent - costPercent;
-      const profitAmount = position.size * (profitPercent / 100);
-      balance += position.size + profitAmount;
-      trades.push({
+      const stopLossExit = stopLossPercent > 0 && rawProfitPercent <= -stopLossPercent;
+      const regimeExit = mode === 'regime' && isTrendOffConfirmed(
         market,
-        entryTimestamp: new Date(position.entryTimestamp).toISOString(),
-        entryPrice: position.entryPrice,
-        exitTimestamp: new Date(timestamp).toISOString(),
-        exitPrice: candle.close,
-        exit: fixedExit ? 'MAX_HOLD' : benchmarkExit ? 'BENCHMARK_OFF' : 'REGIME_OFF',
-        profitPercent,
-        profitAmount,
-        heldDays
-      });
-      positions.delete(market);
-      cooldownUntilByMarket.set(
-        market,
-        profitPercent < 0 ? timestamp + cooldownAfterLossDays * DAY_MS : 0
+        index,
+        trendMinPercent,
+        regimeExitConfirmationBars
       );
+      const benchmarkExit = mode === 'regime' && exitOnBenchmarkOff && benchmarkOffConfirmed;
+      if (!stopLossExit && !fixedExit && !regimeExit && !benchmarkExit) continue;
+      const exit = stopLossExit ? 'STOP_LOSS' : fixedExit ? 'MAX_HOLD' : benchmarkExit ? 'BENCHMARK_OFF' : 'REGIME_OFF';
+      if (exitExecution === 'next_open') {
+        if (!pendingExits.some(pending => pending.market === market)) {
+          pendingExits.push({ market, exit, signalTimestamp: timestamp });
+        }
+        continue;
+      }
+      realizeExit(market, position, candle.close, timestamp, exit, candleCloseTimestamp);
     }
 
+    // `trends` must cover every entry candidate, not just the breadth set:
+    // a benchmark excluded from breadth but still tradable needs its own
+    // trend gate evaluated rather than passing on an undefined lookup.
     const trends = Object.fromEntries(markets.map(market => [market, trendAt(market, index)]));
-    const breadth = Object.values(trends).filter(value => value !== null && value > trendMinPercent).length;
+    const breadth = breadthMarkets.filter(market =>
+      trends[market] !== null && trends[market] > trendMinPercent).length;
     const candidates = [];
-    for (const market of markets) {
+    for (const market of entryMarkets) {
       const candle = normalized[market][index];
       const trendPercent = trends[market];
       if (positions.has(market) || lastEntryTimestampByMarket.get(market) === timestamp) continue;
@@ -354,28 +589,51 @@ export function simulateDailyMomentumPortfolio(rawCandlesByMarket, config = {}) 
         if (!upBarsConfirmed) continue;
       }
       if (trendPercent === null || trendPercent <= trendMinPercent || breadth < breadthMin) continue;
+      if (relativeTrendMinPercent !== null && (
+        benchmarkTrend === null || trendPercent - benchmarkTrend <= relativeTrendMinPercent
+      )) continue;
+      const volatilityScale = volatilityScaleAt(market, index);
+      if (volatilityScale === null) continue;
       signals += 1;
-      candidates.push({ market, candle, trendPercent, breadth });
+      candidates.push({ market, candle, trendPercent, breadth, volatilityScale });
     }
     candidates.sort((a, b) => b.trendPercent - a.trendPercent || a.market.localeCompare(b.market));
+    let plannedBalance = balance;
     for (const candidate of candidates) {
       if (drawdownStopTriggered) continue;
-      if (positions.size >= maxPositions) {
+      if (positions.size + pendingEntries.length >= maxPositions) {
         blockedSignalCount += 1;
         continue;
       }
-      const size = balance * positionFraction * benchmarkExposureScale;
+      const size = plannedBalance * positionFraction * benchmarkExposureScale * candidate.volatilityScale;
       if (size <= 0) continue;
-      balance -= size;
-      positions.set(candidate.market, {
-        market: candidate.market,
-        entryTimestamp: timestamp,
-        entryPrice: candidate.candle.close,
-        size,
-        benchmarkExposureScale,
-        trendPercent: candidate.trendPercent,
-        breadth: candidate.breadth
-      });
+      plannedBalance -= size;
+      if (entryExecution === 'next_open') {
+        pendingEntries.push({
+          market: candidate.market,
+          size,
+          benchmarkExposureScale,
+          volatilityScale: candidate.volatilityScale,
+          trendPercent: candidate.trendPercent,
+          breadth: candidate.breadth,
+          signalClosePrice: candidate.candle.close,
+          signalTimestamp: timestamp
+        });
+      } else {
+        balance -= size;
+        positions.set(candidate.market, {
+          market: candidate.market,
+          entryTimestamp: timestamp,
+          entryPrice: candidate.candle.close,
+          size,
+          benchmarkExposureScale,
+          volatilityScale: candidate.volatilityScale,
+          trendPercent: candidate.trendPercent,
+          breadth: candidate.breadth,
+          entryGapPercent: null,
+          entryExecution
+        });
+      }
       lastEntryTimestampByMarket.set(candidate.market, timestamp);
     }
 
@@ -390,28 +648,27 @@ export function simulateDailyMomentumPortfolio(rawCandlesByMarket, config = {}) 
     const drawdownPercent = peakEquity > 0 ? ((peakEquity - equity) / peakEquity) * 100 : 0;
     if (!drawdownStopTriggered && maxPortfolioDrawdownPercent > 0 &&
       drawdownPercent >= maxPortfolioDrawdownPercent && positions.size > 0) {
-      for (const [market, position] of [...positions.entries()]) {
-        const exitCandle = normalized[market][index];
-        const rawProfitPercent = ((exitCandle.close - position.entryPrice) / position.entryPrice) * 100;
-        const profitPercent = rawProfitPercent - costPercent;
-        const profitAmount = position.size * (profitPercent / 100);
-        balance += position.size + profitAmount;
-        trades.push({
-          market,
-          entryTimestamp: new Date(position.entryTimestamp).toISOString(),
-          entryPrice: position.entryPrice,
-          exitTimestamp: new Date(timestamp).toISOString(),
-          exitPrice: exitCandle.close,
-          exit: 'PORTFOLIO_DRAWDOWN_STOP',
-          profitPercent,
-          profitAmount,
-          heldDays: (timestamp - position.entryTimestamp) / DAY_MS
-        });
-        positions.delete(market);
+      if (exitExecution === 'next_open') {
+        for (const market of positions.keys()) {
+          if (!pendingExits.some(pending => pending.market === market)) {
+            pendingExits.push({ market, exit: 'PORTFOLIO_DRAWDOWN_STOP', signalTimestamp: timestamp });
+          }
+        }
+      } else {
+        for (const [market, position] of [...positions.entries()]) {
+          realizeExit(
+            market,
+            position,
+            normalized[market][index].close,
+            timestamp,
+            'PORTFOLIO_DRAWDOWN_STOP',
+            candleCloseTimestamp
+          );
+        }
       }
       drawdownStopTriggered = true;
       drawdownStopAt = new Date(timestamp).toISOString();
-      equity = balance;
+      if (exitExecution !== 'next_open') equity = balance;
     }
     equityCurve.push(equity);
   }
@@ -456,10 +713,22 @@ export function simulateDailyMomentumPortfolio(rawCandlesByMarket, config = {}) 
       cooldownAfterLossDays,
       benchmarkMarket,
       benchmarkTrendMinPercent,
+      benchmarkMinUpBars,
+      benchmarkExitConfirmationBars,
+      regimeExitConfirmationBars,
+      relativeTrendMinPercent,
+      volatilityLookbackDays,
+      volatilityTargetPercent,
+      excludeBenchmarkFromEntries: options.excludeBenchmarkFromEntries === true,
+      excludeBenchmarkFromBreadth: options.excludeBenchmarkFromBreadth === true,
       benchmarkExposureMinPercent,
       benchmarkExposureMaxPercent,
-      exitOnBenchmarkOff
-      ,maxPortfolioDrawdownPercent
+      exitOnBenchmarkOff,
+      stopLossPercent,
+      maxPortfolioDrawdownPercent,
+      entryExecution,
+      exitExecution,
+      maxEntryGapPercent
     },
     dataQuality,
     metrics,
@@ -469,8 +738,23 @@ export function simulateDailyMomentumPortfolio(rawCandlesByMarket, config = {}) 
     openPositions,
     unknownBoundaryPositions: openPositions,
     unknownBoundaryPositionCount: openPositions.length,
+    unknownBoundaryEntries: pendingEntries.map(entry => ({
+      market: entry.market,
+      signalTimestamp: new Date(entry.signalTimestamp).toISOString(),
+      plannedSize: entry.size,
+      reason: 'entry_after_study_boundary'
+    })),
+    unknownBoundaryEntryCount: pendingEntries.length,
+    unknownBoundaryExits: pendingExits.map(exit => ({
+      market: exit.market,
+      signalTimestamp: new Date(exit.signalTimestamp).toISOString(),
+      exit: exit.exit,
+      reason: 'exit_after_study_boundary'
+    })),
+    unknownBoundaryExitCount: pendingExits.length,
     entryCount: trades.length + openPositions.length,
     blockedSignalCount,
+    entryGapBlockedCount,
     signals,
     drawdownStopTriggered,
     drawdownStopAt,
@@ -516,12 +800,17 @@ export function evaluateDailyMomentumVariants(rawCandlesByMarket, {
         available: result.available,
         metrics: result.metrics,
         unknownBoundaryPositionCount: result.unknownBoundaryPositionCount,
+        unknownBoundaryEntryCount: result.unknownBoundaryEntryCount,
+        unknownBoundaryExitCount: result.unknownBoundaryExitCount,
         dataQuality: result.dataQuality
       };
     });
     const allSegmentsAvailable = segments.every(segment => segment.available);
     const allSegmentsNonNegative = allSegmentsAvailable && segments.every(segment =>
-      segment.metrics.totalReturnPercent >= 0 && segment.unknownBoundaryPositionCount === 0
+      segment.metrics.totalReturnPercent >= 0 &&
+      segment.unknownBoundaryPositionCount === 0 &&
+      segment.unknownBoundaryEntryCount === 0 &&
+      segment.unknownBoundaryExitCount === 0
     );
     return {
       name: variant.name,
@@ -530,6 +819,8 @@ export function evaluateDailyMomentumVariants(rawCandlesByMarket, {
         available: full.available,
         metrics: full.metrics,
         unknownBoundaryPositionCount: full.unknownBoundaryPositionCount,
+        unknownBoundaryEntryCount: full.unknownBoundaryEntryCount,
+        unknownBoundaryExitCount: full.unknownBoundaryExitCount,
         dataQuality: full.dataQuality,
         drawdownStopTriggered: full.drawdownStopTriggered === true,
         drawdownStopAt: full.drawdownStopAt || null

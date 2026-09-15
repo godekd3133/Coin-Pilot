@@ -9,15 +9,78 @@ import {
 dotenv.config();
 
 const number = (value, fallback) => Number.isFinite(Number(value)) ? Number(value) : fallback;
+const numberAxis = value => value.split(',').map(Number).filter(Number.isFinite);
 const inputFile = process.env.DAILY_MOMENTUM_CANDLES_FILE || process.argv[2];
 const outputFile = process.env.DAILY_MOMENTUM_ROBUSTNESS_REPORT_FILE ||
-  '/private/tmp/coinpilot-daily-momentum-robustness-report.json';
+  process.argv[3] || '/private/tmp/coinpilot-daily-momentum-robustness-report.json';
 const benchmarkThresholds = process.env.DAILY_MOMENTUM_ROBUSTNESS_BENCHMARK_THRESHOLDS
   ? process.env.DAILY_MOMENTUM_ROBUSTNESS_BENCHMARK_THRESHOLDS
     .split(',').map(Number).filter(Number.isFinite)
   : null;
 const minUpBars = process.env.DAILY_MOMENTUM_ROBUSTNESS_MIN_UP_BARS
   ? process.env.DAILY_MOMENTUM_ROBUSTNESS_MIN_UP_BARS.split(',').map(Number).filter(Number.isFinite)
+  : null;
+const trendMinPercent = process.env.DAILY_MOMENTUM_ROBUSTNESS_TREND_MIN_PERCENT
+  ? numberAxis(process.env.DAILY_MOMENTUM_ROBUSTNESS_TREND_MIN_PERCENT)
+  : null;
+const breadthMin = process.env.DAILY_MOMENTUM_ROBUSTNESS_BREADTH_MIN
+  ? numberAxis(process.env.DAILY_MOMENTUM_ROBUSTNESS_BREADTH_MIN)
+  : null;
+const positionFraction = process.env.DAILY_MOMENTUM_ROBUSTNESS_POSITION_FRACTION
+  ? numberAxis(process.env.DAILY_MOMENTUM_ROBUSTNESS_POSITION_FRACTION)
+  : null;
+const maxPositions = process.env.DAILY_MOMENTUM_ROBUSTNESS_MAX_POSITIONS
+  ? numberAxis(process.env.DAILY_MOMENTUM_ROBUSTNESS_MAX_POSITIONS)
+  : null;
+const cooldownAfterLossDays = process.env.DAILY_MOMENTUM_ROBUSTNESS_COOLDOWN_AFTER_LOSS_DAYS
+  ? numberAxis(process.env.DAILY_MOMENTUM_ROBUSTNESS_COOLDOWN_AFTER_LOSS_DAYS)
+  : null;
+const maxPortfolioDrawdownPercent = process.env.DAILY_MOMENTUM_ROBUSTNESS_MAX_PORTFOLIO_DRAWDOWN_PERCENT
+  ? numberAxis(process.env.DAILY_MOMENTUM_ROBUSTNESS_MAX_PORTFOLIO_DRAWDOWN_PERCENT)
+  : null;
+const benchmarkExitConfirmationBars = process.env.DAILY_MOMENTUM_ROBUSTNESS_BENCHMARK_EXIT_CONFIRMATION_BARS
+  ? process.env.DAILY_MOMENTUM_ROBUSTNESS_BENCHMARK_EXIT_CONFIRMATION_BARS
+    .split(',').map(Number).filter(Number.isFinite)
+  : null;
+const regimeExitConfirmationBars = process.env.DAILY_MOMENTUM_ROBUSTNESS_REGIME_EXIT_CONFIRMATION_BARS
+  ? process.env.DAILY_MOMENTUM_ROBUSTNESS_REGIME_EXIT_CONFIRMATION_BARS
+    .split(',').map(Number).filter(Number.isFinite)
+  : null;
+const relativeTrendMinPercent = process.env.DAILY_MOMENTUM_ROBUSTNESS_RELATIVE_TREND_MIN_PERCENT
+  ? process.env.DAILY_MOMENTUM_ROBUSTNESS_RELATIVE_TREND_MIN_PERCENT
+    .split(',').map(Number).filter(Number.isFinite)
+  : null;
+const volatilityLookbackDays = process.env.DAILY_MOMENTUM_ROBUSTNESS_VOLATILITY_LOOKBACK_DAYS
+  ? process.env.DAILY_MOMENTUM_ROBUSTNESS_VOLATILITY_LOOKBACK_DAYS
+    .split(',').map(Number).filter(Number.isFinite)
+  : null;
+const volatilityTargetPercent = process.env.DAILY_MOMENTUM_ROBUSTNESS_VOLATILITY_TARGET_PERCENT
+  ? process.env.DAILY_MOMENTUM_ROBUSTNESS_VOLATILITY_TARGET_PERCENT
+    .split(',').map(Number).filter(Number.isFinite)
+  : null;
+const stopLossPercent = process.env.DAILY_MOMENTUM_ROBUSTNESS_STOP_LOSS_PERCENT
+  ? process.env.DAILY_MOMENTUM_ROBUSTNESS_STOP_LOSS_PERCENT
+    .split(',').map(Number).filter(Number.isFinite)
+  : null;
+const maxEntryGapPercent = process.env.DAILY_MOMENTUM_ROBUSTNESS_MAX_ENTRY_GAP_PERCENT
+  ? numberAxis(process.env.DAILY_MOMENTUM_ROBUSTNESS_MAX_ENTRY_GAP_PERCENT)
+  : null;
+const entryExecution = process.env.DAILY_MOMENTUM_ROBUSTNESS_ENTRY_EXECUTION === 'next_open'
+  ? 'next_open'
+  : null;
+const exitExecution = process.env.DAILY_MOMENTUM_ROBUSTNESS_EXIT_EXECUTION === 'next_open'
+  ? 'next_open'
+  : null;
+const costPercent = process.env.DAILY_MOMENTUM_ROBUSTNESS_COST_PERCENT === undefined
+  ? null
+  : number(process.env.DAILY_MOMENTUM_ROBUSTNESS_COST_PERCENT, 0.2);
+const modes = process.env.DAILY_MOMENTUM_ROBUSTNESS_MODES
+  ? process.env.DAILY_MOMENTUM_ROBUSTNESS_MODES
+    .split(',').map(value => value.trim()).filter(value => value === 'fixed' || value === 'regime')
+  : null;
+const maxHoldDays = process.env.DAILY_MOMENTUM_ROBUSTNESS_MAX_HOLD_DAYS
+  ? numberAxis(process.env.DAILY_MOMENTUM_ROBUSTNESS_MAX_HOLD_DAYS)
+    .map(value => Math.max(1, Math.floor(value)))
   : null;
 
 function loadCandles(file) {
@@ -72,10 +135,37 @@ function main() {
     segmentMode: process.env.DAILY_MOMENTUM_ROBUSTNESS_SEGMENT_MODE === 'independent'
       ? 'independent'
       : DEFAULT_DAILY_MOMENTUM_ROBUSTNESS_CONFIG.segmentMode,
-    grid: benchmarkThresholds?.length || minUpBars?.length
+    ...((entryExecution || exitExecution || costPercent !== null) ? {
+      baseConfig: {
+        ...(entryExecution ? { entryExecution } : {}),
+        ...(exitExecution ? { exitExecution } : {}),
+        ...(costPercent !== null ? { costPercent } : {})
+      }
+    } : {}),
+    grid: modes?.length || maxHoldDays?.length || trendMinPercent?.length || breadthMin?.length || positionFraction?.length || maxPositions?.length ||
+      cooldownAfterLossDays?.length || maxPortfolioDrawdownPercent?.length ||
+      benchmarkThresholds?.length || minUpBars?.length ||
+      benchmarkExitConfirmationBars?.length || regimeExitConfirmationBars?.length ||
+      relativeTrendMinPercent?.length || volatilityLookbackDays?.length ||
+      volatilityTargetPercent?.length || stopLossPercent?.length || maxEntryGapPercent?.length
       ? {
+        ...(modes?.length ? { mode: modes } : {}),
+        ...(maxHoldDays?.length ? { maxHoldDays } : {}),
+        ...(trendMinPercent?.length ? { trendMinPercent } : {}),
+        ...(breadthMin?.length ? { breadthMin } : {}),
+        ...(positionFraction?.length ? { positionFraction } : {}),
+        ...(maxPositions?.length ? { maxPositions } : {}),
+        ...(cooldownAfterLossDays?.length ? { cooldownAfterLossDays } : {}),
+        ...(maxPortfolioDrawdownPercent?.length ? { maxPortfolioDrawdownPercent } : {}),
         ...(benchmarkThresholds?.length ? { benchmarkTrendMinPercent: benchmarkThresholds } : {}),
-        ...(minUpBars?.length ? { minUpBars } : {})
+        ...(minUpBars?.length ? { minUpBars } : {}),
+        ...(benchmarkExitConfirmationBars?.length ? { benchmarkExitConfirmationBars } : {}),
+        ...(regimeExitConfirmationBars?.length ? { regimeExitConfirmationBars } : {}),
+        ...(relativeTrendMinPercent?.length ? { relativeTrendMinPercent } : {}),
+        ...(volatilityLookbackDays?.length ? { volatilityLookbackDays } : {}),
+        ...(volatilityTargetPercent?.length ? { volatilityTargetPercent } : {}),
+        ...(stopLossPercent?.length ? { stopLossPercent } : {}),
+        ...(maxEntryGapPercent?.length ? { maxEntryGapPercent } : {})
       }
       : undefined
   });

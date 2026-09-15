@@ -29,10 +29,66 @@
       "KRW-NEAR",
       "KRW-ETC",
       "KRW-SUI"
-    ]
+    ],
+    "pollMs": 300000,
+    "benchmarkMarket": null,
+    "benchmarkTrendMinPercent": null,
+    "exitOnBenchmarkOff": false,
+    "requestIntervalMs": 500,
+    "volatilityLookbackDays": 14,
+    "volatilityTargetPercent": null
   },
-  "balance": 98854370.13948093,
-  "positions": {},
+  "balance": 41704187.40259352,
+  "positions": {
+    "KRW-ETH": {
+      "entryPrice": 3397000,
+      "entryTs": "2026-09-14T00:00:00",
+      "entryTimeMs": 1789430464454,
+      "size": 24713592.534870233,
+      "trendPercent": 0.20648967551622419,
+      "breadth": 3,
+      "markPrice": 3397000,
+      "markTimestamp": "2026-09-14T00:00:00.000Z",
+      "markGrossProfitPercent": 0,
+      "markProfitPercent": -0.2,
+      "markValue": 24664165.349800494,
+      "unrealizedProfit": -49427.18506973982,
+      "maxFavorableExcursionPercent": -0.2,
+      "maxAdverseExcursionPercent": -0.2
+    },
+    "KRW-XRP": {
+      "entryPrice": 1922,
+      "entryTs": "2026-09-14T00:00:00",
+      "entryTimeMs": 1789430464454,
+      "size": 18535194.401152674,
+      "trendPercent": 1.1046817464492371,
+      "breadth": 3,
+      "markPrice": 1922,
+      "markTimestamp": "2026-09-14T00:00:00.000Z",
+      "markGrossProfitPercent": 0,
+      "markProfitPercent": -0.2,
+      "markValue": 18498124.01235037,
+      "unrealizedProfit": -37070.388802304864,
+      "maxFavorableExcursionPercent": -0.2,
+      "maxAdverseExcursionPercent": -0.2
+    },
+    "KRW-NEAR": {
+      "entryPrice": 3332,
+      "entryTs": "2026-09-14T00:00:00",
+      "entryTimeMs": 1789430464454,
+      "size": 13901395.800864507,
+      "trendPercent": 6.080865966252786,
+      "breadth": 3,
+      "markPrice": 3332,
+      "markTimestamp": "2026-09-14T00:00:00.000Z",
+      "markGrossProfitPercent": 0,
+      "markProfitPercent": -0.2,
+      "markValue": 13873593.009262778,
+      "unrealizedProfit": -27802.791601728648,
+      "maxFavorableExcursionPercent": -0.2,
+      "maxAdverseExcursionPercent": -0.2
+    }
+  },
   "trades": [
     {
       "market": "KRW-ETH",
@@ -65,26 +121,26 @@
       "profitPercent": -3.3598513011152416
     }
   ],
-  "cycles": 170,
-  "entries": 2,
-  "lastCycleAt": "2026-09-14T14:43:58.952Z",
-  "breadth": 1,
+  "cycles": 313,
+  "entries": 5,
+  "lastCycleAt": "2026-09-15T07:23:20.415Z",
+  "breadth": 3,
   "trends": {
-    "KRW-BTC": -4.464065370588719,
-    "KRW-ETH": -1.4899211218229622,
-    "KRW-XRP": -5.733471074380166,
-    "KRW-SOL": -6.694271911663216,
-    "KRW-DOGE": -8.870967741935484,
-    "KRW-ADA": -8.552631578947368,
-    "KRW-DOT": 2.479338842975207,
-    "KRW-LINK": -15.277777777777779,
-    "KRW-ATOM": -0.8743672342383801,
-    "KRW-NEAR": -5.729794933655006,
-    "KRW-ETC": -5.144995322731525,
-    "KRW-SUI": -13.31521739130435
+    "KRW-BTC": -1.8836919991830217,
+    "KRW-ETH": 0.20648967551622419,
+    "KRW-XRP": 1.1046817464492371,
+    "KRW-SOL": -2.0523708421797595,
+    "KRW-DOGE": -8.064516129032258,
+    "KRW-ADA": -6,
+    "KRW-DOT": -6.219765031098825,
+    "KRW-LINK": -10.489913544668587,
+    "KRW-ATOM": -3.8669064748201443,
+    "KRW-NEAR": 6.080865966252786,
+    "KRW-ETC": -5.10677808727948,
+    "KRW-SUI": -12.634408602150538
   },
-  "heartbeatAt": "2026-09-14T14:43:58.954Z",
-  "ownerPid": 47509,
+  "heartbeatAt": "2026-09-15T07:25:35.226Z",
+  "ownerPid": 16751,
   "initialBalance": 100000000,
   "configDrift": {
     "previous": {
@@ -105,10 +161,24 @@
         "KRW-BTC",
         "KRW-ETH",
         "KRW-XRP",
-        "KRW-SOL"
-      ]
+        "KRW-SOL",
+        "KRW-DOGE",
+        "KRW-ADA",
+        "KRW-DOT",
+        "KRW-LINK",
+        "KRW-ATOM",
+        "KRW-NEAR",
+        "KRW-ETC",
+        "KRW-SUI"
+      ],
+      "pollMs": 300000,
+      "benchmarkMarket": null,
+      "benchmarkTrendMinPercent": null,
+      "exitOnBenchmarkOff": false,
+      "volatilityLookbackDays": 14,
+      "volatilityTargetPercent": null
     },
-    "changedAt": "2026-09-14T06:23:09.809Z"
+    "changedAt": "2026-09-15T07:12:53.445Z"
   },
   "runnerEvents": [
     {
@@ -147,21 +217,166 @@
       "type": "started",
       "at": "2026-09-14T06:23:09.809Z",
       "pid": 47509
+    },
+    {
+      "type": "stopped",
+      "at": "2026-09-14T16:14:57.871Z",
+      "pid": 47509,
+      "reason": "signal:SIGTERM",
+      "error": null
+    },
+    {
+      "type": "started",
+      "at": "2026-09-14T16:16:28.467Z",
+      "pid": 63634
+    },
+    {
+      "type": "stopped",
+      "at": "2026-09-15T03:05:19.280Z",
+      "pid": 63634,
+      "reason": "heartbeat_timeout",
+      "error": {
+        "name": "Error",
+        "message": "runner heartbeat stale for more than 1500s"
+      }
+    },
+    {
+      "type": "started",
+      "at": "2026-09-15T03:17:06.892Z",
+      "pid": 4066
+    },
+    {
+      "type": "stopped",
+      "at": "2026-09-15T04:39:08.879Z",
+      "pid": 4066,
+      "reason": "heartbeat_timeout",
+      "error": {
+        "name": "Error",
+        "message": "runner heartbeat stale for more than 1500s"
+      }
+    },
+    {
+      "type": "started",
+      "at": "2026-09-15T06:00:46.003Z",
+      "pid": 86340
+    },
+    {
+      "type": "stopped",
+      "at": "2026-09-15T06:41:58.291Z",
+      "pid": 86340,
+      "reason": "heartbeat_timeout",
+      "error": {
+        "name": "Error",
+        "message": "runner heartbeat stale for more than 1500s"
+      }
+    },
+    {
+      "type": "started",
+      "at": "2026-09-15T07:12:53.445Z",
+      "pid": 16751
+    },
+    {
+      "type": "stopped",
+      "at": "2026-09-15T07:25:35.225Z",
+      "pid": 16751,
+      "reason": "signal:SIGTERM",
+      "error": null
     }
   ],
-  "runnerState": "running",
-  "runnerPid": 47509,
-  "runnerStartedAt": "2026-09-14T06:23:09.809Z",
-  "runnerLastHeartbeatAt": "2026-09-14T14:43:58.954Z",
-  "runnerStoppedAt": null,
-  "runnerStopReason": null,
+  "runnerState": "stopped",
+  "runnerPid": 16751,
+  "runnerStartedAt": "2026-09-15T07:12:53.445Z",
+  "runnerLastHeartbeatAt": "2026-09-15T07:23:20.444Z",
+  "runnerStoppedAt": "2026-09-15T07:25:35.225Z",
+  "runnerStopReason": "signal:SIGTERM",
   "runnerLastError": null,
-  "markedAt": "2026-09-14T14:43:58.952Z",
-  "markedEquity": 98854370.13948093,
-  "markedOpenValue": 0,
-  "investedOpen": 0,
-  "unrealizedProfit": 0,
-  "markedReturnPercent": -1.1456298605190707,
-  "runnerLastEventAt": "2026-09-14T06:22:52.467Z",
-  "fetchErrors": 13
+  "markedAt": "2026-09-15T07:23:20.415Z",
+  "markedEquity": 98740069.77400717,
+  "markedOpenValue": 57035882.37141364,
+  "investedOpen": 57150182.73688741,
+  "unrealizedProfit": -114300.3654737696,
+  "markedReturnPercent": -1.2599302259928336,
+  "runnerLastEventAt": "2026-09-15T07:25:35.225Z",
+  "fetchErrors": 36,
+  "benchmarkMarket": null,
+  "benchmarkTrendPercent": null,
+  "benchmarkGateOpen": true,
+  "benchmarkAvailable": true,
+  "cooldownUntilByMarket": {},
+  "peakEquity": 100000000,
+  "drawdownPercent": 1.2599302259928284,
+  "pendingEntries": [],
+  "consumedSignalKeyByMarket": {
+    "KRW-ETH": "2026-09-14T00:00:00",
+    "KRW-XRP": "2026-09-14T00:00:00",
+    "KRW-NEAR": "2026-09-14T00:00:00"
+  },
+  "dataQuality": {
+    "valid": true,
+    "reason": "daily_grid_aligned_and_contiguous",
+    "marketCount": 12,
+    "missingMarkets": [],
+    "invalidMarkets": [],
+    "unalignedMarkets": [],
+    "staleMarkets": [],
+    "latestTimestamp": "2026-09-14T00:00:00.000Z",
+    "latestByMarket": {
+      "KRW-BTC": "2026-09-14T00:00:00.000Z",
+      "KRW-ETH": "2026-09-14T00:00:00.000Z",
+      "KRW-XRP": "2026-09-14T00:00:00.000Z",
+      "KRW-SOL": "2026-09-14T00:00:00.000Z",
+      "KRW-DOGE": "2026-09-14T00:00:00.000Z",
+      "KRW-ADA": "2026-09-14T00:00:00.000Z",
+      "KRW-DOT": "2026-09-14T00:00:00.000Z",
+      "KRW-LINK": "2026-09-14T00:00:00.000Z",
+      "KRW-ATOM": "2026-09-14T00:00:00.000Z",
+      "KRW-NEAR": "2026-09-14T00:00:00.000Z",
+      "KRW-ETC": "2026-09-14T00:00:00.000Z",
+      "KRW-SUI": "2026-09-14T00:00:00.000Z"
+    },
+    "latestAgeSecondsByMarket": {
+      "KRW-BTC": 112990,
+      "KRW-ETH": 112990,
+      "KRW-XRP": 112990,
+      "KRW-SOL": 112990,
+      "KRW-DOGE": 112990,
+      "KRW-ADA": 112990,
+      "KRW-DOT": 112990,
+      "KRW-LINK": 112990,
+      "KRW-ATOM": 112990,
+      "KRW-NEAR": 112990,
+      "KRW-ETC": 112990,
+      "KRW-SUI": 112990
+    },
+    "maxAgeHours": 36
+  },
+  "volatilityByMarket": {
+    "KRW-BTC": null,
+    "KRW-ETH": null,
+    "KRW-XRP": null,
+    "KRW-SOL": null,
+    "KRW-DOGE": null,
+    "KRW-ADA": null,
+    "KRW-DOT": null,
+    "KRW-LINK": null,
+    "KRW-ATOM": null,
+    "KRW-NEAR": null,
+    "KRW-ETC": null,
+    "KRW-SUI": null
+  },
+  "volatilityScaleByMarket": {
+    "KRW-BTC": 1,
+    "KRW-ETH": 1,
+    "KRW-XRP": 1,
+    "KRW-SOL": 1,
+    "KRW-DOGE": 1,
+    "KRW-ADA": 1,
+    "KRW-DOT": 1,
+    "KRW-LINK": 1,
+    "KRW-ATOM": 1,
+    "KRW-NEAR": 1,
+    "KRW-ETC": 1,
+    "KRW-SUI": 1
+  },
+  "dataQualityBlocked": 36
 }

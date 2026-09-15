@@ -123,9 +123,12 @@ npm run validate:scalping:portfolio # 공유 KRW/포지션 제한을 반영한 �
 npm run validate:shadow    # relaxed shadow 후보의 진단용 holdout 검증 (실전 승격 불가)
 npm run compare:scalping   # 동일 캔들 윈도우에서 여러 스캘핑 후보를 공정 비교 (진단 전용)
 npm run research:htf-momentum # 1h/4h 추세 모멘텀 대체 로직 연구 (promotion 불가)
+npm run research:htf-momentum:fetch -- /tmp/coinpilot-htf-momentum-candles.json # 완료된 raw 15분봉 cache 수집 (research 전용)
 npm run research:daily-momentum:fetch # 동일 12시장 완료 일봉 cache 수집 (research 전용)
 npm run research:daily-momentum # daily trend/breadth/exit 후보 sweep (promotion 불가)
 npm run research:daily-momentum:robustness # position/risk envelope와 최악 segment 비교 (promotion 불가)
+npm run research:daily-momentum:robustness -- /tmp/candles.json /tmp/report.json # 입력·출력 cache/report를 positional 인자로 지정
+npm run research:daily-momentum:benchmark-confirmation -- /tmp/candles.json /tmp/report.json 1,2,3 continuous # benchmark 확인일 비교 (research 전용)
 npm run research:daily-market-neutral # synthetic long/short 상대강도 연구 (현물 short 미연결)
 npm run research:momentum-shadow:status # 실행 중인 daily shadow owner의 read-only 상태
 npm run research:momentum-shadow:preflight # 새 risk-capped shadow owner 시작 전 read-only 점검
@@ -295,6 +298,10 @@ portfolio 진단에서만 `requireNextCandleBullish` 후보도 비교할 수 있
 
 과매도 반등의 완화값을 기본 전략에 섞는 대신, 다른 시간축에서 방향성이 있는지 확인하려면 `npm run research:htf-momentum`을 사용합니다. 이 연구 lane은 15분 원천봉을 완료된 1시간/4시간 봉으로 집계하고, higher-timeframe RSI·자체 7일/14일 추세·다음 원천봉 진입·수수료·슬리피지·보수적인 OHLC 손절/익절을 적용합니다. 시장별 expanding walk-forward와 별도 shared-KRW/maxPositions portfolio replay를 함께 기록하며, 시장별 validation fold와 portfolio boundary가 모두 안전해야 `eligibleForFurtherShadow=true`가 됩니다. report의 `promoted`는 항상 `false`이며 runtime 전략·`scalping_validation.json`·live gate를 변경하지 않습니다. 원천봉 gap 또는 시장별 base-candle grid mismatch가 있는 경우 fail-closed합니다.
 
+Upbit이 거래가 없었던 15분 구간의 candle을 생략할 수 있으므로 `research:htf-momentum:fetch`는 기본적으로 raw continuity가 깨지면 저장하지 않습니다. 분석 목적의 짧은 no-trade gap만 시험하려면 `SCALP_HTF_MOMENTUM_FILL_NO_TRADE=true`와 최대 interval 제한을 명시할 수 있으며, 이 경우 이전 종가·거래량 0의 synthetic candle이 생성되고 cache/report는 계속 promotion 불가입니다. raw cache와 synthetic cache 결과를 같은 조건에서 분리 비교해야 하며, synthetic 결과만으로 forward 후보를 만들지 않습니다.
+
+최신 4,000개 raw 15분봉 cache(약 41.7일)는 네 시장 모두 continuity를 통과했지만, HTF 5개 variant의 모든 시장별 expanding walk-forward가 FAIL이었습니다. portfolio full 결과는 variant별 `+6.168%~+10.108%`로 보였지만 validation fold의 음수/무거래·표본 부족이 남아 `allMarketFoldsPassed=false`, `eligibleForFurtherShadow=false`입니다. 2,000개 cache에서도 portfolio 결과가 `-0.798%~-3.614%`였고 모든 fold가 FAIL이었습니다. 따라서 HTF 대체 logic은 현재 shadow/runtime에 연결하지 않습니다. 재현 cache/report는 `/private/tmp/coinpilot-htf-momentum-candles-4000.json`, `/private/tmp/coinpilot-htf-momentum-diagnostic-4000.json`, `/private/tmp/coinpilot-htf-momentum-diagnostic-2000.json`입니다.
+
 ```bash
 SCALP_HTF_MOMENTUM_CANDLES_FILE=/tmp/coinpilot-60d-15m-20mk-20260913.json \
 SCALP_HTF_MOMENTUM_MARKETS=KRW-BTC,KRW-ETH,KRW-XRP,KRW-SOL \
@@ -315,6 +322,48 @@ market-neutral report에는 거래비용 `0.1/0.2/0.3%`와 synthetic short borro
 800일 continuous robustness에서 ordinary 후보로 남은 계약을 별도 forward ledger로 관찰하려면 `MOMO_SHADOW_MODE=regime`, 추세 `>2%`, breadth `>=2`, `MOMO_SHADOW_MIN_UP_BARS=2`, `MOMO_SHADOW_BENCHMARK_MARKET=KRW-BTC`, `MOMO_SHADOW_BENCHMARK_TREND_MIN_PERCENT=2`, `MOMO_SHADOW_EXIT_ON_BENCHMARK_OFF=true`, 비중 `0.125`, 최대 2포지션, 손실 cooldown 3일을 사용합니다. launcher 기본은 여기에 historical 결과와 동일한 손익을 보인 `MOMO_SHADOW_MAX_PORTFOLIO_DRAWDOWN_PERCENT=15` 보호중단을 더하지만, 이는 alpha나 실전 수익성 증명이 아니라 노출 제한 장치입니다. 이 후보는 기존 fixed/regime 장부와 섞지 않고, benchmark 데이터가 없으면 신규 진입을 fail-closed합니다. 설정 drift·heartbeat·실현/평가손익·연속 상승봉 조건·cooldown·drawdown stop은 별도 ledger에 보존되며 live 승격과 무관합니다.
 
 `minUpBars=3`은 800일 연속 구간에서 일부 보호중단 후보가 높은 수익률과 낮은 MDD를 보였지만, 독립 400일 cache에서는 최악 구간이 `-4.869%`까지 내려가 `HOLD`가 되었습니다. 따라서 3봉 확인은 현재 launcher/runtime 기본값으로 승격하지 않으며, 800일 단일 결과만으로 forward 후보를 만들지 않습니다. 보고서 `/private/tmp/coinpilot-daily-momentum-robustness-report-800d-upbars-1-3.json`과 `/private/tmp/coinpilot-daily-momentum-robustness-report-400d-upbars-1-3.json`은 이 screening 근거를 별도로 보존합니다.
+
+benchmark gate 자체의 민감도를 확인하기 위해 2026-09-15에 동일한 400일·800일 완료 일봉 cache에서 gate `0/1/2/3/4%` × `minUpBars 1/2`를 independent segment로 재검증했습니다. 각 window의 `2,160`개 조합이 전부 `HOLD`였습니다. 400일 window에서 gate별 최고 full return은 각각 `+12.201/+10.964/+13.268/+4.288/-2.530%`였지만 worst independent segment가 `-5.004%~-6.893%`였고, 800일 window의 gate 2% 최고 조합도 `+57.971%`에 MDD `30.351%`와 `drawdown_above_limit`/boundary blocker가 남았습니다. 따라서 gate 2%는 현재 forward diagnostic contract로만 유지하고, threshold 미세 조정이나 단일 aggregate return을 근거로 runtime·live·promotion을 변경하지 않습니다. 재현 report는 `/private/tmp/coinpilot-daily-momentum-robustness-report-400d-gates-0-4-upbars-1-2-independent.json`과 `/private/tmp/coinpilot-daily-momentum-robustness-report-800d-gates-0-4-upbars-1-2-independent.json`입니다.
+
+현재 forward contract와 같은 continuous segment 기준에서도 결론은 동일합니다. 400일과 800일 양쪽에서 보호중단 없는 `SHADOW_CANDIDATE` 교집합은 gate `1%` 20개, gate `2%` 8개뿐이고 gate `0/3/4%`는 0개였습니다. 현재 계약 `g2_u2_t2_b2_f0p125_p2_c3`은 400일 `+4.501%`/PF `1.48`/MDD `3.65%`/worst segment `-1.993%`, 800일 `+26.495%`/PF `1.66`/MDD `14.92%`/worst segment `+0.214%`였습니다. 이는 2% gate를 방어형 forward diagnostic으로 유지할 근거이지, 독립 미래 구간의 수익 보장은 아닙니다. continuous 재현 report는 `/private/tmp/coinpilot-daily-momentum-robustness-report-400d-gates-0-4-upbars-1-2-continuous.json`과 `/private/tmp/coinpilot-daily-momentum-robustness-report-800d-gates-0-4-upbars-1-2-continuous.json`입니다.
+
+historical daily simulator와 forward shadow runner의 signal 선택 순서도 맞춥니다. eligible signal을 모두 수집한 뒤 trailing trend 내림차순, market code 오름차순으로 정렬하고 `maxPositions`를 적용하므로, 시장 배열 순서가 우연히 어떤 종목을 먼저 채우는지에 따라 결과가 달라지지 않습니다. 선택 순위는 각 forward position에 `selectionRank`로 남기고, position limit으로 탈락한 신호는 `blockedSignalCount`로 기록합니다. 기존에 실행 중인 owner는 재시작하지 않으며, 새로 시작하는 별도 candidate부터 이 계약을 사용합니다.
+
+forward runner의 signal 중복 방지도 프로세스 메모리에만 두지 않습니다. 시장별 `consumedSignalKeyByMarket`를 ledger에 기록하고, 재시작 시 기존 position과 trade entry에서 최신 완료 candle key를 복원하므로 같은 완료 일봉을 재진입 표본으로 중복 기록하지 않습니다. 차단 횟수는 `duplicateSignalBlocked`로 status CLI와 read-only API에 표시됩니다. 이 장치는 paper evidence의 중복 오염을 막는 idempotency 보호이며, 수익성이나 promotion을 증명하지 않습니다.
+
+완료 close를 곧바로 체결가로 사용하는 가정도 별도 검증합니다. `entryExecution=close`가 기존 계약이고, `entryExecution=next_open`은 완료 close에서 signal을 관측한 뒤 다음 일봉 opening price에 진입하는 execution-boundary stress입니다. 다음 open이 없거나 opening price가 누락된 cache는 `daily_entry_open_price_missing`으로 fail-closed하며, 마지막 signal을 실행하지 못한 경우 `unknownBoundaryEntryCount`로 남겨 robustness 후보에서 제외합니다. 400/800일 next-open 결과가 양쪽 window에서 확인되기 전에는 forward runner나 runtime 기본 계약을 바꾸지 않습니다.
+
+entry와 exit를 모두 `next_open`으로 지연하는 더 엄격한 stress도 별도로 비교합니다. 이번 canonical 계약은 400일에서 `+4.121%`/PF `1.43`/MDD `4.33%`였지만 worst segment `-2.246%`로 floor `-2%`를 깨 `HOLD`가 되었고, 800일은 `+13.372%`/PF `1.37`/MDD `14.69%`/worst `-0.550%`였습니다. 따라서 entry-only next-open은 별도 forward diagnostic 후보로 유지하되 exit-next-open은 현재 forward runner에 연결하지 않습니다. 실행 경계가 양쪽 독립 window에서 재현되지 않은 값을 수익 개선 장치로 승격하지 않습니다. 재현 report는 `/private/tmp/coinpilot-daily-momentum-robustness-report-400d-full-next-open.json`과 `/private/tmp/coinpilot-daily-momentum-robustness-report-800d-full-next-open.json`입니다.
+
+entry-only next-open의 비용 민감도도 별도 확인했습니다. 왕복 비용 `0.2%`에서는 두 window가 후보였지만 `0.3%`에서 400일 worst segment가 `-2.071%`, 800일 MDD가 `15.07%`로 각각 gate를 넘었고, `0.4/0.5%`에서도 계속 `HOLD`였습니다. 따라서 next-open은 비용 `0.2%`라는 연구 가정 아래의 forward diagnostic일 뿐 실제 수익 전략으로 승격하지 않으며, 비용·슬리피지 측정값이 확보되기 전까지 live 기본값을 바꾸지 않습니다. 재현 report는 `/private/tmp/coinpilot-daily-momentum-benchmark-confirmation-400d-next-open-cost-0p3.json`, `/private/tmp/coinpilot-daily-momentum-benchmark-confirmation-800d-next-open-cost-0p3.json`, `/private/tmp/coinpilot-daily-momentum-benchmark-confirmation-400d-next-open-cost-0p4.json`, `/private/tmp/coinpilot-daily-momentum-benchmark-confirmation-800d-next-open-cost-0p4.json`, `/private/tmp/coinpilot-daily-momentum-benchmark-confirmation-400d-next-open-cost-0p5.json`, `/private/tmp/coinpilot-daily-momentum-benchmark-confirmation-800d-next-open-cost-0p5.json`입니다.
+
+비중과 동시 보유 한도의 tail-risk 민감도는 `DAILY_MOMENTUM_ROBUSTNESS_TREND_MIN_PERCENT`, `...BREADTH_MIN`, `...POSITION_FRACTION`, `...MAX_POSITIONS`, `...COOLDOWN_AFTER_LOSS_DAYS`, `...MAX_PORTFOLIO_DRAWDOWN_PERCENT` 축으로 CLI에서 재현할 수 있습니다. 비용 `0.3%`·next-open·gate `1%`·trend `2%`·breadth `3`·cooldown `3일`에서 비중 `0.0625/0.1/0.125/0.15/0.2`, 최대 포지션 `1/2/3`, volatility target `0.75/1/1.25%`를 45개 조합으로 공식 재실행했습니다. 연속 400/800일 기준 각각 28/45개가 risk-envelope 후보였지만, 저노출 `0.0625·max2·vol0.75`의 수익은 `+1.361%/+4.695%`로 낮아졌습니다. 독립 segment 모드에서는 마지막 미청산 경계를 알 수 없어 별도 승격 근거가 되지 않으므로, 새 low-risk owner를 추가하지 않고 현재 `0.125·max2·vol1` next-open 후보만 유지합니다. 재현 report는 `/private/tmp/coinpilot-daily-momentum-robustness-report-400d-risk-axis-formal.json`과 `/private/tmp/coinpilot-daily-momentum-robustness-report-800d-risk-axis-formal.json`입니다.
+
+동일한 next-open·cost `0.3%`·gate `1%`·trend `2%`·breadth `3`·minUpBars `2`·volatility target `1%/14일`·gap ceiling `0.2%` contract에서 최대 보유일 축도 별도 검증했습니다. next-open 진입 후 fixed hold 시간은 entry open부터 해당 완료 close까지 세도록 simulator와 forward runner의 의미를 먼저 맞췄습니다. 보정된 `fixed_h2`는 최근 400일에서 `+5.092%`/PF `1.88`/MDD `1.48%`/92 trades/worst segment `-0.377%`, 800일에서 `+11.351%`/PF `1.78`/MDD `1.91%`/223 trades/worst segment `-0.058%`였습니다. 왕복 비용을 `0.4%`로 올려도 400/800일 `+4.628%/+10.343%`, `0.5%`에서도 `+4.166%/+9.343%`로 risk-envelope를 유지했습니다. 추가 global cost `1.2%` stress에서는 400/800일 `+0.913%/+2.552%`로 양수를 유지했지만 PF가 `1.12/1.14`까지 낮아졌고, cost `1.5%`에서는 400/800일 모두 음수로 전환됐습니다. 따라서 spread와 fee를 합친 실제 총비용이 `1.5%`에 접근하면 후보를 자동 보류해야 하며, 이를 비용 강건성 증명으로 표현하지 않습니다. 이는 regime보다 항상 우수하다는 결론이 아니라 회전율과 보유시간이 다른 별도 exit 가설이므로 기존 regime/next-open 후보를 교체하지 않고 `.paper-momentum-shadow-fixed-hold-2d-v1`에 독립 A/B로 등록합니다. 추가로 현재 호가 spread가 `0.5%`를 넘는 시장만 동적으로 신규 진입에서 제외하는 `.paper-momentum-shadow-fixed-hold-2d-spread-v1` quote-quality A/B를 별도 등록합니다. 이 guard는 과거 orderbook 시계열이 없어 historical 수익을 주장하지 않으며, 완전한 quote 응답이 없으면 해당 cycle의 신규 진입을 fail-closed하고, 정상 응답에서는 초과 시장만 차단합니다. 2026-09-15 read-only orderbook snapshot `5/5`에서는 DOGE가 `0.881%`로 5회 모두 ceiling을 넘었고 ADA는 `0.355%`로 관측됐습니다. 이는 단기 실행비용 관측이며 실제 체결 증거가 아니므로 `/private/tmp/coinpilot-momentum-shadow-quote-quality.json`에서 별도 확인합니다. 연속 segment historical 근거일 뿐 실제 수익·승격 근거가 아니며, 재현 report는 `/private/tmp/coinpilot-daily-momentum-robustness-report-400d-fixed-hold-axis.json`, `/private/tmp/coinpilot-daily-momentum-robustness-report-800d-fixed-hold-axis.json`, cost stress `/private/tmp/coinpilot-daily-momentum-robustness-report-400d-fixed-hold-2d-axis-cost04.json`, `/private/tmp/coinpilot-daily-momentum-robustness-report-800d-fixed-hold-2d-axis-cost04.json`, `/private/tmp/coinpilot-daily-momentum-robustness-report-400d-fixed-hold-2d-axis-cost05.json`, `/private/tmp/coinpilot-daily-momentum-robustness-report-800d-fixed-hold-2d-axis-cost05.json`, `/private/tmp/coinpilot-daily-momentum-robustness-report-400d-fixed-hold-2d-axis-cost12.json`, `/private/tmp/coinpilot-daily-momentum-robustness-report-800d-fixed-hold-2d-axis-cost12.json`입니다. 전체 trailing-window 재현은 `/private/tmp/coinpilot-daily-momentum-rolling-fixed2d-800d.json`에서 확인하며, 120일은 26 trades로 `INSUFFICIENT_SAMPLE`, 180~800일은 `POSITIVE_OBSERVATION`으로 기록됩니다.
+
+next-open 실행에서 신호 종가보다 다음 opening price가 급등하는 추격 진입도 `DAILY_MOMENTUM_ROBUSTNESS_MAX_ENTRY_GAP_PERCENT`로 별도 검증할 수 있습니다. 이 값은 양의 overnight gap만 차단하며 `0`은 비활성입니다. 후보의 400/800일 진입 표본 54/109건에서 gap 최대값은 `+0.395%`, 95백분위는 약 `+0.105%`였으므로 `0.1/0.2/0.3%`를 research-only 축으로 추가했습니다. 비용 `0.3%`에서 gap `0.2/0.3%`는 양쪽 window의 risk-envelope와 거래 표본을 유지하면서 결과를 개선했고, 비용 `0.4%`에서도 gap `0.2/0.3%`가 후보로 남았습니다. 따라서 별도 `.paper-momentum-shadow-next-open-v1` forward 후보에는 `0.2%` ceiling을 연결하되, 기존 close owner와 장부를 섞지 않고 승격과 무관한 A/B로 관찰합니다. 재현 report는 `/private/tmp/coinpilot-daily-momentum-robustness-report-400d-gap-ceiling.json`, `/private/tmp/coinpilot-daily-momentum-robustness-report-800d-gap-ceiling.json`, `/private/tmp/coinpilot-daily-momentum-robustness-report-400d-gap-ceiling-cost04.json`, `/private/tmp/coinpilot-daily-momentum-robustness-report-800d-gap-ceiling-cost04.json`입니다.
+
+forward daily shadow는 응답이 시장별로 정렬·연속이어도 최신 완료 일봉이 기본 `36시간`보다 오래되면 `daily_market_stale`로 전체 신규 진입을 차단합니다. 이는 stale 응답을 과거의 정상 breadth로 오인하는 것을 막는 데이터 안전장치이며, `MOMO_SHADOW_MAX_DAILY_CANDLE_AGE_HOURS`와 ledger의 시장별 최신 시각·나이를 함께 보존합니다. stale 차단은 수익성 개선으로 계산하지 않고 데이터 품질 실패로만 표시합니다.
+
+benchmark owner가 저장한 gate boolean의 threshold와 새 후보의 threshold가 다를 수 있으므로, candidate preflight는 source owner의 boolean을 그대로 복사하지 않고 fresh `benchmarkTrendPercent`에 candidate contract의 `benchmarkTrendMinPercent`를 다시 적용합니다. 결과에는 candidate gate와 source gate, 두 threshold를 모두 남겨 `1%` 후보가 `2%` source gate 때문에 잘못 차단되거나 반대로 열리는 일을 방지합니다.
+
+cost `0.3%`를 유지하면서 benchmark gate `0/1/2/3%`와 `minUpBars 1/2`를 함께 sweep한 `1,728`개 조합에서는 400/800일 교집합이 8개였습니다. 그중 별도 forward diagnostic으로 고정한 `next-open` 계약은 benchmark gate `1%`, trend `2%`, breadth `3`, `minUpBars=2`, position fraction `0.125`, max positions `2`, cooldown `3일`, volatility target `1%/14일`, cost `0.3%`입니다. 이 계약은 400일 `+3.601%`/PF `1.96`/MDD `1.37%`/worst `-0.755%`, 800일 `+12.679%`/PF `2.30`/MDD `2.61%`/worst `-0.700%`였지만, 이는 historical risk-envelope 통과일 뿐 실제 수익 증명이 아닙니다. target은 `.paper-momentum-shadow-next-open-v1`로 분리하고, close-fill 장부와 섞지 않으며, exit-next-open은 연결하지 않습니다. 재현 report는 `/private/tmp/coinpilot-daily-momentum-robustness-report-400d-cost03-g1-next-open-vol.json`과 `/private/tmp/coinpilot-daily-momentum-robustness-report-800d-cost03-g1-next-open-vol.json`입니다.
+
+같은 g2 계약에서 `exitOnBenchmarkOff=false`도 별도 비교했습니다. benchmark-off 즉시 청산을 끄면 400일 결과가 `+4.501%`/PF `1.476`/MDD `3.655%`에서 `+0.024%`/PF `1.002`/MDD `8.334%`로, 800일 결과가 `+26.495%`/PF `1.657`/MDD `14.918%`에서 `+17.835%`/PF `1.450`/MDD `17.578%`로 악화되었습니다. 따라서 benchmark-off 청산은 단순 표시용 보호장치가 아니라 현재 candidate 결과에 기여하는 실행 계약으로 유지하며, 이를 완화하는 튜닝은 forward evidence 없이 적용하지 않습니다.
+
+상관된 동시 진입을 줄이는 `maxPositions=1`도 같은 g2 contract에서 별도 확인했습니다. 비중 `0.125`의 max-1 후보는 400일 `+2.941%`/PF `1.476`/MDD `3.247%`로 max-2보다 낙폭은 낮았지만 거래가 26건으로 최소 30건 표본 gate를 통과하지 못했고, 800일은 `+16.290%`/PF `1.683`/MDD `9.968%`였습니다. 이는 risk A/B forward 후보로는 보존하지만, 현재 max-2 contract보다 표본이 부족하므로 runtime이나 기본 forward candidate를 교체하지 않습니다.
+
+benchmark가 threshold를 넘은 뒤에도 `benchmarkMinUpBars`일 동안 연속 확인해야 진입을 허용하는 보완장치도 research simulator에 추가해 검증했습니다. 기본값 `1`은 기존 contract와 동일하며, `2/3` 확인은 400일 continuous에서 `+4.501% → -3.984% → -7.740%`, 800일 continuous에서 `+26.495% → +16.533% → +8.052%`로 악화되었습니다. 800일 worst segment도 `+0.214% → -2.961% → -4.679%`로 내려갔고, 3일 확인은 MDD `15.158%`로 risk limit도 넘었습니다. 따라서 이 보완장치는 false-entry 감소라는 직관과 달리 참여 지연 비용이 더 컸으며, 기본값 `1`을 유지하고 forward/runtime contract에는 연결하지 않습니다. 전용 CLI는 `npm run research:daily-momentum:benchmark-confirmation -- /tmp/candles.json /tmp/report.json 1,2,3 continuous`이며, 이번 재현 report는 `/private/tmp/coinpilot-daily-momentum-benchmark-confirmation-400d-continuous.json`과 `/private/tmp/coinpilot-daily-momentum-benchmark-confirmation-800d-continuous.json`입니다.
+
+하루짜리 benchmark/regime false-off를 줄이는 exit confirmation도 simulator에 research-only로 추가했습니다. `benchmarkExitConfirmationBars`와 `regimeExitConfirmationBars`의 기본값은 각각 `1`이며, `DAILY_MOMENTUM_ROBUSTNESS_BENCHMARK_EXIT_CONFIRMATION_BARS`와 `DAILY_MOMENTUM_ROBUSTNESS_REGIME_EXIT_CONFIRMATION_BARS`로 `1,2,3` 축을 재현할 수 있습니다. 현재 g2/u2/t2/b2/f0.125/max2/cooldown3 계약에서 `b2/r1`은 400일 수익률이 `+6.060%`(baseline `+4.501%`)로 좋아졌지만 800일 MDD가 `16.572%`로 risk limit `15%`를 넘었습니다. 반대로 `b1/r2`는 800일 MDD `12.771%`이지만 400일 worst segment가 `-2.153%`로 floor `-2%`를 깼습니다. `b1/r1` 기본 조합만 두 window 모두 `SHADOW_CANDIDATE`였으므로 새 confirmation 값을 forward/runtime에 연결하지 않고 기본 `1/1`을 유지합니다. 입력 cache와 출력 report는 각각 첫 번째·두 번째 positional 인자로 지정할 수 있으며, 재현 report는 `/private/tmp/coinpilot-daily-momentum-robustness-report-400d-exit-confirmation.json`과 `/private/tmp/coinpilot-daily-momentum-robustness-report-800d-exit-confirmation.json`입니다.
+
+benchmark 대비 약한 종목을 제외하는 `relativeTrendMinPercent` 필터도 연구 전용으로 추가했습니다. benchmark 추세보다 종목 추세가 지정값만큼 높아야 진입을 허용하는 계약이며, benchmark가 없는 경우 fail-closed합니다. `0/0.5/1/2/3/5%`를 비교한 결과 800일 aggregate는 일부 개선됐지만 400일 worst segment가 `-2.137%` 아래로 내려가 모두 floor `-2%`를 충족하지 못했습니다. `5%`에서는 full return도 음수가 됐습니다. 따라서 이 필터는 현재 forward/runtime에 연결하지 않고, robustness CLI의 `DAILY_MOMENTUM_ROBUSTNESS_RELATIVE_TREND_MIN_PERCENT` 축으로만 보존합니다.
+
+동일 금액 진입의 고변동 종목 risk를 줄이기 위해 entry 직전 완료 close 수익률의 표준편차를 목표값과 비교하는 `volatilityTargetPercent`도 추가했습니다. target `0.75/1.0%`, lookback `7/14/21/28일`은 비용 `0.3%`와 400/800일 continuous 32-segment에서 모두 candidate였고, canonical lookback 14일·target 1%는 MDD가 400일 `1.550%`, 800일 `2.408%`까지 감소했습니다. target `1.25%` 이상은 일부 800일 segment에서 worst floor를 깨기 시작하므로 기본값을 바꾸지 않습니다. 이 scaling은 연구와 별도 paper A/B owner에서만 사용할 수 있으며, target unset은 legacy 고정 비중을 유지합니다. 기존 baseline은 800일 32-segment에서 worst `-6.511%`로 tail risk가 드러났습니다.
+
+volatility target `1.0%/14일`에 close-based stop-loss `1/2/3/5/7%`를 붙인 stress도 비교했습니다. 400/800일 continuous 16/32-segment와 비용 `0.3%`에서 모든 값이 형식상 candidate였지만, `1%`는 400/800일 수익을 낮추고 `3%`는 800일 MDD를 낮추는 대신 수익이 감소했습니다. `5/7%`는 800일 aggregate가 baseline보다 소폭 높아도 400일에서 일관된 우위가 없었습니다. stop-loss는 현재 기본 A/B runner contract에 연결하지 않고, `DAILY_MOMENTUM_ROBUSTNESS_STOP_LOSS_PERCENT`를 통한 research-only 축으로 유지합니다.
+
+benchmark를 gate 전용으로 두고 tradable entry에서 제외하는 `excludeBenchmarkFromEntries` 보완장치도 확인했습니다. 400일 continuous는 `+4.501%`/PF `1.476`에서 `+5.529%`/PF `1.595`로, 800일은 `+26.495%`/PF `1.657`에서 `+26.849%`/PF `1.650`으로 개선되었지만, 400일 worst segment가 `-2.176%`로 floor `-2%`를 넘었습니다. breadth에서 benchmark를 세는지 여부도 분리해 비교했으나 이 cache에서는 동일 결과였습니다. aggregate 개선만으로는 충분하지 않으므로 이 옵션은 risk A/B research 후보로만 보존하고, 현재 forward/runtime contract에는 연결하지 않습니다.
 
 ## 환경 변수
 
@@ -378,9 +427,12 @@ market-neutral report에는 거래비용 `0.1/0.2/0.3%`와 synthetic short borro
 | `SCALP_PAPER_MAX_HEARTBEAT_GAP_MINUTES` | 15 | 연속 관찰로 인정할 수 있는 최대 heartbeat 공백; 초과 시 승격 보류 |
 | `SCALP_PAPER_MIN_STORAGE_MIB` | 1024 | forward ledger 시작/재개에 필요한 최소 여유 저장공간(MiB) |
 | `SCALP_VALIDATION_MAX_CANDIDATES` | 0 (full grid) | tuned holdout에서 평가할 후보 상한; 양수는 research-only 균등 샘플링이며 full pool/선택 수를 함께 기록 |
-| `SCALP_HTF_MOMENTUM_CANDLES_FILE` | unset | higher-timeframe momentum 연구에 사용할 raw candle cache; 기본 runtime/live validation과 분리 |
+| `SCALP_HTF_MOMENTUM_CANDLES_FILE` | unset (fetch 기본 `/private/tmp/coinpilot-htf-momentum-candles.json`) | higher-timeframe momentum 연구에 사용할 raw/synthetic research cache; 기본 runtime/live validation과 분리 |
 | `SCALP_HTF_MOMENTUM_MARKETS` | `KRW-BTC,KRW-ETH,KRW-XRP,KRW-SOL` | higher-timeframe 연구 대상 시장; cache에 없는 시장은 fail-closed |
 | `SCALP_HTF_MOMENTUM_OUTPUT_FILE` | `higher_timeframe_momentum_diagnostic.json` | higher-timeframe 연구 report 경로; promotion report를 덮어쓰지 않음 |
+| `SCALP_HTF_MOMENTUM_FILL_NO_TRADE` | false | raw 15분봉 no-trade gap을 짧게 flat-fill할지 여부; true여도 synthetic research-only |
+| `SCALP_HTF_MOMENTUM_MAX_FILL_INTERVALS` | 4 | 한 gap에서 허용할 최대 synthetic no-trade interval 수 |
+| `SCALP_HTF_MOMENTUM_CANDLE_COUNT` | 8000 | market별 수집할 완료 raw candle 수; fetcher는 부족한 history를 fail-closed |
 | `SCALP_HTF_BASE_CANDLE_UNIT` | 15 | higher-timeframe 연구 원천봉 단위(분) |
 | `SCALP_HTF_FOLDS` | 3 | higher-timeframe 연구 expanding walk-forward fold 수 |
 | `SCALP_HTF_MAX_POSITIONS` | 4 | higher-timeframe shared-balance 진단 portfolio의 최대 동시 포지션 수 |
@@ -399,6 +451,29 @@ market-neutral report에는 거래비용 `0.1/0.2/0.3%`와 synthetic short borro
 | `DAILY_MARKET_NEUTRAL_COST_PERCENT` | 0.2 | synthetic long/short 왕복 거래비용 가정 (%) |
 | `DAILY_MARKET_NEUTRAL_SHORT_BORROW_COST_PER_DAY` | 0 | synthetic short borrow/financing stress 가정 (%/일) |
 | `DAILY_MOMENTUM_MAX_PORTFOLIO_DRAWDOWN_PERCENT` | 0 | daily research circuit breaker의 peak 평가자산 낙폭 기준; 0은 비활성 |
+| `DAILY_MOMENTUM_ROBUSTNESS_MODES` | `regime` | robustness 연구의 exit mode 축; `fixed`는 `maxHoldDays` 도달 시 종료 |
+| `DAILY_MOMENTUM_ROBUSTNESS_MAX_HOLD_DAYS` | `3650` | robustness 연구의 fixed-mode 최대 보유일 축; regime mode에서는 직접 사용되지 않음 |
+| `DAILY_MOMENTUM_ROLLING_CANDLES_FILE` | 첫 번째 인자 | trailing-window daily momentum 연구 입력 cache |
+| `DAILY_MOMENTUM_ROLLING_REPORT_FILE` | `/private/tmp/coinpilot-daily-momentum-rolling-report.json` | trailing-window 연구 report 경로 |
+| `DAILY_MOMENTUM_ROLLING_WINDOWS` | `120,180,240,300,365,400,500,600,800` | trailing-window를 요청할 일수 목록; history 부족은 fail-closed |
+| `DAILY_MOMENTUM_ROLLING_MIN_TRADES` | `30` | trailing-window에서 충분한 표본으로 표시할 최소 청산 수 |
+| `DAILY_MOMENTUM_ROLLING_CONFIG_JSON` | fixed 2일 next-open 후보 contract | trailing-window에 적용할 JSON research config override |
+| `DAILY_MOMENTUM_ROBUSTNESS_TREND_MIN_PERCENT` | 1,2 | robustness 연구의 종목 추세 threshold 축 (%) |
+| `DAILY_MOMENTUM_ROBUSTNESS_BREADTH_MIN` | 2,3 | robustness 연구의 동시 상승 시장 수 축 |
+| `DAILY_MOMENTUM_ROBUSTNESS_POSITION_FRACTION` | 0.125,0.2,0.25 | robustness 연구의 종목별 초기자산 비중 축 |
+| `DAILY_MOMENTUM_ROBUSTNESS_MAX_POSITIONS` | 2,3,4 | robustness 연구의 동시 보유 한도 축 |
+| `DAILY_MOMENTUM_ROBUSTNESS_COOLDOWN_AFTER_LOSS_DAYS` | 0,3 | robustness 연구의 손실 후 재진입 대기일 축 |
+| `DAILY_MOMENTUM_ROBUSTNESS_MAX_PORTFOLIO_DRAWDOWN_PERCENT` | 0,10,15 | robustness 연구의 peak 평가자산 보호중단 축 (%) |
+| `DAILY_MOMENTUM_ROBUSTNESS_BENCHMARK_EXIT_CONFIRMATION_BARS` | 1 | robustness 연구에서 benchmark-off 출구를 확인할 연속 완료 일봉 수 |
+| `DAILY_MOMENTUM_ROBUSTNESS_REGIME_EXIT_CONFIRMATION_BARS` | 1 | robustness 연구에서 regime-off 출구를 확인할 연속 완료 일봉 수 |
+| `DAILY_MOMENTUM_ROBUSTNESS_RELATIVE_TREND_MIN_PERCENT` | unset | robustness 연구에서 benchmark 대비 필요한 상대 추세 차이 (%) |
+| `DAILY_MOMENTUM_ROBUSTNESS_VOLATILITY_LOOKBACK_DAYS` | 14 | robustness 연구에서 entry 직전 close 변동성을 계산할 lookback 축 |
+| `DAILY_MOMENTUM_ROBUSTNESS_VOLATILITY_TARGET_PERCENT` | unset | robustness 연구에서 목표 일변동성; 초과 시 포지션 크기를 축소 |
+| `DAILY_MOMENTUM_ROBUSTNESS_STOP_LOSS_PERCENT` | 0 | robustness 연구에서 완료 일봉 close 기준 stop-loss 축; 0은 비활성 |
+| `DAILY_MOMENTUM_ROBUSTNESS_MAX_ENTRY_GAP_PERCENT` | 0 | next-open research에서 신호 종가 대비 양의 opening gap ceiling; 0은 비활성 |
+| `DAILY_MOMENTUM_ROBUSTNESS_ENTRY_EXECUTION` | `close` | robustness 연구의 entry 체결 경계; `next_open`은 다음 일봉 opening price를 사용 |
+| `DAILY_MOMENTUM_ROBUSTNESS_EXIT_EXECUTION` | `close` | robustness 연구의 exit 체결 경계; `next_open`은 exit signal 다음 일봉 opening price를 사용 |
+| `DAILY_MOMENTUM_ROBUSTNESS_COST_PERCENT` | `0.2` | robustness 연구에서 사용할 왕복 거래비용 stress 값 (%) |
 | `MOMO_SHADOW_BENCHMARK_MARKET` | unset | daily shadow 신규 진입을 허용할 benchmark 시장; 미설정이면 기존 계약 유지 |
 | `MOMO_SHADOW_BENCHMARK_TREND_MIN_PERCENT` | 0 | benchmark 7일 추세가 이 값보다 커야 gate open |
 | `MOMO_SHADOW_BREADTH_MIN` | 후보 launcher 기본 2 | 800일 continuous robustness에서 선택한 ordinary candidate의 최소 동시 상승 시장 수 |
@@ -406,6 +481,23 @@ market-neutral report에는 거래비용 `0.1/0.2/0.3%`와 synthetic short borro
 | `MOMO_SHADOW_EXIT_ON_BENCHMARK_OFF` | false | regime shadow에서 benchmark gate가 닫히면 열린 포지션도 연구용 청산 |
 | `MOMO_SHADOW_COOLDOWN_AFTER_LOSS_DAYS` | unset | 손실 청산 뒤 해당 시장의 신규 진입을 막는 일수; 별도 candidate ledger에서만 사용 |
 | `MOMO_SHADOW_MAX_PORTFOLIO_DRAWDOWN_PERCENT` | unset | peak marked equity 기준 portfolio drawdown stop; 발동 후 해당 owner의 신규 진입을 중지 |
+| `MOMO_SHADOW_VOLATILITY_LOOKBACK_DAYS` | 14 | paper candidate의 entry 직전 close-to-close volatility를 계산할 lookback |
+| `MOMO_SHADOW_VOLATILITY_TARGET_PERCENT` | unset | volatility가 목표를 넘을 때 position size를 선형 축소; unset은 legacy 고정 비중 |
+| `MOMO_SHADOW_ENTRY_EXECUTION` | `close` | shadow runner의 entry 체결 경계; `next_open`은 signal 다음 일봉 opening price에 pending fill |
+| `MOMO_SHADOW_MAX_HOLD_HOURS` | fixed `72` / regime `8760` | raw shadow runner의 fixed 최대 보유시간; 2일 A/B 후보는 `48`로 별도 고정 |
+| `MOMO_SHADOW_MAX_ENTRY_GAP_PERCENT` | 0 | next-open에서 signal close 대비 양의 opening gap ceiling; 0은 비활성, 별도 후보는 0.2 |
+| `MOMO_SHADOW_MAX_DAILY_CANDLE_AGE_HOURS` | 36 | 완료 일봉 최신 timestamp 허용 나이; 초과하거나 시장별 최신 시각이 다르면 신규 진입을 차단 |
+| `MOMO_SHADOW_MAX_SPREAD_PERCENT` | 0 | optional best bid/ask spread ceiling; 0은 비활성, 초과 시장만 신규 진입 차단 |
+| `MOMO_SHADOW_REQUEST_INTERVAL_MS` | 500 | 한 shadow owner가 시장별 public API 요청 사이에 두는 간격; 여러 owner 합산 rate limit 완화 |
+| `MOMO_SHADOW_QUOTE_SAMPLES` | 5 | read-only orderbook snapshot 반복 횟수; `npm run research:momentum-shadow:quotes`에서만 사용 |
+| `MOMO_SHADOW_QUOTE_INTERVAL_MS` | 2000 | 반복 quote snapshot 사이 간격(ms) |
+| `MOMO_SHADOW_QUOTE_MAX_SPREAD_PERCENT` | 0.5 | quote snapshot report에서 초과 횟수를 집계할 ceiling (%) |
+| `MOMO_SHADOW_QUOTE_REPORT_FILE` | `/private/tmp/coinpilot-momentum-shadow-quote-quality.json` | quote snapshot report 경로 |
+| `MOMO_SHADOW_QUOTE_HISTORY_FILE` | `/private/tmp/coinpilot-momentum-shadow-quote-history.jsonl` | 반복 quote summary를 append-only로 보존하는 history 경로 |
+| `MOMO_SHADOW_NEXT_OPEN_DIR` | `.paper-momentum-shadow-next-open-v1` | cost-robust next-open diagnostic 후보의 격리 ledger 경로 |
+| `MOMO_SHADOW_VOLATILITY_DIR` | `.paper-momentum-shadow-vol-target-v1` | volatility target A/B paper ledger 경로; 웹/모바일 read-only 비교에도 사용 |
+| `MOMO_SHADOW_FIXED_HOLD_DIR` | `.paper-momentum-shadow-fixed-hold-2d-v1` | cost 0.3%·next-open·48시간 종료 A/B paper ledger 경로 |
+| `MOMO_SHADOW_FIXED_HOLD_SPREAD_DIR` | `.paper-momentum-shadow-fixed-hold-2d-spread-v1` | fixed 2일 후보의 실제 호가 spread `0.5%` guard A/B paper ledger 경로 |
 | `PAPER_SMOKE_MARKETS` | 미설정 | `FRESH_FROM_LEDGER`를 지정하면 이전 paper 원장 freshness 코호트 선택; 그 외에는 명시 시장 목록 또는 `ALL` |
 | `PAPER_SMOKE_FRESHNESS_LEDGER` | 미설정 | freshness 코호트 기준으로 읽을 이전 격리 paper ledger 경로 |
 | `PAPER_SMOKE_MIN_FRESHNESS_OBSERVATIONS` | 100 | 코호트 선택에 필요한 시장별 최소 freshness 관측 수 |

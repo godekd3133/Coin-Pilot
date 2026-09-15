@@ -1,5 +1,17 @@
 const finiteNumber = value => Number.isFinite(Number(value)) ? Number(value) : null;
 
+function timestampOf(value) {
+  if (value instanceof Date) {
+    const epoch = value.getTime();
+    return Number.isFinite(epoch) ? epoch : null;
+  }
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  const text = String(value ?? '');
+  const normalized = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(text) ? text : `${text}Z`;
+  const timestamp = Date.parse(normalized);
+  return Number.isFinite(timestamp) ? timestamp : null;
+}
+
 /**
  * Mark one daily momentum-shadow position to the latest completed candle.
  * The mark includes the configured round-trip cost so an open position is
@@ -14,6 +26,9 @@ export function markMomentumShadowPosition(position, markPrice, markTimestamp, c
   }
 
   const grossProfitPercent = ((price - entryPrice) / entryPrice) * 100;
+  // Candle timestamps are naive UTC; parse them through the same Z-suffix
+  // convention as the rest of the ledger instead of the host-local timezone.
+  const markTimestampMs = markTimestamp ? timestampOf(markTimestamp) : null;
   const netProfitPercent = grossProfitPercent - (finiteNumber(costPercent) || 0);
   const markValue = size * (1 + netProfitPercent / 100);
   const previousMfe = finiteNumber(position.maxFavorableExcursionPercent);
@@ -22,7 +37,7 @@ export function markMomentumShadowPosition(position, markPrice, markTimestamp, c
   return {
     ...position,
     markPrice: price,
-    markTimestamp: markTimestamp ? new Date(markTimestamp).toISOString() : null,
+    markTimestamp: markTimestampMs === null ? null : new Date(markTimestampMs).toISOString(),
     markGrossProfitPercent: grossProfitPercent,
     markProfitPercent: netProfitPercent,
     markValue,
@@ -42,6 +57,14 @@ export function markMomentumShadowPositions(ledger, seriesByMarket, costPercent 
   for (const [market, position] of Object.entries(ledger.positions)) {
     const bars = seriesByMarket[market];
     const latest = Array.isArray(bars) && bars.length > 0 ? bars[bars.length - 1] : null;
+    const latestTimestamp = timestampOf(latest?.ts ?? latest?.timestamp);
+    const entryTimestamp = timestampOf(position?.entryTs ?? position?.entryTimestamp);
+    if (latestTimestamp !== null && entryTimestamp !== null && latestTimestamp < entryTimestamp) {
+      // A next-open forward fill can be observed before its candle closes. The
+      // last completed candle predates the fill and must not be used as a
+      // fabricated mark or exit reference.
+      continue;
+    }
     const marked = markMomentumShadowPosition(
       position,
       latest?.trade_price,
@@ -105,8 +128,9 @@ export function ensureMomentumShadowInitialBalance(ledger, fallbackInitialBalanc
 export function updateMomentumShadowEquity(ledger, fallbackInitialBalance = 100_000_000, markedAt = null) {
   const equity = getMomentumShadowEquity(ledger, fallbackInitialBalance);
   if (ledger && typeof ledger === 'object') {
+    const markedAtMs = timestampOf(markedAt);
     ledger.initialBalance = equity.initialBalance || ledger.initialBalance;
-    ledger.markedAt = markedAt ? new Date(markedAt).toISOString() : ledger.markedAt || null;
+    ledger.markedAt = markedAtMs !== null ? new Date(markedAtMs).toISOString() : ledger.markedAt || null;
     ledger.markedEquity = equity.markedEquity;
     ledger.markedOpenValue = equity.markedOpenValue;
     ledger.investedOpen = equity.investedOpen;

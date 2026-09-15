@@ -162,6 +162,10 @@
         [/\borphan(?:ed)?\b/gi, '연결 끊김'],
         [/\bcounterfactual\b/gi, '가상 정산'],
         [/\bconfidence\b/gi, '참고 점수'],
+        [/\bdaily_market_stale\b/g, '일봉 응답이 오래됨'],
+        [/\bdaily_market_missing\b/g, '일봉 응답 누락'],
+        [/\bdaily_market_grid_not_contiguous\b/g, '일봉 간격 확인 필요'],
+        [/\bdaily_market_latest_timestamp_mismatch\b/g, '시장별 일봉 시각 불일치'],
         [/\bsamples?\b/gi, '관측'],
         [/\bpromot(?:ion|ed|e)\b/gi, '전환'],
         [/\bwinnerShadow\b/g, '승자 연장 장부'],
@@ -178,6 +182,9 @@
         [/\bticker\b/gi, '시세'],
         [/\bbreak[- ]?even\b/gi, '본전'],
         [/\btrailing\b/gi, '추적'],
+        [/\bbenchmark\b/gi, '기준 시장'],
+        [/\bspread\b/gi, '호가차'],
+        [/\bcost\b/gi, '비용'],
         [/\bPASS\b/g, '통과'],
         [/\bHOLD\b/g, '보류'],
         [/\bWAIT\b/g, '대기'],
@@ -227,8 +234,9 @@
             '[data-pilot-preset-id]'
         ].join(',');
         $$(mutationSelectors).forEach(button => {
-            button.disabled = blocked;
-            button.setAttribute('aria-disabled', blocked ? 'true' : 'false');
+            const sessionDisabled = button.dataset.pilotSessionDisabled === 'true';
+            button.disabled = blocked || sessionDisabled;
+            button.setAttribute('aria-disabled', blocked || sessionDisabled ? 'true' : 'false');
             if (blocked) button.title = readOnlyObserverReason();
         });
     }
@@ -1166,7 +1174,7 @@
         const input = root.querySelector(`[data-pilot-trade-amount="${prefix}"]`);
         const submit = root.querySelector(`[data-pilot-trade-submit="${prefix}"]`);
         if (!select || !input || !submit) return;
-        const selectedBefore = select.value || state.selectedCoin;
+        const selectedBefore = prefix === 'market' ? state.selectedCoin : (select.value || state.selectedCoin);
         const options = marketOptions();
         select.innerHTML = options.map(coin => `<option value="${escapeHtml(coin)}">${escapeHtml(symbolOf(coin))}/KRW</option>`).join('');
         const selectedCoin = options.includes(selectedBefore) ? selectedBefore : (options[0] || state.selectedCoin);
@@ -1382,6 +1390,12 @@
 
     function renderPaperDetail() {
         const status = state.paper; const target = byId('pilot-paper-detail'); if (!target) return;
+        const sessionRunning = status?.available === true && status?.active === true;
+        const sessionLocked = status?.readOnlyObserver === true;
+        const headerStart = root.querySelector('.pilot-panel-header [data-pilot-action="start-paper"]');
+        const headerStop = root.querySelector('.pilot-panel-header [data-pilot-action="stop-paper"]');
+        if (headerStart) { headerStart.dataset.pilotSessionDisabled = String(sessionRunning); headerStart.disabled = sessionRunning || sessionLocked; }
+        if (headerStop) { headerStop.dataset.pilotSessionDisabled = String(!sessionRunning); headerStop.disabled = !sessionRunning || sessionLocked; }
         let confidenceTarget = byId('pilot-paper-confidence');
         if (!confidenceTarget) {
             confidenceTarget = document.createElement('div');
@@ -1629,30 +1643,75 @@
                 ? ` · 다음 갱신 약 ${Math.ceil(Number(readiness.benchmark.nextPollDueInSeconds) / 60)}분 후`
                 : ' · 갱신 예정 또는 진행 중'
             : '';
+        const volatilityReadiness = Array.isArray(projection.candidateReadinessVariants)
+            ? projection.candidateReadinessVariants.find(item => item?.key === 'volatility')?.readiness
+            : null;
+        const nextOpenReadiness = Array.isArray(projection.candidateReadinessVariants)
+            ? projection.candidateReadinessVariants.find(item => item?.key === 'next_open')?.readiness
+            : null;
+        const fixedHoldReadiness = Array.isArray(projection.candidateReadinessVariants)
+            ? projection.candidateReadinessVariants.find(item => item?.key === 'fixed_2d')?.readiness
+            : null;
+        const fixedHoldSpreadReadiness = Array.isArray(projection.candidateReadinessVariants)
+            ? projection.candidateReadinessVariants.find(item => item?.key === 'fixed_2d_spread')?.readiness
+            : null;
+        const volatilityReadinessHtml = volatilityReadiness
+            ? `<p>변동성 제한 후보 ${volatilityReadiness.launchAllowed ? '시작 가능' : '시작 대기'} · 비용 ${formatPercent(volatilityReadiness.candidateConfig?.costPercent)} · ${Array.isArray(volatilityReadiness.blockers) && volatilityReadiness.blockers.length ? volatilityReadiness.blockers.map(readinessBlockerLabel).join(' · ') : '모든 시작 전 조건을 통과했습니다.'}</p>`
+            : '';
+        const nextOpenReadinessHtml = nextOpenReadiness
+            ? `<p>비용 대응·다음 시가 후보 ${nextOpenReadiness.launchAllowed ? '시작 가능' : '시작 대기'} · 비용 ${formatPercent(nextOpenReadiness.candidateConfig?.costPercent)} · 다음 일봉 시작가 체결 · 추격 갭 상한 ${formatOptionalPercent(nextOpenReadiness.candidateConfig?.maxEntryGapPercent)} · 일봉 신선도 ${number(nextOpenReadiness.candidateConfig?.maxDailyCandleAgeHours)}시간 · ${Array.isArray(nextOpenReadiness.blockers) && nextOpenReadiness.blockers.length ? nextOpenReadiness.blockers.map(readinessBlockerLabel).join(' · ') : '모든 시작 전 조건을 통과했습니다.'}</p>`
+            : '';
+        const fixedHoldReadinessHtml = fixedHoldReadiness
+            ? `<p>2일 고정 종료 후보 ${fixedHoldReadiness.launchAllowed ? '시작 가능' : '시작 대기'} · 비용 ${formatPercent(fixedHoldReadiness.candidateConfig?.costPercent)} · 48시간 종료 · 다음 일봉 시작가 체결 · 추격 갭 상한 ${formatOptionalPercent(fixedHoldReadiness.candidateConfig?.maxEntryGapPercent)} · ${Array.isArray(fixedHoldReadiness.blockers) && fixedHoldReadiness.blockers.length ? fixedHoldReadiness.blockers.map(readinessBlockerLabel).join(' · ') : '모든 시작 전 조건을 통과했습니다.'}</p>`
+            : '';
+        const fixedHoldSpreadReadinessHtml = fixedHoldSpreadReadiness
+            ? `<p>2일·호가 제한 후보 ${fixedHoldSpreadReadiness.launchAllowed ? '시작 가능' : '시작 대기'} · 비용 ${formatPercent(fixedHoldSpreadReadiness.candidateConfig?.costPercent)} · 48시간 종료 · 호가차 상한 ${formatOptionalPercent(fixedHoldSpreadReadiness.candidateConfig?.maxSpreadPercent)} · ${Array.isArray(fixedHoldSpreadReadiness.blockers) && fixedHoldSpreadReadiness.blockers.length ? fixedHoldSpreadReadiness.blockers.map(readinessBlockerLabel).join(' · ') : '모든 시작 전 조건을 통과했습니다.'}</p>`
+            : '';
+        const readinessExecutionLabel = readiness?.candidateConfig?.entryExecution === 'next_open'
+            ? '다음 일봉 시작가 체결'
+            : '완료 일봉 종가 체결';
         const readinessHtml = readiness
-            ? `<div class="pilot-momentum-shadow-preflight"><div><strong>다음 리스크 제한 후보</strong><span>${readiness.launchAllowed ? '시작 조건 충족' : '시작 대기'} · 실제 주문과 무관</span></div><span class="pilot-status-pill ${readiness.launchAllowed ? '' : 'is-warning'}">${readiness.launchAllowed ? '시작 가능' : '대기'}</span><p>추세 ${formatPercent(readiness.candidateConfig?.trendMinPercent)} · 시장 수 ${number(readiness.candidateConfig?.breadthMin)} · 연속 상승 ${number(readiness.candidateConfig?.minUpBars)}봉 · 비중 ${formatPercent(number(readiness.candidateConfig?.positionFraction) * 100)} · 손절 중단 ${formatOptionalPercent(readiness.candidateConfig?.maxPortfolioDrawdownPercent)} · 재시작 대기 ${number(readiness.candidateConfig?.cooldownAfterLossDays)}일</p><p>${Array.isArray(readiness.blockers) && readiness.blockers.length ? readiness.blockers.map(readinessBlockerLabel).join(' · ') : '모든 시작 전 조건을 통과했습니다.'}</p>${readiness.benchmark ? `<p>기준 시장 갱신 ${number(readiness.benchmark.heartbeatAgeSeconds)}초 전 · ${readiness.benchmark.heartbeatFresh ? '최신' : '오래됨'}${readinessNextPoll} · 추세 ${formatOptionalPercent(readiness.benchmark.trendPercent)}</p>` : ''}</div>`
+            ? `<div class="pilot-momentum-shadow-preflight"><div><strong>다음 리스크 제한 후보</strong><span>${readiness.launchAllowed ? '시작 조건 충족' : '시작 대기'} · 실제 주문과 무관</span></div><span class="pilot-status-pill ${readiness.launchAllowed ? '' : 'is-warning'}">${readiness.launchAllowed ? '시작 가능' : '대기'}</span><p>추세 ${formatPercent(readiness.candidateConfig?.trendMinPercent)} · 시장 수 ${number(readiness.candidateConfig?.breadthMin)} · 연속 상승 ${number(readiness.candidateConfig?.minUpBars)}봉 · 비중 ${formatPercent(number(readiness.candidateConfig?.positionFraction) * 100)} · 비용 ${formatPercent(readiness.candidateConfig?.costPercent)} · 손절 중단 ${formatOptionalPercent(readiness.candidateConfig?.maxPortfolioDrawdownPercent)} · 재시작 대기 ${number(readiness.candidateConfig?.cooldownAfterLossDays)}일 · 일봉 신선도 ${number(readiness.candidateConfig?.maxDailyCandleAgeHours)}시간 · ${readinessExecutionLabel}</p><p>${Array.isArray(readiness.blockers) && readiness.blockers.length ? readiness.blockers.map(readinessBlockerLabel).join(' · ') : '모든 시작 전 조건을 통과했습니다.'}</p>${volatilityReadinessHtml}${fixedHoldReadinessHtml}${fixedHoldSpreadReadinessHtml}${nextOpenReadinessHtml}${readiness.benchmark ? `<p>기준 시장 갱신 ${number(readiness.benchmark.heartbeatAgeSeconds)}초 전 · ${readiness.benchmark.heartbeatFresh ? '최신' : '오래됨'}${readinessNextPoll} · 추세 ${formatOptionalPercent(readiness.benchmark.trendPercent)}</p>` : ''}</div>`
             : '';
         if (meta) meta.textContent = `완료된 일봉 기준 · 거래비용 ${formatPercent(books[0]?.contract?.costPercent || 0, 2).replace('+', '')} 반영 · 실제 주문과 무관`;
         target.innerHTML = readinessHtml + (books.length
             ? books.map(book => {
+                const dataAvailable = book.available === true;
                 const returnClass = classForValue(book.markedReturnPercent);
                 const statusClass = book.status === '관찰 중' ? 'is-warning' : book.status === '중지' ? 'is-danger' : 'is-warning';
-                const positions = Array.isArray(book.openPositions) && book.openPositions.length
+                const positions = dataAvailable && Array.isArray(book.openPositions) && book.openPositions.length
                     ? book.openPositions.map(position => `${escapeHtml(position.asset)} ${formatPrice(position.entryPrice)} → ${position.markPrice === null ? '—' : formatPrice(position.markPrice)} (${formatOptionalPercent(position.markProfitPercent)})`).join('<br>')
-                    : '현재 보유 없음';
+                    : dataAvailable ? '현재 보유 없음' : '장부 생성 후 표시';
                 const reason = book.statusReason ? ` · ${escapeHtml(toUserText(book.statusReason))}` : '';
                 const configurationWarning = book.configurationWarning ? `<span class="pilot-momentum-shadow-warning">${escapeHtml(toUserText(book.configurationWarning))}</span>` : '';
                 const benchmark = book.benchmark?.configured
                     ? `<span>${escapeHtml(book.benchmark.market)} 필터 ${book.benchmark.available === false ? '데이터 대기' : book.benchmark.gateOpen ? '열림' : '닫힘'} · 추세 ${formatOptionalPercent(book.benchmark.trendPercent)} · 기준 &gt;${formatOptionalPercent(book.contract?.benchmarkTrendMinPercent)} · 차단 ${number(book.benchmark.blockedEntries)}회</span>`
                     : '';
                 const riskControls = book.riskControls?.configured
-                    ? `<span>${book.riskControls.drawdownStopTriggered ? '보호중단 발동' : `보호중단 ${formatOptionalPercent(book.riskControls.maxPortfolioDrawdownPercent)} 기준`} · 재시작 대기 ${number(book.riskControls.cooldownAfterLossDays)}일 · 차단 ${number(book.riskControls.cooldownBlockedEntries) + number(book.riskControls.drawdownBlockedEntries)}회</span>`
+                    ? `<span>${book.riskControls.drawdownStopTriggered ? '보호중단 발동' : `보호중단 ${formatOptionalPercent(book.riskControls.maxPortfolioDrawdownPercent)} 기준`} · 재시작 대기 ${number(book.riskControls.cooldownAfterLossDays)}일 · 차단 ${number(book.riskControls.cooldownBlockedEntries) + number(book.riskControls.drawdownBlockedEntries)}회 · 중복 신호 차단 ${number(book.riskControls.duplicateSignalBlockedEntries)}회</span>`
+                    : '';
+                const executionBoundary = book.contract?.entryExecution === 'next_open'
+                    ? `<span>진입 체결 경계: 다음 일봉 시작가 · 추격 갭 상한 ${formatOptionalPercent(book.contract?.maxEntryGapPercent)} · 일봉 신선도 ${number(book.contract?.maxDailyCandleAgeHours)}시간 · 체결 대기 ${number(book.riskControls?.pendingEntryCount)}건 · 체결 차단 ${number(book.riskControls?.pendingEntryBlocked) + number(book.riskControls?.pendingEntryDataQualityBlocked) + number(book.riskControls?.pendingEntryGapBlocked)}회</span>`
+                    : '';
+                const volatility = Number(book.contract?.volatilityTargetPercent) > 0
+                    ? `<span>변동성 목표 ${formatOptionalPercent(book.contract.volatilityTargetPercent)} · ${number(book.contract.volatilityLookbackDays)}일 조회 구간 · 진입 비중 축소</span>`
+                    : '';
+                const quoteQuality = Number(book.contract?.maxSpreadPercent) > 0
+                    ? `<span>호가차 상한 ${formatOptionalPercent(book.contract.maxSpreadPercent)} · ${book.quoteQuality?.valid === true ? '호가 품질 정상' : '호가 품질 확인 필요'} · 차단 ${number(book.riskControls?.spreadBlockedEntries)}회</span>`
+                    : '';
+                const dataQuality = book.dataQuality?.valid === false
+                    ? `<span>데이터 품질 차단 · ${escapeHtml(toUserText(book.dataQuality.reason || '일봉 grid 확인 필요'))} · 신규 진입 보류</span>`
                     : '';
                 const heartbeat = Number.isFinite(Number(book.heartbeatAgeSeconds)) ? `갱신 ${Math.round(Number(book.heartbeatAgeSeconds))}초 전` : '갱신 시각 확인 필요';
+                const equityLabel = dataAvailable ? formatWon(book.markedEquity) : '데이터 없음';
+                const returnLabel = dataAvailable ? `${formatOptionalPercent(book.markedReturnPercent)} 평가수익률` : '관찰 시작 대기';
+                const stats = dataAvailable
+                    ? `<span>현금 ${formatWon(book.cash)}</span><span>실현 ${formatSignedWon(book.realizedProfit)}</span><span>미실현 ${formatSignedWon(book.unrealizedProfit)}</span><span>청산 ${number(book.closedTradeCount)}회 · 승률 ${book.closedTradeCount ? formatPercent((number(book.winningTrades) / number(book.closedTradeCount)) * 100, 1) : '—'}</span><span>관찰 ${number(book.cycles)}회 · ${number(book.markets)}개 시장${reason}</span><span>${heartbeat}</span>${benchmark}${riskControls}${executionBoundary}${volatility}${quoteQuality}${dataQuality}`
+                    : '<span>장부 생성 전 · 기준 시장 점검 대기</span>';
                 const promotionWarning = Array.isArray(book.promotionBlockers) && book.promotionBlockers.length
                     ? `<span class="pilot-momentum-shadow-warning">${escapeHtml(toUserText(book.promotionStatus || '전환 보류'))}: ${escapeHtml(toUserText(book.promotionBlockers.join(' · ')))}</span>`
                     : '';
-                return `<article class="pilot-momentum-shadow-card"><div class="pilot-momentum-shadow-card-head"><div><strong>${escapeHtml(toUserText(book.label))}</strong><span>${escapeHtml(toUserText(book.description || '동일 진입계약 비교'))}</span></div><span class="pilot-status-pill ${statusClass}">${escapeHtml(toUserText(book.status || '확인 필요'))}</span></div><div class="pilot-momentum-shadow-equity ${returnClass}">${formatWon(book.markedEquity)}</div><div class="pilot-momentum-shadow-return ${returnClass}">${formatOptionalPercent(book.markedReturnPercent)} 평가수익률</div><div class="pilot-momentum-shadow-stats"><span>현금 ${formatWon(book.cash)}</span><span>실현 ${formatSignedWon(book.realizedProfit)}</span><span>미실현 ${formatSignedWon(book.unrealizedProfit)}</span><span>청산 ${number(book.closedTradeCount)}회 · 승률 ${book.closedTradeCount ? formatPercent((number(book.winningTrades) / number(book.closedTradeCount)) * 100, 1) : '—'}</span><span>관찰 ${number(book.cycles)}회 · ${number(book.markets)}개 시장${reason}</span><span>${heartbeat}</span>${benchmark}${riskControls}</div>${configurationWarning}${promotionWarning}<div class="pilot-momentum-shadow-positions"><span>현재 평가 포지션</span><strong>${positions}</strong></div></article>`;
+                return `<article class="pilot-momentum-shadow-card"><div class="pilot-momentum-shadow-card-head"><div><strong>${escapeHtml(toUserText(book.label))}</strong><span>${escapeHtml(toUserText(book.description || '동일 진입계약 비교'))}</span></div><span class="pilot-status-pill ${statusClass}">${escapeHtml(toUserText(book.status || '확인 필요'))}</span></div><div class="pilot-momentum-shadow-equity ${returnClass}">${equityLabel}</div><div class="pilot-momentum-shadow-return ${returnClass}">${returnLabel}</div><div class="pilot-momentum-shadow-stats">${stats}</div>${configurationWarning}${promotionWarning}<div class="pilot-momentum-shadow-positions"><span>현재 평가 포지션</span><strong>${positions}</strong></div></article>`;
             }).join('')
             : '<div class="pilot-inline-empty">표시할 비교 장부가 없습니다.</div>');
     }
@@ -1782,7 +1841,7 @@
     async function saveSettings() {
         if (isReadOnlyObserver()) { showToast(readOnlyObserverReason(), 'warning'); return; }
         const payload = settingPayload();
-        try { const investmentRatio = payload.investmentRatio; delete payload.investmentRatio; const result = await requestJSON('/config/update', { method: 'POST', body: JSON.stringify(payload) }); if (investmentRatio !== undefined) await requestJSON('/investment-config/update', { method: 'POST', body: JSON.stringify({ investmentRatio }) }); state.settingsLoaded = false; await loadSettings(); showToast(result.message || '설정을 적용했습니다. 다음 점검에서 다시 확인하세요.', 'success'); } catch (error) { showToast(`설정 적용 실패: ${error.message}`, 'error'); }
+        try { const investmentRatio = payload.investmentRatio; delete payload.investmentRatio; const result = await requestJSON('/config/update', { method: 'POST', body: JSON.stringify(payload) }); if (investmentRatio !== undefined) await requestJSON('/investment-config/update', { method: 'POST', body: JSON.stringify({ investmentRatio }) }); state.settingsLoaded = false; await loadSettings(); showToast('설정을 적용했습니다. 다음 점검에서 다시 확인하세요.', 'success'); } catch (error) { showToast(`설정 적용 실패: ${error.message}`, 'error'); }
     }
 
     async function applyPreset(presetId) {
