@@ -12,6 +12,7 @@ paper_validation.json
 .paper-*/
 .paper-session.lock
 *.momentum-shadow.lock
+.paper-momentum-shadow-candidate.lock
 .staging-runtime/
 initial_seed_money.json
 portfolio_history.json

@@ -1633,10 +1633,29 @@
             benchmark_heartbeat_stale: '기준 시장 갱신이 오래되었습니다.',
             benchmark_owner_not_running: '기준 시장 관찰이 실행 중이 아닙니다.',
             benchmark_ledger_missing: '기준 시장 기록이 없습니다.',
+            benchmark_data_quality_invalid: '기준 시장 일봉 데이터가 불완전합니다.',
+            benchmark_data_quality_unverified: '기준 시장 일봉 품질을 확인할 수 없습니다.',
             target_owner_already_running: '후보 실행 프로세스가 이미 실행 중입니다.',
             target_ledger_owner_alive: '후보 기록을 소유한 프로세스가 살아 있습니다.',
-            candidate_poll_below_minimum: '후보 갱신 주기가 너무 짧습니다.'
+            candidate_poll_below_minimum: '후보 갱신 주기가 너무 짧습니다.',
+            candidate_slot_occupied: '다른 후보가 이미 관찰 중입니다.',
+            candidate_slot_unverifiable: '후보 실행 슬롯을 확인할 수 없습니다.',
+            candidate_slot_is_stale: '이전 후보 실행 슬롯이 남아 있어 확인이 필요합니다.'
         }[blocker] || '추가 사전 확인이 필요합니다.');
+        const readinessWarningLabel = warning => {
+            if (String(warning).startsWith('benchmark_fetch_failures_active:')) {
+                return '기준 시장의 시세 수집이 현재 실패 중입니다.';
+            }
+            if (String(warning).startsWith('existing_live_owner_count:')) {
+                return `기존 owner ${String(warning).split(':').at(-1)}개가 관찰 중입니다.`;
+            }
+            return ({
+                candidate_slot_is_stale: '이전 후보 실행 슬롯이 남아 있어 새 후보가 교체 후 시작합니다.'
+            }[warning] || '추가 사전 경고를 확인하세요.');
+        };
+        const readinessWarningsHtml = Array.isArray(readiness?.warnings) && readiness.warnings.length
+            ? `<p>사전 경고: ${readiness.warnings.map(readinessWarningLabel).join(' · ')}</p>`
+            : '';
         const readinessNextPoll = readiness?.benchmark && Number.isFinite(Number(readiness.benchmark.nextPollDueInSeconds))
             ? Number(readiness.benchmark.nextPollDueInSeconds) > 0
                 ? ` · 다음 갱신 약 ${Math.ceil(Number(readiness.benchmark.nextPollDueInSeconds) / 60)}분 후`
@@ -1651,6 +1670,9 @@
         const fixedHoldReadiness = Array.isArray(projection.candidateReadinessVariants)
             ? projection.candidateReadinessVariants.find(item => item?.key === 'fixed_2d')?.readiness
             : null;
+        const fixedHoldRelativeReadiness = Array.isArray(projection.candidateReadinessVariants)
+            ? projection.candidateReadinessVariants.find(item => item?.key === 'fixed_2d_relative')?.readiness
+            : null;
         const fixedHoldSpreadReadiness = Array.isArray(projection.candidateReadinessVariants)
             ? projection.candidateReadinessVariants.find(item => item?.key === 'fixed_2d_spread')?.readiness
             : null;
@@ -1661,16 +1683,19 @@
             ? `<p>비용 대응·다음 시가 후보 ${nextOpenReadiness.launchAllowed ? '시작 가능' : '시작 대기'} · 비용 ${formatPercent(nextOpenReadiness.candidateConfig?.costPercent)} · 다음 일봉 시작가 체결 · 추격 갭 상한 ${formatOptionalPercent(nextOpenReadiness.candidateConfig?.maxEntryGapPercent)} · 일봉 신선도 ${number(nextOpenReadiness.candidateConfig?.maxDailyCandleAgeHours)}시간 · ${Array.isArray(nextOpenReadiness.blockers) && nextOpenReadiness.blockers.length ? nextOpenReadiness.blockers.map(readinessBlockerLabel).join(' · ') : '모든 시작 전 조건을 통과했습니다.'}</p>`
             : '';
         const fixedHoldReadinessHtml = fixedHoldReadiness
-            ? `<p>2일 고정 종료 후보 ${fixedHoldReadiness.launchAllowed ? '시작 가능' : '시작 대기'} · 비용 ${formatPercent(fixedHoldReadiness.candidateConfig?.costPercent)} · 48시간 종료 · 다음 일봉 시작가 체결 · 추격 갭 상한 ${formatOptionalPercent(fixedHoldReadiness.candidateConfig?.maxEntryGapPercent)} · ${Array.isArray(fixedHoldReadiness.blockers) && fixedHoldReadiness.blockers.length ? fixedHoldReadiness.blockers.map(readinessBlockerLabel).join(' · ') : '모든 시작 전 조건을 통과했습니다.'}</p>`
+            ? `<p>2일 고정 종료 후보 ${fixedHoldReadiness.launchAllowed ? '시작 가능' : '시작 대기'} · 비용 ${formatPercent(fixedHoldReadiness.candidateConfig?.costPercent)} · 48시간 종료 · 다음 일봉 시작가 체결 · 추격 갭 상한 ${formatOptionalPercent(fixedHoldReadiness.candidateConfig?.maxEntryGapPercent)} · 기준 시장 off 청산 · ${Array.isArray(fixedHoldReadiness.blockers) && fixedHoldReadiness.blockers.length ? fixedHoldReadiness.blockers.map(readinessBlockerLabel).join(' · ') : '모든 시작 전 조건을 통과했습니다.'}</p>`
+            : '';
+        const fixedHoldRelativeReadinessHtml = fixedHoldRelativeReadiness
+            ? `<p>2일·상대추세 후보 ${fixedHoldRelativeReadiness.launchAllowed ? '시작 가능' : '시작 대기'} · 비용 ${formatPercent(fixedHoldRelativeReadiness.candidateConfig?.costPercent)} · 48시간 종료 · BTC 대비 상대추세 우위 ${formatOptionalPercent(fixedHoldRelativeReadiness.candidateConfig?.relativeTrendMinPercent)} · 기준 시장 off 청산 · ${Array.isArray(fixedHoldRelativeReadiness.blockers) && fixedHoldRelativeReadiness.blockers.length ? fixedHoldRelativeReadiness.blockers.map(readinessBlockerLabel).join(' · ') : '모든 시작 전 조건을 통과했습니다.'}</p>`
             : '';
         const fixedHoldSpreadReadinessHtml = fixedHoldSpreadReadiness
-            ? `<p>2일·호가 제한 후보 ${fixedHoldSpreadReadiness.launchAllowed ? '시작 가능' : '시작 대기'} · 비용 ${formatPercent(fixedHoldSpreadReadiness.candidateConfig?.costPercent)} · 48시간 종료 · 호가차 상한 ${formatOptionalPercent(fixedHoldSpreadReadiness.candidateConfig?.maxSpreadPercent)} · ${Array.isArray(fixedHoldSpreadReadiness.blockers) && fixedHoldSpreadReadiness.blockers.length ? fixedHoldSpreadReadiness.blockers.map(readinessBlockerLabel).join(' · ') : '모든 시작 전 조건을 통과했습니다.'}</p>`
+            ? `<p>2일·호가 제한 후보 ${fixedHoldSpreadReadiness.launchAllowed ? '시작 가능' : '시작 대기'} · 비용 ${formatPercent(fixedHoldSpreadReadiness.candidateConfig?.costPercent)} · 48시간 종료 · 호가차 상한 ${formatOptionalPercent(fixedHoldSpreadReadiness.candidateConfig?.maxSpreadPercent)} · 기준 시장 off 청산 · ${Array.isArray(fixedHoldSpreadReadiness.blockers) && fixedHoldSpreadReadiness.blockers.length ? fixedHoldSpreadReadiness.blockers.map(readinessBlockerLabel).join(' · ') : '모든 시작 전 조건을 통과했습니다.'}</p>`
             : '';
         const readinessExecutionLabel = readiness?.candidateConfig?.entryExecution === 'next_open'
             ? '다음 일봉 시작가 체결'
             : '완료 일봉 종가 체결';
         const readinessHtml = readiness
-            ? `<div class="pilot-momentum-shadow-preflight"><div><strong>다음 리스크 제한 후보</strong><span>${readiness.launchAllowed ? '시작 조건 충족' : '시작 대기'} · 실제 주문과 무관</span></div><span class="pilot-status-pill ${readiness.launchAllowed ? '' : 'is-warning'}">${readiness.launchAllowed ? '시작 가능' : '대기'}</span><p>추세 ${formatPercent(readiness.candidateConfig?.trendMinPercent)} · 시장 수 ${number(readiness.candidateConfig?.breadthMin)} · 연속 상승 ${number(readiness.candidateConfig?.minUpBars)}봉 · 비중 ${formatPercent(number(readiness.candidateConfig?.positionFraction) * 100)} · 비용 ${formatPercent(readiness.candidateConfig?.costPercent)} · 손절 중단 ${formatOptionalPercent(readiness.candidateConfig?.maxPortfolioDrawdownPercent)} · 재시작 대기 ${number(readiness.candidateConfig?.cooldownAfterLossDays)}일 · 일봉 신선도 ${number(readiness.candidateConfig?.maxDailyCandleAgeHours)}시간 · ${readinessExecutionLabel}</p><p>${Array.isArray(readiness.blockers) && readiness.blockers.length ? readiness.blockers.map(readinessBlockerLabel).join(' · ') : '모든 시작 전 조건을 통과했습니다.'}</p>${volatilityReadinessHtml}${fixedHoldReadinessHtml}${fixedHoldSpreadReadinessHtml}${nextOpenReadinessHtml}${readiness.benchmark ? `<p>기준 시장 갱신 ${number(readiness.benchmark.heartbeatAgeSeconds)}초 전 · ${readiness.benchmark.heartbeatFresh ? '최신' : '오래됨'}${readinessNextPoll} · 추세 ${formatOptionalPercent(readiness.benchmark.trendPercent)}</p>` : ''}</div>`
+            ? `<div class="pilot-momentum-shadow-preflight"><div><strong>다음 리스크 제한 후보</strong><span>${readiness.launchAllowed ? '시작 조건 충족' : '시작 대기'} · 실제 주문과 무관</span></div><span class="pilot-status-pill ${readiness.launchAllowed ? '' : 'is-warning'}">${readiness.launchAllowed ? '시작 가능' : '대기'}</span><p>추세 ${formatPercent(readiness.candidateConfig?.trendMinPercent)} · 시장 수 ${number(readiness.candidateConfig?.breadthMin)} · 연속 상승 ${number(readiness.candidateConfig?.minUpBars)}봉 · 비중 ${formatPercent(number(readiness.candidateConfig?.positionFraction) * 100)} · 비용 ${formatPercent(readiness.candidateConfig?.costPercent)} · 손절 중단 ${formatOptionalPercent(readiness.candidateConfig?.maxPortfolioDrawdownPercent)} · 재시작 대기 ${number(readiness.candidateConfig?.cooldownAfterLossDays)}일 · 일봉 신선도 ${number(readiness.candidateConfig?.maxDailyCandleAgeHours)}시간 · ${readinessExecutionLabel}</p><p>${Array.isArray(readiness.blockers) && readiness.blockers.length ? readiness.blockers.map(readinessBlockerLabel).join(' · ') : '모든 시작 전 조건을 통과했습니다.'}</p>${readinessWarningsHtml}${volatilityReadinessHtml}${fixedHoldReadinessHtml}${fixedHoldRelativeReadinessHtml}${fixedHoldSpreadReadinessHtml}${nextOpenReadinessHtml}${readiness.benchmark ? `<p>기준 시장 갱신 ${number(readiness.benchmark.heartbeatAgeSeconds)}초 전 · ${readiness.benchmark.heartbeatFresh ? '최신' : '오래됨'}${readinessNextPoll} · 추세 ${formatOptionalPercent(readiness.benchmark.trendPercent)} · 일봉 품질 ${readiness.benchmark.dataQuality?.valid === true ? '정상' : '확인 필요'}</p>` : ''}</div>`
             : '';
         if (meta) meta.textContent = `완료된 일봉 기준 · 거래비용 ${formatPercent(books[0]?.contract?.costPercent || 0, 2).replace('+', '')} 반영 · 실제 주문과 무관`;
         target.innerHTML = readinessHtml + (books.length
@@ -1685,6 +1710,9 @@
                 const configurationWarning = book.configurationWarning ? `<span class="pilot-momentum-shadow-warning">${escapeHtml(toUserText(book.configurationWarning))}</span>` : '';
                 const benchmark = book.benchmark?.configured
                     ? `<span>${escapeHtml(book.benchmark.market)} 필터 ${book.benchmark.available === false ? '데이터 대기' : book.benchmark.gateOpen ? '열림' : '닫힘'} · 추세 ${formatOptionalPercent(book.benchmark.trendPercent)} · 기준 &gt;${formatOptionalPercent(book.contract?.benchmarkTrendMinPercent)} · 차단 ${number(book.benchmark.blockedEntries)}회</span>`
+                    : '';
+                const relativeTrend = book.contract?.relativeTrendMinPercent !== null && Number.isFinite(Number(book.contract?.relativeTrendMinPercent))
+                    ? `<span>상대추세: ${escapeHtml(book.benchmark?.market || '기준 시장')}보다 &gt;${formatOptionalPercent(book.contract.relativeTrendMinPercent)} · 차단 ${number(book.riskControls?.relativeTrendBlockedEntries)}회</span>`
                     : '';
                 const riskControls = book.riskControls?.configured
                     ? `<span>${book.riskControls.drawdownStopTriggered ? '보호중단 발동' : `보호중단 ${formatOptionalPercent(book.riskControls.maxPortfolioDrawdownPercent)} 기준`} · 재시작 대기 ${number(book.riskControls.cooldownAfterLossDays)}일 · 차단 ${number(book.riskControls.cooldownBlockedEntries) + number(book.riskControls.drawdownBlockedEntries)}회 · 중복 신호 차단 ${number(book.riskControls.duplicateSignalBlockedEntries)}회</span>`
@@ -1701,11 +1729,26 @@
                 const dataQuality = book.dataQuality?.valid === false
                     ? `<span>데이터 품질 차단 · ${escapeHtml(toUserText(book.dataQuality.reason || '일봉 grid 확인 필요'))} · 신규 진입 보류</span>`
                     : '';
+                const networkState = book.network?.circuitOpen === true
+                    ? '회로 차단'
+                    : Number(book.network?.failureStreak) > 0
+                        ? '재시도 중'
+                        : Number(book.network?.fetchErrors) > 0
+                            ? '누적 오류 확인'
+                            : '회복';
+                const network = book.network && (
+                    Number(book.network.fetchErrors) > 0 ||
+                    book.network.circuitOpen === true ||
+                    Number(book.network.failureStreak) > 0 ||
+                    Number(book.network.circuitBreaks) > 0
+                )
+                    ? `<span>시세 수집 ${networkState} · 누적 오류 ${number(book.network.fetchErrors)}회 · 연속 실패 ${number(book.network.failureStreak)}/${number(book.network.maxConsecutiveFailures) || 3} · 회로 발동 ${number(book.network.circuitBreaks)}회 · 마지막 ${escapeHtml(toUserText(book.network.lastErrorCode || '오류 없음'))}</span>`
+                    : '';
                 const heartbeat = Number.isFinite(Number(book.heartbeatAgeSeconds)) ? `갱신 ${Math.round(Number(book.heartbeatAgeSeconds))}초 전` : '갱신 시각 확인 필요';
                 const equityLabel = dataAvailable ? formatWon(book.markedEquity) : '데이터 없음';
                 const returnLabel = dataAvailable ? `${formatOptionalPercent(book.markedReturnPercent)} 평가수익률` : '관찰 시작 대기';
                 const stats = dataAvailable
-                    ? `<span>현금 ${formatWon(book.cash)}</span><span>실현 ${formatSignedWon(book.realizedProfit)}</span><span>미실현 ${formatSignedWon(book.unrealizedProfit)}</span><span>청산 ${number(book.closedTradeCount)}회 · 승률 ${book.closedTradeCount ? formatPercent((number(book.winningTrades) / number(book.closedTradeCount)) * 100, 1) : '—'}</span><span>관찰 ${number(book.cycles)}회 · ${number(book.markets)}개 시장${reason}</span><span>${heartbeat}</span>${benchmark}${riskControls}${executionBoundary}${volatility}${quoteQuality}${dataQuality}`
+                    ? `<span>현금 ${formatWon(book.cash)}</span><span>실현 ${formatSignedWon(book.realizedProfit)}</span><span>미실현 ${formatSignedWon(book.unrealizedProfit)}</span><span>청산 ${number(book.closedTradeCount)}회 · 승률 ${book.closedTradeCount ? formatPercent((number(book.winningTrades) / number(book.closedTradeCount)) * 100, 1) : '—'}</span><span>관찰 ${number(book.cycles)}회 · ${number(book.markets)}개 시장${reason}</span><span>${heartbeat}</span>${benchmark}${relativeTrend}${riskControls}${executionBoundary}${volatility}${quoteQuality}${dataQuality}${network}`
                     : '<span>장부 생성 전 · 기준 시장 점검 대기</span>';
                 const promotionWarning = Array.isArray(book.promotionBlockers) && book.promotionBlockers.length
                     ? `<span class="pilot-momentum-shadow-warning">${escapeHtml(toUserText(book.promotionStatus || '전환 보류'))}: ${escapeHtml(toUserText(book.promotionBlockers.join(' · ')))}</span>`

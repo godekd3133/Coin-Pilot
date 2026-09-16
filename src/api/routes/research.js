@@ -8,6 +8,9 @@ import {
   resolveMomentumShadowCandidateConfig,
   DEFAULT_MOMENTUM_SHADOW_CANDIDATE_CONFIG
 } from '../../research/momentumShadowCandidateConfig.js';
+import {
+  DEFAULT_MOMENTUM_SHADOW_CANDIDATE_SLOT_FILE
+} from '../../research/momentumShadowCandidateSlot.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -41,8 +44,20 @@ function momentumShadowOwnerDirs(config) {
       path.resolve(PROJECT_ROOT, '.paper-momentum-shadow-fixed-hold-2d-v1'),
     config.momentumShadowFixedHoldSpreadDir ||
       process.env.MOMO_SHADOW_FIXED_HOLD_SPREAD_DIR ||
-      path.resolve(PROJECT_ROOT, '.paper-momentum-shadow-fixed-hold-2d-spread-v1')
+      path.resolve(PROJECT_ROOT, '.paper-momentum-shadow-fixed-hold-2d-spread-v1'),
+    config.momentumShadowFixedHoldRelativeDir ||
+      process.env.MOMO_SHADOW_FIXED_HOLD_RELATIVE_DIR ||
+      path.resolve(PROJECT_ROOT, '.paper-momentum-shadow-fixed-hold-2d-relative-v1')
   ];
+}
+
+// The shared candidate slot lives at the repository root; anchor it like the
+// ledger dirs so an API process started outside the project root still
+// inspects the same file the launcher claims.
+function momentumShadowCandidateSlotFile(config) {
+  return config.momentumShadowCandidateSlotFile ||
+    process.env.MOMO_SHADOW_CANDIDATE_SLOT_FILE ||
+    path.resolve(PROJECT_ROOT, DEFAULT_MOMENTUM_SHADOW_CANDIDATE_SLOT_FILE);
 }
 
 function projectMomentumShadowCandidateReadiness(server) {
@@ -57,6 +72,7 @@ function projectMomentumShadowCandidateReadiness(server) {
       path.resolve(PROJECT_ROOT, '.paper-momentum-shadow-btc-gate-v2'),
     benchmarkDir,
     ownerDirs,
+    candidateSlotFile: momentumShadowCandidateSlotFile(config),
     expectedConfig: resolveMomentumShadowCandidateConfig(),
     requireBenchmarkOpen: process.env.MOMO_SHADOW_REQUIRE_BENCHMARK_OPEN !== 'false',
     minimumPollMs: Number.isFinite(Number(process.env.MOMO_SHADOW_MIN_POLL_MS))
@@ -87,6 +103,7 @@ function projectMomentumShadowVolatilityReadiness(server) {
     targetDir: volatilityDir,
     benchmarkDir,
     ownerDirs,
+    candidateSlotFile: momentumShadowCandidateSlotFile(config),
     expectedConfig,
     requireBenchmarkOpen: process.env.MOMO_SHADOW_REQUIRE_BENCHMARK_OPEN !== 'false',
     minimumPollMs: Number.isFinite(Number(process.env.MOMO_SHADOW_MIN_POLL_MS))
@@ -125,6 +142,7 @@ function projectMomentumShadowNextOpenReadiness(server) {
     targetDir: nextOpenDir,
     benchmarkDir,
     ownerDirs,
+    candidateSlotFile: momentumShadowCandidateSlotFile(config),
     expectedConfig,
     requireBenchmarkOpen: process.env.MOMO_SHADOW_REQUIRE_BENCHMARK_OPEN !== 'false',
     minimumPollMs: Number.isFinite(Number(process.env.MOMO_SHADOW_MIN_POLL_MS))
@@ -133,31 +151,45 @@ function projectMomentumShadowNextOpenReadiness(server) {
   });
 }
 
-function projectMomentumShadowFixedHoldReadiness(server, { spreadGuard = false } = {}) {
+function projectMomentumShadowFixedHoldReadiness(server, {
+  spreadGuard = false,
+  relativeTrendMinPercent = null
+} = {}) {
   const config = server?.tradingSystem?.config || {};
   const benchmarkDir = config.momentumShadowBenchmarkDir ||
     process.env.MOMO_SHADOW_BENCHMARK_DIR ||
     path.resolve(PROJECT_ROOT, '.paper-momentum-shadow-btc-gate-v1');
-  const fixedHoldDir = (spreadGuard
-    ? config.momentumShadowFixedHoldSpreadDir ||
-      process.env.MOMO_SHADOW_FIXED_HOLD_SPREAD_DIR ||
-      path.resolve(PROJECT_ROOT, '.paper-momentum-shadow-fixed-hold-2d-spread-v1')
-    : config.momentumShadowFixedHoldDir ||
-      process.env.MOMO_SHADOW_FIXED_HOLD_DIR ||
-      path.resolve(PROJECT_ROOT, '.paper-momentum-shadow-fixed-hold-2d-v1'));
+  const fixedHoldDir = relativeTrendMinPercent !== null
+    ? config.momentumShadowFixedHoldRelativeDir ||
+      process.env.MOMO_SHADOW_FIXED_HOLD_RELATIVE_DIR ||
+      path.resolve(PROJECT_ROOT, '.paper-momentum-shadow-fixed-hold-2d-relative-v1')
+    : spreadGuard
+      ? config.momentumShadowFixedHoldSpreadDir ||
+        process.env.MOMO_SHADOW_FIXED_HOLD_SPREAD_DIR ||
+        path.resolve(PROJECT_ROOT, '.paper-momentum-shadow-fixed-hold-2d-spread-v1')
+      : config.momentumShadowFixedHoldDir ||
+        process.env.MOMO_SHADOW_FIXED_HOLD_DIR ||
+        path.resolve(PROJECT_ROOT, '.paper-momentum-shadow-fixed-hold-2d-v1');
   const ownerDirs = momentumShadowOwnerDirs(config);
   const expectedConfig = resolveMomentumShadowCandidateConfig({
     MOMO_SHADOW_MODE: 'fixed',
     MOMO_SHADOW_MAX_HOLD_HOURS: '48',
     MOMO_SHADOW_BENCHMARK_MARKET: 'KRW-BTC',
     MOMO_SHADOW_BENCHMARK_TREND_MIN_PERCENT: '1',
+    ...(relativeTrendMinPercent === null ? {} : {
+      MOMO_SHADOW_RELATIVE_TREND_MIN_PERCENT: String(relativeTrendMinPercent)
+    }),
     MOMO_SHADOW_TREND_MIN_PERCENT: '2',
     MOMO_SHADOW_BREADTH_MIN: '3',
     MOMO_SHADOW_MIN_UP_BARS: '2',
     MOMO_SHADOW_POSITION_FRACTION: '0.125',
     MOMO_SHADOW_MAX_POSITIONS: '2',
     MOMO_SHADOW_COST_PERCENT: '0.3',
-    MOMO_SHADOW_EXIT_ON_BENCHMARK_OFF: 'false',
+    // The fixed-hold A/B contracts use the same benchmark-off protection as
+    // the historical candidate and the launcher. Keeping this explicit seals
+    // the read-only readiness projection to the runner's contract instead of
+    // inheriting the raw runner's legacy default.
+    MOMO_SHADOW_EXIT_ON_BENCHMARK_OFF: 'true',
     MOMO_SHADOW_COOLDOWN_AFTER_LOSS_DAYS: '3',
     MOMO_SHADOW_MAX_PORTFOLIO_DRAWDOWN_PERCENT: '15',
     MOMO_SHADOW_VOLATILITY_LOOKBACK_DAYS: '14',
@@ -172,6 +204,7 @@ function projectMomentumShadowFixedHoldReadiness(server, { spreadGuard = false }
     targetDir: fixedHoldDir,
     benchmarkDir,
     ownerDirs,
+    candidateSlotFile: momentumShadowCandidateSlotFile(config),
     expectedConfig,
     requireBenchmarkOpen: process.env.MOMO_SHADOW_REQUIRE_BENCHMARK_OPEN !== 'false',
     minimumPollMs: Number.isFinite(Number(process.env.MOMO_SHADOW_MIN_POLL_MS))
@@ -238,6 +271,14 @@ const momentumShadowBookDefinitions = server => {
       directory: config.momentumShadowFixedHoldSpreadDir ||
         process.env.MOMO_SHADOW_FIXED_HOLD_SPREAD_DIR ||
         path.resolve(PROJECT_ROOT, '.paper-momentum-shadow-fixed-hold-2d-spread-v1')
+    },
+    {
+      key: 'fixed_2d_relative',
+      label: '2일·상대추세 A/B 후보',
+      description: 'cost 0.3% · 다음 시가 진입 · 48시간 종료 · BTC 대비 상대추세 우위',
+      directory: config.momentumShadowFixedHoldRelativeDir ||
+        process.env.MOMO_SHADOW_FIXED_HOLD_RELATIVE_DIR ||
+        path.resolve(PROJECT_ROOT, '.paper-momentum-shadow-fixed-hold-2d-relative-v1')
     }
   ];
 };
@@ -259,6 +300,8 @@ function formatRunnerStopReason(reason) {
     'signal:SIGINT': '사용자 중지',
     'signal:SIGTERM': '프로세스 종료 신호',
     heartbeat_timeout: '갱신 지연 자동 중지',
+    cycle_timeout: 'cycle 처리 시간 초과',
+    candidate_slot_lost: '후보 실행 슬롯 소유권 상실',
     lock_lost: '잠금 소유권 상실 감지',
     before_exit: '실행 종료 감지',
     startup_failure: '시작 실패',
@@ -394,6 +437,19 @@ function projectMomentumShadowBook(definition, fallbackInitialBalance, server) {
           ? ledger.quoteQuality.blockedMarkets
           : []
       } : null,
+      network: {
+        fetchErrors: Number(ledger.fetchErrors) || 0,
+        circuitOpen: ledger.networkFetchCircuitOpen === true,
+        failureStreak: Number(ledger.networkFetchFailureStreak) || 0,
+        maxConsecutiveFailures: Number(ledger.networkFetchMaxConsecutiveFailures) || 3,
+        maxCycleDurationMs: Number.isFinite(Number(ledger.networkFetchMaxCycleDurationMs))
+          ? Number(ledger.networkFetchMaxCycleDurationMs)
+          : null,
+        circuitBreaks: Number(ledger.networkFetchCircuitBreaks) || 0,
+        failureCount: Number(ledger.networkFetchFailureCount) || 0,
+        lastErrorCode: ledger.lastNetworkFetchError?.code || null,
+        lastErrorAt: ledger.lastNetworkFetchError?.at || null
+      },
       riskControls: {
         configured: Object.prototype.hasOwnProperty.call(ledger.config || {}, 'cooldownAfterLossDays') ||
           Object.prototype.hasOwnProperty.call(ledger.config || {}, 'maxPortfolioDrawdownPercent') ||
@@ -411,7 +467,8 @@ function projectMomentumShadowBook(definition, fallbackInitialBalance, server) {
         pendingEntryBlocked: Number(ledger.pendingEntryBlocked) || 0,
         pendingEntryDataQualityBlocked: Number(ledger.pendingEntryDataQualityBlocked) || 0,
         pendingEntryGapBlocked: Number(ledger.pendingEntryGapBlocked) || 0,
-        spreadBlockedEntries: Number(ledger.spreadBlocked) || 0
+        spreadBlockedEntries: Number(ledger.spreadBlocked) || 0,
+        relativeTrendBlockedEntries: Number(ledger.relativeTrendBlocked) || 0
       },
       openPositions: Object.entries(ledger.positions || {}).map(([market, position]) => ({
         asset: String(market).replace(/^KRW-/, ''),
@@ -435,6 +492,13 @@ function projectMomentumShadowBook(definition, fallbackInitialBalance, server) {
         benchmarkTrendMinPercent: Number.isFinite(Number(ledger.config?.benchmarkTrendMinPercent))
           ? Number(ledger.config.benchmarkTrendMinPercent)
           : null,
+        relativeTrendMinPercent: ledger.config?.relativeTrendMinPercent === null ||
+          ledger.config?.relativeTrendMinPercent === undefined ||
+          ledger.config?.relativeTrendMinPercent === ''
+          ? null
+          : Number.isFinite(Number(ledger.config.relativeTrendMinPercent))
+            ? Number(ledger.config.relativeTrendMinPercent)
+            : null,
         exitOnBenchmarkOff: ledger.config?.exitOnBenchmarkOff === true,
         cooldownAfterLossDays: Number(ledger.config?.cooldownAfterLossDays) || 0,
         maxPortfolioDrawdownPercent: Number(ledger.config?.maxPortfolioDrawdownPercent) || 0,
@@ -507,6 +571,13 @@ export default function createResearchRoutes(server) {
         key: 'fixed_2d',
         label: '2일 고정 종료 A/B 후보',
         readiness: projectMomentumShadowFixedHoldReadiness(server)
+      },
+      {
+      key: 'fixed_2d_relative',
+        label: '2일·상대추세 A/B 후보',
+        readiness: projectMomentumShadowFixedHoldReadiness(server, {
+          relativeTrendMinPercent: 0
+        })
       },
       {
         key: 'fixed_2d_spread',

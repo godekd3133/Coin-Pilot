@@ -31,6 +31,7 @@ export function resolveMomentumShadowRunnerContract({
   markets,
   benchmarkMarket,
   benchmarkTrendMinPercent,
+  relativeTrendMinPercent,
   exitOnBenchmarkOff,
   minUpBars,
   cooldownAfterLossDays,
@@ -68,6 +69,8 @@ export function resolveMomentumShadowRunnerContract({
   const resolvedBenchmarkTrend = resolvedBenchmarkMarket === null
     ? null
     : explicitBenchmarkTrend ?? persistedBenchmarkTrend ?? 0;
+  const explicitRelativeTrend = optionalNonNegative(relativeTrendMinPercent);
+  const persistedRelativeTrend = optionalNonNegative(persistedConfig?.relativeTrendMinPercent);
   const explicitBenchmarkExit = typeof exitOnBenchmarkOff === 'boolean'
     ? exitOnBenchmarkOff
     : null;
@@ -97,6 +100,7 @@ export function resolveMomentumShadowRunnerContract({
     markets: resolvedMarkets,
     benchmarkMarket: resolvedBenchmarkMarket,
     benchmarkTrendMinPercent: resolvedBenchmarkTrend,
+    relativeTrendMinPercent: explicitRelativeTrend ?? persistedRelativeTrend,
     exitOnBenchmarkOff: explicitBenchmarkExit ?? persistedBenchmarkExit,
     cooldownAfterLossDays: explicitCooldown ?? persistedCooldown,
     maxPortfolioDrawdownPercent: explicitDrawdown ?? persistedDrawdown,

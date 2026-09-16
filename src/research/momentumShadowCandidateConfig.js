@@ -16,6 +16,9 @@ const DEFAULT_CONFIG = Object.freeze({
   costPercent: 0.2,
   benchmarkMarket: 'KRW-BTC',
   benchmarkTrendMinPercent: 2,
+  // Optional relative-strength guard. Null preserves the existing candidate
+  // contract; zero requires the asset trend to be strictly above BTC's trend.
+  relativeTrendMinPercent: null,
   exitOnBenchmarkOff: true,
   cooldownAfterLossDays: 3,
   volatilityLookbackDays: 14,
@@ -60,6 +63,11 @@ function optionalPositiveNumber(value, fallback = null) {
   return parsed !== null && parsed > 0 ? parsed : null;
 }
 
+function optionalNonNegativeNumber(value, fallback = null) {
+  const parsed = optionalNumber(value, fallback);
+  return parsed !== null ? Math.max(0, parsed) : null;
+}
+
 /**
  * Resolve the one candidate contract shared by preflight, launcher, and the
  * read-only API projection. Explicit environment values are allowed for
@@ -83,6 +91,10 @@ export function resolveMomentumShadowCandidateConfig(env = process.env) {
     benchmarkTrendMinPercent: number(
       env.MOMO_SHADOW_BENCHMARK_TREND_MIN_PERCENT,
       DEFAULT_CONFIG.benchmarkTrendMinPercent
+    ),
+    relativeTrendMinPercent: optionalNonNegativeNumber(
+      env.MOMO_SHADOW_RELATIVE_TREND_MIN_PERCENT,
+      DEFAULT_CONFIG.relativeTrendMinPercent
     ),
     exitOnBenchmarkOff: env.MOMO_SHADOW_EXIT_ON_BENCHMARK_OFF !== 'false',
     cooldownAfterLossDays: number(

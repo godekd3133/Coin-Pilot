@@ -1,5 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import {
+  DEFAULT_MOMENTUM_SHADOW_CANDIDATE_SLOT_FILE,
+  inspectMomentumShadowCandidateSlot
+} from './momentumShadowCandidateSlot.js';
 
 function readJson(file) {
   try {
@@ -21,6 +25,7 @@ function ownerAlive(pid) {
 }
 
 function normalizedConfig(config = {}) {
+  const relativeTrendValue = config.relativeTrendMinPercent;
   return {
     mode: config.mode || 'regime',
     maxHoldHours: Math.max(1, Number(config.maxHoldHours) || 0),
@@ -35,6 +40,12 @@ function normalizedConfig(config = {}) {
     benchmarkTrendMinPercent: Number.isFinite(Number(config.benchmarkTrendMinPercent))
       ? Number(config.benchmarkTrendMinPercent)
       : null,
+    relativeTrendMinPercent: relativeTrendValue === null ||
+      relativeTrendValue === undefined || relativeTrendValue === ''
+      ? null
+      : Number.isFinite(Number(relativeTrendValue))
+        ? Math.max(0, Number(relativeTrendValue))
+        : null,
     exitOnBenchmarkOff: config.exitOnBenchmarkOff === true,
     cooldownAfterLossDays: Number(config.cooldownAfterLossDays) || 0,
     volatilityLookbackDays: Math.max(2, Number(config.volatilityLookbackDays) || 14),
@@ -77,10 +88,19 @@ export function inspectMomentumShadowCandidate({
   expectedConfig = {},
   requireBenchmarkOpen = true,
   minimumPollMs = 15 * 60 * 1000,
+  candidateSlotFile = DEFAULT_MOMENTUM_SHADOW_CANDIDATE_SLOT_FILE,
   now = Date.now()
 } = {}) {
   const blockers = [];
   const warnings = [];
+  const candidateSlot = inspectMomentumShadowCandidateSlot(candidateSlotFile);
+  if (!candidateSlot.valid) {
+    blockers.push('candidate_slot_unverifiable');
+  } else if (candidateSlot.occupied) {
+    blockers.push('candidate_slot_occupied');
+  } else if (candidateSlot.exists) {
+    warnings.push('candidate_slot_is_stale');
+  }
   const target = path.resolve(targetDir || '.paper-momentum-shadow-candidate');
   const targetLedgerFile = path.join(target, 'ledger.json');
   const targetLockFile = path.join(target, '.momentum-shadow.lock');
@@ -127,6 +147,10 @@ export function inspectMomentumShadowCandidate({
   let benchmarkTrend = null;
   let benchmarkCandidateGateOpen = false;
   let benchmarkSourceGateOpen = false;
+  let benchmarkDataQuality = null;
+  let benchmarkFetchErrors = 0;
+  let benchmarkFetchFailureStreak = 0;
+  let benchmarkFetchCircuitOpen = false;
   if (!benchmark) {
     blockers.push('benchmark_ledger_missing');
   } else {
@@ -153,6 +177,29 @@ export function inspectMomentumShadowCandidate({
       rawBenchmarkTrend === undefined || rawBenchmarkTrend === ''
       ? null
       : Number(rawBenchmarkTrend);
+    benchmarkFetchErrors = Math.max(0, Number(benchmark.fetchErrors) || 0);
+    benchmarkFetchFailureStreak = Math.max(0, Number(benchmark.networkFetchFailureStreak) || 0);
+    benchmarkFetchCircuitOpen = benchmark.networkFetchCircuitOpen === true;
+    benchmarkDataQuality = benchmark.dataQuality && typeof benchmark.dataQuality === 'object'
+      ? {
+        valid: benchmark.dataQuality.valid === true,
+        reason: benchmark.dataQuality.reason || null,
+        marketCount: Number(benchmark.dataQuality.marketCount) || 0,
+        missingMarkets: Array.isArray(benchmark.dataQuality.missingMarkets)
+          ? benchmark.dataQuality.missingMarkets
+          : [],
+        invalidMarkets: Array.isArray(benchmark.dataQuality.invalidMarkets)
+          ? benchmark.dataQuality.invalidMarkets
+          : [],
+        unalignedMarkets: Array.isArray(benchmark.dataQuality.unalignedMarkets)
+          ? benchmark.dataQuality.unalignedMarkets
+          : [],
+        staleMarkets: Array.isArray(benchmark.dataQuality.staleMarkets)
+          ? benchmark.dataQuality.staleMarkets
+          : [],
+        latestTimestamp: benchmark.dataQuality.latestTimestamp || null
+      }
+      : null;
     benchmarkCandidateGateOpen = expectedBenchmarkThreshold !== null &&
       Number.isFinite(benchmarkTrend) && benchmarkTrend > expectedBenchmarkThreshold;
     benchmarkSourceGateOpen = benchmark.benchmarkGateOpen === true;
@@ -162,10 +209,22 @@ export function inspectMomentumShadowCandidate({
     if (!heartbeatFresh) {
       blockers.push('benchmark_heartbeat_stale');
     }
+    if (benchmarkDataQuality?.valid !== true) {
+      blockers.push(benchmarkDataQuality
+        ? 'benchmark_data_quality_invalid'
+        : 'benchmark_data_quality_unverified');
+    }
     if (requireBenchmarkOpen && !benchmarkCandidateGateOpen) {
       blockers.push('benchmark_gate_closed');
     }
     if (pollMs < minimumPollMs) warnings.push('benchmark_poll_below_candidate_budget');
+    // fetchErrors is a lifetime counter that never clears, so it cannot
+    // distinguish a currently failing owner from a recovered one. Warn only
+    // on an active streak or open circuit; the lifetime count stays visible
+    // in the benchmark projection below.
+    if (benchmarkFetchFailureStreak > 0 || benchmarkFetchCircuitOpen) {
+      warnings.push(`benchmark_fetch_failures_active:${benchmarkFetchFailureStreak}`);
+    }
   }
 
   const candidateConfig = normalizedConfig(expectedConfig);
@@ -180,6 +239,13 @@ export function inspectMomentumShadowCandidate({
     targetDir: target,
     targetLedgerExists: Boolean(targetLedger),
     targetLockExists: Boolean(targetLock),
+    candidateSlot: {
+      exists: candidateSlot.exists,
+      valid: candidateSlot.valid,
+      occupied: candidateSlot.occupied,
+      ownerPid: candidateSlot.ownerPid,
+      startedAt: candidateSlot.startedAt
+    },
     candidateConfig,
     benchmark: benchmark ? {
       ownerPid: benchmark.ownerPid || null,
@@ -191,9 +257,22 @@ export function inspectMomentumShadowCandidate({
         ? Number(benchmark.config.benchmarkTrendMinPercent)
         : null,
       trendPercent: Number.isFinite(benchmarkTrend) ? benchmarkTrend : null,
+      fetchErrors: benchmarkFetchErrors,
+      fetchFailureStreak: benchmarkFetchFailureStreak,
+      fetchCircuitOpen: benchmarkFetchCircuitOpen,
       heartbeatAt: benchmark.heartbeatAt || null,
       heartbeatAgeSeconds: benchmarkHeartbeatAgeSeconds,
       heartbeatFresh: benchmarkHeartbeatFresh,
+      dataQuality: benchmarkDataQuality || {
+        valid: false,
+        reason: 'benchmark_data_quality_unverified',
+        marketCount: 0,
+        missingMarkets: [],
+        invalidMarkets: [],
+        unalignedMarkets: [],
+        staleMarkets: [],
+        latestTimestamp: null
+      },
       pollMs: benchmarkPollMs,
       staleLimitSeconds: Math.round(benchmarkStaleLimitMs / 1000),
       nextPollAt: benchmarkNextPollAt,

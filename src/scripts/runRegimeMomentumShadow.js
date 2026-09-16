@@ -43,9 +43,24 @@ import {
 } from '../research/momentumShadowEntryExecution.js';
 import { executeMomentumShadowPendingEntries } from '../research/momentumShadowPendingEntries.js';
 import {
+  recordMomentumShadowFetchFailure,
+  recordMomentumShadowFetchSuccess,
+  resolveMomentumShadowFetchFailureLimit
+} from '../research/momentumShadowNetworkGuard.js';
+import {
+  isMomentumShadowCycleTimedOut,
+  resolveMomentumShadowMaxCycleDurationMs
+} from '../research/momentumShadowCycleWatchdog.js';
+import {
   assessMomentumShadowQuoteQuality,
   projectMomentumShadowQuote
 } from '../research/momentumShadowQuoteQuality.js';
+import { isMomentumShadowRelativeTrendAllowed } from '../research/momentumShadowRelativeTrend.js';
+import {
+  acquireMomentumShadowCandidateSlot,
+  readMomentumShadowCandidateSlot,
+  releaseMomentumShadowCandidateSlot
+} from '../research/momentumShadowCandidateSlot.js';
 
 /**
  * Research-only forward shadow runner for the regime-momentum defense
@@ -70,12 +85,22 @@ const LOCK = path.join(DIR, '.momentum-shadow.lock');
 const LEDGER = path.join(DIR, 'ledger.json');
 const POLL_MS = Number(process.env.MOMO_SHADOW_POLL_MS) || 5 * 60 * 1000;
 const DEFAULT_REQUEST_INTERVAL_MS = 500;
+const MAX_CONSECUTIVE_FETCH_FAILURES = resolveMomentumShadowFetchFailureLimit(
+  process.env.MOMO_SHADOW_MAX_CONSECUTIVE_FETCH_FAILURES
+);
+const MAX_CYCLE_DURATION_MS = resolveMomentumShadowMaxCycleDurationMs(
+  process.env.MOMO_SHADOW_MAX_CYCLE_DURATION_MS
+);
+const CANDIDATE_SLOT_FILE = process.env.MOMO_SHADOW_CANDIDATE_SLOT_FILE
+  ? path.resolve(process.env.MOMO_SHADOW_CANDIDATE_SLOT_FILE)
+  : null;
 const HEARTBEAT_STALE_LIMIT_MS = Math.max(10 * 60 * 1000, POLL_MS * 5);
 const DEFAULT_MAX_DAILY_CANDLE_AGE_HOURS = 36;
 let MARKETS = (process.env.MOMO_SHADOW_MARKETS || 'KRW-BTC,KRW-ETH,KRW-XRP,KRW-SOL')
   .split(',').map((m) => m.trim()).filter(Boolean);
 let BENCHMARK_MARKET = null;
 let BENCHMARK_TREND_MIN_PERCENT = null;
+let RELATIVE_TREND_MIN_PERCENT = null;
 let EXIT_ON_BENCHMARK_OFF = false;
 let COOLDOWN_AFTER_LOSS_DAYS = 0;
 let MAX_PORTFOLIO_DRAWDOWN_PERCENT = 0;
@@ -126,6 +151,7 @@ const notify = createNotifier({ topic: process.env.MOMO_SHADOW_NTFY_TOPIC || '' 
 let bookName = `${DIR.replace(/[^a-z0-9]+/gi, '-')}·${MODE}`;
 let activeLedger = null;
 let lockOwned = false;
+let candidateSlotOwned = false;
 let shutdownStarted = false;
 let heartbeatWatchdogTimer = null;
 
@@ -209,6 +235,17 @@ function verifyLockOwnership() {
   process.exit(2);
 }
 
+function verifyCandidateSlotOwnership() {
+  if (!CANDIDATE_SLOT_FILE || !candidateSlotOwned) return;
+  const slot = readMomentumShadowCandidateSlot(CANDIDATE_SLOT_FILE);
+  if (slot?.valid === true && Number(slot.pid) === process.pid) return;
+  const error = new Error('candidate execution slot ownership was lost');
+  console.error('FAIL_CLOSED: candidate slot ownership lost');
+  stopRunner('candidate_slot_lost', error);
+  process.exitCode = 2;
+  process.exit(2);
+}
+
 function releaseLock() {
   if (!lockOwned) return;
   try {
@@ -237,6 +274,15 @@ function stopRunner(reason, error = null) {
     });
     try { saveLedger(activeLedger); }
     catch (persistError) { console.error(`runner stop state persist failed: ${persistError.message}`); }
+  }
+  if (CANDIDATE_SLOT_FILE && candidateSlotOwned) {
+    try {
+      releaseMomentumShadowCandidateSlot({ file: CANDIDATE_SLOT_FILE, pid: process.pid });
+    } catch (slotError) {
+      console.error(`candidate slot release failed: ${slotError.message}`);
+    } finally {
+      candidateSlotOwned = false;
+    }
   }
   releaseLock();
 }
@@ -283,7 +329,13 @@ process.on('unhandledRejection', (reason) => {
 process.on('beforeExit', () => {
   if (activeLedger && !shutdownStarted) stopRunner('before_exit');
 });
-process.on('exit', releaseLock);
+process.on('exit', () => {
+  if (CANDIDATE_SLOT_FILE && candidateSlotOwned) {
+    try { releaseMomentumShadowCandidateSlot({ file: CANDIDATE_SLOT_FILE, pid: process.pid }); }
+    catch { /* best-effort during process teardown */ }
+  }
+  releaseLock();
+});
 
 async function fetchDailyCandles(market) {
   return upbit.requestWithRetry(async () => {
@@ -356,320 +408,392 @@ function trailingTrend(bars, i, days = 7) {
 
 async function cycle(ledger, strategies) {
   verifyLockOwnership();
+  verifyCandidateSlotOwnership();
   const series = {};
   const currentOpenByMarket = {};
   const cycleNow = Date.now();
-  for (const m of MARKETS) {
-    try {
-      const candles = await fetchDailyCandles(m);
-      series[m] = toBars(candles, new Date(cycleNow));
-      currentOpenByMarket[m] = currentDailyOpen(candles, cycleNow);
+  let cycleTimeout = null;
+  const onCycleTimeout = () => {
+    if (shutdownStarted) return;
+    const elapsedMs = Date.now() - cycleNow;
+    if (!isMomentumShadowCycleTimedOut({
+      startedAt: cycleNow,
+      now: Date.now(),
+      timeoutMs: MAX_CYCLE_DURATION_MS
+    })) {
+      // A timer may fire ahead of its wall-clock deadline (cached loop time,
+      // ms rounding). A one-shot callback that simply returns would retire
+      // the watchdog for the rest of the cycle, so re-arm for the remaining
+      // budget instead.
+      cycleTimeout = setTimeout(
+        onCycleTimeout,
+        Math.max(1, MAX_CYCLE_DURATION_MS - elapsedMs)
+      );
+      cycleTimeout.unref?.();
+      return;
     }
-    catch (e) { ledger.fetchErrors = (ledger.fetchErrors || 0) + 1; continue; }
-    await sleep(REQUEST_INTERVAL_MS);
-  }
-  const now = cycleNow;
-  const nowIso = new Date().toISOString();
-  const dataQuality = assessMomentumShadowDailyGrid(series, MARKETS, {
-    now,
-    maxAgeHours: MAX_DAILY_CANDLE_AGE_HOURS
-  });
-  ledger.dataQuality = {
-    valid: dataQuality.valid,
-    reason: dataQuality.reason,
-    marketCount: dataQuality.marketCount,
-    missingMarkets: dataQuality.missingMarkets,
-    invalidMarkets: dataQuality.invalidMarkets,
-    unalignedMarkets: dataQuality.unalignedMarkets,
-    staleMarkets: dataQuality.staleMarkets,
-    latestTimestamp: dataQuality.latestTimestamp,
-    latestByMarket: dataQuality.latestByMarket,
-    latestAgeSecondsByMarket: dataQuality.latestAgeSecondsByMarket,
-    maxAgeHours: dataQuality.maxAgeHours
+    const error = new Error(
+      `shadow cycle exceeded ${Math.round(MAX_CYCLE_DURATION_MS / 1000)}s`
+    );
+    console.error(`FAIL_CLOSED: ${error.message}`);
+    stopRunner('cycle_timeout', error);
+    process.exitCode = 2;
+    process.exit(2);
   };
+  cycleTimeout = setTimeout(onCycleTimeout, MAX_CYCLE_DURATION_MS);
+  cycleTimeout.unref?.();
 
-  let quoteQuality = null;
-  if (MAX_SPREAD_PERCENT > 0) {
-    try {
-      quoteQuality = assessMomentumShadowQuoteQuality({
-        markets: MARKETS,
-        quotes: await fetchOrderbookQuotes(),
-        maxSpreadPercent: MAX_SPREAD_PERCENT
-      });
-    } catch (error) {
-      ledger.fetchErrors = (ledger.fetchErrors || 0) + 1;
-      quoteQuality = assessMomentumShadowQuoteQuality({
-        markets: MARKETS,
-        quotes: {},
-        maxSpreadPercent: MAX_SPREAD_PERCENT,
-        error: error.message
-      });
-    }
-    ledger.quoteQuality = quoteQuality;
-  }
-
-  const benchmark = getMomentumShadowBenchmarkGate(
-    series,
-    BENCHMARK_MARKET,
-    series[BENCHMARK_MARKET]?.length - 1,
-    BENCHMARK_TREND_MIN_PERCENT ?? 0,
-    strategyConfig.trendLookbackHours / 24
-  );
-  ledger.benchmarkMarket = BENCHMARK_MARKET;
-  ledger.benchmarkTrendPercent = benchmark.trendPercent;
-  ledger.benchmarkGateOpen = benchmark.gateOpen;
-  ledger.benchmarkAvailable = benchmark.available;
-
-  // Mark-to-market is descriptive only. Entry/exit decisions still use the
-  // same completed-candle prices and strategy contract as before.
-  markMomentumShadowPositions(ledger, series, COST_PERCENT);
-  if (!ledger.cooldownUntilByMarket || typeof ledger.cooldownUntilByMarket !== 'object') {
-    ledger.cooldownUntilByMarket = {};
-  }
-
-  // exits first (mark to latest completed daily close)
-  for (const [m, pos] of Object.entries(ledger.positions)) {
-    const bars = series[m];
-    if (!bars || !bars.length) continue;
-    const last = bars[bars.length - 1];
-    // When a next-open fill used the currently forming candle, there is no
-    // completed close at or after the entry yet. Never evaluate a pre-entry
-    // close as an immediate exit or drawdown stop.
-    if (positionNeedsCompletedEntryBar(pos) &&
-      !isMomentumShadowPositionCoveredByBar(pos, last)) continue;
-    let ex = strategies[m].checkPosition(
-      { entryPrice: pos.entryPrice, entryTimeMs: pos.entryTimeMs }, last.trade_price, now);
-    if (!ex.exit && MODE === 'regime') {
-      const t = trailingTrend(bars, bars.length - 1);
-      if (t != null && t <= TREND_MIN_PERCENT) {
-        ex = { exit: 'REGIME_OFF', profitPercent: ((last.trade_price - pos.entryPrice) / pos.entryPrice) * 100 };
+  try {
+    let consecutiveFetchFailures = 0;
+    ledger.networkFetchMaxConsecutiveFailures = MAX_CONSECUTIVE_FETCH_FAILURES;
+    ledger.networkFetchMaxCycleDurationMs = MAX_CYCLE_DURATION_MS;
+    for (const m of MARKETS) {
+      try {
+        const candles = await fetchDailyCandles(m);
+        series[m] = toBars(candles, new Date(cycleNow));
+        currentOpenByMarket[m] = currentDailyOpen(candles, cycleNow);
+        recordMomentumShadowFetchSuccess(ledger);
+        consecutiveFetchFailures = 0;
       }
+      catch (e) {
+        ledger.fetchErrors = (ledger.fetchErrors || 0) + 1;
+        consecutiveFetchFailures += 1;
+        const networkState = recordMomentumShadowFetchFailure(ledger, e, {
+          consecutiveFailures: consecutiveFetchFailures,
+          maxConsecutiveFailures: MAX_CONSECUTIVE_FETCH_FAILURES,
+          now: Date.now()
+        });
+        if (networkState.circuitOpen) {
+          console.error(
+            `FAIL_CLOSED: shadow daily fetch circuit opened after ${networkState.consecutiveFailures} consecutive failures (${networkState.error.code})`
+          );
+          break;
+        }
+        continue;
+      }
+      await sleep(REQUEST_INTERVAL_MS);
     }
-    if (!ex.exit && MODE === 'regime' && EXIT_ON_BENCHMARK_OFF &&
-      benchmark.available && !benchmark.gateOpen) {
-      ex = { exit: 'BENCHMARK_OFF', profitPercent: ((last.trade_price - pos.entryPrice) / pos.entryPrice) * 100 };
-    }
-    if (ex.exit) {
-      const profit = ex.profitPercent - COST_PERCENT;
-      ledger.balance += pos.size * (1 + profit / 100);
-      ledger.trades.push({ market: m, entry: pos, exitTs: last.ts, exitPrice: last.trade_price, exit: ex.exit, profitPercent: profit });
-      delete ledger.positions[m];
-      recordMomentumShadowExit(ledger, m, profit, now, COOLDOWN_AFTER_LOSS_DAYS);
-      notify.send(`momentum close ${m.replace('KRW-', '')}`,
-        `${ex.exit} ${profit >= 0 ? '+' : ''}${profit.toFixed(2)}% · ${bookName} · bal ${Math.round(ledger.balance).toLocaleString()}`,
-        [profit >= 0 ? 'white_check_mark' : 'x']);
-    }
-  }
+    const now = cycleNow;
+    const nowIso = new Date().toISOString();
+    const dataQuality = assessMomentumShadowDailyGrid(series, MARKETS, {
+      now,
+      maxAgeHours: MAX_DAILY_CANDLE_AGE_HOURS
+    });
+    ledger.dataQuality = {
+      valid: dataQuality.valid,
+      reason: dataQuality.reason,
+      marketCount: dataQuality.marketCount,
+      missingMarkets: dataQuality.missingMarkets,
+      invalidMarkets: dataQuality.invalidMarkets,
+      unalignedMarkets: dataQuality.unalignedMarkets,
+      staleMarkets: dataQuality.staleMarkets,
+      latestTimestamp: dataQuality.latestTimestamp,
+      latestByMarket: dataQuality.latestByMarket,
+      latestAgeSecondsByMarket: dataQuality.latestAgeSecondsByMarket,
+      maxAgeHours: dataQuality.maxAgeHours
+    };
 
-  const markedBeforeEntries = getMomentumShadowEquity(
-    ledger,
-    Number(process.env.MOMO_SHADOW_INITIAL_BALANCE) || 100_000_000
-  );
-  const drawdownState = updateMomentumShadowDrawdown(
-    ledger,
-    markedBeforeEntries.markedEquity,
-    nowIso,
-    MAX_PORTFOLIO_DRAWDOWN_PERCENT,
-    Number(process.env.MOMO_SHADOW_INITIAL_BALANCE) || 100_000_000
-  );
-  if (drawdownState.triggered) {
+    let quoteQuality = null;
+    if (MAX_SPREAD_PERCENT > 0) {
+      try {
+        quoteQuality = assessMomentumShadowQuoteQuality({
+          markets: MARKETS,
+          quotes: await fetchOrderbookQuotes(),
+          maxSpreadPercent: MAX_SPREAD_PERCENT
+        });
+      } catch (error) {
+        ledger.fetchErrors = (ledger.fetchErrors || 0) + 1;
+        quoteQuality = assessMomentumShadowQuoteQuality({
+          markets: MARKETS,
+          quotes: {},
+          maxSpreadPercent: MAX_SPREAD_PERCENT,
+          error: error.message
+        });
+      }
+      ledger.quoteQuality = quoteQuality;
+    }
+
+    const benchmark = getMomentumShadowBenchmarkGate(
+      series,
+      BENCHMARK_MARKET,
+      series[BENCHMARK_MARKET]?.length - 1,
+      BENCHMARK_TREND_MIN_PERCENT ?? 0,
+      strategyConfig.trendLookbackHours / 24
+    );
+    ledger.benchmarkMarket = BENCHMARK_MARKET;
+    ledger.benchmarkTrendPercent = benchmark.trendPercent;
+    ledger.benchmarkGateOpen = benchmark.gateOpen;
+    ledger.benchmarkAvailable = benchmark.available;
+
+    // Mark-to-market is descriptive only. Entry/exit decisions still use the
+    // same completed-candle prices and strategy contract as before.
+    markMomentumShadowPositions(ledger, series, COST_PERCENT);
+    if (!ledger.cooldownUntilByMarket || typeof ledger.cooldownUntilByMarket !== 'object') {
+      ledger.cooldownUntilByMarket = {};
+    }
+
+    // exits first (mark to latest completed daily close)
     for (const [m, pos] of Object.entries(ledger.positions)) {
       const bars = series[m];
-      const last = bars?.at(-1);
-      if (!last) continue;
+      if (!bars || !bars.length) continue;
+      const last = bars[bars.length - 1];
+      // When a next-open fill used the currently forming candle, there is no
+      // completed close at or after the entry yet. Never evaluate a pre-entry
+      // close as an immediate exit or drawdown stop.
       if (positionNeedsCompletedEntryBar(pos) &&
         !isMomentumShadowPositionCoveredByBar(pos, last)) continue;
-      const rawProfitPercent = ((last.trade_price - pos.entryPrice) / pos.entryPrice) * 100;
-      const profit = rawProfitPercent - COST_PERCENT;
-      ledger.balance += pos.size * (1 + profit / 100);
-      ledger.trades.push({
-        market: m,
-        entry: pos,
-        exitTs: last.ts,
-        exitPrice: last.trade_price,
-        exit: 'PORTFOLIO_DRAWDOWN_STOP',
-        profitPercent: profit
-      });
-      delete ledger.positions[m];
-      recordMomentumShadowExit(ledger, m, profit, now, COOLDOWN_AFTER_LOSS_DAYS);
-      notify.send(`momentum drawdown stop ${m.replace('KRW-', '')}`,
-        `PORTFOLIO_DRAWDOWN_STOP ${profit >= 0 ? '+' : ''}${profit.toFixed(2)}% · ${bookName}`,
-        ['warning']);
-    }
-  }
-
-  // Pending next-open fills settle after this cycle's exits and drawdown
-  // liquidation: an exit decided at the last completed close frees its slot
-  // and cash before an open-time fill is evaluated, matching the simulator's
-  // boundary ordering.
-  executeMomentumShadowPendingEntries({
-    ledger,
-    series,
-    currentOpenByMarket,
-    dataQuality,
-    maxPositions: MAX_POSITIONS,
-    now,
-    entryExecution: ENTRY_EXECUTION,
-    maxEntryGapPercent: MAX_ENTRY_GAP_PERCENT,
-    notify,
-    bookName
-  });
-
-  // breadth: count markets with trailing trend above threshold
-  const trends = {};
-  for (const m of MARKETS) {
-    const bars = series[m];
-    if (!bars || bars.length < 9) continue;
-    trends[m] = trailingTrend(bars, bars.length - 1);
-  }
-  const breadth = Object.values(trends).filter((t) => t != null && t > TREND_MIN_PERCENT).length;
-
-  const volatilityByMarket = {};
-  const volatilityScaleByMarket = {};
-  for (const m of MARKETS) {
-    const bars = series[m];
-    const volatilityPercent = VOLATILITY_TARGET_PERCENT === null
-      ? null
-      : calculateCloseVolatilityPercent(bars, bars?.length - 1, VOLATILITY_LOOKBACK_DAYS);
-    const volatilityScale = VOLATILITY_TARGET_PERCENT === null
-      ? 1
-      : volatilityPercent === null
-        ? null
-        : calculateVolatilityPositionScale(volatilityPercent, VOLATILITY_TARGET_PERCENT);
-    volatilityByMarket[m] = volatilityPercent;
-    volatilityScaleByMarket[m] = volatilityScale;
-  }
-  ledger.volatilityByMarket = volatilityByMarket;
-  ledger.volatilityScaleByMarket = volatilityScaleByMarket;
-
-  // Collect every eligible signal before applying the position limit. This
-  // matches the daily research simulator, which ranks the strongest trend
-  // first instead of depending on the configured market array order.
-  const entryCandidates = [];
-  for (const m of MARKETS) {
-    if (!dataQuality.valid) {
-      ledger.dataQualityBlocked = (ledger.dataQualityBlocked || 0) + 1;
-      continue;
-    }
-    if (ledger.drawdownStopTriggered) {
-      ledger.drawdownBlocked = (ledger.drawdownBlocked || 0) + 1;
-      continue;
-    }
-    const pendingMarket = ENTRY_EXECUTION === 'next_open' &&
-      (ledger.pendingEntries || []).some(entry => entry.market === m);
-    if (ledger.positions[m] || pendingMarket) continue;
-    if (isMomentumShadowCooldownActive(ledger, m, now)) {
-      ledger.cooldownBlocked = (ledger.cooldownBlocked || 0) + 1;
-      continue;
-    }
-    const bars = series[m];
-    if (!bars || bars.length < strategies[m].getMinCandleCount()) continue;
-    const r = strategies[m].analyze(bars, now);
-    if (r.signal !== 'BUY') continue;
-    if (isMomentumShadowSignalConsumed(ledger, m, r.signalKey)) {
-      ledger.duplicateSignalBlocked = (ledger.duplicateSignalBlocked || 0) + 1;
-      continue;
-    }
-    if (r.trendPercent <= TREND_MIN_PERCENT) { ledger.gateBlocked = (ledger.gateBlocked || 0) + 1; continue; }
-    if (breadth < BREADTH_MIN) { ledger.breadthBlocked = (ledger.breadthBlocked || 0) + 1; continue; }
-    if (BENCHMARK_MARKET && !benchmark.gateOpen) {
-      ledger.benchmarkBlocked = (ledger.benchmarkBlocked || 0) + 1;
-      continue;
-    }
-    if (MAX_SPREAD_PERCENT > 0 && (
-      quoteQuality?.error ||
-      quoteQuality?.missingMarkets?.length ||
-      quoteQuality?.invalidMarkets?.length ||
-      quoteQuality?.blockedMarkets?.includes(m)
-    )) {
-      ledger.spreadBlocked = (ledger.spreadBlocked || 0) + 1;
-      if (!ledger.spreadBlockedByMarket || typeof ledger.spreadBlockedByMarket !== 'object') {
-        ledger.spreadBlockedByMarket = {};
+      let ex = strategies[m].checkPosition(
+        { entryPrice: pos.entryPrice, entryTimeMs: pos.entryTimeMs }, last.trade_price, now);
+      if (!ex.exit && MODE === 'regime') {
+        const t = trailingTrend(bars, bars.length - 1);
+        if (t != null && t <= TREND_MIN_PERCENT) {
+          ex = { exit: 'REGIME_OFF', profitPercent: ((last.trade_price - pos.entryPrice) / pos.entryPrice) * 100 };
+        }
       }
-      ledger.spreadBlockedByMarket[m] = (ledger.spreadBlockedByMarket[m] || 0) + 1;
-      continue;
+      if (!ex.exit && MODE === 'regime' && EXIT_ON_BENCHMARK_OFF &&
+        benchmark.available && !benchmark.gateOpen) {
+        ex = { exit: 'BENCHMARK_OFF', profitPercent: ((last.trade_price - pos.entryPrice) / pos.entryPrice) * 100 };
+      }
+      if (ex.exit) {
+        const profit = ex.profitPercent - COST_PERCENT;
+        ledger.balance += pos.size * (1 + profit / 100);
+        ledger.trades.push({ market: m, entry: pos, exitTs: last.ts, exitPrice: last.trade_price, exit: ex.exit, profitPercent: profit });
+        delete ledger.positions[m];
+        recordMomentumShadowExit(ledger, m, profit, now, COOLDOWN_AFTER_LOSS_DAYS);
+        notify.send(`momentum close ${m.replace('KRW-', '')}`,
+          `${ex.exit} ${profit >= 0 ? '+' : ''}${profit.toFixed(2)}% · ${bookName} · bal ${Math.round(ledger.balance).toLocaleString()}`,
+          [profit >= 0 ? 'white_check_mark' : 'x']);
+      }
     }
-    const volatilityScale = volatilityScaleByMarket[m];
-    if (volatilityScale === null) {
-      ledger.volatilityBlocked = (ledger.volatilityBlocked || 0) + 1;
-      continue;
+
+    const markedBeforeEntries = getMomentumShadowEquity(
+      ledger,
+      Number(process.env.MOMO_SHADOW_INITIAL_BALANCE) || 100_000_000
+    );
+    const drawdownState = updateMomentumShadowDrawdown(
+      ledger,
+      markedBeforeEntries.markedEquity,
+      nowIso,
+      MAX_PORTFOLIO_DRAWDOWN_PERCENT,
+      Number(process.env.MOMO_SHADOW_INITIAL_BALANCE) || 100_000_000
+    );
+    if (drawdownState.triggered) {
+      for (const [m, pos] of Object.entries(ledger.positions)) {
+        const bars = series[m];
+        const last = bars?.at(-1);
+        if (!last) continue;
+        if (positionNeedsCompletedEntryBar(pos) &&
+          !isMomentumShadowPositionCoveredByBar(pos, last)) continue;
+        const rawProfitPercent = ((last.trade_price - pos.entryPrice) / pos.entryPrice) * 100;
+        const profit = rawProfitPercent - COST_PERCENT;
+        ledger.balance += pos.size * (1 + profit / 100);
+        ledger.trades.push({
+          market: m,
+          entry: pos,
+          exitTs: last.ts,
+          exitPrice: last.trade_price,
+          exit: 'PORTFOLIO_DRAWDOWN_STOP',
+          profitPercent: profit
+        });
+        delete ledger.positions[m];
+        recordMomentumShadowExit(ledger, m, profit, now, COOLDOWN_AFTER_LOSS_DAYS);
+        notify.send(`momentum drawdown stop ${m.replace('KRW-', '')}`,
+          `PORTFOLIO_DRAWDOWN_STOP ${profit >= 0 ? '+' : ''}${profit.toFixed(2)}% · ${bookName}`,
+          ['warning']);
+      }
     }
-    entryCandidates.push({
-      market: m,
-      bars,
-      signal: r,
-      volatilityScale,
-      trendPercent: r.trendPercent
+
+    // Pending next-open fills settle after this cycle's exits and drawdown
+    // liquidation: an exit decided at the last completed close frees its slot
+    // and cash before an open-time fill is evaluated, matching the simulator's
+    // boundary ordering.
+    executeMomentumShadowPendingEntries({
+      ledger,
+      series,
+      currentOpenByMarket,
+      dataQuality,
+      maxPositions: MAX_POSITIONS,
+      now,
+      entryExecution: ENTRY_EXECUTION,
+      maxEntryGapPercent: MAX_ENTRY_GAP_PERCENT,
+      notify,
+      bookName
     });
-  }
 
-  // entries
-  let plannedBalance = ledger.balance;
-  for (const [selectionRank, candidate] of rankMomentumShadowEntryCandidates(
-    entryCandidates
-  ).entries()) {
-    const { market: m, bars, signal: r, volatilityScale } = candidate;
-    const pendingCount = ENTRY_EXECUTION === 'next_open' ? (ledger.pendingEntries || []).length : 0;
-    if (Object.keys(ledger.positions).length + pendingCount >= MAX_POSITIONS) {
-      ledger.blockedSignalCount = (ledger.blockedSignalCount || 0) + 1;
-      continue;
+    // breadth: count markets with trailing trend above threshold
+    const trends = {};
+    for (const m of MARKETS) {
+      const bars = series[m];
+      if (!bars || bars.length < 9) continue;
+      trends[m] = trailingTrend(bars, bars.length - 1);
     }
-    const size = plannedBalance * POSITION_FRACTION * volatilityScale;
-    // A below-minimum entry must not consume the signal key: the order is
-    // skipped, not executed, and the same candle may retry once cash allows.
-    if (size < 5000) continue;
-    if (!strategies[m].consumeSignal(r.signalKey)) {
-      ledger.duplicateSignalBlocked = (ledger.duplicateSignalBlocked || 0) + 1;
-      continue;
+    const breadth = Object.values(trends).filter((t) => t != null && t > TREND_MIN_PERCENT).length;
+
+    const volatilityByMarket = {};
+    const volatilityScaleByMarket = {};
+    for (const m of MARKETS) {
+      const bars = series[m];
+      const volatilityPercent = VOLATILITY_TARGET_PERCENT === null
+        ? null
+        : calculateCloseVolatilityPercent(bars, bars?.length - 1, VOLATILITY_LOOKBACK_DAYS);
+      const volatilityScale = VOLATILITY_TARGET_PERCENT === null
+        ? 1
+        : volatilityPercent === null
+          ? null
+          : calculateVolatilityPositionScale(volatilityPercent, VOLATILITY_TARGET_PERCENT);
+      volatilityByMarket[m] = volatilityPercent;
+      volatilityScaleByMarket[m] = volatilityScale;
     }
-    recordMomentumShadowSignal(ledger, m, r.signalKey);
-    plannedBalance -= size;
-    if (ENTRY_EXECUTION === 'next_open') {
-      ledger.pendingEntries.push({
+    ledger.volatilityByMarket = volatilityByMarket;
+    ledger.volatilityScaleByMarket = volatilityScaleByMarket;
+
+    // Collect every eligible signal before applying the position limit. This
+    // matches the daily research simulator, which ranks the strongest trend
+    // first instead of depending on the configured market array order.
+    const entryCandidates = [];
+    for (const m of MARKETS) {
+      if (!dataQuality.valid) {
+        ledger.dataQualityBlocked = (ledger.dataQualityBlocked || 0) + 1;
+        continue;
+      }
+      if (ledger.drawdownStopTriggered) {
+        ledger.drawdownBlocked = (ledger.drawdownBlocked || 0) + 1;
+        continue;
+      }
+      const pendingMarket = ENTRY_EXECUTION === 'next_open' &&
+        (ledger.pendingEntries || []).some(entry => entry.market === m);
+      if (ledger.positions[m] || pendingMarket) continue;
+      if (isMomentumShadowCooldownActive(ledger, m, now)) {
+        ledger.cooldownBlocked = (ledger.cooldownBlocked || 0) + 1;
+        continue;
+      }
+      const bars = series[m];
+      if (!bars || bars.length < strategies[m].getMinCandleCount()) continue;
+      const r = strategies[m].analyze(bars, now);
+      if (r.signal !== 'BUY') continue;
+      if (isMomentumShadowSignalConsumed(ledger, m, r.signalKey)) {
+        ledger.duplicateSignalBlocked = (ledger.duplicateSignalBlocked || 0) + 1;
+        continue;
+      }
+      if (r.trendPercent <= TREND_MIN_PERCENT) { ledger.gateBlocked = (ledger.gateBlocked || 0) + 1; continue; }
+      if (breadth < BREADTH_MIN) { ledger.breadthBlocked = (ledger.breadthBlocked || 0) + 1; continue; }
+      if (BENCHMARK_MARKET && !benchmark.gateOpen) {
+        ledger.benchmarkBlocked = (ledger.benchmarkBlocked || 0) + 1;
+        continue;
+      }
+      if (RELATIVE_TREND_MIN_PERCENT !== null && !isMomentumShadowRelativeTrendAllowed({
+        trendPercent: r.trendPercent,
+        benchmarkTrendPercent: benchmark.trendPercent,
+        minimumGapPercent: RELATIVE_TREND_MIN_PERCENT
+      })) {
+        ledger.relativeTrendBlocked = (ledger.relativeTrendBlocked || 0) + 1;
+        continue;
+      }
+      if (MAX_SPREAD_PERCENT > 0 && (
+        quoteQuality?.error ||
+        quoteQuality?.missingMarkets?.length ||
+        quoteQuality?.invalidMarkets?.length ||
+        quoteQuality?.blockedMarkets?.includes(m)
+      )) {
+        ledger.spreadBlocked = (ledger.spreadBlocked || 0) + 1;
+        if (!ledger.spreadBlockedByMarket || typeof ledger.spreadBlockedByMarket !== 'object') {
+          ledger.spreadBlockedByMarket = {};
+        }
+        ledger.spreadBlockedByMarket[m] = (ledger.spreadBlockedByMarket[m] || 0) + 1;
+        continue;
+      }
+      const volatilityScale = volatilityScaleByMarket[m];
+      if (volatilityScale === null) {
+        ledger.volatilityBlocked = (ledger.volatilityBlocked || 0) + 1;
+        continue;
+      }
+      entryCandidates.push({
         market: m,
-        signalKey: r.signalKey,
-        signalTimestamp: bars[bars.length - 1].ts,
-        signalClosePrice: r.referencePrice,
-        size,
-        volatilityPercent: volatilityByMarket[m],
+        bars,
+        signal: r,
         volatilityScale,
-        selectionRank: selectionRank + 1,
-        trendPercent: r.trendPercent,
-        breadth,
-        entryExecution: ENTRY_EXECUTION
+        trendPercent: r.trendPercent
       });
-    } else {
-      ledger.balance -= size;
-      ledger.positions[m] = {
-        entryPrice: r.referencePrice,
-        entryTs: bars[bars.length - 1].ts,
-        entryTimeMs: now,
-        signalKey: r.signalKey,
-        size,
-        volatilityPercent: volatilityByMarket[m],
-        volatilityScale,
-        selectionRank: selectionRank + 1,
-        trendPercent: r.trendPercent,
-        breadth,
-        entryExecution: ENTRY_EXECUTION
-      };
-      ledger.entries = (ledger.entries || 0) + 1;
-      notify.send(`momentum open ${m.replace('KRW-', '')}`,
-        `7d trend +${r.trendPercent.toFixed(1)}% · breadth ${breadth} · size ${Math.round(size).toLocaleString()} · ${bookName}`,
-        ['chart_with_upwards_trend']);
     }
-  }
 
-  ledger.lastCycleAt = nowIso;
-  ledger.cycles = (ledger.cycles || 0) + 1;
-  ledger.breadth = breadth;
-  ledger.trends = trends;
-  updateMomentumShadowEquity(ledger, Number(process.env.MOMO_SHADOW_INITIAL_BALANCE) || 100_000_000, nowIso);
-  saveLedger(ledger);
-  console.log(`[${nowIso}] cycle ${ledger.cycles} bal=${Math.round(ledger.balance)} equity=${Math.round(ledger.markedEquity || ledger.balance)} unrealized=${Math.round(ledger.unrealizedProfit || 0)} open=${Object.keys(ledger.positions).join(',') || 'none'} breadth=${breadth} trades=${ledger.trades.length}`);
+    // entries
+    let plannedBalance = ledger.balance;
+    for (const [selectionRank, candidate] of rankMomentumShadowEntryCandidates(
+      entryCandidates
+    ).entries()) {
+      const { market: m, bars, signal: r, volatilityScale } = candidate;
+      const pendingCount = ENTRY_EXECUTION === 'next_open' ? (ledger.pendingEntries || []).length : 0;
+      if (Object.keys(ledger.positions).length + pendingCount >= MAX_POSITIONS) {
+        ledger.blockedSignalCount = (ledger.blockedSignalCount || 0) + 1;
+        continue;
+      }
+      const size = plannedBalance * POSITION_FRACTION * volatilityScale;
+      // A below-minimum entry must not consume the signal key: the order is
+      // skipped, not executed, and the same candle may retry once cash allows.
+      if (size < 5000) continue;
+      if (!strategies[m].consumeSignal(r.signalKey)) {
+        ledger.duplicateSignalBlocked = (ledger.duplicateSignalBlocked || 0) + 1;
+        continue;
+      }
+      recordMomentumShadowSignal(ledger, m, r.signalKey);
+      plannedBalance -= size;
+      if (ENTRY_EXECUTION === 'next_open') {
+        ledger.pendingEntries.push({
+          market: m,
+          signalKey: r.signalKey,
+          signalTimestamp: bars[bars.length - 1].ts,
+          signalClosePrice: r.referencePrice,
+          size,
+          volatilityPercent: volatilityByMarket[m],
+          volatilityScale,
+          selectionRank: selectionRank + 1,
+          trendPercent: r.trendPercent,
+          breadth,
+          entryExecution: ENTRY_EXECUTION
+        });
+      } else {
+        ledger.balance -= size;
+        ledger.positions[m] = {
+          entryPrice: r.referencePrice,
+          entryTs: bars[bars.length - 1].ts,
+          entryTimeMs: now,
+          signalKey: r.signalKey,
+          size,
+          volatilityPercent: volatilityByMarket[m],
+          volatilityScale,
+          selectionRank: selectionRank + 1,
+          trendPercent: r.trendPercent,
+          breadth,
+          entryExecution: ENTRY_EXECUTION
+        };
+        ledger.entries = (ledger.entries || 0) + 1;
+        notify.send(`momentum open ${m.replace('KRW-', '')}`,
+          `7d trend +${r.trendPercent.toFixed(1)}% · breadth ${breadth} · size ${Math.round(size).toLocaleString()} · ${bookName}`,
+          ['chart_with_upwards_trend']);
+      }
+    }
+
+    ledger.lastCycleAt = nowIso;
+    ledger.cycles = (ledger.cycles || 0) + 1;
+    ledger.breadth = breadth;
+    ledger.trends = trends;
+    updateMomentumShadowEquity(ledger, Number(process.env.MOMO_SHADOW_INITIAL_BALANCE) || 100_000_000, nowIso);
+    saveLedger(ledger);
+    console.log(`[${nowIso}] cycle ${ledger.cycles} bal=${Math.round(ledger.balance)} equity=${Math.round(ledger.markedEquity || ledger.balance)} unrealized=${Math.round(ledger.unrealizedProfit || 0)} open=${Object.keys(ledger.positions).join(',') || 'none'} breadth=${breadth} trades=${ledger.trades.length}`);
+  } finally {
+    clearTimeout(cycleTimeout);
+  }
 }
 
 async function main() {
+  if (CANDIDATE_SLOT_FILE) {
+    acquireMomentumShadowCandidateSlot({
+      file: CANDIDATE_SLOT_FILE,
+      pid: process.pid,
+      dir: path.resolve(DIR)
+    });
+    candidateSlotOwned = true;
+  }
   const staleRecovery = acquireLock();
   let ledger = loadLedger();
   const explicitEntryExecution = process.env.MOMO_SHADOW_ENTRY_EXECUTION !== undefined;
@@ -689,6 +813,7 @@ async function main() {
     markets: process.env.MOMO_SHADOW_MARKETS,
     benchmarkMarket: process.env.MOMO_SHADOW_BENCHMARK_MARKET,
     benchmarkTrendMinPercent: process.env.MOMO_SHADOW_BENCHMARK_TREND_MIN_PERCENT,
+    relativeTrendMinPercent: process.env.MOMO_SHADOW_RELATIVE_TREND_MIN_PERCENT,
     exitOnBenchmarkOff: process.env.MOMO_SHADOW_EXIT_ON_BENCHMARK_OFF === undefined
       ? undefined
       : process.env.MOMO_SHADOW_EXIT_ON_BENCHMARK_OFF === 'true',
@@ -707,6 +832,7 @@ async function main() {
   MARKETS = contract.markets;
   BENCHMARK_MARKET = contract.benchmarkMarket;
   BENCHMARK_TREND_MIN_PERCENT = contract.benchmarkTrendMinPercent;
+  RELATIVE_TREND_MIN_PERCENT = contract.relativeTrendMinPercent;
   EXIT_ON_BENCHMARK_OFF = contract.exitOnBenchmarkOff;
   COOLDOWN_AFTER_LOSS_DAYS = contract.cooldownAfterLossDays ?? 0;
   MAX_PORTFOLIO_DRAWDOWN_PERCENT = contract.maxPortfolioDrawdownPercent ?? 0;
@@ -758,6 +884,13 @@ async function main() {
     optionalRiskConfig.requestIntervalMs = REQUEST_INTERVAL_MS;
   }
   if (contract.minUpBars !== null) optionalRiskConfig.minUpBars = strategyConfig.minUpBars;
+  // Relative-strength is optional for legacy ledgers. Persist it for a fresh
+  // or explicitly opted-in book, but do not inject a new null key into an
+  // older owner because that would manufacture config drift on restart.
+  if (contract.relativeTrendMinPercent !== null || !ledger ||
+    Object.prototype.hasOwnProperty.call(ledger?.config || {}, 'relativeTrendMinPercent')) {
+    optionalRiskConfig.relativeTrendMinPercent = RELATIVE_TREND_MIN_PERCENT;
+  }
   // Volatility keys follow the same schema rule as the other optional knobs:
   // recorded when explicitly enabled, part of a fresh ledger's contract, or
   // already present — never injected into an older schema as ambient values.
@@ -800,7 +933,7 @@ async function main() {
   });
   saveLedger(ledger);
   startHeartbeatWatchdog(ledger);
-  console.log(`momentum shadow started: ${MARKETS.join(',')} hold=${strategyConfig.maxHoldHours}h trend>${TREND_MIN_PERCENT}% breadth>=${BREADTH_MIN} cooldown=${COOLDOWN_AFTER_LOSS_DAYS}d drawdownStop=${MAX_PORTFOLIO_DRAWDOWN_PERCENT}% volatilityTarget=${VOLATILITY_TARGET_PERCENT ?? 'off'}%/${VOLATILITY_LOOKBACK_DAYS}d entryExecution=${ENTRY_EXECUTION} entryGapCeiling=${MAX_ENTRY_GAP_PERCENT}% dailyCandleMaxAge=${MAX_DAILY_CANDLE_AGE_HOURS}h spreadCeiling=${MAX_SPREAD_PERCENT > 0 ? `${MAX_SPREAD_PERCENT}%` : 'off'} requestInterval=${REQUEST_INTERVAL_MS}ms`);
+  console.log(`momentum shadow started: ${MARKETS.join(',')} hold=${strategyConfig.maxHoldHours}h trend>${TREND_MIN_PERCENT}% breadth>=${BREADTH_MIN} cooldown=${COOLDOWN_AFTER_LOSS_DAYS}d drawdownStop=${MAX_PORTFOLIO_DRAWDOWN_PERCENT}% volatilityTarget=${VOLATILITY_TARGET_PERCENT ?? 'off'}%/${VOLATILITY_LOOKBACK_DAYS}d relativeTrend=${RELATIVE_TREND_MIN_PERCENT === null ? 'off' : `>${RELATIVE_TREND_MIN_PERCENT}% over benchmark`} entryExecution=${ENTRY_EXECUTION} entryGapCeiling=${MAX_ENTRY_GAP_PERCENT}% dailyCandleMaxAge=${MAX_DAILY_CANDLE_AGE_HOURS}h spreadCeiling=${MAX_SPREAD_PERCENT > 0 ? `${MAX_SPREAD_PERCENT}%` : 'off'} requestInterval=${REQUEST_INTERVAL_MS}ms candidateSlot=${CANDIDATE_SLOT_FILE ? 'global' : 'off'}`);
   while (true) {
     try { await cycle(ledger, strategies); }
     catch (e) { console.error('cycle error:', e.message); }

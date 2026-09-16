@@ -17,6 +17,7 @@ test('candidate config has one evidence-backed default contract', () => {
   assert.equal(config.positionFraction, 0.125);
   assert.equal(config.maxPositions, 2);
   assert.equal(config.costPercent, 0.2);
+  assert.equal(config.relativeTrendMinPercent, null);
   assert.equal(config.maxEntryGapPercent, 0);
   assert.equal(config.maxDailyCandleAgeHours, 36);
   assert.equal(config.maxSpreadPercent, 0);
@@ -102,6 +103,21 @@ test('candidate config accepts an explicit daily candle freshness budget', () =>
   assert.equal(resolveMomentumShadowCandidateConfig({
     MOMO_SHADOW_MAX_DAILY_CANDLE_AGE_HOURS: '-1'
   }).maxDailyCandleAgeHours, 0);
+});
+
+test('candidate config keeps relative trend as an opt-in non-negative guard', () => {
+  assert.equal(resolveMomentumShadowCandidateConfig({
+    MOMO_SHADOW_RELATIVE_TREND_MIN_PERCENT: '0'
+  }).relativeTrendMinPercent, 0);
+  assert.equal(resolveMomentumShadowCandidateConfig({
+    MOMO_SHADOW_RELATIVE_TREND_MIN_PERCENT: '1.5'
+  }).relativeTrendMinPercent, 1.5);
+  assert.equal(resolveMomentumShadowCandidateConfig({
+    MOMO_SHADOW_RELATIVE_TREND_MIN_PERCENT: '-1'
+  }).relativeTrendMinPercent, 0);
+  assert.equal(resolveMomentumShadowCandidateConfig({
+    MOMO_SHADOW_RELATIVE_TREND_MIN_PERCENT: 'invalid'
+  }).relativeTrendMinPercent, null);
 });
 
 test('candidate config accepts an optional best-bid/ask spread ceiling', () => {

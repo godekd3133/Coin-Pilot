@@ -100,6 +100,17 @@ test('momentum shadow route projects marked equity as read-only research evidenc
     cooldownBlocked: 2,
     drawdownBlocked: 4,
     duplicateSignalBlocked: 3,
+    networkFetchFailureStreak: 2,
+    fetchErrors: 4,
+    networkFetchMaxConsecutiveFailures: 3,
+    networkFetchMaxCycleDurationMs: 600_000,
+    networkFetchCircuitOpen: true,
+    networkFetchCircuitBreaks: 1,
+    networkFetchFailureCount: 4,
+    lastNetworkFetchError: {
+      code: 'ENOTFOUND',
+      at: '2026-09-14T00:00:01.000Z'
+    },
     dataQuality: {
       valid: false,
       reason: 'daily_market_latest_timestamp_mismatch',
@@ -142,13 +153,26 @@ test('momentum shadow route projects marked equity as read-only research evidenc
     assert.equal(body.books[0].unrealizedProfit, 30);
     assert.match(body.books[0].configurationWarning, /설정 변경/);
     assert.equal(body.books[0].realizedProfit, 1);
+    assert.equal(body.books[0].contract.relativeTrendMinPercent, null);
+    assert.equal(body.books[0].network.circuitOpen, true);
+    assert.equal(body.books[0].network.fetchErrors, 4);
+    assert.equal(body.books[0].network.failureStreak, 2);
+    assert.equal(body.books[0].network.maxConsecutiveFailures, 3);
+    assert.equal(body.books[0].network.maxCycleDurationMs, 600_000);
+    assert.equal(body.books[0].network.circuitBreaks, 1);
+    assert.equal(body.books[0].network.failureCount, 4);
+    assert.equal(body.books[0].network.lastErrorCode, 'ENOTFOUND');
     assert.equal(body.candidateReadiness.readOnly, true);
     assert.equal(body.candidateReadiness.promotionAllowed, false);
     assert.equal(typeof body.candidateReadiness.launchAllowed, 'boolean');
+    assert.equal(body.candidateReadiness.candidateSlot.occupied, false);
+    assert.equal(body.candidateReadiness.candidateSlot.exists, false);
+    assert.equal(Object.hasOwn(body.candidateReadiness.candidateSlot, 'ownerDir'), false);
     assert.equal(body.candidateReadiness.candidateConfig.breadthMin, 2);
     assert.equal(body.candidateReadiness.candidateConfig.minUpBars, 2);
     assert.equal(body.candidateReadiness.candidateConfig.maxHoldHours, 8760);
-    assert.equal(body.candidateReadinessVariants.length, 5);
+    assert.equal(body.candidateReadiness.candidateConfig.relativeTrendMinPercent, null);
+    assert.equal(body.candidateReadinessVariants.length, 6);
     assert.equal(body.candidateReadinessVariants[1].key, 'volatility');
     assert.equal(body.candidateReadinessVariants[1].readiness.candidateConfig.volatilityTargetPercent, 1);
     assert.equal(body.candidateReadinessVariants[2].key, 'next_open');
@@ -161,12 +185,18 @@ test('momentum shadow route projects marked equity as read-only research evidenc
     assert.equal(body.candidateReadinessVariants[3].key, 'fixed_2d');
     assert.equal(body.candidateReadinessVariants[3].readiness.candidateConfig.mode, 'fixed');
     assert.equal(body.candidateReadinessVariants[3].readiness.candidateConfig.maxHoldHours, 48);
-    assert.equal(body.candidateReadinessVariants[3].readiness.candidateConfig.exitOnBenchmarkOff, false);
+    assert.equal(body.candidateReadinessVariants[3].readiness.candidateConfig.exitOnBenchmarkOff, true);
     assert.equal(body.candidateReadinessVariants[3].readiness.candidateConfig.maxSpreadPercent, 0);
-    assert.equal(body.candidateReadinessVariants[4].key, 'fixed_2d_spread');
+    assert.equal(body.candidateReadinessVariants[4].key, 'fixed_2d_relative');
     assert.equal(body.candidateReadinessVariants[4].readiness.candidateConfig.mode, 'fixed');
     assert.equal(body.candidateReadinessVariants[4].readiness.candidateConfig.maxHoldHours, 48);
-    assert.equal(body.candidateReadinessVariants[4].readiness.candidateConfig.maxSpreadPercent, 0.5);
+    assert.equal(body.candidateReadinessVariants[4].readiness.candidateConfig.relativeTrendMinPercent, 0);
+    assert.equal(body.candidateReadinessVariants[4].readiness.candidateConfig.exitOnBenchmarkOff, true);
+    assert.equal(body.candidateReadinessVariants[5].key, 'fixed_2d_spread');
+    assert.equal(body.candidateReadinessVariants[5].readiness.candidateConfig.mode, 'fixed');
+    assert.equal(body.candidateReadinessVariants[5].readiness.candidateConfig.maxHoldHours, 48);
+    assert.equal(body.candidateReadinessVariants[5].readiness.candidateConfig.maxSpreadPercent, 0.5);
+    assert.equal(body.candidateReadinessVariants[5].readiness.candidateConfig.exitOnBenchmarkOff, true);
     assert.equal(body.books[0].openPositions[0].asset, 'BTC');
     assert.equal(body.books[0].openPositions[0].markProfitPercent, 10);
     assert.equal(body.books[0].riskControls.configured, true);
@@ -190,6 +220,9 @@ test('momentum shadow route projects marked equity as read-only research evidenc
     assert.equal(body.books[6].key, 'fixed_2d_spread');
     assert.equal(body.books[6].label, '2일·호가 제한 A/B 후보');
     assert.equal(body.books[6].available, false);
+    assert.equal(body.books[7].key, 'fixed_2d_relative');
+    assert.equal(body.books[7].label, '2일·상대추세 A/B 후보');
+    assert.equal(body.books[7].available, false);
   } finally {
     dashboard.stop();
     trader.stop();
@@ -243,6 +276,8 @@ test('momentum shadow variant readiness is sealed against ambient candidate env'
     assert.equal(variants.next_open.maxSpreadPercent, 0);
     assert.equal(variants.fixed_2d.mode, 'fixed');
     assert.equal(variants.fixed_2d.positionFraction, 0.125);
+    assert.equal(variants.fixed_2d_relative.mode, 'fixed');
+    assert.equal(variants.fixed_2d_relative.relativeTrendMinPercent, 0);
     assert.equal(variants.fixed_2d_spread.maxSpreadPercent, 0.5);
   } finally {
     dashboard.stop();
