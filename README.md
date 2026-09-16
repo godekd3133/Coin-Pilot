@@ -140,6 +140,16 @@ npm run paper:forward     # .paper-forward에 격리된 장기 DRY_RUN forward �
 
 대시보드는 http://localhost:3000 에서 확인할 수 있습니다.
 
+### 대시보드 접근 보안
+
+대시보드의 `/api/*`와 Socket.io 데이터 평면은 `DASHBOARD_TOKEN`으로 보호됩니다.
+
+- `DASHBOARD_TOKEN`을 설정하면 모든 API 요청과 실시간 소켓 연결에 `Authorization: Bearer <token>`이 필요합니다. 브라우저는 첫 접속 시 표시되는 잠금 화면에 토큰을 한 번 입력하면 되고, 모바일을 포함해 이 기기의 localStorage에만 저장됩니다.
+- 토큰이 없으면 대시보드는 `127.0.0.1`에만 바인딩되어 같은 LAN의 다른 기기에서 접속할 수 없습니다. 모바일에서 쓰려면 `.env`에 토큰을 설정한 뒤 재시작하세요.
+- `DASHBOARD_HOST`로 바인드 주소를 명시할 수 있지만, 토큰 없이 비루프백 바인딩은 거부됩니다(의도적인 무보안 LAN 공개는 `DASHBOARD_ALLOW_INSECURE=true` opt-out이 필요합니다).
+- 브라우저 cross-origin 요청은 same-origin과 `DASHBOARD_CORS_ORIGINS` allowlist만 통과합니다.
+- `/api/auth/login`은 IP당 연속 실패 시 일시 차단되는 rate limit이 적용됩니다.
+
 프론트엔드/API smoke가 필요할 때는 `npm run dashboard:staging`을 사용하세요. 이 명령은 `DRY_RUN=true`를 강제하고 `.staging-runtime/<timestamp>/` 아래에 별도 `dry_portfolio.json`과 paper ledger를 생성하므로 사용자의 root `dry_portfolio.json`을 읽거나 수정하지 않습니다. 기본 staging 포트는 `3100`이며 `STAGING_PORT`와 `STAGING_TARGET_COINS`로 바꿀 수 있습니다. 실제 주문·수익성·wallet settlement 증거가 아닙니다.
 
 실제로 실행 중인 forward paper 장부를 웹/모바일/PWA 화면에서 관찰하려면 별도 읽기 전용 서버를 사용하세요. 이 서버는 지정한 ledger의 최신 snapshot과 strict/shadow 검증 결과만 읽고, paper 세션 start/stop과 주문 경로를 차단합니다. 원본 runner와 다른 포트에서 실행해야 합니다.
@@ -343,7 +353,7 @@ entry-only next-open의 비용 민감도도 별도 확인했습니다. 왕복 �
 
 next-open 실행에서 신호 종가보다 다음 opening price가 급등하는 추격 진입도 `DAILY_MOMENTUM_ROBUSTNESS_MAX_ENTRY_GAP_PERCENT`로 별도 검증할 수 있습니다. 이 값은 양의 overnight gap만 차단하며 `0`은 비활성입니다. 후보의 400/800일 진입 표본 54/109건에서 gap 최대값은 `+0.395%`, 95백분위는 약 `+0.105%`였으므로 `0.1/0.2/0.3%`를 research-only 축으로 추가했습니다. 비용 `0.3%`에서 gap `0.2/0.3%`는 양쪽 window의 risk-envelope와 거래 표본을 유지하면서 결과를 개선했고, 비용 `0.4%`에서도 gap `0.2/0.3%`가 후보로 남았습니다. 따라서 별도 `.paper-momentum-shadow-next-open-v1` forward 후보에는 `0.2%` ceiling을 연결하되, 기존 close owner와 장부를 섞지 않고 승격과 무관한 A/B로 관찰합니다. 재현 report는 `/private/tmp/coinpilot-daily-momentum-robustness-report-400d-gap-ceiling.json`, `/private/tmp/coinpilot-daily-momentum-robustness-report-800d-gap-ceiling.json`, `/private/tmp/coinpilot-daily-momentum-robustness-report-400d-gap-ceiling-cost04.json`, `/private/tmp/coinpilot-daily-momentum-robustness-report-800d-gap-ceiling-cost04.json`입니다.
 
-forward daily shadow는 응답이 시장별로 정렬·연속이어도 최신 완료 일봉이 기본 `36시간`보다 오래되면 `daily_market_stale`로 전체 신규 진입을 차단합니다. 이는 stale 응답을 과거의 정상 breadth로 오인하는 것을 막는 데이터 안전장치이며, `MOMO_SHADOW_MAX_DAILY_CANDLE_AGE_HOURS`와 ledger의 시장별 최신 시각·나이를 함께 보존합니다. stale 차단은 수익성 개선으로 계산하지 않고 데이터 품질 실패로만 표시합니다.
+forward daily shadow는 응답이 시장별로 정렬·연속이어도 최신 완료 일봉의 완료 시각이 기본 `36시간`보다 오래되면 `daily_market_stale`로 전체 신규 진입을 차단합니다. 신선도는 캔들 시작 시각이 아니라 완료 경계(`open + 1일`)에서 재므로, 정상 그리드의 최신 완료 봉은 항상 24시간 이내에 끝나고 이 검사는 실제로 경계가 누락됐을 때만 발동합니다. 이는 stale 응답을 과거의 정상 breadth로 오인하는 것을 막는 데이터 안전장치이며, `MOMO_SHADOW_MAX_DAILY_CANDLE_AGE_HOURS`와 ledger의 시장별 최신 시각·나이를 함께 보존합니다. stale 차단은 수익성 개선으로 계산하지 않고 데이터 품질 실패로만 표시합니다.
 
 benchmark owner가 저장한 gate boolean의 threshold와 새 후보의 threshold가 다를 수 있으므로, candidate preflight는 source owner의 boolean을 그대로 복사하지 않고 fresh `benchmarkTrendPercent`에 candidate contract의 `benchmarkTrendMinPercent`를 다시 적용합니다. 결과에는 candidate gate와 source gate, 두 threshold를 모두 남겨 `1%` 후보가 `2%` source gate 때문에 잘못 차단되거나 반대로 열리는 일을 방지합니다.
 
@@ -486,7 +496,7 @@ benchmark를 gate 전용으로 두고 tradable entry에서 제외하는 `exclude
 | `MOMO_SHADOW_ENTRY_EXECUTION` | `close` | shadow runner의 entry 체결 경계; `next_open`은 signal 다음 일봉 opening price에 pending fill |
 | `MOMO_SHADOW_MAX_HOLD_HOURS` | fixed `72` / regime `8760` | raw shadow runner의 fixed 최대 보유시간; 2일 A/B 후보는 `48`로 별도 고정 |
 | `MOMO_SHADOW_MAX_ENTRY_GAP_PERCENT` | 0 | next-open에서 signal close 대비 양의 opening gap ceiling; 0은 비활성, 별도 후보는 0.2 |
-| `MOMO_SHADOW_MAX_DAILY_CANDLE_AGE_HOURS` | 36 | 완료 일봉 최신 timestamp 허용 나이; 초과하거나 시장별 최신 시각이 다르면 신규 진입을 차단 |
+| `MOMO_SHADOW_MAX_DAILY_CANDLE_AGE_HOURS` | 36 | 완료 일봉이 끝난 지 허용 시간; 초과하거나 시장별 최신 시각이 다르면 신규 진입을 차단 |
 | `MOMO_SHADOW_MAX_SPREAD_PERCENT` | 0 | optional best bid/ask spread ceiling; 0은 비활성, 초과 시장만 신규 진입 차단 |
 | `MOMO_SHADOW_REQUEST_INTERVAL_MS` | 500 | 한 shadow owner가 시장별 public API 요청 사이에 두는 간격; 여러 owner 합산 rate limit 완화 |
 | `MOMO_SHADOW_QUOTE_SAMPLES` | 5 | read-only orderbook snapshot 반복 횟수; `npm run research:momentum-shadow:quotes`에서만 사용 |

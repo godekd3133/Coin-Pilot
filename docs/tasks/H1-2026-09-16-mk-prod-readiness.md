@@ -10,7 +10,7 @@ Coin Pilot을 상용 서비스 수준의 신뢰성·보안·운영성으로 끌�
 
 ## 요구사항
 - [ ] 로드맵 문서 작성 (`docs/production-readiness-roadmap.md`)
-- [ ] Phase 0: 대시보드 보안 잠금 (토큰 인증, CORS/바인드 제한)
+- [x] Phase 0: 대시보드 보안 잠금 (토큰 인증, CORS/바인드 제한) — `507802b` 이후 구현, 테스트 20개 추가
 - [ ] Phase 1: CI 실질화 + eslint
 - [ ] Phase 2: config 스키마 단일화
 - [ ] Phase 3: 관측성 (구조화 로깅, /health)

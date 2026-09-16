@@ -30,7 +30,7 @@ test('PWA shell은 redesign asset version과 service worker cache version을 함
   const scriptAsset = indexSource.match(/<script\s+src=["'](\/pilot-redesign\.js\?v=[^"']+)["']/)?.[1];
   assert.equal(scriptAsset, '/pilot-redesign.js?v=observer-readonly-32');
   assert.match(indexSource, /<link\s+rel=["']stylesheet["']\s+href=["']\/pilot-redesign\.css\?v=20260914-04["']/);
-  assert.match(serviceWorkerSource, /const CACHE_NAME = ['"]coinpilot-shell-v38['"]/);
+  assert.match(serviceWorkerSource, /const CACHE_NAME = ['"]coinpilot-shell-v39['"]/);
   assert.match(serviceWorkerSource, new RegExp(`['"]${scriptAsset.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}['"]`));
   assert.match(serviceWorkerSource, /['"]\/pilot-redesign\.css\?v=20260914-04['"]/);
 });
@@ -57,6 +57,7 @@ test('PWA manifest icon과 service worker app shell의 모든 정적 자산이 �
     '/icon-192.png',
     '/icon-512.png',
     '/apple-touch-icon.png',
+    '/auth-client.js',
     '/pilot-redesign.css?v=20260914-04',
     '/pilot-redesign.js?v=observer-readonly-32'
   ];

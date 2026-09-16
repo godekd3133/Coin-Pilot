@@ -26,7 +26,7 @@ test('strategy research route exposes a diagnostic report but hard-forces promot
     }]
   }), 'utf8');
 
-  const dashboard = new DashboardServer(trader, 0);
+  const dashboard = new DashboardServer(trader, 0, { env: { ...process.env, DASHBOARD_TOKEN: '' } });
   const httpServer = dashboard.start();
   await new Promise(resolve => httpServer.once('listening', resolve));
   const port = httpServer.address().port;
@@ -38,6 +38,7 @@ test('strategy research route exposes a diagnostic report but hard-forces promot
     assert.equal(body.researchOnly, true);
     assert.equal(body.promoted, false);
     assert.equal(body.projectionReason, 'research_artifact_never_authorizes_live_orders');
+    assert.equal(body.reportFile, path.basename(reportFile));
     assert.equal(body.variants[0].portfolio.metrics.tradeCount, 20);
   } finally {
     dashboard.stop();
@@ -49,7 +50,7 @@ test('strategy research route exposes a diagnostic report but hard-forces promot
 test('strategy research route reports an unconfigured report without inventing results', async () => {
   const trader = createMockTrader();
   delete trader.config.higherTimeframeMomentumReportFile;
-  const dashboard = new DashboardServer(trader, 0);
+  const dashboard = new DashboardServer(trader, 0, { env: { ...process.env, DASHBOARD_TOKEN: '' } });
   const httpServer = dashboard.start();
   await new Promise(resolve => httpServer.once('listening', resolve));
   const port = httpServer.address().port;
@@ -116,7 +117,7 @@ test('momentum shadow route projects marked equity as read-only research evidenc
   trader.config.momentumShadowFixedDir = fixedDir;
   trader.config.momentumShadowRegimeDir = regimeDir;
   trader.config.momentumShadowBenchmarkDir = regimeDir;
-  const dashboard = new DashboardServer(trader, 0);
+  const dashboard = new DashboardServer(trader, 0, { env: { ...process.env, DASHBOARD_TOKEN: '' } });
   const httpServer = dashboard.start();
   await new Promise(resolve => httpServer.once('listening', resolve));
   const port = httpServer.address().port;
@@ -215,7 +216,7 @@ test('momentum shadow variant readiness is sealed against ambient candidate env'
   process.env.MOMO_SHADOW_POSITION_FRACTION = '0.9';
 
   const trader = createMockTrader();
-  const dashboard = new DashboardServer(trader, 0);
+  const dashboard = new DashboardServer(trader, 0, { env: { ...process.env, DASHBOARD_TOKEN: '' } });
   const httpServer = dashboard.start();
   await new Promise(resolve => httpServer.once('listening', resolve));
   const port = httpServer.address().port;

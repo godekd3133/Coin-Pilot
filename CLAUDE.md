@@ -266,6 +266,8 @@ Pre-configured mappings for major coins (BTC, ETH, XRP, SOL, etc.) with:
 
 ## Web Dashboard API Endpoints
 
+**Access control contract (fail-closed):** when `DASHBOARD_TOKEN` is set, every `/api/*` route except `GET /api/auth/status` and `POST /api/auth/login` requires `Authorization: Bearer <token>`, and every Socket.io handshake must carry `auth.token`. Browser cross-origin calls are limited to same-origin plus `DASHBOARD_CORS_ORIGINS`. Without a token the server binds to `127.0.0.1` only; exposing it on a non-loopback interface without auth requires the explicit `DASHBOARD_ALLOW_INSECURE=true` opt-out. The static shell stays public — never let a new endpoint leak trading state outside the authenticated `/api` plane.
+
 **Core APIs:**
 
 - `GET /api/status` - System status (running, mode, positions)
