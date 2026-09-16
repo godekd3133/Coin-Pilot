@@ -102,7 +102,7 @@ class NewsMonitor {
           console.log(`✓ Twitter/X (${mirror}): ${articles.length}개 트윗 수집`);
           break; // 성공하면 다음 미러 시도 안함
         }
-      } catch (error) {
+      } catch {
         // 조용히 다음 미러 시도
         continue;
       }
@@ -132,7 +132,7 @@ class NewsMonitor {
             }
           });
         }
-      } catch (error) {
+      } catch {
         // CryptoPanic도 실패시 무시
       }
     }
@@ -203,7 +203,7 @@ class NewsMonitor {
     }
 
     // 뉴스 수집 (캐시된 뉴스 사용 또는 새로 수집)
-    let news = [];
+    let news;
     const cachedNews = this.coinNewsCache.get(coin);
 
     if (cachedNews && (Date.now() - cachedNews.timestamp.getTime()) < maxAgeMs) {

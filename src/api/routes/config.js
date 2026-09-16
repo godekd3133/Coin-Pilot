@@ -248,7 +248,7 @@ export default function createConfigRoutes(server) {
       }
 
       if (server.tradingSystem.strategies && server.tradingSystem.strategies.size > 0) {
-        for (const [coin, strategy] of server.tradingSystem.strategies.entries()) {
+        for (const strategy of server.tradingSystem.strategies.values()) {
           if (strategy && strategy.config) {
             strategy.config.stopLossPercent = config.stopLossPercent;
             strategy.config.takeProfitPercent = config.takeProfitPercent;

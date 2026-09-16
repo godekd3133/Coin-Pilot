@@ -179,7 +179,7 @@ async function resolveMarkets() {
     try {
       sourceLedger = JSON.parse(fs.readFileSync(sourceFile, 'utf8'));
     } catch (error) {
-      throw new Error(`freshness 원장 로드 실패 (${sourceFile}): ${error.message}`);
+      throw new Error(`freshness 원장 로드 실패 (${sourceFile}): ${error.message}`, { cause: error });
     }
     const cohort = selectFreshMarketCohort({
       markets: sourceLedger?.targetCoins,

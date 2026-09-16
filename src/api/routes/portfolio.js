@@ -90,7 +90,7 @@ export default function createPortfolioRoutes(server) {
                 totalAssets += ticker.trade_price * holding.amount;
               }
             }
-          } catch (e) {
+          } catch {
             for (const holding of holdings.values()) {
               totalAssets += holding.avgPrice * holding.amount;
             }
@@ -166,7 +166,7 @@ export default function createPortfolioRoutes(server) {
       if (fs.existsSync(historyFile)) {
         try {
           history = JSON.parse(fs.readFileSync(historyFile, 'utf8'));
-        } catch (e) {
+        } catch {
           history = [];
         }
       }
@@ -178,7 +178,7 @@ export default function createPortfolioRoutes(server) {
         const accounts = await server.tradingSystem.getAccountInfo();
         krwBalance = server.tradingSystem.getKRWBalance(accounts) || 0;
         totalAssets = krwBalance;
-      } catch (e) {
+      } catch {
         if (server.tradingSystem.virtualPortfolio) {
           krwBalance = server.tradingSystem.virtualPortfolio.krwBalance || 0;
           totalAssets = krwBalance;
@@ -197,7 +197,7 @@ export default function createPortfolioRoutes(server) {
               totalAssets += ticker.trade_price * holding.amount;
             }
           }
-        } catch (e) {
+        } catch {
           for (const holding of holdingsMap.values()) {
             totalAssets += (holding.avgPrice || 0) * (holding.amount || 0);
           }

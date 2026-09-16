@@ -452,8 +452,7 @@ function projectMomentumShadowBook(definition, fallbackInitialBalance, server) {
           ? Number(ledger.config.maxDailyCandleAgeHours)
           : DEFAULT_MOMENTUM_SHADOW_CANDIDATE_CONFIG.maxDailyCandleAgeHours,
         maxSpreadPercent: Number(ledger.config?.maxSpreadPercent) || 0
-      },
-      heartbeatAgeSeconds
+      }
     };
   } catch (error) {
     return {

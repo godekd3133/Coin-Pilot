@@ -99,6 +99,8 @@ npm run backtest     # Run backtesting only
 npm run optimize     # Run parameter optimization only
 npm run dashboard    # Run web dashboard only (http://localhost:3000)
 npm run dashboard:paper # Observe an explicitly selected forward paper ledger (read-only)
+npm test             # Run the node:test suite (required green for CI)
+npm run lint         # ESLint flat-config check (required clean for CI)
 ```
 
 `runDashboard.js` is a deterministic mock for UI smoke. To show the actual

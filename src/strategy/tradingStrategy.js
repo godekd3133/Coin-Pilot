@@ -66,8 +66,8 @@ class TradingStrategy {
 
     // 매매 결정
     let action = 'HOLD';
-    let reason = '';
-    let confidence = 0;
+    let reason;
+    let confidence;
 
     if (totalScore >= this.config.buyThreshold) {
       action = 'BUY';
@@ -182,7 +182,6 @@ class TradingStrategy {
     const bbCurrent = parseFloat(indicators.bollingerBands.current);
     const bbLower = parseFloat(indicators.bollingerBands.lower);
     const bbUpper = parseFloat(indicators.bollingerBands.upper);
-    const bbMiddle = parseFloat(indicators.bollingerBands.middle);
 
     if (bbCurrent < bbLower) {
       score += 10; // 하단 밴드 이탈 - 매수 신호

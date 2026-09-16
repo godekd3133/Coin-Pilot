@@ -45,7 +45,7 @@ export function discoverPaperValidationFiles(workspaceRoot = process.cwd()) {
   const rootLedger = path.join(root, 'paper_validation.json');
   if (fs.existsSync(rootLedger)) files.push(rootLedger);
 
-  let entries = [];
+  let entries;
   try {
     entries = fs.readdirSync(root, { withFileTypes: true });
   } catch {

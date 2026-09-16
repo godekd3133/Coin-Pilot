@@ -662,7 +662,7 @@ function setupExitHandlers(trader, dashboardServer, backtestTimer, optimizationT
     gracefulShutdown();
   });
 
-  process.on('unhandledRejection', (reason, promise) => {
+  process.on('unhandledRejection', (reason, _promise) => {
     console.error('\n💥 처리되지 않은 Promise 거부:', reason);
     if (logger) {
       logger.error('Unhandled Rejection', { reason });

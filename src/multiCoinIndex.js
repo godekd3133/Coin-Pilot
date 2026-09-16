@@ -66,7 +66,7 @@ async function main() {
 
   const config = createConfig();
   config.strategyMode = strategyMode;
-  const logger = new Logger(config.logLevel);
+  new Logger(config.logLevel);
 
   console.log('\n⚙️  설정:');
   console.log(`  모드: ${config.dryRun ? '🧪 모의투자' : '💰 실전투자'}`);

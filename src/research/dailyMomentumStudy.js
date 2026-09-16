@@ -214,7 +214,7 @@ function emptyMetrics(initialBalance) {
   };
 }
 
-function buildMetrics({ initialBalance, finalEquity, balance, trades, equityCurve, exposureDays, totalDays }) {
+function buildMetrics({ initialBalance, finalEquity, trades, equityCurve, exposureDays, totalDays }) {
   const wins = trades.filter(trade => trade.profitPercent > 0);
   const losses = trades.filter(trade => trade.profitPercent < 0);
   const grossProfit = wins.reduce((sum, trade) => sum + trade.profitAmount, 0);

@@ -407,7 +407,7 @@ export default function createTradingRoutes(server) {
 
           // API 속도 제한 방지
           await new Promise(r => setTimeout(r, 50));
-        } catch (coinError) {
+        } catch {
           // 개별 코인 오류는 무시
         }
       }
@@ -603,7 +603,7 @@ export default function createTradingRoutes(server) {
 
           // API 속도 제한 (50ms)
           await new Promise(r => setTimeout(r, 50));
-        } catch (e) {
+        } catch {
           // 개별 코인 분석 오류는 무시하고 다음으로
         }
       }
@@ -979,7 +979,7 @@ export default function createTradingRoutes(server) {
   // 스마트 자동 매수
   router.post('/trade/smart-buy', express.json(), async (req, res) => {
     try {
-      let { totalAmount, minScore = 60, maxCoins = 10, strategy = 'score' } = req.body;
+      let { totalAmount, minScore = 60, maxCoins = 10 } = req.body;
 
       if (!totalAmount || totalAmount < 5000) {
         return res.status(400).json({ error: '최소 금액은 5,000원입니다', success: false });
@@ -1077,7 +1077,7 @@ export default function createTradingRoutes(server) {
           });
 
           await new Promise(r => setTimeout(r, 50));
-        } catch (e) {
+        } catch {
           // 개별 코인 오류 무시
         }
       }
@@ -1302,7 +1302,9 @@ export default function createTradingRoutes(server) {
             const analysis = comprehensiveAnalysis(candles, {});
             rsi = analysis?.indicators?.rsi || 50;
           }
-        } catch (e) {}
+        } catch {
+          // RSI 조회 실패 시 기본값 유지
+        }
 
         coinAnalysis.push({
           coin,
@@ -2114,7 +2116,7 @@ export default function createTradingRoutes(server) {
           }
 
           await new Promise(r => setTimeout(r, 50));
-        } catch (coinError) {
+        } catch {
           // 개별 코인 오류 무시
         }
       }

@@ -45,7 +45,7 @@ function parseConfig() {
   if (!raw) return { ...DEFAULT_DAILY_MOMENTUM_ROLLING_CONFIG };
   let parsed;
   try { parsed = JSON.parse(raw); }
-  catch (error) { throw new Error(`FAIL_CLOSED: DAILY_MOMENTUM_ROLLING_CONFIG_JSON 형식 오류: ${error.message}`); }
+  catch (error) { throw new Error(`FAIL_CLOSED: DAILY_MOMENTUM_ROLLING_CONFIG_JSON 형식 오류: ${error.message}`, { cause: error }); }
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     throw new Error('FAIL_CLOSED: DAILY_MOMENTUM_ROLLING_CONFIG_JSON은 객체여야 합니다.');
   }

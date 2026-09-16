@@ -102,7 +102,7 @@ export function loadPaperValidationConfigSnapshot(filePath) {
   try {
     ledger = JSON.parse(fs.readFileSync(filePath, 'utf8'));
   } catch (error) {
-    throw new Error(`paper config snapshot을 읽을 수 없습니다 (${filePath}): ${error.message}`);
+    throw new Error(`paper config snapshot을 읽을 수 없습니다 (${filePath}): ${error.message}`, { cause: error });
   }
 
   if (!ledger || typeof ledger !== 'object' || Array.isArray(ledger)) {

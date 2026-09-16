@@ -63,7 +63,6 @@
         viewLoading: new Set()
     };
 
-    const $ = (selector) => root.querySelector(selector);
     const $$ = (selector) => Array.from(root.querySelectorAll(selector));
     const byId = (id) => root.querySelector(`#${id}`);
 
@@ -288,7 +287,7 @@
             }
             return data;
         } catch (error) {
-            if (error?.name === 'AbortError') throw new Error('서버 응답 시간이 초과되었습니다. 연결 상태를 확인해주세요.');
+            if (error?.name === 'AbortError') throw new Error('서버 응답 시간이 초과되었습니다. 연결 상태를 확인해주세요.', { cause: error });
             throw error;
         } finally {
             window.clearTimeout(timeoutId);
@@ -1841,7 +1840,7 @@
     async function saveSettings() {
         if (isReadOnlyObserver()) { showToast(readOnlyObserverReason(), 'warning'); return; }
         const payload = settingPayload();
-        try { const investmentRatio = payload.investmentRatio; delete payload.investmentRatio; const result = await requestJSON('/config/update', { method: 'POST', body: JSON.stringify(payload) }); if (investmentRatio !== undefined) await requestJSON('/investment-config/update', { method: 'POST', body: JSON.stringify({ investmentRatio }) }); state.settingsLoaded = false; await loadSettings(); showToast('설정을 적용했습니다. 다음 점검에서 다시 확인하세요.', 'success'); } catch (error) { showToast(`설정 적용 실패: ${error.message}`, 'error'); }
+        try { const investmentRatio = payload.investmentRatio; delete payload.investmentRatio; await requestJSON('/config/update', { method: 'POST', body: JSON.stringify(payload) }); if (investmentRatio !== undefined) await requestJSON('/investment-config/update', { method: 'POST', body: JSON.stringify({ investmentRatio }) }); state.settingsLoaded = false; await loadSettings(); showToast('설정을 적용했습니다. 다음 점검에서 다시 확인하세요.', 'success'); } catch (error) { showToast(`설정 적용 실패: ${error.message}`, 'error'); }
     }
 
     async function applyPreset(presetId) {

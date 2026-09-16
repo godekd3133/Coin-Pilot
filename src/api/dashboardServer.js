@@ -423,7 +423,7 @@ class DashboardServer {
         if (this.tradingSystem.strategies) {
           const processedTradeIds = new Set(todayTrades.map(t => t.id || t.timestamp));
 
-          for (const [coin, strategy] of this.tradingSystem.strategies.entries()) {
+          for (const strategy of this.tradingSystem.strategies.values()) {
             const history = strategy.tradeHistory || [];
             history.forEach(trade => {
               // 이미 smartTradeHistory에서 처리된 거래는 스킵
@@ -663,7 +663,7 @@ class DashboardServer {
     });
 
     // 전역 에러 핸들러
-    this.app.use((err, req, res, next) => {
+    this.app.use((err, req, res, _next) => {
       const statusCode = err.status || 500;
       const message = err.message || 'Internal Server Error';
 
@@ -865,7 +865,7 @@ class DashboardServer {
               sellValue: holding.amount * currentPrice
             });
           }
-        } catch (e) { /* skip */ }
+        } catch { /* skip */ }
         await new Promise(r => setTimeout(r, 100));
       }
 
@@ -927,7 +927,7 @@ class DashboardServer {
               volume24h: ticker.acc_trade_price_24h
             });
           }
-        } catch (e) { /* skip */ }
+        } catch { /* skip */ }
         await new Promise(r => setTimeout(r, 100));
       }
 

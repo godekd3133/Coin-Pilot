@@ -2356,7 +2356,6 @@ export function walkForwardValidatePortfolio(rawCandlesByMarket, baseConfig = {}
   }
 
   const training = Object.fromEntries(entries.map(([market, candles]) => [market, candles.slice(0, splitIndex)]));
-  const holdout = Object.fromEntries(entries.map(([market, candles]) => [market, candles.slice(splitIndex)]));
   const tuning = tuneScalpingPortfolioParameters(
     training,
     resolvedConfig,
