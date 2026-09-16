@@ -1,12 +1,29 @@
 import fs from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+/**
+ * Serialize a log payload to a single JSON line.
+ * Error objects keep name/message/stack instead of stringifying to {},
+ * circular references collapse to '[Circular]', and bigint values degrade
+ * to strings so a hostile payload can never throw inside a log call.
+ */
+function safeJsonLine(value) {
+  const seen = new WeakSet();
+  return JSON.stringify(value, (key, item) => {
+    if (item instanceof Error) {
+      return { name: item.name, message: item.message, stack: item.stack };
+    }
+    if (typeof item === 'bigint') return item.toString();
+    if (item !== null && typeof item === 'object') {
+      if (seen.has(item)) return '[Circular]';
+      seen.add(item);
+    }
+    return item;
+  });
+}
 
 class Logger {
-  constructor(logLevel = 'info') {
+  constructor(logLevel = 'info', options = {}) {
     this.logLevel = logLevel;
     this.logLevels = {
       error: 0,
@@ -16,7 +33,7 @@ class Logger {
     };
 
     // 로그 디렉토리 생성
-    this.logDir = path.join(process.cwd(), 'logs');
+    this.logDir = options.logDir || path.join(process.cwd(), 'logs');
     if (!fs.existsSync(this.logDir)) {
       fs.mkdirSync(this.logDir, { recursive: true });
     }
@@ -25,31 +42,47 @@ class Logger {
     const today = new Date().toISOString().split('T')[0];
     this.logFile = path.join(this.logDir, `trading-${today}.log`);
     this.errorFile = path.join(this.logDir, `error-${today}.log`);
+
+    // 파일별 비동기 쓰기 큐. appendFileSync는 매 라인 이벤트 루프를
+    // 블로킹하므로, 파일당 Promise 체인으로 순서를 유지한 채
+    // 논블로킹 appendFile을 직렬화한다.
+    this.writeQueues = new Map();
   }
 
   /**
-   * 로그 메시지 포맷팅
+   * 로그 라인 포맷팅 — 파일에는 한 줄짜리 구조화 JSON을 기록한다.
    */
   formatMessage(level, message, data = null) {
-    const timestamp = new Date().toISOString();
-    let formatted = `[${timestamp}] [${level.toUpperCase()}] ${message}`;
-
-    if (data) {
-      formatted += '\n' + JSON.stringify(data, null, 2);
+    const record = {
+      ts: new Date().toISOString(),
+      level,
+      msg: message
+    };
+    if (data !== null && data !== undefined) {
+      record.data = data;
     }
-
-    return formatted;
+    return safeJsonLine(record);
   }
 
   /**
-   * 파일에 로그 쓰기
+   * 파일에 로그 쓰기 (비동기, 파일당 순서 보장)
    */
   writeToFile(filename, message) {
-    try {
-      fs.appendFileSync(filename, message + '\n', 'utf8');
-    } catch (error) {
-      console.error('로그 파일 쓰기 실패:', error.message);
-    }
+    const previous = this.writeQueues.get(filename) || Promise.resolve();
+    const next = previous
+      .then(() => fs.promises.appendFile(filename, message + '\n', 'utf8'))
+      .catch(error => {
+        console.error('로그 파일 쓰기 실패:', error.message);
+      });
+    this.writeQueues.set(filename, next);
+  }
+
+  /**
+   * 큐에 쌓인 파일 쓰기가 모두 끝날 때까지 대기한다.
+   * 테스트와 graceful shutdown 경로에서 마지막 라인 유실을 막는다.
+   */
+  async flush() {
+    await Promise.all([...this.writeQueues.values()]);
   }
 
   /**
@@ -137,7 +170,7 @@ class Logger {
       ...data
     };
 
-    const formatted = JSON.stringify(logEntry);
+    const formatted = safeJsonLine(logEntry);
     this.writeToFile(tradeFile, formatted);
 
     // 콘솔에도 출력
@@ -157,7 +190,7 @@ class Logger {
       ...stats
     };
 
-    const formatted = JSON.stringify(logEntry);
+    const formatted = safeJsonLine(logEntry);
     this.writeToFile(performanceFile, formatted);
 
     console.log('\n📊 성과 기록');
@@ -166,6 +199,7 @@ class Logger {
 
   /**
    * 로그 파일 정리 (7일 이상 된 파일 삭제)
+   * 로그/리포트 패턴 파일만 대상으로 하여 logs/ 안의 다른 파일은 건드리지 않는다.
    */
   cleanOldLogs(daysToKeep = 7) {
     try {
@@ -174,6 +208,7 @@ class Logger {
       const maxAge = daysToKeep * 24 * 60 * 60 * 1000;
 
       files.forEach(file => {
+        if (!/\.(log|txt)$/.test(file)) return;
         const filePath = path.join(this.logDir, file);
         const stats = fs.statSync(filePath);
         const age = now - stats.mtimeMs;

@@ -13,7 +13,7 @@ Coin Pilot을 상용 서비스 수준의 신뢰성·보안·운영성으로 끌�
 - [x] Phase 0: 대시보드 보안 잠금 (토큰 인증, CORS/바인드 제한) — `507802b` 이후 구현, 테스트 20개 추가
 - [x] Phase 1: CI 실질화 + eslint — CI가 Node 20/22에서 `npm run lint` + `npm test` 실행, eslint flat config 도입, engines `>=20`
 - [x] Phase 2: config 스키마 단일화 — `src/config/` 스키마+로더, 부팅 fail-fast, `.env.example`↔스키마 동기화 테스트, `index.js`/`multiCoinIndex.js` createConfig 주입 마이그레이션
-- [ ] Phase 3: 관측성 (구조화 로깅, /health)
+- [x] Phase 3: 관측성 — Logger JSONL + 비동기 파일 쓰기 큐, `/health`+`/ready` 프로브 (trader fail-closed 판정 재사용), 로그 보관 패턴 스코핑
 - [ ] Phase 4: multiCoinTrader 분해 (architecture deepening)
 - [ ] Phase 5: DATA_DIR 통합 + 저장소 위생
 - [ ] Phase 6: Node 22 + 의존성 갱신 + Docker

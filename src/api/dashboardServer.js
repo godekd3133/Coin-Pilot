@@ -245,6 +245,21 @@ class DashboardServer {
   }
 
   setupRoutes() {
+    // 인프라 프로브는 /api 네임스페이스 밖, 토큰 게이트 밖에 둔다.
+    // 프로세스/런타임 boolean만 담고 포지션·설정·계좌 정보는 노출하지 않는다.
+    this.app.get('/health', (req, res) => {
+      res.json({
+        status: 'ok',
+        uptimeSec: Math.floor(process.uptime()),
+        pid: process.pid,
+        timestamp: new Date().toISOString()
+      });
+    });
+    this.app.get('/ready', (req, res) => {
+      const readiness = this.buildReadiness();
+      res.status(readiness.ready ? 200 : 503).json(readiness);
+    });
+
     // 공개 인증 엔드포인트는 가드보다 먼저 마운트한다.
     this.app.get('/api/auth/status', this.auth.statusHandler);
     this.app.post('/api/auth/login', this.auth.loginHandler);
@@ -1049,6 +1064,53 @@ class DashboardServer {
     });
 
     return this.server;
+  }
+
+  /**
+   * Readiness verdict for infra probes. Reuses the trader's own fail-closed
+   * accessors (risk data gap / analysis cycle gap) instead of re-deriving
+   * freshness, so a stalled or stale loop reports not-ready the same way the
+   * trading loop stops itself. Dashboard-only observers without an isRunning
+   * trader report ready purely on the HTTP listener.
+   */
+  buildReadiness(now = Date.now()) {
+    const checks = {
+      httpServerListening: this.httpServer?.listening === true
+    };
+    let ready = checks.httpServerListening;
+
+    const trader = this.tradingSystem;
+    if (trader && typeof trader.isRunning === 'boolean') {
+      checks.traderRunning = trader.isRunning;
+      ready = ready && trader.isRunning;
+
+      const lastCycleAt = trader.paperValidation?.telemetry?.lastCycleAt || null;
+      const lastCycleMs = lastCycleAt ? Date.parse(lastCycleAt) : null;
+      checks.lastCycleAt = lastCycleAt;
+      if (Number.isFinite(lastCycleMs)) {
+        checks.lastCycleAgeSeconds = Math.max(0, Math.floor((now - lastCycleMs) / 1000));
+      }
+
+      if (typeof trader.getAnalysisDataHealthStatus === 'function') {
+        const analysis = trader.getAnalysisDataHealthStatus(now);
+        checks.analysisHealthy = analysis.failClosed !== true;
+        checks.analysisStaleReason = analysis.staleReason || null;
+        ready = ready && checks.analysisHealthy;
+      }
+      if (typeof trader.getRiskMonitorStatus === 'function') {
+        const risk = trader.getRiskMonitorStatus(now);
+        checks.riskHealthy = risk.failClosed !== true;
+        checks.riskStaleReason = risk.staleReason || null;
+        ready = ready && checks.riskHealthy;
+      }
+    }
+
+    return {
+      ready,
+      uptimeSec: Math.floor(process.uptime()),
+      timestamp: new Date(now).toISOString(),
+      checks
+    };
   }
 
   // 최적화 상태 파일 경로
