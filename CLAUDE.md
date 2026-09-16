@@ -599,6 +599,15 @@ server.tradingSystem.saveVirtualPortfolio();
 
 ## Configuration
 
+All documented env vars are declared in `src/config/envSchema.js` (type, range,
+enum, secret). Boot (`src/index.js`, `src/multiCoinIndex.js`) calls
+`loadEnv()` from `src/config/envLoader.js` and exits immediately when a
+required key is missing or a set value fails its schema — the error names
+every offending key and why. Adding or renaming a knob means updating BOTH
+`.env.example` and `ENV_SCHEMA`; `test/envDocumentation.test.js` fails CI on
+any drift. Boolean literals are strict `true`/`false` — `DRY_RUN=0` or
+`DRY_RUN=yes` now fails fast instead of being silently misread.
+
 Key environment variables:
 - `DRY_RUN=true/false` - Simulated vs real trading
 - `TARGET_COINS` - Comma-separated coin list (e.g., KRW-BTC,KRW-ETH) or `ALL` to analyze all KRW markets

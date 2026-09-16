@@ -5,6 +5,7 @@ import BacktestEngine from './backtest/backtestEngine.js';
 import UpbitAPI from './api/upbit.js';
 import Logger from './utils/logger.js';
 import ParameterOptimizer from './optimization/parameterOptimizer.js';
+import { loadEnv, formatEnvErrors, formatEnvWarnings } from './config/envLoader.js';
 import fs from 'fs';
 import axios from 'axios';
 
@@ -57,18 +58,6 @@ async function getMultipleMinuteCandles(upbit, market, unit, totalCount) {
   return allCandles;
 }
 
-// 설정 검증
-function validateConfig() {
-  // API 키는 실전투자 모드일 때만 필수
-  if (process.env.DRY_RUN !== 'true') {
-    if (!process.env.UPBIT_ACCESS_KEY || !process.env.UPBIT_SECRET_KEY) {
-      console.error('❌ 실전투자 모드에서는 업비트 API 키가 필요합니다.');
-      console.error('모의투자 모드로 실행하려면 DRY_RUN=true로 설정하세요.');
-      process.exit(1);
-    }
-  }
-}
-
 // 최적화된 파라미터 로드
 function loadOptimalConfig() {
   const configFile = 'optimal_config.json';
@@ -88,11 +77,6 @@ function loadOptimalConfig() {
   return null;
 }
 
-function envNumber(name, fallback) {
-  const value = Number(process.env[name]);
-  return Number.isFinite(value) ? value : fallback;
-}
-
 function redactConfigForLog(config) {
   const safeConfig = { ...config };
   delete safeConfig.accessKey;
@@ -101,9 +85,9 @@ function redactConfigForLog(config) {
 }
 
 // 설정 객체 생성
-function createConfig() {
-  const dryRun = process.env.DRY_RUN !== 'false';
-  const strategyMode = process.env.TRADING_STRATEGY || 'oversold_reaction_scalping';
+function createConfig(env) {
+  const dryRun = env.DRY_RUN !== false;
+  const strategyMode = env.TRADING_STRATEGY || 'oversold_reaction_scalping';
   const isScalpingMode = strategyMode === 'oversold_reaction_scalping';
 
   // 최적화된 파라미터 로드 (있으면 사용, 없으면 기본값)
@@ -115,182 +99,182 @@ function createConfig() {
     strategyMode,
     isScalpingMode,
     // API 키
-    accessKey: process.env.UPBIT_ACCESS_KEY || '',
-    secretKey: process.env.UPBIT_SECRET_KEY || '',
+    accessKey: env.UPBIT_ACCESS_KEY || '',
+    secretKey: env.UPBIT_SECRET_KEY || '',
 
     // 다중 코인 설정 (기본값)
     // TARGET_COINS=ALL 이면 모든 KRW 마켓 대상 (main에서 동적 로드)
-    targetCoins: process.env.TARGET_COINS === 'ALL'
+    targetCoins: env.TARGET_COINS === 'ALL'
       ? [] // 나중에 동적으로 로드
-      : process.env.TARGET_COINS
-        ? process.env.TARGET_COINS.split(',')
+      : env.TARGET_COINS
+        ? env.TARGET_COINS.split(',')
         : ['KRW-BTC', 'KRW-ETH', 'KRW-XRP'],
-    analyzeAllCoins: process.env.TARGET_COINS === 'ALL',
+    analyzeAllCoins: env.TARGET_COINS === 'ALL',
 
-    maxPositions: parseInt(
-      isScalpingMode ? process.env.SCALP_MAX_POSITIONS : process.env.MAX_POSITIONS
+    maxPositions: (
+      isScalpingMode ? env.SCALP_MAX_POSITIONS : env.MAX_POSITIONS
     ) || (isScalpingMode ? 3 : 99999),
-    portfolioAllocation: parseFloat(
-      isScalpingMode ? process.env.SCALP_PORTFOLIO_ALLOCATION : process.env.PORTFOLIO_ALLOCATION
+    portfolioAllocation: (
+      isScalpingMode ? env.SCALP_PORTFOLIO_ALLOCATION : env.PORTFOLIO_ALLOCATION
     ) || (isScalpingMode ? 0.1 : 0.5),
 
-    investmentAmount: parseInt(process.env.INVESTMENT_AMOUNT) || 50000,
+    investmentAmount: env.INVESTMENT_AMOUNT || 50000,
     stopLossPercent: isScalpingMode
-      ? parseFloat(process.env.SCALP_STOP_LOSS_PERCENT) || 1.2
-      : (optimalParams?.stopLossPercent || parseFloat(process.env.STOP_LOSS_PERCENT) || 5),
+      ? env.SCALP_STOP_LOSS_PERCENT || 1.2
+      : (optimalParams?.stopLossPercent || env.STOP_LOSS_PERCENT || 5),
     takeProfitPercent: isScalpingMode
-      ? parseFloat(process.env.SCALP_TAKE_PROFIT_PERCENT) || 1.8
-      : (optimalParams?.takeProfitPercent || parseFloat(process.env.TAKE_PROFIT_PERCENT) || 10),
+      ? env.SCALP_TAKE_PROFIT_PERCENT || 1.8
+      : (optimalParams?.takeProfitPercent || env.TAKE_PROFIT_PERCENT || 10),
 
     // 기술적 분석 설정 (최적화 파라미터 우선)
     // RSI
-    rsiPeriod: optimalParams?.rsiPeriod || parseInt(isScalpingMode ? process.env.SCALP_RSI_PERIOD : process.env.RSI_PERIOD) || parseInt(process.env.RSI_PERIOD) || 14,
-    rsiOversold: optimalParams?.rsiOversold || parseInt(isScalpingMode ? process.env.SCALP_RSI_OVERSOLD : process.env.RSI_OVERSOLD) || parseInt(process.env.RSI_OVERSOLD) || 30,
-    rsiOverbought: optimalParams?.rsiOverbought || parseInt(isScalpingMode ? process.env.SCALP_RSI_OVERBOUGHT : process.env.RSI_OVERBOUGHT) || parseInt(process.env.RSI_OVERBOUGHT) || 70,
+    rsiPeriod: optimalParams?.rsiPeriod || (isScalpingMode ? env.SCALP_RSI_PERIOD : env.RSI_PERIOD) || env.RSI_PERIOD || 14,
+    rsiOversold: optimalParams?.rsiOversold || (isScalpingMode ? env.SCALP_RSI_OVERSOLD : env.RSI_OVERSOLD) || env.RSI_OVERSOLD || 30,
+    rsiOverbought: optimalParams?.rsiOverbought || (isScalpingMode ? env.SCALP_RSI_OVERBOUGHT : env.RSI_OVERBOUGHT) || env.RSI_OVERBOUGHT || 70,
     // MACD
-    macdFast: optimalParams?.macdFast || parseInt(process.env.MACD_FAST) || 12,
-    macdSlow: optimalParams?.macdSlow || parseInt(process.env.MACD_SLOW) || 26,
-    macdSignal: optimalParams?.macdSignal || parseInt(process.env.MACD_SIGNAL) || 9,
+    macdFast: optimalParams?.macdFast || env.MACD_FAST || 12,
+    macdSlow: optimalParams?.macdSlow || env.MACD_SLOW || 26,
+    macdSignal: optimalParams?.macdSignal || env.MACD_SIGNAL || 9,
     // 볼린저 밴드
-    bbPeriod: optimalParams?.bbPeriod || parseInt(process.env.BB_PERIOD) || 20,
-    bbStdDev: optimalParams?.bbStdDev || parseFloat(process.env.BB_STD_DEV) || 2.0,
+    bbPeriod: optimalParams?.bbPeriod || env.BB_PERIOD || 20,
+    bbStdDev: optimalParams?.bbStdDev || env.BB_STD_DEV || 2.0,
     // EMA
-    emaShort: optimalParams?.emaShort || parseInt(process.env.EMA_SHORT) || 10,
-    emaMid: optimalParams?.emaMid || parseInt(process.env.EMA_MID) || 30,
-    emaLong: optimalParams?.emaLong || parseInt(process.env.EMA_LONG) || 60,
+    emaShort: optimalParams?.emaShort || env.EMA_SHORT || 10,
+    emaMid: optimalParams?.emaMid || env.EMA_MID || 30,
+    emaLong: optimalParams?.emaLong || env.EMA_LONG || 60,
     // 트레일링 스탑: legacy strategy keeps its old setting; scalping uses
     // the opt-in protective-exit setting below.
     trailingStopPercent: isScalpingMode
-      ? envNumber('SCALP_TRAILING_STOP_PERCENT', 0)
-      : (optimalParams?.trailingStopPercent || parseFloat(process.env.TRAILING_STOP_PERCENT) || 3),
+      ? (env.SCALP_TRAILING_STOP_PERCENT ?? 0)
+      : (optimalParams?.trailingStopPercent || env.TRAILING_STOP_PERCENT || 3),
     // 거래량
-    volumeMultiplier: optimalParams?.volumeMultiplier || parseFloat(process.env.VOLUME_MULTIPLIER) || 1.5,
-    volumePeriod: optimalParams?.volumePeriod || parseInt(process.env.VOLUME_PERIOD) || 20,
+    volumeMultiplier: optimalParams?.volumeMultiplier || env.VOLUME_MULTIPLIER || 1.5,
+    volumePeriod: optimalParams?.volumePeriod || env.VOLUME_PERIOD || 20,
 
     // 뉴스 모니터링 설정
-    newsCheckInterval: parseInt(process.env.NEWS_CHECK_INTERVAL) || 300000,
-    newsSentimentThreshold: parseFloat(process.env.NEWS_SENTIMENT_THRESHOLD) || 0.5,
+    newsCheckInterval: env.NEWS_CHECK_INTERVAL || 300000,
+    newsSentimentThreshold: env.NEWS_SENTIMENT_THRESHOLD || 0.5,
 
     // 매매 임계값 (최적화 파라미터 우선, 기본값 55로 적극적 매수)
-    buyThreshold: optimalParams?.buyThreshold || parseInt(process.env.BUY_THRESHOLD) || 55,
-    sellThreshold: optimalParams?.sellThreshold || parseInt(process.env.SELL_THRESHOLD) || 55,
+    buyThreshold: optimalParams?.buyThreshold || env.BUY_THRESHOLD || 55,
+    sellThreshold: optimalParams?.sellThreshold || env.SELL_THRESHOLD || 55,
 
     // 매수 전용 모드 (환경변수 BUY_ONLY=true로 활성화)
-    buyOnly: process.env.BUY_ONLY === 'true',
+    buyOnly: env.BUY_ONLY === true,
 
     // 기존 포지션에 추가 매수 허용 (기본: true, STRONG 이상 신호에서 추가 매수)
     allowAveraging: isScalpingMode
-      ? process.env.SCALP_ALLOW_AVERAGING === 'true'
-      : process.env.ALLOW_AVERAGING !== 'false',
+      ? env.SCALP_ALLOW_AVERAGING === true
+      : env.ALLOW_AVERAGING !== false,
 
     // 가중치 설정 (최적화 파라미터 우선)
-    technicalWeight: optimalParams?.technicalWeight || parseFloat(process.env.TECHNICAL_WEIGHT) || 0.6,
-    newsWeight: optimalParams?.technicalWeight ? (1 - optimalParams.technicalWeight) : (parseFloat(process.env.NEWS_WEIGHT) || 0.4),
+    technicalWeight: optimalParams?.technicalWeight || env.TECHNICAL_WEIGHT || 0.6,
+    newsWeight: optimalParams?.technicalWeight ? (1 - optimalParams.technicalWeight) : (env.NEWS_WEIGHT || 0.4),
 
     // 투자 비율 (최적화 파라미터 우선)
     investmentRatio: isScalpingMode
-      ? parseFloat(process.env.SCALP_INVESTMENT_RATIO) || 0.02
-      : (optimalParams?.investmentRatio || parseFloat(process.env.INVESTMENT_RATIO) || 0.05),
+      ? env.SCALP_INVESTMENT_RATIO || 0.02
+      : (optimalParams?.investmentRatio || env.INVESTMENT_RATIO || 0.05),
 
     // 과매도 반응 스캘핑 설정
     candleUnit: isScalpingMode
-      ? parseInt(process.env.SCALP_CANDLE_UNIT) || 1
-      : parseInt(process.env.CANDLE_UNIT) || 5,
+      ? env.SCALP_CANDLE_UNIT || 1
+      : env.CANDLE_UNIT || 5,
     candleCount: isScalpingMode
-      ? parseInt(process.env.SCALP_CANDLE_COUNT) || 120
-      : parseInt(process.env.CANDLE_COUNT) || 200,
+      ? env.SCALP_CANDLE_COUNT || 120
+      : env.CANDLE_COUNT || 200,
     // 0 uses the candle-unit-aware safety default (90s for 1-minute candles).
     maxCandleAgeSeconds: isScalpingMode
-      ? envNumber('SCALP_MAX_CANDLE_AGE_SECONDS', 0)
+      ? (env.SCALP_MAX_CANDLE_AGE_SECONDS ?? 0)
       : 0,
-    oversoldLookback: parseInt(process.env.SCALP_OVERSOLD_LOOKBACK) || 1,
-    minReboundPercent: parseFloat(process.env.SCALP_MIN_REBOUND_PERCENT) || 0.15,
-    minRsiRecovery: parseFloat(process.env.SCALP_MIN_RSI_RECOVERY) || 2,
-    minVolumeRatio: envNumber('SCALP_MIN_VOLUME_RATIO', 1.0),
-    volumeLookback: parseInt(process.env.SCALP_VOLUME_LOOKBACK) || 20,
-    minCloseStrength: envNumber('SCALP_MIN_CLOSE_STRENGTH', 0.65),
-    trendPeriod: parseInt(process.env.SCALP_TREND_PERIOD) || 30,
-    trendSlopeLookback: parseInt(process.env.SCALP_TREND_SLOPE_LOOKBACK) || 3,
-    minTrendSlopePercent: envNumber('SCALP_MIN_TREND_SLOPE_PERCENT', -0.2),
-    requirePreviousHighBreak: process.env.SCALP_REQUIRE_PREVIOUS_HIGH_BREAK !== 'false',
-    maxSignalRangePercent: envNumber('SCALP_MAX_SIGNAL_RANGE_PERCENT', 0),
-    minSignalRangePercent: envNumber('SCALP_MIN_SIGNAL_RANGE_PERCENT', 0),
+    oversoldLookback: env.SCALP_OVERSOLD_LOOKBACK || 1,
+    minReboundPercent: env.SCALP_MIN_REBOUND_PERCENT || 0.15,
+    minRsiRecovery: env.SCALP_MIN_RSI_RECOVERY || 2,
+    minVolumeRatio: (env.SCALP_MIN_VOLUME_RATIO ?? 1.0),
+    volumeLookback: env.SCALP_VOLUME_LOOKBACK || 20,
+    minCloseStrength: (env.SCALP_MIN_CLOSE_STRENGTH ?? 0.65),
+    trendPeriod: env.SCALP_TREND_PERIOD || 30,
+    trendSlopeLookback: env.SCALP_TREND_SLOPE_LOOKBACK || 3,
+    minTrendSlopePercent: (env.SCALP_MIN_TREND_SLOPE_PERCENT ?? -0.2),
+    requirePreviousHighBreak: env.SCALP_REQUIRE_PREVIOUS_HIGH_BREAK !== false,
+    maxSignalRangePercent: (env.SCALP_MAX_SIGNAL_RANGE_PERCENT ?? 0),
+    minSignalRangePercent: (env.SCALP_MIN_SIGNAL_RANGE_PERCENT ?? 0),
     // Optional research-only exhaustion guard; zero preserves the existing
     // lower-bound-only rebound contract.
-    maxReboundPercent: envNumber('SCALP_MAX_REBOUND_PERCENT', 0),
-    marketRegimeEnabled: process.env.SCALP_MARKET_REGIME_ENABLED === 'true',
-    marketRegimeLookback: parseInt(process.env.SCALP_MARKET_REGIME_LOOKBACK) || 5,
-    marketRegimeMinBreadth: envNumber('SCALP_MARKET_REGIME_MIN_BREADTH', 0.5),
-    marketRegimeMinReturnPercent: envNumber('SCALP_MARKET_REGIME_MIN_RETURN_PERCENT', -0.2),
-    requireReboundBelowOverbought: process.env.SCALP_REQUIRE_REBOUND_BELOW_OVERBOUGHT === 'true',
-    signalProfile: process.env.SCALP_SIGNAL_PROFILE || 'rsi_rebound',
-    entryDelayMinMs: parseInt(process.env.SCALP_ENTRY_DELAY_MIN_MS) || 1000,
-    entryDelayMaxMs: parseInt(process.env.SCALP_ENTRY_DELAY_MAX_MS) || 5000,
-    maxEntryRetracePercent: parseFloat(process.env.SCALP_MAX_ENTRY_RETRACE_PERCENT) || 0.25,
-    maxEntryChasePercent: parseFloat(process.env.SCALP_MAX_ENTRY_CHASE_PERCENT) || 0.35,
+    maxReboundPercent: (env.SCALP_MAX_REBOUND_PERCENT ?? 0),
+    marketRegimeEnabled: env.SCALP_MARKET_REGIME_ENABLED === true,
+    marketRegimeLookback: env.SCALP_MARKET_REGIME_LOOKBACK || 5,
+    marketRegimeMinBreadth: (env.SCALP_MARKET_REGIME_MIN_BREADTH ?? 0.5),
+    marketRegimeMinReturnPercent: (env.SCALP_MARKET_REGIME_MIN_RETURN_PERCENT ?? -0.2),
+    requireReboundBelowOverbought: env.SCALP_REQUIRE_REBOUND_BELOW_OVERBOUGHT === true,
+    signalProfile: env.SCALP_SIGNAL_PROFILE || 'rsi_rebound',
+    entryDelayMinMs: env.SCALP_ENTRY_DELAY_MIN_MS || 1000,
+    entryDelayMaxMs: env.SCALP_ENTRY_DELAY_MAX_MS || 5000,
+    maxEntryRetracePercent: env.SCALP_MAX_ENTRY_RETRACE_PERCENT || 0.25,
+    maxEntryChasePercent: env.SCALP_MAX_ENTRY_CHASE_PERCENT || 0.35,
     // Optional protective exits. Zero trigger keeps the fixed stop/take
     // contract; enable only after an independent holdout study.
-    breakEvenTriggerPercent: envNumber('SCALP_BREAK_EVEN_TRIGGER_PERCENT', 0),
-    breakEvenOffsetPercent: envNumber('SCALP_BREAK_EVEN_OFFSET_PERCENT', 0.05),
-    trailingActivationPercent: envNumber('SCALP_TRAILING_ACTIVATION_PERCENT', 0),
-    maxHoldMinutes: parseFloat(process.env.SCALP_MAX_HOLD_MINUTES) || 30,
-    maxLosingHoldMinutes: envNumber('SCALP_MAX_LOSING_HOLD_MINUTES', 0),
-    winnerExtendMinutes: envNumber('SCALP_WINNER_EXTEND_MINUTES', 0),
-    winnerExtendMinProfitPercent: envNumber('SCALP_WINNER_EXTEND_MIN_PROFIT_PERCENT', 0),
-    winnerShadowExtendMinutes: envNumber('SCALP_WINNER_SHADOW_EXTEND_MINUTES', 0),
-    winnerShadowExtendMinProfitPercent: envNumber('SCALP_WINNER_SHADOW_EXTEND_MIN_PROFIT_PERCENT', 0),
-    winnerShadowMaxReboundPercent: envNumber('SCALP_WINNER_SHADOW_MAX_REBOUND_PERCENT', 0),
-    maxEntriesPerSignalWindow: parseInt(process.env.SCALP_MAX_ENTRIES_PER_SIGNAL_WINDOW) || 0,
-    positionRiskCheckIntervalMs: parseInt(process.env.SCALP_RISK_CHECK_INTERVAL_MS) || 1000,
-    maxRiskDataGapSeconds: envNumber('SCALP_MAX_RISK_DATA_GAP_SECONDS', 30),
-    maxAnalysisDataGapSeconds: envNumber('SCALP_MAX_ANALYSIS_DATA_GAP_SECONDS', 60),
-    cooldownAfterLossMinutes: parseFloat(process.env.SCALP_COOLDOWN_AFTER_LOSS_MINUTES) || 15,
-    maxConsecutiveLosses: parseInt(process.env.SCALP_MAX_CONSECUTIVE_LOSSES) || 3,
+    breakEvenTriggerPercent: (env.SCALP_BREAK_EVEN_TRIGGER_PERCENT ?? 0),
+    breakEvenOffsetPercent: (env.SCALP_BREAK_EVEN_OFFSET_PERCENT ?? 0.05),
+    trailingActivationPercent: (env.SCALP_TRAILING_ACTIVATION_PERCENT ?? 0),
+    maxHoldMinutes: env.SCALP_MAX_HOLD_MINUTES || 30,
+    maxLosingHoldMinutes: (env.SCALP_MAX_LOSING_HOLD_MINUTES ?? 0),
+    winnerExtendMinutes: (env.SCALP_WINNER_EXTEND_MINUTES ?? 0),
+    winnerExtendMinProfitPercent: (env.SCALP_WINNER_EXTEND_MIN_PROFIT_PERCENT ?? 0),
+    winnerShadowExtendMinutes: (env.SCALP_WINNER_SHADOW_EXTEND_MINUTES ?? 0),
+    winnerShadowExtendMinProfitPercent: (env.SCALP_WINNER_SHADOW_EXTEND_MIN_PROFIT_PERCENT ?? 0),
+    winnerShadowMaxReboundPercent: (env.SCALP_WINNER_SHADOW_MAX_REBOUND_PERCENT ?? 0),
+    maxEntriesPerSignalWindow: env.SCALP_MAX_ENTRIES_PER_SIGNAL_WINDOW || 0,
+    positionRiskCheckIntervalMs: env.SCALP_RISK_CHECK_INTERVAL_MS || 1000,
+    maxRiskDataGapSeconds: (env.SCALP_MAX_RISK_DATA_GAP_SECONDS ?? 30),
+    maxAnalysisDataGapSeconds: (env.SCALP_MAX_ANALYSIS_DATA_GAP_SECONDS ?? 60),
+    cooldownAfterLossMinutes: env.SCALP_COOLDOWN_AFTER_LOSS_MINUTES || 15,
+    maxConsecutiveLosses: env.SCALP_MAX_CONSECUTIVE_LOSSES || 3,
     // 0 disables the process-wide sliding-window circuit breaker.
-    lossCircuitBreakerCount: parseInt(process.env.SCALP_LOSS_CIRCUIT_BREAKER_COUNT) || 0,
-    lossCircuitBreakerWindowMinutes: envNumber('SCALP_LOSS_CIRCUIT_BREAKER_WINDOW_MINUTES', 30),
-    lossCircuitBreakerCooldownMinutes: envNumber('SCALP_LOSS_CIRCUIT_BREAKER_COOLDOWN_MINUTES', 60),
-    paperValidationMinDays: parseInt(process.env.SCALP_PAPER_MIN_DAYS) || 7,
-    paperValidationMinTrades: parseInt(process.env.SCALP_PAPER_MIN_TRADES) || 20,
-    paperValidationMinReturnPercent: envNumber('SCALP_PAPER_MIN_RETURN_PERCENT', 0.2),
-    paperValidationMaxDrawdownPercent: envNumber('SCALP_PAPER_MAX_DRAWDOWN_PERCENT', 15),
-    paperValidationMaxHeartbeatGapMinutes: envNumber('SCALP_PAPER_MAX_HEARTBEAT_GAP_MINUTES', 15),
-    maxScalpMarkets: parseInt(process.env.SCALP_MAX_MARKETS) || 20,
-    upbitRequestTimeoutMs: parseInt(process.env.UPBIT_REQUEST_TIMEOUT_MS) || 10000,
-    requireValidationPassForLive: process.env.SCALP_REQUIRE_VALIDATION_PASS !== 'false',
+    lossCircuitBreakerCount: env.SCALP_LOSS_CIRCUIT_BREAKER_COUNT || 0,
+    lossCircuitBreakerWindowMinutes: (env.SCALP_LOSS_CIRCUIT_BREAKER_WINDOW_MINUTES ?? 30),
+    lossCircuitBreakerCooldownMinutes: (env.SCALP_LOSS_CIRCUIT_BREAKER_COOLDOWN_MINUTES ?? 60),
+    paperValidationMinDays: env.SCALP_PAPER_MIN_DAYS || 7,
+    paperValidationMinTrades: env.SCALP_PAPER_MIN_TRADES || 20,
+    paperValidationMinReturnPercent: (env.SCALP_PAPER_MIN_RETURN_PERCENT ?? 0.2),
+    paperValidationMaxDrawdownPercent: (env.SCALP_PAPER_MAX_DRAWDOWN_PERCENT ?? 15),
+    paperValidationMaxHeartbeatGapMinutes: (env.SCALP_PAPER_MAX_HEARTBEAT_GAP_MINUTES ?? 15),
+    maxScalpMarkets: env.SCALP_MAX_MARKETS || 20,
+    upbitRequestTimeoutMs: env.UPBIT_REQUEST_TIMEOUT_MS || 10000,
+    requireValidationPassForLive: env.SCALP_REQUIRE_VALIDATION_PASS !== false,
     useNews: !isScalpingMode,
 
     // AI 자문은 ChatGPT/Claude API key가 아니라 로컬 구독 CLI 세션을
     // 사용한다. 자문 결과는 기록/표시만 하고 주문 실행에는 연결하지 않는다.
-    aiAdvisorEnabled: process.env.AI_ADVISOR_ENABLED !== 'false',
-    aiLocalBriefEnabled: process.env.AI_LOCAL_BRIEF_ENABLED !== 'false',
-    aiAdvisorTimeoutMs: parseInt(process.env.AI_ADVISOR_TIMEOUT_MS) || 60000,
-    aiMonitoringFile: process.env.AI_MONITORING_FILE || '',
-    aiCodexBin: process.env.AI_CODEX_BIN || 'codex',
-    aiCodexIgnoreUserConfig: process.env.AI_CODEX_IGNORE_USER_CONFIG !== 'false',
-    aiClaudeBin: process.env.AI_CLAUDE_BIN || 'claude',
-    aiGptModel: process.env.AI_GPT_MODEL || '',
-    aiClaudeModel: process.env.AI_CLAUDE_MODEL || '',
-    aiEvaluationMinutes: envNumber('AI_EVALUATION_MINUTES', 5),
-    aiEvaluationNeutralBandPercent: envNumber('AI_EVALUATION_NEUTRAL_BAND_PERCENT', 0.3),
-    aiEvaluationMinSamples: parseInt(process.env.AI_EVALUATION_MIN_SAMPLES) || 20,
+    aiAdvisorEnabled: env.AI_ADVISOR_ENABLED !== false,
+    aiLocalBriefEnabled: env.AI_LOCAL_BRIEF_ENABLED !== false,
+    aiAdvisorTimeoutMs: env.AI_ADVISOR_TIMEOUT_MS || 60000,
+    aiMonitoringFile: env.AI_MONITORING_FILE || '',
+    aiCodexBin: env.AI_CODEX_BIN || 'codex',
+    aiCodexIgnoreUserConfig: env.AI_CODEX_IGNORE_USER_CONFIG !== false,
+    aiClaudeBin: env.AI_CLAUDE_BIN || 'claude',
+    aiGptModel: env.AI_GPT_MODEL || '',
+    aiClaudeModel: env.AI_CLAUDE_MODEL || '',
+    aiEvaluationMinutes: (env.AI_EVALUATION_MINUTES ?? 5),
+    aiEvaluationNeutralBandPercent: (env.AI_EVALUATION_NEUTRAL_BAND_PERCENT ?? 0.3),
+    aiEvaluationMinSamples: env.AI_EVALUATION_MIN_SAMPLES || 20,
 
     // 체크 간격 (드라이 모드일 때 더 짧게)
     checkInterval: dryRun
-      ? parseInt(process.env.CHECK_INTERVAL_DRY) || (isScalpingMode ? 5000 : 30000)
-      : parseInt(process.env.CHECK_INTERVAL) || (isScalpingMode ? 5000 : 60000),
+      ? env.CHECK_INTERVAL_DRY || (isScalpingMode ? 5000 : 30000)
+      : env.CHECK_INTERVAL || (isScalpingMode ? 5000 : 60000),
 
     // 백테스팅 간격 (드라이 모드에서만)
-    backtestInterval: parseInt(process.env.BACKTEST_INTERVAL) || 3600000, // 1시간
+    backtestInterval: env.BACKTEST_INTERVAL || 3600000, // 1시간
 
     // 드라이 모드 시드 자금
-    dryRunSeedMoney: parseInt(process.env.DRY_RUN_SEED_MONEY) || 10000000, // 1000만원
+    dryRunSeedMoney: env.DRY_RUN_SEED_MONEY || 10000000, // 1000만원
 
     // 운영 모드
     dryRun,
-    logLevel: process.env.LOG_LEVEL || 'info',
-    enableDashboard: process.env.ENABLE_DASHBOARD !== 'false',
-    dashboardPort: parseInt(process.env.DASHBOARD_PORT) || 3000
+    logLevel: env.LOG_LEVEL || 'info',
+    enableDashboard: env.ENABLE_DASHBOARD !== false,
+    dashboardPort: env.DASHBOARD_PORT || 3000
   };
 }
 
@@ -674,11 +658,18 @@ function setupExitHandlers(trader, dashboardServer, backtestTimer, optimizationT
 async function main() {
   printBanner();
 
-  // 설정 검증
-  validateConfig();
+  // 스키마 검증: 필수 env 누락/형식 오류는 부팅 시점에 실패시킨다.
+  const { values: env, errors: envErrors, warnings: envWarnings } = loadEnv();
+  if (envErrors.length > 0) {
+    console.error(formatEnvErrors(envErrors));
+    process.exit(1);
+  }
+  if (envWarnings.length > 0) {
+    console.warn(formatEnvWarnings(envWarnings));
+  }
 
   // 설정 로드
-  const config = createConfig();
+  const config = createConfig(env);
 
   // TARGET_COINS=ALL 인 경우 모든 KRW 마켓 자동 로드
   if (config.analyzeAllCoins || config.targetCoins.length === 0) {
