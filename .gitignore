@@ -9,8 +9,7 @@ logs/
 # Portfolio & trading data (sensitive)
 dry_portfolio.json
 paper_validation.json
-.paper-smoke/
-.paper-forward*/
+.paper-*/
 .paper-session.lock
 *.momentum-shadow.lock
 .staging-runtime/
