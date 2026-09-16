@@ -112,6 +112,25 @@ test('pending next-open fill is voided when the grid moved past the fill window'
   assert.equal(ledger.positions['KRW-BTC'], undefined);
 });
 
+test('pending next-open fills are voided once the portfolio drawdown stop fired', () => {
+  const ledger = pendingLedger({ drawdownStopTriggered: true });
+  const result = executeMomentumShadowPendingEntries({
+    ledger,
+    series: { 'KRW-BTC': [bar('2026-01-01T00:00:00', 100)] },
+    currentOpenByMarket: {
+      'KRW-BTC': { ts: '2026-01-02T00:00:00', opening_price: 110 }
+    },
+    dataQuality: { valid: true },
+    maxPositions: 2
+  });
+
+  assert.deepEqual(result, { filled: 0, blocked: 1, pending: 0 });
+  assert.equal(ledger.balance, 100_000);
+  assert.equal(ledger.pendingEntries.length, 0);
+  assert.equal(ledger.voidedEntries[0].reason, 'pending_entry_drawdown_stop');
+  assert.equal(ledger.positions['KRW-BTC'], undefined);
+});
+
 test('pending next-open fill is voided when the adverse gap exceeds the ceiling', () => {
   const ledger = pendingLedger();
   const result = executeMomentumShadowPendingEntries({

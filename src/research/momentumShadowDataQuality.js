@@ -69,7 +69,12 @@ export function assessMomentumShadowDailyGrid(
         invalidMarkets.push({ market, reason: 'latest_timestamp_missing' });
       }
     } else if (maxAgeMs !== null) {
-      const ageSeconds = Math.max(0, Math.round((nowMs - latest) / 1000));
+      // Freshness is measured from the bar's completion boundary, not its
+      // open: a healthy daily grid's newest completed bar always finished
+      // within the last 24h, so a fixed ceiling only fires when a daily
+      // boundary was actually missed instead of flagging the second half of
+      // every UTC day as stale.
+      const ageSeconds = Math.max(0, Math.round((nowMs - (latest + DAY_MS)) / 1000));
       latestAgeSecondsByMarket[market] = ageSeconds;
       if (ageSeconds * 1000 > maxAgeMs) {
         staleMarkets.push(market);

@@ -41,6 +41,19 @@ export function executeMomentumShadowPendingEntries({
     !Array.isArray(ledger.pendingEntries) || ledger.pendingEntries.length === 0) {
     return { filled: 0, blocked: 0, pending: ledger?.pendingEntries?.length || 0 };
   }
+  // A triggered portfolio drawdown stop permanently halts new positions, so
+  // queued entries are voided as terminal rather than left to fill later.
+  if (ledger.drawdownStopTriggered === true) {
+    const at = new Date(now).toISOString();
+    let blocked = 0;
+    for (const pending of ledger.pendingEntries) {
+      recordVoidedPendingEntry(ledger, pending, 'pending_entry_drawdown_stop', at);
+      blocked += 1;
+    }
+    ledger.pendingEntries = [];
+    ledger.pendingEntryBlocked = (ledger.pendingEntryBlocked || 0) + blocked;
+    return { filled: 0, blocked, pending: 0 };
+  }
   if (dataQuality?.valid !== true) {
     ledger.pendingEntryDataQualityBlocked = (ledger.pendingEntryDataQualityBlocked || 0) +
       ledger.pendingEntries.length;

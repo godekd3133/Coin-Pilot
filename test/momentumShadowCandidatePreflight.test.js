@@ -140,6 +140,37 @@ test('candidate preflight allows a fresh open benchmark with an empty target', (
   }
 });
 
+test('candidate preflight blocks a benchmark with a future heartbeat', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'coinpilot-preflight-future-hb-'));
+  const benchmarkDir = path.join(root, 'benchmark');
+  fs.mkdirSync(benchmarkDir, { recursive: true });
+  const now = Date.parse('2026-01-01T00:05:00.000Z');
+  fs.writeFileSync(path.join(benchmarkDir, 'ledger.json'), JSON.stringify({
+    ownerPid: process.pid,
+    runnerState: 'running',
+    heartbeatAt: new Date(now + 60_000).toISOString(),
+    benchmarkGateOpen: true,
+    benchmarkTrendPercent: 2.5,
+    config: { pollMs: 900_000 }
+  }));
+  try {
+    const result = inspectMomentumShadowCandidate({
+      targetDir: path.join(root, 'target'),
+      benchmarkDir,
+      ownerDirs: [],
+      expectedConfig: baseExpected(),
+      now
+    });
+
+    assert.equal(result.launchAllowed, false);
+    assert.equal(result.benchmark.heartbeatAgeSeconds, null);
+    assert.equal(result.benchmark.heartbeatFresh, false);
+    assert.ok(result.blockers.includes('benchmark_heartbeat_stale'));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('candidate preflight evaluates the candidate threshold instead of copying the source owner gate', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'coinpilot-preflight-threshold-'));
   const benchmarkDir = path.join(root, 'benchmark');

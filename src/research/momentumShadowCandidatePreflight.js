@@ -132,8 +132,10 @@ export function inspectMomentumShadowCandidate({
   } else {
     const heartbeatMs = Date.parse(benchmark.heartbeatAt || '');
     const pollMs = Number(benchmark.config?.pollMs) || 15 * 60 * 1000;
-    const heartbeatAgeSeconds = Number.isFinite(heartbeatMs)
-      ? Math.max(0, Math.round((Number(now) - heartbeatMs) / 1000))
+    // A heartbeat written in the future is clock-skewed, not fresh — treat
+    // it as unverifiable like a missing timestamp instead of age zero.
+    const heartbeatAgeSeconds = Number.isFinite(heartbeatMs) && Number(now) >= heartbeatMs
+      ? Math.round((Number(now) - heartbeatMs) / 1000)
       : null;
     const staleLimitMs = Math.max(600_000, pollMs * 5);
     const heartbeatFresh = heartbeatAgeSeconds !== null && heartbeatAgeSeconds * 1000 <= staleLimitMs;

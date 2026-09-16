@@ -34,3 +34,18 @@ test('momentum shadow heartbeat watchdog fails closed on stale or malformed stat
     staleLimitMs: 60_000
   }), true);
 });
+
+test('momentum shadow heartbeat watchdog fails closed on a future heartbeat', () => {
+  const now = Date.parse('2026-09-15T01:00:00.000Z');
+  // A heartbeat written in the future is clock-skewed, not fresh: it must
+  // not keep a dead or diverged owner looking alive.
+  assert.equal(getMomentumShadowHeartbeatAgeMs({
+    heartbeatAt: '2026-09-15T01:00:30.000Z',
+    now
+  }), null);
+  assert.equal(isMomentumShadowHeartbeatStale({
+    heartbeatAt: '2026-09-15T01:00:30.000Z',
+    now,
+    staleLimitMs: 60_000
+  }), true);
+});

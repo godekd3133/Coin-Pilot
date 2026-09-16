@@ -420,19 +420,6 @@ async function cycle(ledger, strategies) {
   ledger.benchmarkGateOpen = benchmark.gateOpen;
   ledger.benchmarkAvailable = benchmark.available;
 
-  executeMomentumShadowPendingEntries({
-    ledger,
-    series,
-    currentOpenByMarket,
-    dataQuality,
-    maxPositions: MAX_POSITIONS,
-    now,
-    entryExecution: ENTRY_EXECUTION,
-    maxEntryGapPercent: MAX_ENTRY_GAP_PERCENT,
-    notify,
-    bookName
-  });
-
   // Mark-to-market is descriptive only. Entry/exit decisions still use the
   // same completed-candle prices and strategy contract as before.
   markMomentumShadowPositions(ledger, series, COST_PERCENT);
@@ -510,6 +497,23 @@ async function cycle(ledger, strategies) {
         ['warning']);
     }
   }
+
+  // Pending next-open fills settle after this cycle's exits and drawdown
+  // liquidation: an exit decided at the last completed close frees its slot
+  // and cash before an open-time fill is evaluated, matching the simulator's
+  // boundary ordering.
+  executeMomentumShadowPendingEntries({
+    ledger,
+    series,
+    currentOpenByMarket,
+    dataQuality,
+    maxPositions: MAX_POSITIONS,
+    now,
+    entryExecution: ENTRY_EXECUTION,
+    maxEntryGapPercent: MAX_ENTRY_GAP_PERCENT,
+    notify,
+    bookName
+  });
 
   // breadth: count markets with trailing trend above threshold
   const trends = {};

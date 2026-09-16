@@ -286,8 +286,10 @@ function projectMomentumShadowBook(definition, fallbackInitialBalance, server) {
   try {
     const ledger = JSON.parse(fs.readFileSync(ledgerFile, 'utf8'));
     const heartbeatMs = Date.parse(ledger.heartbeatAt);
-    const heartbeatAgeSeconds = Number.isFinite(heartbeatMs)
-      ? Math.max(0, Math.round((Date.now() - heartbeatMs) / 1000))
+    // A future heartbeat is clock-skewed, not fresh — unverifiable freshness
+    // must not keep a book marked as actively observing.
+    const heartbeatAgeSeconds = Number.isFinite(heartbeatMs) && Date.now() >= heartbeatMs
+      ? Math.round((Date.now() - heartbeatMs) / 1000)
       : null;
     const pollMs = Number(ledger.config?.pollMs) ||
       Number(process.env.MOMO_SHADOW_POLL_MS) ||
@@ -534,12 +536,15 @@ export default function createResearchRoutes(server) {
         reason: 'research_report_not_configured'
       });
     }
+    // Project only the basename — the absolute report path is local
+    // filesystem detail, not dashboard evidence.
+    const reportFileName = path.basename(reportFile);
     if (!fs.existsSync(reportFile)) {
       return res.json({
         available: false,
         researchOnly: true,
         promoted: false,
-        reportFile,
+        reportFile: reportFileName,
         reason: 'research_report_not_found'
       });
     }
@@ -554,7 +559,7 @@ export default function createResearchRoutes(server) {
         available: true,
         researchOnly: true,
         promoted: false,
-        reportFile,
+        reportFile: reportFileName,
         projectionReason: 'research_artifact_never_authorizes_live_orders'
       });
     } catch (error) {
@@ -562,7 +567,7 @@ export default function createResearchRoutes(server) {
         available: false,
         researchOnly: true,
         promoted: false,
-        reportFile,
+        reportFile: reportFileName,
         reason: 'research_report_invalid',
         error: error.message
       });

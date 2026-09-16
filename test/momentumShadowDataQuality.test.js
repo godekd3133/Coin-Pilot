@@ -61,15 +61,33 @@ test('momentum shadow daily grid rejects an aligned but stale completed candle',
     'KRW-BTC': daily([100, 101, 102]),
     'KRW-ETH': daily([100, 101, 102])
   }, ['KRW-BTC', 'KRW-ETH'], {
-    now: Date.parse('2026-01-05T12:00:00.000Z'),
+    now: Date.parse('2026-01-05T13:00:00.000Z'),
     maxAgeHours: 36
   });
 
   assert.equal(result.valid, false);
   assert.equal(result.reason, 'daily_market_stale');
   assert.deepEqual(result.staleMarkets, ['KRW-BTC', 'KRW-ETH']);
-  assert.equal(result.latestAgeSecondsByMarket['KRW-BTC'], 216000);
+  assert.equal(result.latestAgeSecondsByMarket['KRW-BTC'], 133200);
   assert.equal(result.maxAgeHours, 36);
+});
+
+test('momentum shadow daily grid stays valid through the second half of a UTC day', () => {
+  // The newest completed bar's open is always 24-48h old on a healthy feed;
+  // freshness is measured from when it completed, so an afternoon poll must
+  // not be reported as stale.
+  const result = assessMomentumShadowDailyGrid({
+    'KRW-BTC': daily([100, 101, 102]),
+    'KRW-ETH': daily([100, 101, 102])
+  }, ['KRW-BTC', 'KRW-ETH'], {
+    now: Date.parse('2026-01-04T13:00:00.000Z'),
+    maxAgeHours: 36
+  });
+
+  assert.equal(result.valid, true);
+  assert.equal(result.reason, 'daily_grid_aligned_and_contiguous');
+  assert.deepEqual(result.staleMarkets, []);
+  assert.equal(result.latestAgeSecondsByMarket['KRW-BTC'], 46800);
 });
 
 test('daily candle completion follows the candle end time across the UTC boundary', () => {

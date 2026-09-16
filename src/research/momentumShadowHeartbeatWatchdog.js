@@ -5,7 +5,10 @@
 export function getMomentumShadowHeartbeatAgeMs({ heartbeatAt, now = Date.now() } = {}) {
   const heartbeatMs = Date.parse(heartbeatAt || '');
   if (!Number.isFinite(heartbeatMs)) return null;
-  return Math.max(0, Number(now) - heartbeatMs);
+  const ageMs = Number(now) - heartbeatMs;
+  // A heartbeat in the future cannot be verified fresh — the writer's clock
+  // disagrees with the reader's — so it is unusable like a missing value.
+  return ageMs < 0 ? null : ageMs;
 }
 
 /**

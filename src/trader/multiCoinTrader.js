@@ -3023,11 +3023,15 @@ class MultiCoinTrader {
     const startedAtMs = new Date(session.startedAt).getTime();
     const elapsedDays = Math.max(0, (Date.now() - startedAtMs) / 86_400_000);
     const heartbeatAt = session.telemetry?.heartbeatAt || session.startedAt;
-    const heartbeatAgeMs = Date.now() - new Date(heartbeatAt).getTime();
+    const heartbeatMs = new Date(heartbeatAt).getTime();
+    // 미래·누락·비정형 heartbeat는 검증 불가 — 신선하다고 간주하지 않는다.
+    const heartbeatAgeMs = Number.isFinite(heartbeatMs) && Date.now() >= heartbeatMs
+      ? Date.now() - heartbeatMs
+      : null;
     const heartbeatLimitMs = Math.max(120_000, (Number(this.config.checkInterval) || 60_000) * 5);
     const ownerProcessAlive = this.isProcessAlive(session.processId);
     const orphaned = session.active === true &&
-      (ownerProcessAlive === false || heartbeatAgeMs > heartbeatLimitMs);
+      (ownerProcessAlive === false || heartbeatAgeMs === null || heartbeatAgeMs > heartbeatLimitMs);
     const orphanReason = orphaned
       ? ownerProcessAlive === false ? 'owner_process_missing' : 'heartbeat_stale'
       : null;

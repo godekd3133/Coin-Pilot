@@ -62,6 +62,26 @@ test('momentum shadow status fails closed when runner state is absent', () => {
   }
 });
 
+test('momentum shadow status fails closed when the heartbeat is not verifiable', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'coinpilot-shadow-status-'));
+  try {
+    const dir = writeLedger(root, {
+      runnerState: 'running',
+      ownerPid: process.pid,
+      heartbeatAt: new Date(Date.now() + 60_000).toISOString(),
+      config: { mode: 'regime', pollMs: 900_000 },
+      balance: 100_000_000,
+      positions: {},
+      trades: []
+    });
+    const result = runStatus(dir);
+    assert.equal(result.status, 0);
+    assert.match(result.stdout, /\[STOPPED:heartbeat_stale\]/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('momentum shadow status reports volatility target and scale readback', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'coinpilot-shadow-status-'));
   try {

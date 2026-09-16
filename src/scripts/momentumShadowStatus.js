@@ -36,7 +36,10 @@ for (const dir of dirs) {
   try { l = JSON.parse(fs.readFileSync(`${dir}/ledger.json`, 'utf8')); }
   catch { console.log(`${dir}: no ledger`); continue; }
   const heartbeatMs = Date.parse(l.heartbeatAt);
-  const heartbeatAgeMs = Number.isFinite(heartbeatMs) ? Date.now() - heartbeatMs : null;
+  // Missing, malformed, or future heartbeats are all unverifiable freshness.
+  const heartbeatAgeMs = Number.isFinite(heartbeatMs) && Date.now() >= heartbeatMs
+    ? Date.now() - heartbeatMs
+    : null;
   const pollMs = Number(l.config?.pollMs) ||
     (l.config?.benchmarkMarket ? 15 * 60 * 1000 : defaultPollMs);
   const heartbeatLimitMs = Math.max(600_000, pollMs * 5);
@@ -51,7 +54,7 @@ for (const dir of dirs) {
     ? 'runner_state_missing'
     : ownerProcessAlive !== true
     ? 'owner_process_missing'
-    : heartbeatAgeMs !== null && heartbeatAgeMs > heartbeatLimitMs
+    : heartbeatAgeMs === null || heartbeatAgeMs > heartbeatLimitMs
       ? 'heartbeat_stale'
       : null;
   const state = orphanReason ? `STOPPED:${orphanReason}` : 'RUNNING';

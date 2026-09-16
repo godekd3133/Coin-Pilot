@@ -295,7 +295,9 @@ async function main() {
       trader.paperValidation.configSnapshotComplete = false;
       trader.paperValidation.configSnapshotBackfilledAt = resumedAt;
     }
-    const gapMs = Number(existingPaperStatus.heartbeatAgeMs) || 0;
+    const gapMs = Number.isFinite(Number(existingPaperStatus.heartbeatAgeMs))
+      ? Number(existingPaperStatus.heartbeatAgeMs)
+      : null;
     trader.paperValidation.interruptions = [
       ...(Array.isArray(trader.paperValidation.interruptions)
         ? trader.paperValidation.interruptions
