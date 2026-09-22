@@ -6,6 +6,7 @@ import UpbitAPI from './api/upbit.js';
 import Logger from './utils/logger.js';
 import ParameterOptimizer from './optimization/parameterOptimizer.js';
 import { loadEnv, formatEnvErrors, formatEnvWarnings } from './config/envLoader.js';
+import { finalizeActivePaperValidation } from './runtime/paperShutdown.js';
 import fs from 'fs';
 import axios from 'axios';
 
@@ -224,6 +225,7 @@ function createConfig(env) {
     winnerShadowExtendMinutes: (env.SCALP_WINNER_SHADOW_EXTEND_MINUTES ?? 0),
     winnerShadowExtendMinProfitPercent: (env.SCALP_WINNER_SHADOW_EXTEND_MIN_PROFIT_PERCENT ?? 0),
     winnerShadowMaxReboundPercent: (env.SCALP_WINNER_SHADOW_MAX_REBOUND_PERCENT ?? 0),
+    paperDiagnosticShadowsEnabled: env.SCALP_PAPER_DIAGNOSTIC_SHADOWS_ENABLED !== false,
     maxEntriesPerSignalWindow: env.SCALP_MAX_ENTRIES_PER_SIGNAL_WINDOW || 0,
     positionRiskCheckIntervalMs: env.SCALP_RISK_CHECK_INTERVAL_MS || 1000,
     maxRiskDataGapSeconds: (env.SCALP_MAX_RISK_DATA_GAP_SECONDS ?? 30),
@@ -239,6 +241,9 @@ function createConfig(env) {
     paperValidationMinReturnPercent: (env.SCALP_PAPER_MIN_RETURN_PERCENT ?? 0.2),
     paperValidationMaxDrawdownPercent: (env.SCALP_PAPER_MAX_DRAWDOWN_PERCENT ?? 15),
     paperValidationMaxHeartbeatGapMinutes: (env.SCALP_PAPER_MAX_HEARTBEAT_GAP_MINUTES ?? 15),
+    // Validation CLI, API projection, and live gate must share the same
+    // explicit report identity. The default preserves the legacy root path.
+    scalpingValidationOutputFile: env.SCALP_VALIDATION_OUTPUT_FILE || 'scalping_validation.json',
     maxScalpMarkets: env.SCALP_MAX_MARKETS || 20,
     upbitRequestTimeoutMs: env.UPBIT_REQUEST_TIMEOUT_MS || 10000,
     requireValidationPassForLive: env.SCALP_REQUIRE_VALIDATION_PASS !== false,
@@ -592,6 +597,12 @@ function setupExitHandlers(trader, dashboardServer, backtestTimer, optimizationT
 
     trader.stop();
 
+    // A dashboard/staging process can own an active paper validation session
+    // even when the trading loop itself is idle. Close that evidence window
+    // before exit so SIGINT/SIGTERM produces a terminal ledger instead of
+    // leaving an avoidable active/orphaned session for the observer to infer.
+    await finalizeActivePaperValidation(trader, console);
+
     if (dashboardServer) {
       dashboardServer.stop();
     }
@@ -750,7 +761,7 @@ async function main() {
   console.log('💡 팁:');
   console.log('  - Ctrl+C를 눌러 언제든지 종료할 수 있습니다.');
   console.log('  - 로그는 logs/ 디렉토리에 저장됩니다.');
-  console.log('  - 웹 대시보드: http://localhost:' + config.dashboardPort);
+  console.log('  - 웹 대시보드: ' + (dashboardServer?.protocol || 'http') + '://localhost:' + config.dashboardPort);
   if (config.dryRun && !config.isScalpingMode) {
     console.log('  - 백테스팅 결과: backtest_results_*.json 파일 확인');
     console.log('  - 백테스팅 간격: ' + (config.backtestInterval / 60000) + '분마다');

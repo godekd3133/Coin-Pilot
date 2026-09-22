@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { createServer } from 'http';
+import { createServer as createHttpsServer } from 'https';
 import { Server as SocketIOServer } from 'socket.io';
 import Logger from '../utils/logger.js';
 
@@ -19,6 +20,8 @@ import createResearchRoutes from './routes/research.js';
 import AIAdvisorService from '../ai/aiAdvisorService.js';
 import MonitoringSessionService from '../ai/monitoringSessionService.js';
 import { createDashboardAuth, createOriginGuard } from './auth.js';
+import { getPaperEvidenceMutationLock } from '../research/paperEvidenceMutationGuard.js';
+import { resolveDashboardTls } from './dashboardTls.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -31,10 +34,16 @@ class DashboardServer {
     this.port = port;
     this.tradingSystem = tradingSystem;
     this.logger = new Logger('debug');
+    const dashboardEnv = options.env || process.env;
+    this.tlsConfig = resolveDashboardTls(dashboardEnv, PROJECT_ROOT);
+    if (this.tlsConfig.error) {
+      throw new Error(this.tlsConfig.error);
+    }
+    this.protocol = this.tlsConfig.enabled ? 'https' : 'http';
 
     // API/소켓 데이터 평면 인증. 정적 셸은 공개이며, DASHBOARD_TOKEN이 없으면
     // 루프백 전용 바인딩으로 강제된다 (src/api/auth.js 참고).
-    this.auth = createDashboardAuth(options.env || process.env, {
+    this.auth = createDashboardAuth(dashboardEnv, {
       loginRateLimiter: options.loginRateLimiter
     });
     this.originGuard = createOriginGuard(this.auth.corsOrigins);
@@ -53,7 +62,9 @@ class DashboardServer {
     });
 
     // HTTP 서버 및 Socket.io 초기화
-    this.httpServer = createServer(this.app);
+    this.httpServer = this.tlsConfig.enabled
+      ? createHttpsServer({ cert: this.tlsConfig.cert, key: this.tlsConfig.key }, this.app)
+      : createServer(this.app);
     this.io = new SocketIOServer(this.httpServer, {
       // WebSocket 업그레이드는 CORS 대상이 아니므로 Origin을 직접 검사하고,
       // 실제 인가는 handshake auth 토큰(socketMiddleware)이 담당한다.
@@ -1043,8 +1054,8 @@ class DashboardServer {
     this.server = this.httpServer.listen(this.port, this.auth.host, () => {
       const address = this.server.address();
       const boundPort = typeof address === 'object' && address ? address.port : this.port;
-      console.log(`\n🌐 대시보드 서버 시작: http://${this.auth.host}:${boundPort}`);
-      console.log(`   API 엔드포인트: http://${this.auth.host}:${boundPort}/api`);
+      console.log(`\n🌐 대시보드 서버 시작: ${this.protocol}://${this.auth.host}:${boundPort}`);
+      console.log(`   API 엔드포인트: ${this.protocol}://${this.auth.host}:${boundPort}/api`);
       console.log(`   🔐 인증: ${this.auth.enabled ? 'DASHBOARD_TOKEN 필요' : '비활성 (루프백 전용)'}`);
       console.log(`   📡 실시간 알림: Socket.io 활성화`);
       this.logger.info(`Dashboard server started on ${this.auth.host}:${boundPort} (auth=${this.auth.enabled})`);
@@ -1179,7 +1190,19 @@ class DashboardServer {
   async runOptimizationCycle() {
     if (this.optimizationState.isRunning) {
       console.log('⚠️ 이미 최적화가 실행 중입니다.');
-      return;
+      return { blocked: true, reason: 'optimization_already_running' };
+    }
+
+    const mutationLock = getPaperEvidenceMutationLock(this.tradingSystem, 'optimization_cycle');
+    if (mutationLock.locked) {
+      console.log(`⏸️ paper evidence 보호 중 — 최적화 사이클을 건너뜁니다 (${mutationLock.code}).`);
+      this.optimizationState.lastBlocked = {
+        at: new Date().toISOString(),
+        code: mutationLock.code,
+        operation: mutationLock.operation,
+        sessionId: mutationLock.sessionId
+      };
+      return { blocked: true, lock: mutationLock };
     }
 
     try {
@@ -1307,7 +1330,19 @@ class DashboardServer {
   applyOptimalParameters(params) {
     if (!params || !this.tradingSystem) {
       console.log('⚠️ 파라미터 적용 실패: 트레이딩 시스템 없음');
-      return;
+      return { blocked: true, reason: 'trading_system_unavailable' };
+    }
+
+    const mutationLock = getPaperEvidenceMutationLock(this.tradingSystem, 'optimization_apply');
+    if (mutationLock.locked) {
+      console.log(`⏸️ paper evidence 보호 중 — 최적화 파라미터를 적용하지 않습니다 (${mutationLock.code}).`);
+      this.optimizationState.lastBlocked = {
+        at: new Date().toISOString(),
+        code: mutationLock.code,
+        operation: mutationLock.operation,
+        sessionId: mutationLock.sessionId
+      };
+      return { blocked: true, lock: mutationLock };
     }
 
     console.log('🔄 새 파라미터를 트레이딩 시스템에 적용 중...');
@@ -1395,6 +1430,7 @@ class DashboardServer {
     if (params.investmentRatio) {
       console.log(`   투자비율: ${(params.investmentRatio * 100).toFixed(1)}%`);
     }
+    return { blocked: false };
   }
 
   stop() {

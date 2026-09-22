@@ -1,4 +1,6 @@
 import { resolveMomentumShadowNextOpenFill } from './momentumShadowEntryExecution.js';
+import { compactMomentumShadowQuote } from './momentumShadowQuoteQuality.js';
+import { projectMomentumShadowExecutionPrice } from './momentumShadowExecutionModel.js';
 
 function timestampMs(value) {
   const text = String(value ?? '');
@@ -23,7 +25,8 @@ function recordVoidedPendingEntry(ledger, pending, reason, at) {
  * Execute persisted next-open entries against one authoritative candle grid.
  * This function owns only scoped ledger mutation; it never fetches data and
  * never authorizes a live order. Missing/incomplete data leaves a pending
- * entry pending, while a terminal missing next candle voids it fail-closed.
+ * entry pending, while a terminal missing next candle or unverifiable quote
+ * at the fill boundary voids it fail-closed.
  */
 export function executeMomentumShadowPendingEntries({
   ledger,
@@ -32,6 +35,10 @@ export function executeMomentumShadowPendingEntries({
   dataQuality,
   maxPositions,
   maxEntryGapPercent = 0,
+  maxSpreadPercent = 0,
+  quoteQuality = null,
+  entryQuotes = {},
+  executionModel = 'candle_close',
   now = Date.now(),
   entryExecution = 'next_open',
   notify = null,
@@ -97,6 +104,30 @@ export function executeMomentumShadowPendingEntries({
       continue;
     }
 
+    let entryQuote = null;
+    const quoteRequired = Number(maxSpreadPercent) > 0 || executionModel === 'quote_cross';
+    if (quoteRequired) {
+      const quote = compactMomentumShadowQuote(entryQuotes?.[pending.market]);
+      const quoteBlocked = quoteQuality?.error
+        ? 'pending_entry_quote_request_failed'
+        : quoteQuality?.missingMarkets?.includes(pending.market)
+          ? 'pending_entry_quote_market_missing'
+          : quoteQuality?.invalidMarkets?.includes(pending.market)
+            ? 'pending_entry_quote_invalid'
+            : quoteQuality?.blockedMarkets?.includes(pending.market)
+              ? 'pending_entry_quote_spread_above_limit'
+              : !quote
+                ? 'pending_entry_quote_missing_or_invalid'
+                : null;
+      if (quoteBlocked) {
+        recordVoidedPendingEntry(ledger, pending, quoteBlocked, new Date(now).toISOString());
+        ledger.pendingEntryQuoteBlocked = (ledger.pendingEntryQuoteBlocked || 0) + 1;
+        blocked += 1;
+        continue;
+      }
+      entryQuote = quote;
+    }
+
     const signalClosePrice = Number(pending.signalClosePrice);
     const entryGapPercent = Number.isFinite(signalClosePrice) && signalClosePrice > 0
       ? ((fill.entryPrice - signalClosePrice) / signalClosePrice) * 100
@@ -113,9 +144,26 @@ export function executeMomentumShadowPendingEntries({
       continue;
     }
 
+    const execution = projectMomentumShadowExecutionPrice({
+      model: executionModel,
+      side: 'entry',
+      candlePrice: fill.entryPrice,
+      quote: entryQuote
+    });
+    if (!execution.available) {
+      recordVoidedPendingEntry(ledger, pending, `pending_entry_${execution.reason}`, new Date(now).toISOString());
+      ledger.pendingEntryExecutionBlocked = (ledger.pendingEntryExecutionBlocked || 0) + 1;
+      blocked += 1;
+      continue;
+    }
+
     ledger.balance -= size;
     ledger.positions[pending.market] = {
-      entryPrice: fill.entryPrice,
+      entryPrice: execution.price,
+      decisionEntryPrice: fill.entryPrice,
+      executionModel: execution.model,
+      executionPriceSource: execution.source,
+      executionQuoteTimestamp: execution.quoteTimestamp,
       entryTs: fill.entryTimestamp,
       entryTimeMs: timestampMs(fill.entryTimestamp) ?? now,
       signalKey: pending.signalKey || pending.signalTimestamp,
@@ -126,6 +174,11 @@ export function executeMomentumShadowPendingEntries({
       selectionRank: pending.selectionRank,
       trendPercent: pending.trendPercent,
       breadth: pending.breadth,
+      // Older pending rows used entryQuote for the signal-cycle quote. Keep
+      // it as signalQuote for compatibility, while entryQuote below is the
+      // quote observed at the actual next-open fill cycle.
+      signalQuote: pending.signalQuote || pending.entryQuote || null,
+      entryQuote: entryQuote || (quoteRequired ? null : pending.entryQuote || null),
       entryGapPercent,
       entryExecution
     };

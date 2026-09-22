@@ -7,6 +7,9 @@ import {
   projectMomentumShadowQuote,
   summarizeMomentumShadowQuoteSamples
 } from '../research/momentumShadowQuoteQuality.js';
+import {
+  resolveMomentumShadowQuoteRuntimeFile
+} from '../research/momentumShadowQuoteHistory.js';
 
 dotenv.config();
 
@@ -20,9 +23,9 @@ const maxSpreadPercent = Number.isFinite(configuredMaxSpread)
   ? Math.max(0, configuredMaxSpread)
   : 0.5;
 const outputFile = process.env.MOMO_SHADOW_QUOTE_REPORT_FILE ||
-  '/private/tmp/coinpilot-momentum-shadow-quote-quality.json';
+  resolveMomentumShadowQuoteRuntimeFile('quote-quality.json');
 const historyFile = process.env.MOMO_SHADOW_QUOTE_HISTORY_FILE ||
-  '/private/tmp/coinpilot-momentum-shadow-quote-history.jsonl';
+  resolveMomentumShadowQuoteRuntimeFile('quote-history.jsonl');
 const upbit = new UpbitAPI('', '', { requestTimeoutMs: 10_000 });
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));

@@ -1,3 +1,5 @@
+import { resolveMomentumShadowExecutionModel } from './momentumShadowExecutionModel.js';
+
 export const DEFAULT_MOMENTUM_SHADOW_MARKETS = Object.freeze([
   'KRW-BTC', 'KRW-ETH', 'KRW-XRP', 'KRW-SOL'
 ]);
@@ -42,6 +44,7 @@ export function resolveMomentumShadowRunnerContract({
   requestIntervalMs,
   volatilityLookbackDays,
   volatilityTargetPercent,
+  executionModel,
   persistedConfig = null
 } = {}) {
   const explicitMode = mode === 'regime' || mode === 'fixed' ? mode : null;
@@ -95,6 +98,13 @@ export function resolveMomentumShadowRunnerContract({
   const persistedVolatilityLookback = optionalNonNegative(persistedConfig?.volatilityLookbackDays);
   const explicitVolatilityTarget = optionalNonNegative(volatilityTargetPercent);
   const persistedVolatilityTarget = optionalNonNegative(persistedConfig?.volatilityTargetPercent);
+  const explicitExecutionModel = executionModel === 'candle_close' || executionModel === 'quote_cross'
+    ? executionModel
+    : null;
+  const persistedExecutionModel = persistedConfig?.executionModel === 'candle_close' ||
+    persistedConfig?.executionModel === 'quote_cross'
+    ? resolveMomentumShadowExecutionModel(persistedConfig.executionModel)
+    : null;
   return {
     mode: resolvedMode,
     markets: resolvedMarkets,
@@ -111,6 +121,7 @@ export function resolveMomentumShadowRunnerContract({
     minUpBars: explicitMinUpBars ?? persistedMinUpBars,
     volatilityLookbackDays: explicitVolatilityLookback ?? persistedVolatilityLookback,
     volatilityTargetPercent: explicitVolatilityTarget ?? persistedVolatilityTarget,
+    executionModel: explicitExecutionModel ?? persistedExecutionModel,
     inheritedMode: !explicitMode && Boolean(persistedMode),
     inheritedMarkets: !explicitMarkets && Boolean(persistedMarkets),
     inheritedBenchmark: !explicitBenchmarkMarket && Boolean(persistedBenchmarkMarket)

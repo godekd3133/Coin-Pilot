@@ -2,6 +2,7 @@ import express from 'express';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { getPaperEvidenceMutationLock, respondIfPaperEvidenceMutationBlocked } from '../../research/paperEvidenceMutationGuard.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -82,7 +83,10 @@ export default function createOptimizationRoutes(server) {
   // 자동 최적화 설정 조회
   router.get('/optimization/settings', (req, res) => {
     try {
-      res.json(server.optimizationState);
+      res.json({
+        ...server.optimizationState,
+        evidenceMutationLock: getPaperEvidenceMutationLock(server.tradingSystem, 'optimization')
+      });
     } catch (error) {
       res.status(500).json({ error: error.message });
     }
@@ -90,6 +94,7 @@ export default function createOptimizationRoutes(server) {
 
   // 자동 최적화 토글
   router.post('/optimization/toggle', express.json(), (req, res) => {
+    if (respondIfPaperEvidenceMutationBlocked(server.tradingSystem, res, 'optimization_toggle')) return;
     try {
       const { enabled } = req.body;
       server.optimizationState.enabled = enabled;
@@ -109,6 +114,7 @@ export default function createOptimizationRoutes(server) {
 
   // 최적화 주기 변경
   router.post('/optimization/interval', express.json(), (req, res) => {
+    if (respondIfPaperEvidenceMutationBlocked(server.tradingSystem, res, 'optimization_interval')) return;
     try {
       const { interval } = req.body;
       server.optimizationState.interval = parseInt(interval);
@@ -127,6 +133,7 @@ export default function createOptimizationRoutes(server) {
 
   // 즉시 최적화 실행
   router.post('/optimization/run-now', async (req, res) => {
+    if (respondIfPaperEvidenceMutationBlocked(server.tradingSystem, res, 'optimization_run_now')) return;
     try {
       if (server.optimizationState.isRunning) {
         return res.status(400).json({ error: '이미 최적화가 실행 중입니다.' });

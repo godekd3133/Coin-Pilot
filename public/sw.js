@@ -1,4 +1,11 @@
-const CACHE_NAME = 'coinpilot-shell-v41';
+const CACHE_NAME = 'coinpilot-shell-v96';
+const NETWORK_FIRST_SHELL_PATHS = new Set([
+  '/',
+  '/index.html',
+  '/auth-client.js',
+  '/pilot-redesign.css',
+  '/pilot-redesign.js'
+]);
 const APP_SHELL = [
   '/',
   '/index.html',
@@ -8,8 +15,8 @@ const APP_SHELL = [
   '/icon-512.png',
   '/apple-touch-icon.png',
   '/auth-client.js',
-  '/pilot-redesign.css?v=20260914-04',
-  '/pilot-redesign.js?v=observer-readonly-34'
+  '/pilot-redesign.css?v=20260918-06',
+  '/pilot-redesign.js?v=observer-readonly-87'
 ];
 
 self.addEventListener('install', event => {
@@ -30,6 +37,10 @@ self.addEventListener('activate', event => {
   );
 });
 
+self.addEventListener('message', event => {
+  if (event.data?.type === 'SKIP_WAITING') self.skipWaiting();
+});
+
 self.addEventListener('fetch', event => {
   const request = event.request;
   if (request.method !== 'GET') return;
@@ -37,6 +48,22 @@ self.addEventListener('fetch', event => {
   const url = new URL(request.url);
   if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/socket.io/')) {
     // Trading/account state must never be served from an old shell cache.
+    return;
+  }
+
+  if (NETWORK_FIRST_SHELL_PATHS.has(url.pathname)) {
+    event.respondWith(
+      fetch(request)
+        .then(response => {
+          if (response.ok && url.origin === self.location.origin) {
+            const copy = response.clone();
+            caches.open(CACHE_NAME).then(cache => cache.put(request, copy));
+          }
+          return response;
+        })
+        .catch(() => caches.match(request, { ignoreSearch: true })
+          .then(cached => cached || caches.match('/index.html')))
+    );
     return;
   }
 

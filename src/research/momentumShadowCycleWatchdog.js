@@ -32,3 +32,26 @@ export function isMomentumShadowCycleTimedOut({
   // result stay responsible for the remaining slack.
   return current - start >= limit;
 }
+
+/**
+ * Keep watchdog failures actionable without changing the liveness budget.
+ * The runner supplies the last stage/market it reached before the timer
+ * fired, so a persisted stop reason can distinguish API fetch latency from
+ * quote or decision work.
+ */
+export function formatMomentumShadowCycleTimeoutMessage({
+  elapsedMs,
+  timeoutMs = DEFAULT_MOMENTUM_SHADOW_MAX_CYCLE_DURATION_MS,
+  stage = 'unknown',
+  market = null
+} = {}) {
+  const limit = resolveMomentumShadowMaxCycleDurationMs(timeoutMs);
+  const elapsed = Number.isFinite(Number(elapsedMs))
+    ? Math.max(0, Math.floor(Number(elapsedMs)))
+    : null;
+  const stageLabel = String(stage || 'unknown').replace(/\s+/g, '_');
+  const marketLabel = String(market || 'none').replace(/\s+/g, '_');
+  return `shadow cycle exceeded ${Math.round(limit / 1000)}s` +
+    ` (elapsedMs=${elapsed === null ? 'unknown' : elapsed}` +
+    ` stage=${stageLabel} market=${marketLabel})`;
+}

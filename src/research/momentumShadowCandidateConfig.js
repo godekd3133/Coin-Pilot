@@ -1,3 +1,5 @@
+import { resolveMomentumShadowExecutionModel } from './momentumShadowExecutionModel.js';
+
 const DEFAULT_MARKETS = Object.freeze([
   'KRW-BTC', 'KRW-ETH', 'KRW-XRP', 'KRW-SOL', 'KRW-DOGE', 'KRW-ADA',
   'KRW-DOT', 'KRW-LINK', 'KRW-ATOM', 'KRW-NEAR', 'KRW-ETC', 'KRW-SUI'
@@ -24,6 +26,9 @@ const DEFAULT_CONFIG = Object.freeze({
   volatilityLookbackDays: 14,
   volatilityTargetPercent: null,
   entryExecution: 'close',
+  // Candle close remains the default. quote_cross is an explicit
+  // research-only best-ask/best-bid paper model.
+  executionModel: 'candle_close',
   // A research-only next-open chase guard; zero preserves the legacy contract.
   maxEntryGapPercent: 0,
   // Completed daily data older than this is not allowed to drive a new cycle.
@@ -110,6 +115,7 @@ export function resolveMomentumShadowCandidateConfig(env = process.env) {
       DEFAULT_CONFIG.volatilityTargetPercent
     ),
     entryExecution: env.MOMO_SHADOW_ENTRY_EXECUTION === 'next_open' ? 'next_open' : 'close',
+    executionModel: resolveMomentumShadowExecutionModel(env.MOMO_SHADOW_EXECUTION_MODEL),
     maxEntryGapPercent: Math.max(0, number(
       env.MOMO_SHADOW_MAX_ENTRY_GAP_PERCENT,
       DEFAULT_CONFIG.maxEntryGapPercent

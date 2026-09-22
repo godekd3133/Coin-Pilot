@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.coinpilot.momentum-shadow.benchmark</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/opt/homebrew/bin/node</string>
+        <string>/Users/kimminkyu/Bagelcode/Repository_Personal/coin-automandation/src/scripts/runRegimeMomentumShadow.js</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>/Users/kimminkyu/Bagelcode/Repository_Personal/coin-automandation</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>MOMO_SHADOW_DIR</key>
+        <string>/Users/kimminkyu/Bagelcode/Repository_Personal/coin-automandation/.paper-momentum-shadow-btc-gate-v1</string>
+        <key>MOMO_SHADOW_MODE</key>
+        <string>regime</string>
+        <key>MOMO_SHADOW_MAX_HOLD_HOURS</key>
+        <string>8760</string>
+        <key>MOMO_SHADOW_MARKETS</key>
+        <string>KRW-BTC,KRW-ETH,KRW-XRP,KRW-SOL,KRW-DOGE,KRW-ADA,KRW-DOT,KRW-LINK,KRW-ATOM,KRW-NEAR,KRW-ETC,KRW-SUI</string>
+        <key>MOMO_SHADOW_TREND_MIN_PERCENT</key>
+        <string>0</string>
+        <key>MOMO_SHADOW_BREADTH_MIN</key>
+        <string>1</string>
+        <key>MOMO_SHADOW_POSITION_FRACTION</key>
+        <string>0.25</string>
+        <key>MOMO_SHADOW_MAX_POSITIONS</key>
+        <string>4</string>
+        <key>MOMO_SHADOW_COST_PERCENT</key>
+        <string>0.2</string>
+        <key>MOMO_SHADOW_BENCHMARK_MARKET</key>
+        <string>KRW-BTC</string>
+        <key>MOMO_SHADOW_BENCHMARK_TREND_MIN_PERCENT</key>
+        <string>2</string>
+        <key>MOMO_SHADOW_EXIT_ON_BENCHMARK_OFF</key>
+        <string>true</string>
+        <key>MOMO_SHADOW_POLL_MS</key>
+        <string>900000</string>
+        <key>MOMO_SHADOW_REQUEST_INTERVAL_MS</key>
+        <string>500</string>
+        <key>MOMO_SHADOW_MAX_CONSECUTIVE_FETCH_FAILURES</key>
+        <string>3</string>
+        <key>MOMO_SHADOW_MAX_CYCLE_DURATION_MS</key>
+        <string>600000</string>
+    </dict>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+    <key>ProcessType</key>
+    <string>Background</string>
+    <key>StandardOutPath</key>
+    <string>/private/tmp/coinpilot-momentum-shadow-benchmark.launchd.log</string>
+    <key>StandardErrorPath</key>
+    <string>/private/tmp/coinpilot-momentum-shadow-benchmark.err.log</string>
+</dict>
+</plist>

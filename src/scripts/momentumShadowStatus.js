@@ -1,5 +1,21 @@
 import fs from 'node:fs';
 import { getMomentumShadowEquity } from '../research/momentumShadowLedger.js';
+import {
+  summarizeMomentumShadowBenchmarkObservationCheckpoints,
+  calculateMomentumShadowBenchmarkReturnPercent,
+  calculateMomentumShadowRelativeMarkedReturnPercent,
+  MOMENTUM_SHADOW_BENCHMARK_OBSERVATION_SCHEMA_VERSION
+} from '../research/momentumShadowBenchmark.js';
+import {
+  calculateMomentumShadowRealizedProfit,
+  calculateMomentumShadowRealizedReturnPercent,
+  calculateMomentumShadowTradeConfidence,
+  summarizeMomentumShadowTradesByMarket,
+  calculateMomentumShadowObservationDays,
+  DEFAULT_MOMENTUM_SHADOW_MIN_RESEARCH_DAYS
+} from '../research/momentumShadowProfitability.js';
+import { summarizeMomentumShadowQuoteExecutionEvidence } from '../research/momentumShadowQuoteQuality.js';
+import { resolveMomentumShadowExecutionModel } from '../research/momentumShadowExecutionModel.js';
 
 /**
  * Read-only status printer for the momentum shadow books.
@@ -60,8 +76,50 @@ for (const dir of dirs) {
       : null;
   const state = orphanReason ? `STOPPED:${orphanReason}` : 'RUNNING';
   const open = Object.entries(l.positions || {});
-  const realized = (l.trades || []).reduce((a, t) => a + (t.profitPercent || 0) / 100 * (t.entry?.size || 0), 0);
+  const executionModel = resolveMomentumShadowExecutionModel(l.config?.executionModel);
   const equity = getMomentumShadowEquity(l, Number(process.env.MOMO_SHADOW_INITIAL_BALANCE) || 100_000_000);
+  const benchmarkObservationSchemaVersion = l.benchmarkObservationSchemaVersion === null ||
+    l.benchmarkObservationSchemaVersion === undefined ||
+    l.benchmarkObservationSchemaVersion === ''
+    ? null
+    : Number(l.benchmarkObservationSchemaVersion);
+  const benchmarkObservationTelemetryReady =
+    benchmarkObservationSchemaVersion === MOMENTUM_SHADOW_BENCHMARK_OBSERVATION_SCHEMA_VERSION;
+  const benchmarkObservationReturnPercent = calculateMomentumShadowBenchmarkReturnPercent(
+    l.benchmarkObservationStartPrice,
+    l.benchmarkObservationMarkPrice
+  );
+  const benchmarkObservationAvailable = benchmarkObservationTelemetryReady &&
+    l.benchmarkObservationAvailable === true &&
+    typeof l.benchmarkObservationStartTs === 'string' &&
+    l.benchmarkObservationStartTs.trim().length > 0 &&
+    typeof l.benchmarkObservationMarkTs === 'string' &&
+    l.benchmarkObservationMarkTs.trim().length > 0 &&
+    benchmarkObservationReturnPercent !== null;
+  const relativeMarkedReturnPercent = benchmarkObservationAvailable
+    ? calculateMomentumShadowRelativeMarkedReturnPercent(
+      equity.markedReturnPercent,
+      benchmarkObservationReturnPercent
+    )
+    : null;
+  const benchmarkObservationCheckpoints =
+    summarizeMomentumShadowBenchmarkObservationCheckpoints(
+      benchmarkObservationTelemetryReady ? l.benchmarkObservationCheckpoints : []
+    );
+  const realized = calculateMomentumShadowRealizedProfit(l);
+  const realizedByMarket = summarizeMomentumShadowTradesByMarket(l);
+  const realizedReturnPercent = calculateMomentumShadowRealizedReturnPercent(
+    l,
+    Number(process.env.MOMO_SHADOW_INITIAL_BALANCE) || 100_000_000
+  );
+  const confidence = calculateMomentumShadowTradeConfidence(l);
+  const quoteExecution = summarizeMomentumShadowQuoteExecutionEvidence(l.trades);
+  const observationDays = calculateMomentumShadowObservationDays(l);
+  const minimumResearchDays = Math.max(
+    1,
+    Number(process.env.MOMO_SHADOW_MIN_RESEARCH_DAYS) ||
+      DEFAULT_MOMENTUM_SHADOW_MIN_RESEARCH_DAYS
+  );
   console.log(`\n=== ${dir} (mode=${l.config?.mode || 'fixed'}) [${state}] ===`);
   const markedReturn = Number.isFinite(equity.markedReturnPercent)
     ? `${equity.markedReturnPercent >= 0 ? '+' : ''}${equity.markedReturnPercent.toFixed(2)}%`
@@ -71,11 +129,63 @@ for (const dir of dirs) {
     console.log(`next poll ${new Date(nextPollAtMs).toISOString()} (in ${nextPollDueInSeconds}s)`);
   }
   console.log(`open: ${open.map(([m, p]) => `${m.replace('KRW-', '')}@${p.entryPrice}${p.markPrice !== undefined ? `→${p.markPrice} ${Number(p.markProfitPercent || 0) >= 0 ? '+' : ''}${Number(p.markProfitPercent || 0).toFixed(2)}%` : ''}`).join(' ') || 'none'}`);
-  console.log(`closed trades: ${(l.trades || []).length} | realized ${Math.round(realized).toLocaleString()} KRW`);
+  const executionModelBlockedCount =
+    (Number(l.executionModelEntryBlocked) || 0) +
+    (Number(l.executionModelExitBlocked) || 0) +
+    (Number(l.executionModelMarkBlocked) || 0) +
+    (Number(l.pendingEntryExecutionBlocked) || 0);
+  console.log(`execution model ${executionModel} | ${executionModel === 'quote_cross' ? 'best ask entry · best bid exit/mark · modeled paper price' : 'completed candle close'} | blocked ${executionModelBlockedCount}`);
+  if (executionModel === 'quote_cross') {
+    const quoteReady = l.quoteQuality?.executionReady === true;
+    console.log(`quote-cross readiness ${quoteReady ? 'ready' : `blocked ${l.quoteQuality?.reason || 'quote_boundary_unavailable'}`} | actual fills not observed`);
+  }
+  const realizedReturn = Number.isFinite(Number(realizedReturnPercent))
+    ? `${realizedReturnPercent >= 0 ? '+' : ''}${realizedReturnPercent.toFixed(2)}%`
+    : '—';
+  const confidenceLowerBoundValue = confidence.lowerBoundPercent === null ||
+    confidence.lowerBoundPercent === undefined ||
+    !Number.isFinite(Number(confidence.lowerBoundPercent))
+    ? null
+    : Number(confidence.lowerBoundPercent);
+  const confidenceLowerBound = confidenceLowerBoundValue === null
+    ? 'unavailable'
+    : `${confidenceLowerBoundValue >= 0 ? '+' : ''}${confidenceLowerBoundValue.toFixed(2)}%`;
+  console.log(`closed trades: ${(l.trades || []).length} | realized ${Math.round(realized).toLocaleString()} KRW (${realizedReturn}) | trade-return 95% lower ${confidenceLowerBound} | valid returns ${confidence.sampleCount}/${(l.trades || []).length}`);
+  const marketAttribution = Object.entries(realizedByMarket)
+    .filter(([, row]) => row.validReturnCount > 0)
+    .map(([market, row]) => {
+      const profit = `${row.realizedProfit >= 0 ? '+' : ''}${Math.round(row.realizedProfit).toLocaleString()} KRW`;
+      const average = row.averageProfitPercent === null
+        ? 'unavailable'
+        : `${row.averageProfitPercent >= 0 ? '+' : ''}${row.averageProfitPercent.toFixed(2)}% avg`;
+      return `${market.replace(/^KRW-/, '')} ${profit} (${row.validReturnCount}/${row.tradeCount} valid, ${average})`;
+    })
+    .join(' | ');
+  if (marketAttribution) console.log(`realized by market: ${marketAttribution}`);
+  const observationLabel = observationDays === null ? 'unknown' : `${observationDays.toFixed(2)}d`;
+  const finalEvaluation = orphanReason ? `not-ready:${orphanReason}` :
+    l.configDrift ? 'not-ready:config_drift' :
+      l.runnerState === 'running' ? 'in-progress' : 'stopped';
+  console.log(`observation ${observationLabel} | minimum ${minimumResearchDays}d | final ${finalEvaluation}`);
   if (l.voidedEntries?.length) console.log(`voided entries: ${l.voidedEntries.length}`);
-  if (l.configDrift) console.log(`config drift recorded at ${l.configDrift.changedAt}`);
+  if (l.configDrift) {
+    console.log(`config drift recorded at ${l.configDrift.changedAt} | evidence not eligible for A/B or promotion`);
+  }
   if (l.config?.benchmarkMarket) {
     console.log(`benchmark ${l.config.benchmarkMarket.replace(/^KRW-/, '')} trend ${l.benchmarkTrendPercent === null || l.benchmarkTrendPercent === undefined ? 'unknown' : `${Number(l.benchmarkTrendPercent).toFixed(2)}%`} | gate ${l.benchmarkGateOpen === true ? 'open' : 'closed'} | blocked ${l.benchmarkBlocked ?? 0}`);
+    const benchmarkReturn = benchmarkObservationAvailable
+      ? `${benchmarkObservationReturnPercent >= 0 ? '+' : ''}${benchmarkObservationReturnPercent.toFixed(2)}%`
+      : 'unavailable';
+    const relativeReturn = relativeMarkedReturnPercent !== null &&
+      Number.isFinite(Number(relativeMarkedReturnPercent))
+      ? `${relativeMarkedReturnPercent >= 0 ? '+' : ''}${relativeMarkedReturnPercent.toFixed(2)}%`
+      : 'unavailable';
+    console.log(`benchmark observation price return ${benchmarkReturn} | relative marked ${relativeReturn} | price-only, actual fills not observed`);
+    console.log(`benchmark observation telemetry ${benchmarkObservationTelemetryReady ? `schema ${benchmarkObservationSchemaVersion}` : 'legacy owner restart required'}`);
+    const checkpointRange = benchmarkObservationCheckpoints.available
+      ? `${benchmarkObservationCheckpoints.worstRelativeMarkedReturnPercent >= 0 ? '+' : ''}${benchmarkObservationCheckpoints.worstRelativeMarkedReturnPercent.toFixed(2)}%~${benchmarkObservationCheckpoints.bestRelativeMarkedReturnPercent >= 0 ? '+' : ''}${benchmarkObservationCheckpoints.bestRelativeMarkedReturnPercent.toFixed(2)}%`
+      : 'unavailable';
+    console.log(`benchmark observation checkpoints ${benchmarkObservationCheckpoints.checkpointCount} | relative range ${checkpointRange} | daily completed-bar history`);
   }
   const relativeTrendMinPercent = l.config?.relativeTrendMinPercent;
   if (relativeTrendMinPercent !== null && relativeTrendMinPercent !== undefined &&
@@ -93,7 +203,7 @@ for (const dir of dirs) {
     console.log(`volatility target ${volatilityTarget.toFixed(2)}%/${Number(l.config?.volatilityLookbackDays) || 14}d | ${scaleSummary} | blocked ${l.volatilityBlocked ?? 0}`);
   }
   if (l.config?.entryExecution === 'next_open' || l.pendingEntries?.length) {
-    console.log(`entry execution ${l.config?.entryExecution || 'next_open'} | pending ${l.pendingEntries?.length ?? 0} | blocked ${l.pendingEntryBlocked ?? 0} | dataQualityBlocked ${l.pendingEntryDataQualityBlocked ?? 0} | gapBlocked ${l.pendingEntryGapBlocked ?? 0}`);
+    console.log(`entry execution ${l.config?.entryExecution || 'next_open'} | pending ${l.pendingEntries?.length ?? 0} | blocked ${l.pendingEntryBlocked ?? 0} | dataQualityBlocked ${l.pendingEntryDataQualityBlocked ?? 0} | gapBlocked ${l.pendingEntryGapBlocked ?? 0} | quoteBlocked ${l.pendingEntryQuoteBlocked ?? 0}`);
     if (Number(l.config?.maxEntryGapPercent) > 0) {
       console.log(`entry gap ceiling ${Number(l.config.maxEntryGapPercent).toFixed(2)}%`);
     }
@@ -101,10 +211,15 @@ for (const dir of dirs) {
   if (Number(l.config?.maxSpreadPercent) > 0) {
     const quote = l.quoteQuality || {};
     console.log(`quote spread ceiling ${Number(l.config.maxSpreadPercent).toFixed(2)}% | ${quote.valid === true ? 'ok' : `blocked ${quote.reason || 'quote_check_failed'}`} | blocked markets ${(quote.blockedMarkets || []).length} | entries blocked ${Number(l.spreadBlocked) || 0}`);
+    const modeledDrag = Number.isFinite(Number(quoteExecution.averageEstimatedCrossingDragPercent))
+      ? `${Number(quoteExecution.averageEstimatedCrossingDragPercent).toFixed(3)}%`
+      : 'unavailable';
+    console.log(`quote boundary evidence ${quoteExecution.availableCount}/${quoteExecution.closedTradeCount} | modeled crossing drag ${modeledDrag} | actual fills not observed`);
   }
   if (Number(l.fetchErrors) > 0 || Number(l.networkFetchFailureStreak) > 0 || Number(l.networkFetchCircuitBreaks) > 0) {
     const lastError = l.lastNetworkFetchError?.code || 'none';
-    console.log(`network fetch errors ${Number(l.fetchErrors) || 0} | streak ${Number(l.networkFetchFailureStreak) || 0}/${Number(l.networkFetchMaxConsecutiveFailures) || 3} | circuit ${l.networkFetchCircuitOpen === true ? 'open' : 'closed'} | breaks ${Number(l.networkFetchCircuitBreaks) || 0} | last ${lastError}`);
+    const lastErrorMarket = l.lastNetworkFetchError?.market || 'unknown-market';
+    console.log(`network fetch errors ${Number(l.fetchErrors) || 0} | streak ${Number(l.networkFetchFailureStreak) || 0}/${Number(l.networkFetchMaxConsecutiveFailures) || 3} | circuit ${l.networkFetchCircuitOpen === true ? 'open' : 'closed'} | breaks ${Number(l.networkFetchCircuitBreaks) || 0} | last ${lastErrorMarket}:${lastError}`);
   }
   if (l.dataQuality && l.dataQuality.valid === false) {
     console.log(`data quality BLOCKED: ${l.dataQuality.reason} | missing ${(l.dataQuality.missingMarkets || []).join(',') || 'none'} | stale ${(l.dataQuality.staleMarkets || []).join(',') || 'none'} | unaligned ${(l.dataQuality.unalignedMarkets || []).join(',') || 'none'} | maxAge ${l.dataQuality.maxAgeHours ?? 'off'}h | blocked ${l.dataQualityBlocked ?? 0}`);
@@ -114,6 +229,12 @@ for (const dir of dirs) {
       .filter(value => Number.isFinite(value));
     const latestAge = ages.length ? Math.max(...ages) : null;
     console.log(`daily freshness maxAge ${Number(l.dataQuality.maxAgeHours).toFixed(1)}h | latest age ${latestAge === null ? 'unknown' : `${Math.round(latestAge / 60)}m`}`);
+  }
+  const qualityObservationCycles = Number(l.dataQualityObservationCycles) || 0;
+  const qualityInvalidCycles = Number(l.dataQualityInvalidCycles) || 0;
+  const qualityBlockedChecks = Number(l.dataQualityBlocked) || 0;
+  if (qualityObservationCycles > 0 || qualityInvalidCycles > 0 || qualityBlockedChecks > 0) {
+    console.log(`daily quality history valid ${Number(l.dataQualityValidCycles) || 0}/${qualityObservationCycles || 'unknown'} cycles | invalid ${qualityInvalidCycles} | market checks blocked ${qualityBlockedChecks}`);
   }
   console.log(`breadth ${l.breadth ?? '-'} | gateBlocked ${l.gateBlocked ?? 0} | breadthBlocked ${l.breadthBlocked ?? 0} | blockedSignal ${l.blockedSignalCount ?? 0} | duplicateSignalBlocked ${l.duplicateSignalBlocked ?? 0}`);
 }

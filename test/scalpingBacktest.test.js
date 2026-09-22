@@ -363,6 +363,26 @@ test('tuned holdout 후보 상한은 full pool과 선택 수를 분리해 기록
   assert.equal(tuning.candidateSelectionLimited, true);
 });
 
+test('튜너의 최소 거래수 guard는 fallback 여부를 숨기지 않는다', () => {
+  const tuning = tuneScalpingParameters(
+    syntheticRebound(),
+    { initialBalance: 1_000_000, slippage: 0 },
+    {
+      rsiOversold: [25, 30],
+      minReboundPercent: [0.1, 0.15],
+      minRsiRecovery: [1],
+      stopLossPercent: [1.2],
+      takeProfitPercent: [1.8]
+    },
+    { minimumTradeCount: 2 }
+  );
+
+  assert.equal(tuning.minimumTradeCount, 2);
+  assert.equal(tuning.eligibleCandidateCount, 0);
+  assert.equal(tuning.minimumTradeFallback, true);
+  assert.ok(tuning.best);
+});
+
 test('워크포워드 검증은 데이터가 부족하면 승격하지 않는다', () => {
   const result = walkForwardValidate(syntheticRebound().slice(0, 10), {}, { minimumCandles: 30 });
   assert.equal(result.promoted, false);

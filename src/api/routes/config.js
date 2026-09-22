@@ -1,5 +1,6 @@
 import express from 'express';
 import { resolveMaxCandleAgeSeconds } from '../../risk/candleFreshness.js';
+import { getPaperEvidenceMutationLock, respondIfPaperEvidenceMutationBlocked } from '../../research/paperEvidenceMutationGuard.js';
 
 /**
  * 설정/제어 관련 라우트
@@ -195,6 +196,7 @@ export default function createConfigRoutes(server) {
 
   // 투자 프리셋 적용
   router.post('/investment-presets/apply', (req, res) => {
+    if (respondIfPaperEvidenceMutationBlocked(server.tradingSystem, res, 'investment_preset_apply')) return;
     try {
       const { presetId, config } = req.body;
 
@@ -392,6 +394,7 @@ export default function createConfigRoutes(server) {
           maxAnalysisDataGapSeconds: server.tradingSystem.maxAnalysisDataGapSeconds,
           maxPositions: server.tradingSystem.maxPositions
         } : null,
+        evidenceMutationLock: getPaperEvidenceMutationLock(server.tradingSystem, 'configuration'),
         minOrderAmount: 5000
       });
     } catch (error) {
@@ -401,6 +404,7 @@ export default function createConfigRoutes(server) {
 
   // 투자 설정 업데이트
   router.post('/investment-config/update', (req, res) => {
+    if (respondIfPaperEvidenceMutationBlocked(server.tradingSystem, res, 'investment_config_update')) return;
     try {
       const updates = req.body;
 
@@ -453,6 +457,7 @@ export default function createConfigRoutes(server) {
 
   // 설정 업데이트
   router.post('/config/update', (req, res) => {
+    if (respondIfPaperEvidenceMutationBlocked(server.tradingSystem, res, 'config_update')) return;
     try {
       const newConfig = req.body;
 

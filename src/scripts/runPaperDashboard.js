@@ -17,7 +17,7 @@ export async function main() {
 
   console.log('\n📊 읽기 전용 forward paper 대시보드');
   console.log(`   ledger: ${trader.paperValidationFile}`);
-  console.log(`   port: http://localhost:${port}`);
+  console.log(`   port: ${server.protocol}://localhost:${port}`);
   console.log('   세션 start/stop과 주문 API는 차단됩니다.');
 
   const shutdown = signal => {

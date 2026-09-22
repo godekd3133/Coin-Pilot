@@ -1,5 +1,6 @@
 import dotenv from 'dotenv';
 import fs from 'fs';
+import path from 'node:path';
 import axios from 'axios';
 import UpbitAPI from '../api/upbit.js';
 import {
@@ -97,6 +98,26 @@ function baseConfig() {
     marketRegimeLookback: number(process.env.SCALP_MARKET_REGIME_LOOKBACK, 5),
     marketRegimeMinBreadth: number(process.env.SCALP_MARKET_REGIME_MIN_BREADTH, 0.5),
     marketRegimeMinReturnPercent: number(process.env.SCALP_MARKET_REGIME_MIN_RETURN_PERCENT, -0.2),
+    // Research-only volatility sizing. Zero preserves fixed portfolio
+    // exposure and is intentionally not part of the live config contract.
+    volatilityLookbackCandles: number(
+      process.env.SCALP_PORTFOLIO_VOLATILITY_LOOKBACK_CANDLES,
+      20
+    ),
+    volatilityTargetPercent: number(
+      process.env.SCALP_PORTFOLIO_VOLATILITY_TARGET_PERCENT,
+      0
+    ),
+    // Research-only signal invalidation exit. Zero preserves the fixed
+    // max-hold contract and does not alter runtime/live behavior.
+    referenceBreakExitPercent: number(
+      process.env.SCALP_PORTFOLIO_REFERENCE_BREAK_EXIT_PERCENT,
+      0
+    ),
+    referenceBreakMinHoldMinutes: number(
+      process.env.SCALP_PORTFOLIO_REFERENCE_BREAK_MIN_HOLD_MINUTES,
+      0
+    ),
     requireReboundBelowOverbought: process.env.SCALP_REQUIRE_REBOUND_BELOW_OVERBOUGHT === 'true',
     signalProfile: process.env.SCALP_SIGNAL_PROFILE || 'rsi_rebound',
     bbPeriod: number(process.env.BB_PERIOD, 20),
@@ -156,6 +177,7 @@ async function main() {
   );
   const tuned = process.env.SCALP_PORTFOLIO_VALIDATION_TUNED === 'true';
   const candleCacheFile = process.env.SCALP_PORTFOLIO_CANDLES_FILE || null;
+  const candleCacheOutputFile = process.env.SCALP_PORTFOLIO_CANDLES_OUTPUT_FILE || null;
   const foldCount = Math.max(0, Math.floor(number(process.env.SCALP_PORTFOLIO_VALIDATION_FOLDS, 0)));
 
   if (markets.length === 0) throw new Error('포트폴리오 검증 대상 KRW 마켓이 없습니다.');
@@ -194,9 +216,11 @@ async function main() {
       fetched.push({ market, error: error.message });
     }
   }
-  if (candleCacheFile && Object.keys(candlesByMarket).length > 0) {
-    fs.writeFileSync(candleCacheFile, JSON.stringify(candlesByMarket), 'utf8');
-    console.log(`\n💾 candle cache 저장: ${candleCacheFile}`);
+  if (candleCacheOutputFile && Object.keys(candlesByMarket).length > 0) {
+    const resolvedOutputFile = path.resolve(candleCacheOutputFile);
+    fs.mkdirSync(path.dirname(resolvedOutputFile), { recursive: true });
+    fs.writeFileSync(resolvedOutputFile, JSON.stringify(candlesByMarket), 'utf8');
+    console.log(`\n💾 candle cache 저장: ${resolvedOutputFile}`);
   }
 
   const validationOptions = {
@@ -231,6 +255,7 @@ async function main() {
     candleUnit: unit,
     candleCount,
     candleCacheFile,
+    candleCacheOutputFile,
     config,
     markets,
     fetched,

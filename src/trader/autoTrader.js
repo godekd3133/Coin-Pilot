@@ -2,6 +2,16 @@ import UpbitAPI from '../api/upbit.js';
 import { comprehensiveAnalysis } from '../analysis/technicalIndicators.js';
 import NewsMonitor from '../analysis/newsMonitor.js';
 import TradingStrategy from '../strategy/tradingStrategy.js';
+import fs from 'node:fs';
+import path from 'node:path';
+import {
+  createLiveExecutionEvidenceEvent,
+  inspectLiveExecutionEvidenceFile
+} from '../research/liveExecutionEvidence.js';
+import {
+  executeLiveOrderWithEvidence,
+  hasCompleteObservedLiveFill
+} from '../api/routes/trading.js';
 
 class AutoTrader {
   constructor(config) {
@@ -18,8 +28,36 @@ class AutoTrader {
 
     this.isRunning = false;
     this.dryRun = config.dryRun !== false; // 기본값 true
+    this.liveExecutionEvidenceFile = config.liveExecutionEvidenceFile ||
+      process.env.LIVE_EXECUTION_EVIDENCE_FILE ||
+      '.coinpilot-runtime/live-execution/evidence.jsonl';
+    this.liveExecutionEvidenceWriteError = null;
+    this.liveExecutionEvidenceDataError = null;
+    this.liveExecutionEvidenceStartup = inspectLiveExecutionEvidenceFile(this.liveExecutionEvidenceFile);
+    if (this.liveExecutionEvidenceStartup.blockingReasons.length > 0) {
+      this.liveExecutionEvidenceDataError = `startup safety block: ${this.liveExecutionEvidenceStartup.blockingReasons.join('; ')}`;
+    }
     this.lastNewsCheck = null;
     this.newsData = null;
+  }
+
+  recordLiveExecutionEvidence(event) {
+    if (this.dryRun || !event) return true;
+    if (this.liveExecutionEvidenceWriteError || this.liveExecutionEvidenceDataError) return false;
+    try {
+      const directory = path.dirname(this.liveExecutionEvidenceFile);
+      if (directory && directory !== '.') fs.mkdirSync(directory, { recursive: true });
+      fs.appendFileSync(this.liveExecutionEvidenceFile, `${JSON.stringify(event)}\n`, 'utf8');
+      return true;
+    } catch (error) {
+      this.liveExecutionEvidenceWriteError = error.message;
+      console.error(`❌ live execution evidence 저장 실패: ${error.message}`);
+      return false;
+    }
+  }
+
+  createLiveExecutionEvidence(options = {}) {
+    return createLiveExecutionEvidenceEvent(options);
   }
 
   /**
@@ -170,19 +208,22 @@ class AutoTrader {
         this.strategy.openPosition(currentPrice, volume, 'BUY');
       } else {
         console.log('\n💵 실제 매수 주문 실행');
-        try {
-          const order = await this.upbit.order(
-            this.config.targetCoin,
-            'bid',
-            investmentAmount,
-            null,
-            'price'
-          );
-          console.log(`  주문 완료: ${order.uuid}`);
-          this.strategy.openPosition(currentPrice, volume, 'BUY');
-        } catch (error) {
-          console.error(`  주문 실패: ${error.message}`);
+        const liveExecution = await executeLiveOrderWithEvidence(this, {
+          market: this.config.targetCoin,
+          side: 'bid',
+          volume: investmentAmount,
+          orderType: 'price',
+          requested: { amount: investmentAmount },
+          referencePrice: currentPrice
+        });
+        if (!hasCompleteObservedLiveFill(liveExecution)) {
+          console.error(`  주문이 실제 체결되지 않았거나 fill accounting field가 부족합니다: ${liveExecution.reason || liveExecution.fill?.error || 'fill_not_observed'}`);
+          return;
         }
+        const actualPrice = liveExecution.fill.averagePrice;
+        const actualVolume = liveExecution.fill.executedVolume;
+        console.log(`  주문 체결: ${liveExecution.fill.orderId || liveExecution.orderResult?.data?.uuid}`);
+        this.strategy.openPosition(actualPrice, actualVolume, 'BUY');
       }
     }
 
@@ -204,19 +245,23 @@ class AutoTrader {
         this.strategy.closePosition(currentPrice, decision.reason);
       } else {
         console.log('\n💰 실제 매도 주문 실행');
-        try {
-          const order = await this.upbit.order(
-            this.config.targetCoin,
-            'ask',
-            sellVolume,
-            null,
-            'market'
-          );
-          console.log(`  주문 완료: ${order.uuid}`);
-          this.strategy.closePosition(currentPrice, decision.reason);
-        } catch (error) {
-          console.error(`  주문 실패: ${error.message}`);
+        const liveExecution = await executeLiveOrderWithEvidence(this, {
+          market: this.config.targetCoin,
+          side: 'ask',
+          volume: sellVolume,
+          orderType: 'market',
+          requested: { volume: sellVolume },
+          referencePrice: currentPrice
+        });
+        if (!hasCompleteObservedLiveFill(liveExecution)) {
+          console.error(`  주문이 실제 체결되지 않았거나 fill accounting field가 부족합니다: ${liveExecution.reason || liveExecution.fill?.error || 'fill_not_observed'}`);
+          return;
         }
+        const actualPrice = liveExecution.fill.averagePrice;
+        const actualVolume = liveExecution.fill.executedVolume;
+        const isFullSell = !liveExecution.fillResult.partial || actualVolume >= this.strategy.currentPosition?.amount - 0.00000001;
+        if (isFullSell) this.strategy.closePosition(actualPrice, decision.reason);
+        else this.strategy.recordPartialSell(actualPrice, actualVolume, decision.reason);
       }
     }
   }

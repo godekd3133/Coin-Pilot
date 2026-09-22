@@ -43,6 +43,7 @@ export function recordMomentumShadowFetchFailure(
   {
     consecutiveFailures = 1,
     maxConsecutiveFailures = DEFAULT_MAX_CONSECUTIVE_FETCH_FAILURES,
+    market = null,
     now = Date.now()
   } = {}
 ) {
@@ -57,6 +58,7 @@ export function recordMomentumShadowFetchFailure(
     ledger.networkFetchCircuitOpen = circuitOpen;
     ledger.lastNetworkFetchError = {
       ...summary,
+      ...(typeof market === 'string' && market ? { market } : {}),
       at: new Date(now).toISOString()
     };
     ledger.networkFetchFailureCount = (Number(ledger.networkFetchFailureCount) || 0) + 1;
@@ -66,6 +68,14 @@ export function recordMomentumShadowFetchFailure(
     }
     ledger.networkFetchFailureCountsByCode[summary.code] =
       (Number(ledger.networkFetchFailureCountsByCode[summary.code]) || 0) + 1;
+    if (typeof market === 'string' && market) {
+      if (!ledger.networkFetchFailureCountsByMarket ||
+        typeof ledger.networkFetchFailureCountsByMarket !== 'object') {
+        ledger.networkFetchFailureCountsByMarket = {};
+      }
+      ledger.networkFetchFailureCountsByMarket[market] =
+        (Number(ledger.networkFetchFailureCountsByMarket[market]) || 0) + 1;
+    }
     if (!wasOpen && circuitOpen) {
       ledger.networkFetchCircuitBreaks = (Number(ledger.networkFetchCircuitBreaks) || 0) + 1;
       ledger.networkFetchCircuitLastOpenedAt = new Date(now).toISOString();

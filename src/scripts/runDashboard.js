@@ -26,7 +26,29 @@ export function attachReadOnlyPaperLedger(trader, ledgerFile) {
   };
 
   const originalGetPaperValidationStatus = trader.getPaperValidationStatus.bind(trader);
+  // A read-only observer must not inherit the repository-root validation
+  // report from the mock trader. Use an explicit override when supplied;
+  // otherwise keep readiness reads beside the selected ledger, where a
+  // missing report is correctly shown as pending instead of borrowing a
+  // different session's market universe.
+  const configuredValidationReport = trader.config?.scalpingValidationOutputFile ||
+    process.env.SCALP_VALIDATION_OUTPUT_FILE ||
+    path.join(path.dirname(resolvedLedgerFile), 'scalping_validation.json');
+  trader.config = {
+    ...trader.config,
+    scalpingValidationOutputFile: configuredValidationReport
+  };
   const applyLedgerConfig = ledger => {
+    const baselineAssets = Number(ledger?.baselineAssets);
+    if (Number.isFinite(baselineAssets) && baselineAssets > 0) {
+      // The observer starts from a 1M mock by default, but the attached paper
+      // ledger may use a different seed (the sealed r2 ledger uses 10M). Keep
+      // account/cumulative-P&L projections on the ledger's authoritative
+      // baseline instead of turning a small return into a huge percentage.
+      trader.initialSeedMoney = baselineAssets;
+      trader.config = { ...trader.config, dryRunSeedMoney: baselineAssets };
+      if (trader.virtualPortfolio) trader.virtualPortfolio.krwBalance = baselineAssets;
+    }
     const snapshot = ledger?.configSnapshot;
     if (!snapshot || typeof snapshot !== 'object') return;
 
@@ -35,6 +57,15 @@ export function attachReadOnlyPaperLedger(trader, ledgerFile) {
     // snapshot. Mirror the recorded values so a mock-shell default cannot be
     // reported as configuration drift for the real observed session.
     trader.config = { ...trader.config, ...snapshot };
+    // The paper snapshot uses the canonical validation key `emaPeriod`,
+    // while the runtime/mock config uses the legacy source key `emaLong`.
+    // Mirror the recorded value into the runtime alias before comparing the
+    // observer config, otherwise an unchanged forward session is reported as
+    // a false `emaPeriod` drift.
+    if (Number.isFinite(Number(snapshot.emaPeriod))) {
+      trader.config.emaLong = Number(snapshot.emaPeriod);
+      trader.strategyConfig = { ...trader.strategyConfig, emaLong: Number(snapshot.emaPeriod) };
+    }
     trader.strategyMode = snapshot.strategyMode || trader.strategyMode;
     trader.isScalpingMode = trader.strategyMode === 'oversold_reaction_scalping';
     if (Array.isArray(snapshot.targetCoins)) trader.targetCoins = [...snapshot.targetCoins];
@@ -58,6 +89,10 @@ export function attachReadOnlyPaperLedger(trader, ledgerFile) {
       trader.winnerShadowExtendMinutes = Math.max(0, Number(winnerShadow.winnerExtendMinutes) || 0);
       trader.winnerShadowExtendMinProfitPercent = Math.max(0, Number(winnerShadow.winnerExtendMinProfitPercent) || 0);
       trader.winnerShadowMaxReboundPercent = Math.max(0, Number(winnerShadow.entryMaxReboundPercent) || 0);
+    }
+    const diagnosticShadows = ledger?.paperExperiments?.diagnosticShadows;
+    if (diagnosticShadows && typeof diagnosticShadows === 'object') {
+      trader.paperDiagnosticShadowsEnabled = diagnosticShadows.enabled !== false;
     }
   };
 
@@ -273,7 +308,7 @@ export async function main() {
   server.start();
 
   console.log('\n📊 대시보드에 접속하세요:');
-  console.log(`   http://localhost:${port}`);
+  console.log(`   ${server.protocol}://localhost:${port}`);
   console.log('\nCtrl+C를 눌러 종료할 수 있습니다.\n');
 
   // 종료 핸들러

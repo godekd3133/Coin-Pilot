@@ -6,6 +6,9 @@ import path from 'node:path';
 import {
   inspectMomentumShadowCandidate
 } from '../src/research/momentumShadowCandidatePreflight.js';
+import {
+  MOMENTUM_SHADOW_BENCHMARK_OBSERVATION_SCHEMA_VERSION
+} from '../src/research/momentumShadowBenchmark.js';
 
 function baseExpected() {
   return {
@@ -39,6 +42,48 @@ test('candidate preflight blocks a closed benchmark without touching owners', ()
   assert.equal(result.promotionAllowed, false);
   assert.equal(result.launchAllowed, false);
   assert.ok(result.blockers.includes('benchmark_ledger_missing'));
+});
+
+test('candidate preflight blocks while another momentum-shadow owner is alive', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'coinpilot-preflight-owner-'));
+  const benchmarkDir = path.join(root, 'benchmark');
+  const ownerDir = path.join(root, 'owner');
+  fs.mkdirSync(benchmarkDir, { recursive: true });
+  fs.mkdirSync(ownerDir, { recursive: true });
+  const now = Date.parse('2026-01-01T00:05:00.000Z');
+  fs.writeFileSync(path.join(benchmarkDir, 'ledger.json'), JSON.stringify({
+    ownerPid: process.pid,
+    runnerState: 'running',
+    heartbeatAt: new Date(now).toISOString(),
+    benchmarkGateOpen: true,
+    benchmarkTrendPercent: 2.5,
+    dataQuality: { valid: true, reason: 'daily_grid_aligned_and_contiguous', marketCount: 2 },
+    config: { pollMs: 900_000 }
+  }));
+  fs.writeFileSync(path.join(ownerDir, 'ledger.json'), JSON.stringify({
+    ownerPid: process.pid,
+    runnerState: 'running',
+    configDrift: {
+      previous: { breadthMin: 1 },
+      changedAt: '2025-12-31T00:00:00.000Z'
+    }
+  }));
+  try {
+    const result = inspectMomentumShadowCandidate({
+      targetDir: path.join(root, 'target'),
+      benchmarkDir,
+      ownerDirs: [ownerDir],
+      expectedConfig: baseExpected(),
+      now
+    });
+
+    assert.equal(result.liveOwnerCount, 1);
+    assert.equal(result.launchAllowed, false);
+    assert.ok(result.blockers.includes('existing_live_owner_count:1'));
+    assert.equal(result.warnings.includes('existing_live_owner_count:1'), false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('candidate preflight rejects an active target lock and config drift', () => {
@@ -112,6 +157,7 @@ test('candidate preflight allows a fresh open benchmark with an empty target', (
     heartbeatAt: new Date(now).toISOString(),
     benchmarkGateOpen: true,
     benchmarkTrendPercent: 2.5,
+    benchmarkObservationSchemaVersion: MOMENTUM_SHADOW_BENCHMARK_OBSERVATION_SCHEMA_VERSION,
     dataQuality: { valid: true, reason: 'daily_grid_aligned_and_contiguous', marketCount: 2 },
     config: { pollMs: 900_000 }
   }));
@@ -134,10 +180,131 @@ test('candidate preflight allows a fresh open benchmark with an empty target', (
     assert.equal(result.targetLockExists, false);
     assert.equal(result.benchmark.gateOpen, true);
     assert.equal(result.benchmark.heartbeatFresh, true);
+    assert.equal(result.benchmark.observationTelemetryReady, true);
+    assert.equal(result.benchmark.observationAvailable, false);
+    assert.equal(result.benchmark.observationReason, 'benchmark_observation_not_recorded');
+    assert.equal(result.benchmark.observationCheckpointCount, 0);
+    assert.equal(result.benchmark.observationValidCheckpointCount, 0);
+    assert.ok(result.warnings.includes('benchmark_observation_unavailable'));
     assert.equal(result.candidateConfig.maxEntryGapPercent, 0.2);
     assert.equal(result.candidateConfig.maxDailyCandleAgeHours, 36);
     assert.equal(result.candidateConfig.relativeTrendMinPercent, null);
     assert.equal(result.candidateConfig.maxSpreadPercent, 0.5);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('candidate preflight does not attach a missing-observation reason to an available observation', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'coinpilot-preflight-observation-ready-'));
+  const benchmarkDir = path.join(root, 'benchmark');
+  fs.mkdirSync(benchmarkDir, { recursive: true });
+  const now = Date.parse('2026-01-01T00:05:00.000Z');
+  fs.writeFileSync(path.join(benchmarkDir, 'ledger.json'), JSON.stringify({
+    ownerPid: process.pid,
+    runnerState: 'running',
+    heartbeatAt: new Date(now).toISOString(),
+    benchmarkGateOpen: true,
+    benchmarkTrendPercent: 2.5,
+    benchmarkObservationSchemaVersion: MOMENTUM_SHADOW_BENCHMARK_OBSERVATION_SCHEMA_VERSION,
+    benchmarkObservationAvailable: true,
+    benchmarkObservationStartTs: '2025-12-31T00:00:00',
+    benchmarkObservationMarkTs: '2026-01-01T00:00:00',
+    benchmarkObservationStartPrice: 100,
+    benchmarkObservationMarkPrice: 110,
+    dataQuality: { valid: true, reason: 'daily_grid_aligned_and_contiguous', marketCount: 2 },
+    config: { pollMs: 900_000 }
+  }));
+  try {
+    const result = inspectMomentumShadowCandidate({
+      targetDir: path.join(root, 'target'),
+      benchmarkDir,
+      ownerDirs: [],
+      expectedConfig: baseExpected(),
+      now
+    });
+    assert.equal(result.benchmark.observationAvailable, true);
+    assert.equal(result.benchmark.observationReason, null);
+    assert.equal(result.warnings.includes('benchmark_observation_unavailable'), false);
+    assert.equal(result.warnings.includes('benchmark_observation_telemetry_legacy'), false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('candidate preflight identifies legacy benchmark observation telemetry separately', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'coinpilot-preflight-legacy-observation-'));
+  const benchmarkDir = path.join(root, 'benchmark');
+  fs.mkdirSync(benchmarkDir, { recursive: true });
+  const now = Date.parse('2026-01-01T00:05:00.000Z');
+  fs.writeFileSync(path.join(benchmarkDir, 'ledger.json'), JSON.stringify({
+    ownerPid: process.pid,
+    runnerState: 'running',
+    heartbeatAt: new Date(now).toISOString(),
+    benchmarkGateOpen: true,
+    benchmarkTrendPercent: 2.5,
+    dataQuality: { valid: true, reason: 'daily_grid_aligned_and_contiguous', marketCount: 2 },
+    config: { pollMs: 900_000 }
+  }));
+  try {
+    const result = inspectMomentumShadowCandidate({
+      targetDir: path.join(root, 'target'),
+      benchmarkDir,
+      ownerDirs: [],
+      expectedConfig: baseExpected(),
+      now
+    });
+    assert.equal(result.launchAllowed, true);
+    assert.equal(result.benchmark.observationSchemaVersion, null);
+    assert.equal(result.benchmark.observationTelemetryReady, false);
+    assert.equal(result.benchmark.observationReason, 'benchmark_observation_not_recorded');
+    assert.equal(result.benchmark.observationRestart.required, true);
+    assert.equal(result.benchmark.observationRestart.safe, true);
+    assert.deepEqual(result.benchmark.observationRestart.blockers, []);
+    assert.equal(result.benchmark.observationRestart.openPositionCount, 0);
+    assert.equal(result.benchmark.observationRestart.tradeCount, 0);
+    assert.ok(result.warnings.includes('benchmark_observation_telemetry_legacy'));
+    assert.equal(result.warnings.includes('benchmark_observation_unavailable'), false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('candidate preflight does not label a benchmark with paper state safe to restart', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'coinpilot-preflight-legacy-busy-'));
+  const benchmarkDir = path.join(root, 'benchmark');
+  fs.mkdirSync(benchmarkDir, { recursive: true });
+  const now = Date.parse('2026-01-01T00:05:00.000Z');
+  fs.writeFileSync(path.join(benchmarkDir, 'ledger.json'), JSON.stringify({
+    ownerPid: process.pid,
+    runnerState: 'running',
+    heartbeatAt: new Date(now).toISOString(),
+    benchmarkGateOpen: false,
+    benchmarkTrendPercent: -4,
+    positions: { 'KRW-BTC': { size: 100 } },
+    trades: [{ market: 'KRW-BTC' }],
+    pendingEntries: [{ market: 'KRW-ETH' }],
+    dataQuality: { valid: true, reason: 'daily_grid_aligned_and_contiguous', marketCount: 2 },
+    config: { pollMs: 900_000 }
+  }));
+  try {
+    const result = inspectMomentumShadowCandidate({
+      targetDir: path.join(root, 'target'),
+      benchmarkDir,
+      ownerDirs: [],
+      expectedConfig: baseExpected(),
+      now
+    });
+    assert.equal(result.benchmark.observationRestart.required, true);
+    assert.equal(result.benchmark.observationRestart.safe, false);
+    assert.deepEqual(result.benchmark.observationRestart.blockers, [
+      'benchmark_positions_open',
+      'benchmark_trades_exist',
+      'benchmark_pending_entries'
+    ]);
+    assert.equal(result.benchmark.observationRestart.openPositionCount, 1);
+    assert.equal(result.benchmark.observationRestart.tradeCount, 1);
+    assert.equal(result.benchmark.observationRestart.pendingEntryCount, 1);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -436,6 +603,112 @@ test('candidate preflight blocks an open benchmark with invalid daily data quali
     assert.equal(result.benchmark.dataQuality.valid, false);
     assert.equal(result.benchmark.dataQuality.reason, 'daily_market_missing');
     assert.deepEqual(result.benchmark.dataQuality.missingMarkets, ['KRW-ETH']);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('candidate preflight requires a fresh complete quote report for quote execution', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'coinpilot-preflight-quote-ready-'));
+  const benchmarkDir = path.join(root, 'benchmark');
+  const quoteFile = path.join(root, 'quote-quality.json');
+  fs.mkdirSync(benchmarkDir, { recursive: true });
+  const now = Date.parse('2026-01-01T00:05:00.000Z');
+  fs.writeFileSync(path.join(benchmarkDir, 'ledger.json'), JSON.stringify({
+    ownerPid: process.pid,
+    runnerState: 'running',
+    heartbeatAt: new Date(now).toISOString(),
+    benchmarkGateOpen: true,
+    benchmarkTrendPercent: 4,
+    dataQuality: { valid: true, reason: 'daily_grid_aligned_and_contiguous', marketCount: 2 },
+    config: { pollMs: 900_000 }
+  }));
+  fs.writeFileSync(quoteFile, JSON.stringify({
+    generatedAt: new Date(now - 60_000).toISOString(),
+    complete: true,
+    errors: [],
+    requestedSampleCount: 5,
+    samples: [{}, {}, {}, {}, {}],
+    summary: {
+      valid: true,
+      sampleCount: 5,
+      markets: { 'KRW-BTC': {}, 'KRW-ETH': { overCeiling: 5 } }
+    }
+  }));
+  try {
+    const result = inspectMomentumShadowCandidate({
+      targetDir: path.join(root, 'target'),
+      benchmarkDir,
+      ownerDirs: [],
+      expectedConfig: {
+        ...baseExpected(),
+        markets: ['KRW-BTC', 'KRW-ETH'],
+        executionModel: 'quote_cross',
+        maxSpreadPercent: 0.5
+      },
+      requireQuoteQuality: true,
+      quoteReportFile: quoteFile,
+      now
+    });
+
+    assert.equal(result.launchAllowed, true);
+    assert.equal(result.quoteQuality.ready, true);
+    assert.equal(result.quoteQuality.ageSeconds, 60);
+    assert.equal(result.quoteQuality.errorCount, 0);
+    assert.deepEqual(result.quoteQuality.overCeilingMarkets, ['KRW-ETH']);
+    assert.ok(result.warnings.includes('quote_quality_over_ceiling_markets:KRW-ETH'));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('candidate preflight blocks stale quote evidence before quote execution', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'coinpilot-preflight-quote-stale-'));
+  const benchmarkDir = path.join(root, 'benchmark');
+  const quoteFile = path.join(root, 'quote-quality.json');
+  fs.mkdirSync(benchmarkDir, { recursive: true });
+  const now = Date.parse('2026-01-01T00:05:00.000Z');
+  fs.writeFileSync(path.join(benchmarkDir, 'ledger.json'), JSON.stringify({
+    ownerPid: process.pid,
+    runnerState: 'running',
+    heartbeatAt: new Date(now).toISOString(),
+    benchmarkGateOpen: true,
+    benchmarkTrendPercent: 4,
+    dataQuality: { valid: true, reason: 'daily_grid_aligned_and_contiguous', marketCount: 2 },
+    config: { pollMs: 900_000 }
+  }));
+  fs.writeFileSync(quoteFile, JSON.stringify({
+    generatedAt: new Date(now - 901_000).toISOString(),
+    complete: true,
+    errors: [],
+    requestedSampleCount: 5,
+    samples: [{}, {}, {}, {}, {}],
+    summary: {
+      valid: true,
+      sampleCount: 5,
+      markets: { 'KRW-BTC': {}, 'KRW-ETH': {} }
+    }
+  }));
+  try {
+    const result = inspectMomentumShadowCandidate({
+      targetDir: path.join(root, 'target'),
+      benchmarkDir,
+      ownerDirs: [],
+      expectedConfig: {
+        ...baseExpected(),
+        markets: ['KRW-BTC', 'KRW-ETH'],
+        executionModel: 'quote_cross',
+        maxSpreadPercent: 0.5
+      },
+      requireQuoteQuality: true,
+      quoteReportFile: quoteFile,
+      now
+    });
+
+    assert.equal(result.launchAllowed, false);
+    assert.ok(result.blockers.includes('quote_quality_report_stale'));
+    assert.equal(result.quoteQuality.ready, false);
+    assert.equal(result.quoteQuality.ageSeconds, 901);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

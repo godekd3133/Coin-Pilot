@@ -182,6 +182,8 @@ async function main() {
     0
   );
   const results = [];
+  const candleCacheOutputFile = process.env.SCALP_VALIDATION_CANDLES_OUTPUT_FILE || '';
+  const capturedCandleCache = {};
 
   if (markets.length === 0) {
     throw new Error('검증할 KRW 마켓이 없습니다.');
@@ -206,6 +208,7 @@ async function main() {
       const candles = fromCache
         ? cachedCandles
         : await getHistoricalCandles(upbit, market, unit, candleCount);
+      if (candleCacheOutputFile) capturedCandleCache[market] = candles;
       console.log(`   ${fromCache ? 'cache 사용' : '수집 완료'}: ${candles.length}개`);
 
       const validation = walkForwardValidate(candles, config, {
@@ -262,6 +265,7 @@ async function main() {
           configSnapshotComplete: paperSnapshot.configSnapshotComplete
         }
       : { type: 'environment_or_defaults' },
+    candleCacheOutputFile: candleCacheOutputFile || null,
     validationMode: fixedConfigValidation ? 'fixed_config' : 'tuned_holdout',
     config,
     markets,
@@ -297,6 +301,10 @@ async function main() {
   };
 
   const outputFile = process.env.SCALP_VALIDATION_OUTPUT_FILE || 'scalping_validation.json';
+  if (candleCacheOutputFile) {
+    fs.writeFileSync(candleCacheOutputFile, JSON.stringify(capturedCandleCache), 'utf8');
+    console.log(`🧾 원본 candle cache 저장: ${candleCacheOutputFile}`);
+  }
   fs.writeFileSync(outputFile, JSON.stringify(report, null, 2), 'utf8');
   console.log(`\n💾 검증 리포트 저장: ${outputFile}`);
   console.log(`승격 가능 마켓: ${report.promotedMarkets.length}/${markets.length}`);

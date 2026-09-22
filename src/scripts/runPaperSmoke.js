@@ -13,6 +13,13 @@ import { createPaperAiMonitor } from '../ai/paperAiMonitoring.js';
 dotenv.config();
 
 const number = (value, fallback) => Number.isFinite(Number(value)) ? Number(value) : fallback;
+const boolean = (value, fallback) => value === undefined
+  ? fallback
+  : value === 'true'
+    ? true
+    : value === 'false'
+      ? false
+      : fallback;
 
 // Keep the active paper session recoverable when the runner itself fails.
 // SIGKILL/host termination cannot be intercepted, so the dashboard still
@@ -146,6 +153,7 @@ function buildConfig(portfolioFile, paperFile, markets) {
     winnerShadowExtendMinutes: number(process.env.SCALP_WINNER_SHADOW_EXTEND_MINUTES, 0),
     winnerShadowExtendMinProfitPercent: number(process.env.SCALP_WINNER_SHADOW_EXTEND_MIN_PROFIT_PERCENT, 0),
     winnerShadowMaxReboundPercent: number(process.env.SCALP_WINNER_SHADOW_MAX_REBOUND_PERCENT, 0),
+    paperDiagnosticShadowsEnabled: boolean(process.env.SCALP_PAPER_DIAGNOSTIC_SHADOWS_ENABLED, true),
     maxEntriesPerSignalWindow: number(process.env.SCALP_MAX_ENTRIES_PER_SIGNAL_WINDOW, 0),
     positionRiskCheckIntervalMs: number(process.env.SCALP_RISK_CHECK_INTERVAL_MS, 1000),
     maxRiskDataGapSeconds: number(process.env.SCALP_MAX_RISK_DATA_GAP_SECONDS, 30),
@@ -164,6 +172,10 @@ function buildConfig(portfolioFile, paperFile, markets) {
     paperValidationMinReturnPercent: number(process.env.SCALP_PAPER_MIN_RETURN_PERCENT, 0.2),
     paperValidationMaxDrawdownPercent: number(process.env.SCALP_PAPER_MAX_DRAWDOWN_PERCENT, 15),
     paperValidationMaxHeartbeatGapMinutes: number(process.env.SCALP_PAPER_MAX_HEARTBEAT_GAP_MINUTES, 15),
+    // Keep the validation artifact identity shared with the live config and
+    // staging/API projection. Paper sessions do not read the report here,
+    // but must still carry the same explicit path contract.
+    scalpingValidationOutputFile: process.env.SCALP_VALIDATION_OUTPUT_FILE || 'scalping_validation.json',
     logLevel: process.env.LOG_LEVEL || 'warn'
   };
 }

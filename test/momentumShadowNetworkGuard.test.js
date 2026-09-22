@@ -20,16 +20,19 @@ test('network fetch circuit opens only after the configured consecutive failures
   const first = recordMomentumShadowFetchFailure(ledger, error, {
     consecutiveFailures: 1,
     maxConsecutiveFailures: 3,
+    market: 'KRW-BTC',
     now: Date.parse('2026-01-01T00:00:00.000Z')
   });
   const second = recordMomentumShadowFetchFailure(ledger, error, {
     consecutiveFailures: 2,
     maxConsecutiveFailures: 3,
+    market: 'KRW-BTC',
     now: Date.parse('2026-01-01T00:00:01.000Z')
   });
   const third = recordMomentumShadowFetchFailure(ledger, error, {
     consecutiveFailures: 3,
     maxConsecutiveFailures: 3,
+    market: 'KRW-BTC',
     now: Date.parse('2026-01-01T00:00:02.000Z')
   });
 
@@ -39,7 +42,9 @@ test('network fetch circuit opens only after the configured consecutive failures
   assert.equal(ledger.networkFetchCircuitOpen, true);
   assert.equal(ledger.networkFetchCircuitBreaks, 1);
   assert.equal(ledger.networkFetchFailureCountsByCode.ENOTFOUND, 3);
+  assert.equal(ledger.networkFetchFailureCountsByMarket['KRW-BTC'], 3);
   assert.equal(ledger.lastNetworkFetchError.code, 'ENOTFOUND');
+  assert.equal(ledger.lastNetworkFetchError.market, 'KRW-BTC');
   assert.equal(ledger.lastNetworkFetchError.at, '2026-01-01T00:00:02.000Z');
 });
 

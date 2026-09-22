@@ -25,6 +25,20 @@ function normalizeMarkets(markets) {
     .filter(Boolean))];
 }
 
+function normalizeFailureCode(value) {
+  const code = String(value || '').trim();
+  return code ? code.slice(0, 80) : null;
+}
+
+function normalizeFailureCounts(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return Object.fromEntries(Object.entries(value)
+    .map(([code, count]) => [normalizeFailureCode(code), Number(count)])
+    .filter(([code, count]) => code && Number.isFinite(count) && count > 0)
+    .map(([code, count]) => [code, Math.floor(count)])
+    .slice(-20));
+}
+
 /**
  * Resolve the maximum period for which an analysis cycle may be incomplete.
  * A positive value is clamped to five seconds so a misconfigured fail-closed
@@ -59,6 +73,10 @@ export function createAnalysisDataHealthState(existing = {}) {
     expectedMarketCount: nonNegativeInteger(existing.expectedMarketCount),
     analyzedMarketCount: nonNegativeInteger(existing.analyzedMarketCount),
     lastMissingMarkets: normalizeMarkets(existing.lastMissingMarkets),
+    lastFailureAt: asIsoTimestamp(existing.lastFailureAt),
+    lastFailureCode: normalizeFailureCode(existing.lastFailureCode),
+    lastFailureMarkets: normalizeMarkets(existing.lastFailureMarkets),
+    failureCounts: normalizeFailureCounts(existing.failureCounts),
     continuityEligible: existing.continuityEligible !== false
   };
 }
@@ -137,6 +155,16 @@ export function recordAnalysisDataFailure(
   state.expectedMarketCount = nonNegativeInteger(details.expectedMarketCount);
   state.analyzedMarketCount = nonNegativeInteger(details.analyzedMarketCount);
   state.lastMissingMarkets = missingMarkets;
+  const failureCode = normalizeFailureCode(details.failureCode);
+  if (failureCode) {
+    state.lastFailureAt = new Date(timestamp).toISOString();
+    state.lastFailureCode = failureCode;
+    state.lastFailureMarkets = normalizeMarkets(details.failureMarkets || missingMarkets);
+    state.failureCounts = normalizeFailureCounts({
+      ...state.failureCounts,
+      ...details.failureCounts
+    });
+  }
   state.maxObservedGapSeconds = Math.max(state.maxObservedGapSeconds, gapDurationSeconds);
 
   const resolvedMaxGapSeconds = resolveMaxAnalysisDataGapSeconds(maxGapSeconds);
@@ -148,6 +176,8 @@ export function recordAnalysisDataFailure(
     gapDurationSeconds,
     maxAnalysisDataGapSeconds: resolvedMaxGapSeconds,
     failClosed,
+    failureCode: state.lastFailureCode,
+    failureMarkets: state.lastFailureMarkets,
     continuityEligible: state.continuityEligible && !failClosed
   };
 }

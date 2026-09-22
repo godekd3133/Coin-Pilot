@@ -23,6 +23,10 @@ test('읽기 전용 paper dashboard는 최신 ledger를 표시하고 원본을 �
     startedAt: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
     heartbeatAt: now,
     baselineAssets: 1_000_000,
+    configSnapshot: {
+      ...baseLedger.configSnapshot,
+      emaPeriod: 60
+    },
     snapshots: [
       { timestamp: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(), totalAssets: 1_000_000 },
       { timestamp: now, totalAssets: 999_000 }
@@ -50,6 +54,17 @@ test('읽기 전용 paper dashboard는 최신 ledger를 표시하고 원본을 �
     assert.equal(first.closedTradeCount, 1);
     assert.equal(first.realizedProfit, -100);
     assert.equal(first.configConsistent, true);
+    assert.equal(first.executionOutcomeComparison.researchOnly, true);
+    assert.equal(first.executionOutcomeComparison.promoted, false);
+    assert.equal(first.executionOutcomeComparison.available, false);
+    assert.equal(first.executionRobustnessGate.required, true);
+    assert.equal(first.executionRobustnessGate.passed, false);
+    assert.equal(first.executionRobustnessGate.reason, 'execution_comparison_pairs_insufficient');
+    assert.ok(first.promotionBlockers.some(blocker => blocker.includes('실행 경계 비교 표본')));
+    assert.equal(
+      trader.config.scalpingValidationOutputFile,
+      path.join(path.dirname(ledgerFile), 'scalping_validation.json')
+    );
     assert.equal(fs.readFileSync(ledgerFile, 'utf8'), before);
 
     const updated = {
@@ -61,6 +76,8 @@ test('읽기 전용 paper dashboard는 최신 ledger를 표시하고 원본을 �
     const refreshed = await trader.getPaperValidationStatus();
     assert.equal(refreshed.currentAssets, 998_500);
     assert.equal(refreshed.closedTradeCount, 1);
+    assert.equal(refreshed.executionOutcomeComparison.available, false);
+    assert.equal(refreshed.executionRobustnessGate.passed, false);
 
     await assert.rejects(
       () => trader.startPaperValidationSession(),
@@ -166,6 +183,40 @@ test('읽기 전용 observer는 orphan 미청산 ledger를 UI에서도 fail-clos
     } finally {
       dashboard.stop();
     }
+  } finally {
+    trader.stop();
+    if (fs.existsSync(ledgerFile)) fs.unlinkSync(ledgerFile);
+  }
+});
+
+test('읽기 전용 paper dashboard는 ledger baseline으로 수익률을 계산한다', async () => {
+  const suffix = `coinpilot-dashboard-baseline-${Date.now()}`;
+  const ledgerFile = path.join(os.tmpdir(), `${suffix}.json`);
+  const trader = createMockTrader();
+  const now = new Date().toISOString();
+  const ledger = {
+    ...trader.paperValidation,
+    sessionId: 'paper-baseline-observer-fixture',
+    active: true,
+    processId: process.pid,
+    startedAt: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+    heartbeatAt: now,
+    baselineAssets: 10_000_000,
+    snapshots: [
+      { timestamp: now, totalAssets: 10_004_715 }
+    ],
+    strictTrades: [],
+    strictOpenPositions: []
+  };
+
+  try {
+    fs.writeFileSync(ledgerFile, JSON.stringify(ledger), 'utf8');
+    attachReadOnlyPaperLedger(trader, ledgerFile);
+    const pnl = await trader.calculateCumulativePnL();
+    assert.equal(pnl.initialSeedMoney, 10_000_000);
+    assert.equal(pnl.totalAssets, 10_004_715);
+    assert.ok(Math.abs(pnl.profitPercent - 0.04715) < 1e-9);
+    assert.equal(trader.virtualPortfolio.krwBalance, 10_000_000);
   } finally {
     trader.stop();
     if (fs.existsSync(ledgerFile)) fs.unlinkSync(ledgerFile);

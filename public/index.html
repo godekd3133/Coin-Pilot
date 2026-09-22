@@ -16,7 +16,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&family=Noto+Sans+KR:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/pilot-redesign.css?v=20260914-04">
+    <link rel="stylesheet" href="/pilot-redesign.css?v=20260918-06">
     <title>CoinPilot | Automated Trading</title>
     <style>
         :root {
@@ -4436,6 +4436,7 @@
             const installButton = document.getElementById('pwaInstallButton');
             const installState = document.getElementById('pwaInstallState');
             const isStandalone = window.matchMedia?.('(display-mode: standalone)').matches || window.navigator.standalone;
+            const isSecureContext = window.isSecureContext === true;
             const isIos = /iphone|ipad|ipod/i.test(window.navigator.userAgent || '') ||
                 (window.navigator.platform === 'MacIntel' && window.navigator.maxTouchPoints > 1);
             const isAndroid = /android/i.test(window.navigator.userAgent || '');
@@ -4444,6 +4445,15 @@
                 if (installState) {
                     installState.textContent = '설치앱 모드';
                     installState.className = 'badge badge-running';
+                }
+            } else if (!isSecureContext) {
+                if (installButton) {
+                    installButton.hidden = false;
+                    installButton.textContent = 'HTTPS 설치 안내';
+                }
+                if (installState) {
+                    installState.textContent = 'HTTPS 필요';
+                    installState.className = 'badge badge-dry';
                 }
             } else {
                 if (installButton) {
@@ -4456,7 +4466,7 @@
                 }
             }
 
-            if ('serviceWorker' in navigator) {
+            if (isSecureContext && 'serviceWorker' in navigator) {
                 navigator.serviceWorker.register('/sw.js').catch(error => {
                     console.warn('PWA service worker 등록 실패:', error.message);
                 });
@@ -4465,7 +4475,7 @@
             window.addEventListener('beforeinstallprompt', event => {
                 // iOS/iPadOS must stay on the manual Share -> Home Screen
                 // guide even when a browser emulation emits this event.
-                if (isIos || isStandalone) return;
+                if (isIos || isStandalone || !isSecureContext) return;
                 event.preventDefault();
                 deferredInstallPrompt = event;
                 if (installButton) installButton.hidden = false;
@@ -4487,7 +4497,9 @@
 
             installButton?.addEventListener('click', async () => {
                 if (!deferredInstallPrompt) {
-                    const instruction = isIos
+                    const instruction = !isSecureContext
+                        ? 'HTTPS 주소로 다시 연 뒤 브라우저 메뉴에서 설치해주세요.'
+                        : isIos
                         ? 'Safari 공유 버튼에서 “홈 화면에 추가”를 선택해주세요.'
                         : isAndroid
                             ? '브라우저 메뉴에서 “앱 설치” 또는 “홈 화면에 추가”를 선택해주세요.'
@@ -5158,7 +5170,24 @@
             const validationMode = report.validationMode === 'fixed_config'
                 ? '현재 설정 기준 점검'
                 : '파라미터 조정 점검';
-            if (generatedAt) generatedAt.textContent = `${generated} · ${report.candleCount || '-'}개 캔들 · ${validationMode}`;
+            const freshnessMeta = report.reportFreshness;
+            const generatedMs = Date.parse(report.generatedAt || '');
+            const ageMs = Number.isFinite(generatedMs) && generatedMs <= Date.now() ? Date.now() - generatedMs : null;
+            const freshnessAgeSeconds = Number(freshnessMeta?.ageSeconds);
+            const freshness = typeof freshnessMeta?.fresh === 'boolean'
+                ? freshnessMeta.fresh
+                    ? '최근 생성'
+                    : ['future_timestamp', 'timestamp_missing_or_invalid'].includes(freshnessMeta.reason)
+                        ? '최신성 확인 불가'
+                        : Number.isFinite(freshnessAgeSeconds)
+                            ? `최신 raw window 재점검 필요 · ${Math.max(1, Math.floor(freshnessAgeSeconds / (24 * 60 * 60)))}일 전 생성`
+                            : '최신 raw window 재점검 필요'
+                : ageMs === null
+                    ? '최신성 확인 불가'
+                    : ageMs >= 24 * 60 * 60 * 1000
+                        ? `최신 raw window 재점검 필요 · ${Math.max(1, Math.floor(ageMs / (24 * 60 * 60 * 1000)))}일 전 생성`
+                        : '최근 생성';
+            if (generatedAt) generatedAt.textContent = `${generated} · ${report.candleCount || '-'}개 캔들 · ${validationMode} · ${freshness}`;
 
             const marketHtml = results.map(result => {
                 const metrics = result.validation?.validation;
@@ -5267,7 +5296,25 @@
                 : status.filterStarvation
                     ? '진입 조건 장기 미충족'
                     : '반등 후보 집계 중';
-            const signalSummary = `${signalLabel} · 과매도 ${Number(signalAvailability.oversoldObservations) || 0}회 · 반등 후보 ${Number(signalAvailability.strictReboundCandidates) || 0}회 · 확인 ${Number(signalAvailability.strictConfirmedCandidates) || 0}회`;
+            const rsiProximity = signalAvailability.rsiProximity || {};
+            const rsiMinimum = Number.isFinite(Number(rsiProximity.minimumPreviousRsi))
+                ? Number(rsiProximity.minimumPreviousRsi).toFixed(1)
+                : '미측정';
+            const rsiThreshold = Number.isFinite(Number(rsiProximity.threshold))
+                ? Number(rsiProximity.threshold).toFixed(1)
+                : '미측정';
+            const signalFunnel = signalAvailability.signalFunnel || {};
+            const signalFunnelText = Number(signalFunnel.availableWindows) > 0
+                ? ` · funnel ${Number(signalFunnel.availableWindows) || 0}→${Number(signalFunnel.oversoldWindows) || 0}→${Number(signalFunnel.bullishWindows) || 0}→${Number(signalFunnel.priceReboundWindows) || 0}→${Number(signalFunnel.rsiRecoveryWindows) || 0}→${Number(signalFunnel.confirmedWindows) || 0}`
+                : '';
+            const latestSignalEvidenceEntry = Object.entries(status.signalAvailability?.lastSignalEvidenceByCoin || {})
+                .filter(([, evidence]) => evidence && typeof evidence === 'object')
+                .sort(([, a], [, b]) => new Date(a.observedAt || a.candleTime || 0).getTime() - new Date(b.observedAt || b.candleTime || 0).getTime())
+                .at(-1);
+            const latestSignalEvidenceText = latestSignalEvidenceEntry
+                ? ` · 최근 후보 ${escapeHtml(latestSignalEvidenceEntry[0])} · 반등 ${Number.isFinite(Number(latestSignalEvidenceEntry[1].reboundPriceChangePercent)) ? Number(latestSignalEvidenceEntry[1].reboundPriceChangePercent).toFixed(2) : '-'}% · RSI 회복 ${Number.isFinite(Number(latestSignalEvidenceEntry[1].rsiRecovery)) ? Number(latestSignalEvidenceEntry[1].rsiRecovery).toFixed(1) : '-'}`
+                : '';
+            const signalSummary = `${signalLabel} · 과매도 ${Number(signalAvailability.oversoldObservations) || 0}회 · 반등 후보 ${Number(signalAvailability.strictReboundCandidates) || 0}회 · 확인 ${Number(signalAvailability.strictConfirmedCandidates) || 0}회 · 직전 RSI 최저 ${rsiMinimum} (기준 ${rsiThreshold}, 근접 ${Number(rsiProximity.nearThresholdWindows) || 0}회)${signalFunnelText}${latestSignalEvidenceText}`;
             const insufficientCandleEntry = Object.entries(candleDataQuality.insufficientByCoin || {})
                 .sort((a, b) => (Number(b[1]?.count) || 0) - (Number(a[1]?.count) || 0))[0];
             const insufficientCandleText = insufficientCandleEntry
@@ -10234,6 +10281,6 @@
             }
         });
     </script>
-    <script src="/pilot-redesign.js?v=observer-readonly-34"></script>
+    <script src="/pilot-redesign.js?v=observer-readonly-87"></script>
 </body>
 </html>

@@ -4,6 +4,11 @@ import {
   DEFAULT_MOMENTUM_SHADOW_CANDIDATE_SLOT_FILE,
   inspectMomentumShadowCandidateSlot
 } from './momentumShadowCandidateSlot.js';
+import {
+  MOMENTUM_SHADOW_BENCHMARK_OBSERVATION_SCHEMA_VERSION
+} from './momentumShadowBenchmark.js';
+import { resolveMomentumShadowExecutionModel } from './momentumShadowExecutionModel.js';
+import { resolveMomentumShadowQuoteRuntimeFile } from './momentumShadowQuoteHistory.js';
 
 function readJson(file) {
   try {
@@ -54,6 +59,7 @@ function normalizedConfig(config = {}) {
       ? Number(config.volatilityTargetPercent)
       : null,
     entryExecution: config.entryExecution === 'next_open' ? 'next_open' : 'close',
+    executionModel: resolveMomentumShadowExecutionModel(config.executionModel),
     maxEntryGapPercent: Math.max(0, Number(config.maxEntryGapPercent) || 0),
     maxDailyCandleAgeHours: Math.max(0, Number(config.maxDailyCandleAgeHours) || 0),
     maxSpreadPercent: Math.max(0, Number(config.maxSpreadPercent) || 0),
@@ -76,6 +82,87 @@ function configDifferences(actual, expected) {
   });
 }
 
+function inspectQuoteQualityReadiness({
+  reportFile,
+  expectedMarkets = [],
+  maxAgeSeconds = 15 * 60,
+  now = Date.now()
+} = {}) {
+  const resolvedFile = path.resolve(reportFile || resolveMomentumShadowQuoteRuntimeFile('quote-quality.json'));
+  const result = {
+    required: true,
+    ready: false,
+    reportFile: path.basename(resolvedFile),
+    reason: null,
+    generatedAt: null,
+    ageSeconds: null,
+    maxAgeSeconds,
+    complete: false,
+    errorCount: null,
+    sampleCount: null,
+    requestedSampleCount: null,
+    marketCount: 0,
+    missingMarkets: [],
+    overCeilingMarkets: []
+  };
+  if (!fs.existsSync(resolvedFile)) {
+    result.reason = 'quote_quality_report_missing';
+    return result;
+  }
+  let report;
+  try {
+    report = readJson(resolvedFile);
+  } catch {
+    result.reason = 'quote_quality_report_invalid';
+    return result;
+  }
+  if (!report || typeof report !== 'object' || Array.isArray(report)) {
+    result.reason = 'quote_quality_report_invalid';
+    return result;
+  }
+  result.generatedAt = report.generatedAt || null;
+  const generatedAtMs = Date.parse(report.generatedAt || '');
+  const nowMs = Number(now);
+  if (!Number.isFinite(generatedAtMs) || !Number.isFinite(nowMs) || generatedAtMs > nowMs) {
+    result.reason = 'quote_quality_report_timestamp_invalid';
+    return result;
+  }
+  result.ageSeconds = Math.floor((nowMs - generatedAtMs) / 1000);
+  if (result.ageSeconds > Number(maxAgeSeconds)) {
+    result.reason = 'quote_quality_report_stale';
+    return result;
+  }
+  const summary = report.summary && typeof report.summary === 'object' ? report.summary : {};
+  const reportMarkets = summary.markets && typeof summary.markets === 'object'
+    ? Object.keys(summary.markets)
+    : [];
+  const expected = [...new Set(Array.isArray(expectedMarkets) ? expectedMarkets : [])];
+  result.marketCount = reportMarkets.length;
+  result.missingMarkets = expected.filter(market => !reportMarkets.includes(market));
+  result.overCeilingMarkets = expected.filter(market =>
+    Number(summary.markets?.[market]?.overCeiling) > 0
+  );
+  result.complete = report.complete === true && summary.valid === true;
+  result.errorCount = Array.isArray(report.errors)
+    ? report.errors.length
+    : Math.max(0, Number(report.errors) || 0);
+  result.sampleCount = Math.max(0, Number(summary.sampleCount) || Number(report.samples?.length) || 0);
+  result.requestedSampleCount = Math.max(0, Number(report.requestedSampleCount) || 0);
+  if (result.errorCount > 0) {
+    result.reason = 'quote_quality_report_errors';
+  } else if (!result.complete) {
+    result.reason = 'quote_quality_report_incomplete';
+  } else if (result.missingMarkets.length > 0) {
+    result.reason = 'quote_quality_market_set_incomplete';
+  } else if (result.requestedSampleCount > 0 && result.sampleCount < result.requestedSampleCount) {
+    result.reason = 'quote_quality_samples_incomplete';
+  } else {
+    result.ready = true;
+    result.reason = 'quote_quality_report_fresh_and_complete';
+  }
+  return result;
+}
+
 /**
  * Read-only gate before starting a new risk-capped momentum shadow owner.
  * It deliberately blocks while the benchmark gate is closed so an empty
@@ -87,6 +174,9 @@ export function inspectMomentumShadowCandidate({
   ownerDirs = [],
   expectedConfig = {},
   requireBenchmarkOpen = true,
+  requireQuoteQuality = false,
+  quoteReportFile,
+  quoteMaxAgeSeconds = 15 * 60,
   minimumPollMs = 15 * 60 * 1000,
   candidateSlotFile = DEFAULT_MOMENTUM_SHADOW_CANDIDATE_SLOT_FILE,
   now = Date.now()
@@ -132,7 +222,11 @@ export function inspectMomentumShadowCandidate({
     };
   });
   const liveOwnerCount = owners.filter(owner => owner.alive && owner.runnerState === 'running').length;
-  if (liveOwnerCount > 0) warnings.push(`existing_live_owner_count:${liveOwnerCount}`);
+  // A candidate must be the only live momentum-shadow owner. Keeping this as
+  // a warning allows a future benchmark gate to open while an older fixed,
+  // regime, or benchmark owner is still consuming the same public API budget;
+  // their config drift would then contaminate the candidate's evidence window.
+  if (liveOwnerCount > 0) blockers.push(`existing_live_owner_count:${liveOwnerCount}`);
 
   const expectedBenchmarkThreshold = Number.isFinite(Number(expectedConfig?.benchmarkTrendMinPercent))
     ? Number(expectedConfig.benchmarkTrendMinPercent)
@@ -151,6 +245,20 @@ export function inspectMomentumShadowCandidate({
   let benchmarkFetchErrors = 0;
   let benchmarkFetchFailureStreak = 0;
   let benchmarkFetchCircuitOpen = false;
+  let benchmarkObservationSchemaVersion = null;
+  let benchmarkObservationTelemetryReady = false;
+  let benchmarkObservationAvailable = false;
+  let benchmarkObservationReason = null;
+  let benchmarkObservationCheckpointCount = 0;
+  let benchmarkObservationValidCheckpointCount = 0;
+  let benchmarkObservationRestart = {
+    required: false,
+    safe: false,
+    blockers: [],
+    openPositionCount: 0,
+    tradeCount: 0,
+    pendingEntryCount: 0
+  };
   if (!benchmark) {
     blockers.push('benchmark_ledger_missing');
   } else {
@@ -180,6 +288,45 @@ export function inspectMomentumShadowCandidate({
     benchmarkFetchErrors = Math.max(0, Number(benchmark.fetchErrors) || 0);
     benchmarkFetchFailureStreak = Math.max(0, Number(benchmark.networkFetchFailureStreak) || 0);
     benchmarkFetchCircuitOpen = benchmark.networkFetchCircuitOpen === true;
+    benchmarkObservationSchemaVersion = benchmark.benchmarkObservationSchemaVersion === null ||
+      benchmark.benchmarkObservationSchemaVersion === undefined ||
+      benchmark.benchmarkObservationSchemaVersion === ''
+      ? null
+      : Number(benchmark.benchmarkObservationSchemaVersion);
+    benchmarkObservationTelemetryReady =
+      benchmarkObservationSchemaVersion === MOMENTUM_SHADOW_BENCHMARK_OBSERVATION_SCHEMA_VERSION;
+    benchmarkObservationAvailable = benchmarkObservationTelemetryReady &&
+      benchmark.benchmarkObservationAvailable === true;
+    benchmarkObservationReason = benchmark.benchmarkObservationReason || null;
+    const benchmarkObservationCheckpoints = Array.isArray(benchmark.benchmarkObservationCheckpoints)
+      ? benchmark.benchmarkObservationCheckpoints
+      : [];
+    benchmarkObservationCheckpointCount = benchmarkObservationCheckpoints.length;
+    benchmarkObservationValidCheckpointCount = benchmarkObservationCheckpoints.filter(checkpoint =>
+      checkpoint?.dataQualityValid === true
+    ).length;
+    const benchmarkOpenPositionCount = Object.keys(benchmark.positions || {}).length;
+    const benchmarkTradeCount = Array.isArray(benchmark.trades) ? benchmark.trades.length : 0;
+    const benchmarkPendingEntryCount = Array.isArray(benchmark.pendingEntries)
+      ? benchmark.pendingEntries.length
+      : 0;
+    const restartBlockers = [];
+    if (benchmark.runnerState !== 'running' || !ownerAlive(benchmark.ownerPid)) {
+      restartBlockers.push('benchmark_owner_not_running');
+    }
+    if (!heartbeatFresh) restartBlockers.push('benchmark_heartbeat_stale');
+    if (benchmarkOpenPositionCount > 0) restartBlockers.push('benchmark_positions_open');
+    if (benchmarkTradeCount > 0) restartBlockers.push('benchmark_trades_exist');
+    if (benchmarkPendingEntryCount > 0) restartBlockers.push('benchmark_pending_entries');
+    if (benchmark.dataQuality?.valid !== true) restartBlockers.push('benchmark_data_quality_invalid');
+    benchmarkObservationRestart = {
+      required: !benchmarkObservationTelemetryReady,
+      safe: !benchmarkObservationTelemetryReady && restartBlockers.length === 0,
+      blockers: restartBlockers,
+      openPositionCount: benchmarkOpenPositionCount,
+      tradeCount: benchmarkTradeCount,
+      pendingEntryCount: benchmarkPendingEntryCount
+    };
     benchmarkDataQuality = benchmark.dataQuality && typeof benchmark.dataQuality === 'object'
       ? {
         valid: benchmark.dataQuality.valid === true,
@@ -225,6 +372,11 @@ export function inspectMomentumShadowCandidate({
     if (benchmarkFetchFailureStreak > 0 || benchmarkFetchCircuitOpen) {
       warnings.push(`benchmark_fetch_failures_active:${benchmarkFetchFailureStreak}`);
     }
+    if (!benchmarkObservationTelemetryReady) {
+      warnings.push('benchmark_observation_telemetry_legacy');
+    } else if (!benchmarkObservationAvailable) {
+      warnings.push('benchmark_observation_unavailable');
+    }
   }
 
   const candidateConfig = normalizedConfig(expectedConfig);
@@ -233,6 +385,28 @@ export function inspectMomentumShadowCandidate({
   }
   if (candidateConfig.benchmarkMarket === null) blockers.push('candidate_benchmark_missing');
   if (candidateConfig.maxPortfolioDrawdownPercent <= 0) warnings.push('candidate_drawdown_stop_disabled');
+
+  const quoteExecutionRequired = requireQuoteQuality ||
+    candidateConfig.executionModel === 'quote_cross';
+  const quoteQuality = quoteExecutionRequired
+    ? inspectQuoteQualityReadiness({
+      reportFile: quoteReportFile,
+      expectedMarkets: candidateConfig.markets,
+      maxAgeSeconds: quoteMaxAgeSeconds,
+      now
+    })
+    : {
+      required: false,
+      ready: true,
+      reportFile: null,
+      reason: 'quote_quality_not_required_for_candle_close_contract'
+    };
+  if (quoteExecutionRequired && !quoteQuality.ready) {
+    blockers.push(quoteQuality.reason);
+  }
+  if (quoteExecutionRequired && quoteQuality.overCeilingMarkets?.length) {
+    warnings.push(`quote_quality_over_ceiling_markets:${quoteQuality.overCeilingMarkets.join(',')}`);
+  }
 
   return {
     launchAllowed: blockers.length === 0,
@@ -247,6 +421,7 @@ export function inspectMomentumShadowCandidate({
       startedAt: candidateSlot.startedAt
     },
     candidateConfig,
+    quoteQuality,
     benchmark: benchmark ? {
       ownerPid: benchmark.ownerPid || null,
       runnerState: benchmark.runnerState || null,
@@ -260,6 +435,15 @@ export function inspectMomentumShadowCandidate({
       fetchErrors: benchmarkFetchErrors,
       fetchFailureStreak: benchmarkFetchFailureStreak,
       fetchCircuitOpen: benchmarkFetchCircuitOpen,
+      observationSchemaVersion: benchmarkObservationSchemaVersion,
+      observationTelemetryReady: benchmarkObservationTelemetryReady,
+      observationAvailable: benchmarkObservationAvailable,
+      observationReason: benchmarkObservationAvailable
+        ? benchmarkObservationReason || null
+        : benchmarkObservationReason || 'benchmark_observation_not_recorded',
+      observationCheckpointCount: benchmarkObservationCheckpointCount,
+      observationValidCheckpointCount: benchmarkObservationValidCheckpointCount,
+      observationRestart: benchmarkObservationRestart,
       heartbeatAt: benchmark.heartbeatAt || null,
       heartbeatAgeSeconds: benchmarkHeartbeatAgeSeconds,
       heartbeatFresh: benchmarkHeartbeatFresh,

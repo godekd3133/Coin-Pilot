@@ -21,6 +21,7 @@ test('candidate config has one evidence-backed default contract', () => {
   assert.equal(config.maxEntryGapPercent, 0);
   assert.equal(config.maxDailyCandleAgeHours, 36);
   assert.equal(config.maxSpreadPercent, 0);
+  assert.equal(config.executionModel, 'candle_close');
   assert.equal(config.requestIntervalMs, 500);
   assert.equal(config.maxPortfolioDrawdownPercent, 15);
 });
@@ -61,6 +62,16 @@ test('candidate config keeps next-open execution explicit and defaults to close'
   assert.equal(resolveMomentumShadowCandidateConfig({
     MOMO_SHADOW_ENTRY_EXECUTION: 'unexpected'
   }).entryExecution, 'close');
+});
+
+test('candidate config keeps quote-cross execution explicitly opt-in', () => {
+  assert.equal(resolveMomentumShadowCandidateConfig({}).executionModel, 'candle_close');
+  assert.equal(resolveMomentumShadowCandidateConfig({
+    MOMO_SHADOW_EXECUTION_MODEL: 'quote_cross'
+  }).executionModel, 'quote_cross');
+  assert.equal(resolveMomentumShadowCandidateConfig({
+    MOMO_SHADOW_EXECUTION_MODEL: 'unexpected'
+  }).executionModel, 'candle_close');
 });
 
 test('candidate config makes fixed hold duration explicit instead of inheriting the regime default', () => {
@@ -142,4 +153,19 @@ test('candidate config seals runner exit overrides into the contract', () => {
   assert.equal(resolveMomentumShadowCandidateConfig({
     MOMO_SHADOW_STOP_LOSS_PERCENT: '-2'
   }).stopLossPercent, 0);
+});
+
+test('loss-cap research hypothesis can pin a completed-close stop without enabling take profit', () => {
+  const config = resolveMomentumShadowCandidateConfig({
+    MOMO_SHADOW_MODE: 'fixed',
+    MOMO_SHADOW_MAX_HOLD_HOURS: '48',
+    MOMO_SHADOW_ENTRY_EXECUTION: 'next_open',
+    MOMO_SHADOW_STOP_LOSS_PERCENT: '4',
+    MOMO_SHADOW_TAKE_PROFIT_PERCENT: '0'
+  });
+  assert.equal(config.mode, 'fixed');
+  assert.equal(config.maxHoldHours, 48);
+  assert.equal(config.entryExecution, 'next_open');
+  assert.equal(config.stopLossPercent, 4);
+  assert.equal(config.takeProfitPercent, 0);
 });

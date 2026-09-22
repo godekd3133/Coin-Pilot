@@ -4,12 +4,12 @@
 |---|---|---|---|
 | Strategy contract | Completed-candle oversold reaction, delayed revalidation, bounded exits | Source + unit tests | PASS |
 | Web UI | Desktop dashboard, responsive mobile layout, paper status controls | Browser/API smoke, strict/relaxed/MFE-MAE evidence display, and PWA assets | PASS |
-| Installable app | Manifest, icons, service worker, standalone metadata | Static manifest/service-worker checks | PASS |
+| Installable app | Manifest, icons, service worker, standalone metadata | Static shell checks plus Chromium manifest/installability readback: parse/installability errors `[]`; actual standalone install remains unrun | PASS |
 | Historical validation | Fee/slippage-aware walk-forward holdout with minimum trades/PF/return/MDD | Fresh 7-day fixed-config top-20 run: 0/20 promoted; 17 training-gate failures, 3 holdout-gate failures | HOLD |
-| Forward paper | Isolated multi-market ledger with telemetry, snapshots, durable strict trades, and continuity gate | v71 baseline and v72 0.25% candidate are preserved; v73 is the active latest-code 0.15% baseline with MFE/MAE telemetry, currently 10 cycles with no trades | IN PROGRESS |
+| Forward paper | Isolated multi-market ledger with telemetry, snapshots, durable strict trades, and continuity gate | r2 terminated fail-closed on `risk_data_gap` after strict 4 closes; fresh strict-only r1 is active at cycle 3 with complete snapshot and no diagnostic sidecar | IN PROGRESS |
 | Live safety | Live scalping blocked until global validation promotion | `assertLiveValidationGate()` requires matching `fixed_config` report; current tuned/failed report blocked | PASS |
 | Profitability | Forward thresholds met and independently reviewed | No qualifying evidence yet | NOT PROVEN |
-| Continuity | Heartbeat gaps over the configured limit invalidate promotion | v71 owner loss was fail-closed as orphan and resumed with the 482s gap preserved; risk/analysis continuity is currently healthy after recovery | IN PROGRESS |
+| Continuity | Heartbeat gaps over the configured limit invalidate promotion | r2 recorded `RISK_CHECK_STALE` with max gap `426.771s`; strict-only r1 currently has analysis/risk continuity true and interruptions `0` | IN PROGRESS |
 
 ## Latest evidence
 

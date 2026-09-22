@@ -4,18 +4,13 @@
   "description": "모의투자·실제투자 모드, 포트폴리오와 시장 상태를 한 화면에서 관리하는 CoinPilot 거래 대시보드",
   "lang": "ko-KR",
   "start_url": "/?source=pwa",
+  "id": "/?source=pwa",
   "scope": "/",
   "display": "standalone",
   "orientation": "any",
   "background_color": "#f7f4ee",
   "theme_color": "#f7f4ee",
   "icons": [
-    {
-      "src": "/icon.svg",
-      "sizes": "any",
-      "type": "image/svg+xml",
-      "purpose": "any"
-    },
     {
       "src": "/icon-192.png",
       "sizes": "192x192",

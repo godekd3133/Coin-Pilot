@@ -67,6 +67,14 @@ export const SCALPING_VARIANTS = {
   // training/holdout gates and a separate forward cohort.
   rsi_40: { rsiOversold: 40 },
   rsi_45: { rsiOversold: 45 },
+  // Direct recovery/close-strength axes make the runtime rejection reasons
+  // measurable without silently changing the sealed default contract.
+  rsi_recovery_0: { minRsiRecovery: 0 },
+  rsi_recovery_1: { minRsiRecovery: 1 },
+  rsi_recovery_3: { minRsiRecovery: 3 },
+  close_strength_055: { minCloseStrength: 0.55 },
+  close_strength_075: { minCloseStrength: 0.75 },
+  recovery_1_close_strength_055: { minRsiRecovery: 1, minCloseStrength: 0.55 },
   rebound_below_overbought: { requireReboundBelowOverbought: true },
   relax_volume: { minVolumeRatio: 0 },
   relax_trend: { minTrendSlopePercent: -1.5 },
@@ -300,13 +308,27 @@ function makeGateOptions() {
   };
 }
 
-function summarizeVariantResults(results) {
-  const rows = results.filter(result => result.validation?.validation);
+export function summarizeVariantResults(results = []) {
+  const attemptedResults = Array.isArray(results) ? results : [];
+  const rows = attemptedResults.filter(result => result.validation?.validation);
+  const invalidRows = attemptedResults
+    .filter(result => !result.validation?.validation)
+    .map(result => ({
+      market: result.market,
+      error: result.error || result.validation?.reason || 'validation_result_unavailable'
+    }));
   const sum = key => rows.reduce((total, row) => total + (Number(row.validation.validation?.[key]) || 0), 0);
   return {
+    attemptedMarketCount: attemptedResults.length,
     marketCount: rows.length,
+    invalidMarketCount: invalidRows.length,
+    invalidMarkets: invalidRows,
     promotedMarketCount: rows.filter(row => row.validation.promoted === true).length,
-    promoted: rows.length > 0 && rows.every(row => row.validation.promoted === true),
+    promotionBlockedByInvalidMarkets: invalidRows.length > 0,
+    promoted: attemptedResults.length > 0 &&
+      invalidRows.length === 0 &&
+      rows.length === attemptedResults.length &&
+      rows.every(row => row.validation.promoted === true),
     trainingGateFailures: rows.filter(row => row.validation.gate?.trainingGatePassed !== true).length,
     holdoutGateFailures: rows.filter(row => row.validation.gate?.trainingGatePassed === true && row.validation.promoted !== true).length,
     positiveHoldoutMarkets: rows.filter(row => Number(row.validation.validation.totalReturnPercent) > 0).length,
@@ -407,6 +429,7 @@ export async function runVariantStudy() {
     candleCount,
     baseConfig,
     markets,
+    requestedMarketCount: markets.length,
     candleCacheOutputFile,
     fetched,
     variants: Object.fromEntries(selectedNames.map(name => [name, {
@@ -427,7 +450,10 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       console.log(`\n💾 동일 윈도우 variant study 저장: ${process.env.SCALP_VARIANT_OUTPUT_FILE || 'scalping_variant_study.json'}`);
       for (const [name, variant] of Object.entries(report.variants)) {
         const summary = variant.summary;
-        console.log(`  ${name}: ${summary.positiveHoldoutMarkets}/${summary.marketCount} 양수, ${summary.holdoutTradeCount} trades, circuit block ${summary.holdoutCircuitBlockedEntries || 0}회, 합산 ${summary.sumHoldoutReturnPercent.toFixed(4)}%, 승격 ${summary.promoted ? '가능' : '보류'}`);
+        const invalid = summary.invalidMarketCount > 0
+          ? `, invalid ${summary.invalidMarketCount}개`
+          : '';
+        console.log(`  ${name}: ${summary.positiveHoldoutMarkets}/${summary.marketCount} 양수, 유효 ${summary.marketCount}/${summary.attemptedMarketCount}${invalid}, ${summary.holdoutTradeCount} trades, circuit block ${summary.holdoutCircuitBlockedEntries || 0}회, 합산 ${summary.sumHoldoutReturnPercent.toFixed(4)}%, 승격 ${summary.promoted ? '가능' : '보류'}`);
       }
     })
     .catch(error => {

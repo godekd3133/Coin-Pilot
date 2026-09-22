@@ -1,5 +1,6 @@
 import { calculateCostAdjustedBreakEvenPrice } from '../strategy/protectionPrices.js';
 import { createLossCircuitBreakerState, isLossCircuitCoolingDown, registerLoss } from '../risk/lossCircuitBreaker.js';
+import { resolveScalpingVolatilitySizing } from '../research/scalpingVolatility.js';
 
 const DEFAULT_CONFIG = {
   initialBalance: 1_000_000,
@@ -46,6 +47,11 @@ const DEFAULT_CONFIG = {
   // winnerExtendMinutes with a cost-adjusted break-even floor.
   winnerExtendMinutes: 0,
   winnerExtendMinProfitPercent: 0,
+  // Research-only invalidation exit. Zero preserves the fixed max-hold
+  // contract; a positive value exits only after price breaks below the
+  // completed signal's reference price by the configured percentage.
+  referenceBreakExitPercent: 0,
+  referenceBreakMinHoldMinutes: 0,
   // Optional portfolio safeguard. Zero preserves the existing multi-entry
   // contract; a positive value caps entries sharing one completed-candle key.
   maxEntriesPerSignalWindow: 0,
@@ -70,6 +76,9 @@ const DEFAULT_CONFIG = {
   marketRegimeLookback: 5,
   marketRegimeMinBreadth: 0.5,
   marketRegimeMinReturnPercent: -0.2,
+  // Research-only exposure overlay. Zero keeps the fixed-size contract.
+  volatilityLookbackCandles: 20,
+  volatilityTargetPercent: 0,
   candleUnit: 1
 };
 
@@ -1056,6 +1065,8 @@ function createMetrics({
   circuitBreaks = 0,
   marketRegimeBlockedEntries = 0,
   signalWindowBlockedEntries = 0,
+  volatilityScaledEntries = 0,
+  volatilityBlockedEntries = 0,
   dataQuality = null
 }) {
   const closedTrades = trades.filter(trade => trade.type === 'CLOSE');
@@ -1067,6 +1078,9 @@ function createMetrics({
   const totalReturnPercent = initialBalance > 0 ? (netProfit / initialBalance) * 100 : 0;
   const profitFactor = grossLoss > 0 ? grossProfit / grossLoss : grossProfit > 0 ? Infinity : 0;
   const tradeReturnConfidence = calculateTradeReturnConfidence(closedTrades);
+  const referenceBreakExits = closedTrades.filter(
+    trade => trade.reason === 'REFERENCE_BREAK_EXIT'
+  ).length;
 
   return {
     initialBalance,
@@ -1089,6 +1103,9 @@ function createMetrics({
     circuitBreaks,
     marketRegimeBlockedEntries,
     signalWindowBlockedEntries,
+    volatilityScaledEntries,
+    volatilityBlockedEntries,
+    referenceBreakExits,
     dataQuality,
     qualityScore: calculateQualityScore({
       totalReturnPercent,
@@ -1346,6 +1363,23 @@ function findExit(position, candle, config, timestamp) {
   }
 
   const holdMs = timestamp - position.entryTimestamp;
+  const referenceBreakExitPercent = Math.max(
+    0,
+    number(config.referenceBreakExitPercent, 0)
+  );
+  const referenceBreakMinHoldMinutes = Math.max(
+    0,
+    number(config.referenceBreakMinHoldMinutes, 0)
+  );
+  const signalReferencePrice = number(position.signalReferencePrice, 0);
+  if (referenceBreakExitPercent > 0 && signalReferencePrice > 0 &&
+    holdMs >= referenceBreakMinHoldMinutes * 60 * 1000 &&
+    getClose(candle) <= signalReferencePrice * (1 - referenceBreakExitPercent / 100)) {
+    return {
+      reason: 'REFERENCE_BREAK_EXIT',
+      price: getClose(candle) * (1 - config.slippage)
+    };
+  }
   if (config.maxLosingHoldMinutes > 0 && holdMs >= config.maxLosingHoldMinutes * 60 * 1000 &&
     getClose(candle) <= position.entryPrice) {
     return { reason: 'MAX_LOSING_HOLD_TIME', price: getClose(candle) * (1 - config.slippage) };
@@ -1397,6 +1431,8 @@ export function simulateScalping(rawCandles, config = {}, simulationOptions = {}
   const rejectionCounts = {};
   let circuitBlockedEntries = 0;
   let circuitBreaks = 0;
+  let volatilityScaledEntries = 0;
+  let volatilityBlockedEntries = 0;
   let cooldownUntil = 0;
   let consecutiveLosses = 0;
   const lossCircuitBreaker = createLossCircuitBreakerState();
@@ -1471,44 +1507,64 @@ export function simulateScalping(rawCandles, config = {}, simulationOptions = {}
           if (!entry.valid) {
             cancelledSignals += 1;
           } else {
-            const investAmount = Math.min(
-              balance * options.investmentRatio,
-              balance * 0.95
-            );
+            // Use only candles before the completed signal candle. If the
+            // research overlay is enabled but its history is unavailable,
+            // block the entry instead of silently restoring full exposure.
+            const volatilitySizing = resolveScalpingVolatilitySizing({
+              candles,
+              index,
+              lookbackCandles: options.volatilityLookbackCandles,
+              targetPercent: options.volatilityTargetPercent
+            });
+            if (!volatilitySizing.available) {
+              volatilityBlockedEntries += 1;
+            } else {
+              if (volatilitySizing.scale < 1) volatilityScaledEntries += 1;
+              const investAmount = Math.min(
+                balance * options.investmentRatio * volatilitySizing.scale,
+                balance * 0.95
+              );
 
-            if (investAmount >= options.minOrderAmount && entry.entryPrice > 0) {
-              const buyFee = investAmount * options.tradingFee;
-              const amount = (investAmount - buyFee) / entry.entryPrice;
-              balance -= investAmount;
-              fees += buyFee;
-              position = {
-                entryPrice: entry.entryPrice,
-                amount,
-                investAmount,
-                entryTimestamp: candleTime(nextCandle, timestamp),
-                entryTime: nextCandle?.candle_date_time_utc || nextCandle?.candle_date_time_kst || null,
-                signalKey: rebound.signalKey,
-                highestPrice: entry.entryPrice,
-                lowestPrice: entry.entryPrice,
-                maxFavorableExcursionPercent: 0,
-                maxAdverseExcursionPercent: 0,
-                breakEvenArmed: false,
-                trailingArmed: false,
-                winnerExtended: false
-              };
-              trades.push({
-                type: 'OPEN',
-                reason: 'OVERSOLD_REBOUND_DELAYED_ENTRY',
-                entryPrice: entry.entryPrice,
-                amount,
-                investAmount,
-                buyFee,
-                signalKey: rebound.signalKey,
-                signalTime: candle?.candle_date_time_utc || candle?.candle_date_time_kst || null,
-                entryTime: position.entryTime,
-                retracePercent: entry.retracePercent,
-                chasePercent: entry.chasePercent
-              });
+              if (investAmount >= options.minOrderAmount && entry.entryPrice > 0) {
+                const buyFee = investAmount * options.tradingFee;
+                const amount = (investAmount - buyFee) / entry.entryPrice;
+                balance -= investAmount;
+                fees += buyFee;
+                position = {
+                  entryPrice: entry.entryPrice,
+                  amount,
+                  investAmount,
+                  entryTimestamp: candleTime(nextCandle, timestamp),
+                  entryTime: nextCandle?.candle_date_time_utc || nextCandle?.candle_date_time_kst || null,
+                  signalKey: rebound.signalKey,
+                  signalReferencePrice: rebound.referencePrice,
+                  highestPrice: entry.entryPrice,
+                  lowestPrice: entry.entryPrice,
+                  maxFavorableExcursionPercent: 0,
+                  maxAdverseExcursionPercent: 0,
+                  breakEvenArmed: false,
+                  trailingArmed: false,
+                  winnerExtended: false,
+                  volatilityPercent: volatilitySizing.volatilityPercent,
+                  volatilityScale: volatilitySizing.scale
+                };
+                trades.push({
+                  type: 'OPEN',
+                  reason: 'OVERSOLD_REBOUND_DELAYED_ENTRY',
+                  entryPrice: entry.entryPrice,
+                  amount,
+                  investAmount,
+                  buyFee,
+                  signalKey: rebound.signalKey,
+                  signalReferencePrice: rebound.referencePrice,
+                  signalTime: candle?.candle_date_time_utc || candle?.candle_date_time_kst || null,
+                  entryTime: position.entryTime,
+                  retracePercent: entry.retracePercent,
+                  chasePercent: entry.chasePercent,
+                  volatilityPercent: volatilitySizing.volatilityPercent,
+                  volatilityScale: volatilitySizing.scale
+                });
+              }
             }
           }
         }
@@ -1549,6 +1605,8 @@ export function simulateScalping(rawCandles, config = {}, simulationOptions = {}
       rejectionCounts,
       circuitBlockedEntries,
       circuitBreaks,
+      volatilityScaledEntries,
+      volatilityBlockedEntries,
       dataQuality
     }),
     dataQuality
@@ -1875,6 +1933,8 @@ export function simulateScalpingPortfolio(rawCandlesByMarket, config = {}, simul
   let circuitBreaks = 0;
   let marketRegimeBlockedEntries = 0;
   let signalWindowBlockedEntries = 0;
+  let volatilityScaledEntries = 0;
+  let volatilityBlockedEntries = 0;
   let fees = 0;
   const lossCircuitBreaker = createLossCircuitBreakerState();
 
@@ -1992,12 +2052,25 @@ export function simulateScalpingPortfolio(rawCandlesByMarket, config = {}, simul
         cancelledSignals += 1;
         continue;
       }
+      // Size from history before the completed signal candle. The signal move
+      // itself must not influence the volatility used for this entry.
+      const volatilitySizing = resolveScalpingVolatilitySizing({
+        candles: context.candles,
+        index: index - 1,
+        lookbackCandles: options.volatilityLookbackCandles,
+        targetPercent: options.volatilityTargetPercent
+      });
+      if (!volatilitySizing.available) {
+        volatilityBlockedEntries += 1;
+        continue;
+      }
       candidates.push({
         context,
         candle: context.candles[index],
         rebound,
         entry,
-        marketRegime
+        marketRegime,
+        volatilitySizing
       });
     }
 
@@ -2021,8 +2094,10 @@ export function simulateScalpingPortfolio(rawCandlesByMarket, config = {}, simul
         signalWindowBlockedEntries += 1;
         continue;
       }
+      const volatilitySizing = candidate.volatilitySizing;
+      if (volatilitySizing.scale < 1) volatilityScaledEntries += 1;
       const investAmount = Math.min(
-        balance * number(options.investmentRatio, 0.02),
+        balance * number(options.investmentRatio, 0.02) * volatilitySizing.scale,
         balance * portfolioAllocation,
         balance * 0.95
       );
@@ -2043,13 +2118,16 @@ export function simulateScalpingPortfolio(rawCandlesByMarket, config = {}, simul
         entryTimestamp: timestamp,
           entryTime: candidate.candle?.candle_date_time_utc || candidate.candle?.candle_date_time_kst || null,
           signalKey: candidate.rebound.signalKey,
+          signalReferencePrice: candidate.rebound.referencePrice,
           highestPrice: candidate.entry.entryPrice,
           lowestPrice: candidate.entry.entryPrice,
           maxFavorableExcursionPercent: 0,
-          maxAdverseExcursionPercent: 0,
-          breakEvenArmed: false,
+        maxAdverseExcursionPercent: 0,
+        breakEvenArmed: false,
         trailingArmed: false,
-        winnerExtended: false
+        winnerExtended: false,
+        volatilityPercent: volatilitySizing.volatilityPercent,
+        volatilityScale: volatilitySizing.scale
       };
       candidate.context.position = position;
       candidate.context.lastSignalKey = candidate.rebound.signalKey;
@@ -2063,10 +2141,13 @@ export function simulateScalpingPortfolio(rawCandlesByMarket, config = {}, simul
         investAmount,
         buyFee,
         signalKey: candidate.rebound.signalKey,
+        signalReferencePrice: candidate.rebound.referencePrice,
         signalTime: candidate.candle?.candle_date_time_utc || candidate.candle?.candle_date_time_kst || null,
         entryTime: position.entryTime,
         retracePercent: candidate.entry.retracePercent,
         chasePercent: candidate.entry.chasePercent,
+        volatilityPercent: volatilitySizing.volatilityPercent,
+        volatilityScale: volatilitySizing.scale,
         selectionScore: portfolioCandidateScore(candidate.rebound),
         reboundPriceChangePercent: candidate.rebound.reboundPriceChangePercent,
         rsiRecovery: candidate.rebound.rsiRecovery,
@@ -2121,10 +2202,14 @@ export function simulateScalpingPortfolio(rawCandlesByMarket, config = {}, simul
       circuitBreaks,
       marketRegimeBlockedEntries,
       signalWindowBlockedEntries,
+      volatilityScaledEntries,
+      volatilityBlockedEntries,
       dataQuality
     }),
     skippedEntries,
     signalWindowBlockedEntries,
+    volatilityScaledEntries,
+    volatilityBlockedEntries,
     dataQuality
   };
 }
@@ -2183,6 +2268,21 @@ function selectTuningCandidates(candidates, baseConfig, maxCandidates = 0) {
   };
 }
 
+function selectBestTuningResult(ranked, minimumTradeCount = 0) {
+  const requestedMinimum = Math.max(0, Math.floor(number(minimumTradeCount, 0)));
+  const eligible = requestedMinimum > 0
+    ? ranked.filter(candidate => candidate.metrics.tradeCount >= requestedMinimum)
+    : ranked;
+  const selectionPool = eligible.length > 0 ? eligible : ranked;
+  const best = selectionPool[0] || null;
+  return {
+    best,
+    minimumTradeCount: requestedMinimum,
+    eligibleCandidateCount: eligible.length,
+    minimumTradeFallback: requestedMinimum > 0 && eligible.length === 0
+  };
+}
+
 export const DEFAULT_TUNING_GRID = {
   signalProfile: ['rsi_rebound', 'bb_reclaim', 'trend_rebound'],
   rsiOversold: [25, 30, 35],
@@ -2223,24 +2323,26 @@ export function tuneScalpingParameters(candles, baseConfig = {}, grid = DEFAULT_
   );
   const candidates = candidateSelection.candidates;
   const featureCache = createScalpingFeatureCache(candles);
-  let best = null;
   const ranked = [];
 
   for (const candidate of candidates) {
     const result = simulateScalping(candles, candidate, { featureCache });
-    ranked.push({ config: candidate, metrics: result.metrics });
-    if (!best || result.metrics.qualityScore > best.result.metrics.qualityScore) {
-      best = { config: candidate, result };
-    }
+    ranked.push({ config: candidate, metrics: result.metrics, result });
   }
 
   ranked.sort((a, b) => b.metrics.qualityScore - a.metrics.qualityScore);
+  const selection = selectBestTuningResult(ranked, tuningOptions.minimumTradeCount);
   return {
     candidateCount: candidates.length,
     candidatePoolCount: candidateSelection.candidatePoolCount,
     candidateSelectionLimited: candidateSelection.candidateSelectionLimited,
-    best,
-    topCandidates: ranked.slice(0, 10)
+    best: selection.best
+      ? { config: selection.best.config, result: selection.best.result }
+      : null,
+    minimumTradeCount: selection.minimumTradeCount,
+    eligibleCandidateCount: selection.eligibleCandidateCount,
+    minimumTradeFallback: selection.minimumTradeFallback,
+    topCandidates: ranked.slice(0, 10).map(({ config, metrics }) => ({ config, metrics }))
   };
 }
 
@@ -2261,24 +2363,26 @@ export function tuneScalpingPortfolioParameters(candlesByMarket, baseConfig = {}
     marketEntries(candlesByMarket)
       .map(([market, candles]) => [market, createScalpingFeatureCache(candles)])
   );
-  let best = null;
   const ranked = [];
 
   for (const candidate of candidates) {
     const result = simulateScalpingPortfolio(candlesByMarket, candidate, { featureCacheByMarket });
-    ranked.push({ config: candidate, metrics: result.metrics });
-    if (!best || result.metrics.qualityScore > best.result.metrics.qualityScore) {
-      best = { config: candidate, result };
-    }
+    ranked.push({ config: candidate, metrics: result.metrics, result });
   }
 
   ranked.sort((a, b) => b.metrics.qualityScore - a.metrics.qualityScore);
+  const selection = selectBestTuningResult(ranked, tuningOptions.minimumTradeCount);
   return {
     candidateCount: candidates.length,
     candidatePoolCount: candidateSelection.candidatePoolCount,
     candidateSelectionLimited: candidateSelection.candidateSelectionLimited,
-    best,
-    topCandidates: ranked.slice(0, 10)
+    best: selection.best
+      ? { config: selection.best.config, result: selection.best.result }
+      : null,
+    minimumTradeCount: selection.minimumTradeCount,
+    eligibleCandidateCount: selection.eligibleCandidateCount,
+    minimumTradeFallback: selection.minimumTradeFallback,
+    topCandidates: ranked.slice(0, 10).map(({ config, metrics }) => ({ config, metrics }))
   };
 }
 
@@ -2360,7 +2464,14 @@ export function walkForwardValidatePortfolio(rawCandlesByMarket, baseConfig = {}
     training,
     resolvedConfig,
     options.grid || DEFAULT_TUNING_GRID,
-    { maxCandidates: options.maxTuningCandidates }
+    {
+      maxCandidates: options.maxTuningCandidates,
+      minimumTradeCount: options.minimumTuningTrades ?? (
+        options.requireStatisticalConfidence === true
+          ? options.minimumTrainingConfidenceTrades ?? 10
+          : options.minimumTrainingTrades ?? 3
+      )
+    }
   );
   const warmupLength = Math.min(
     splitIndex,
@@ -2435,6 +2546,9 @@ export function walkForwardValidatePortfolio(rawCandlesByMarket, baseConfig = {}
       candidateCount: tuning.candidateCount,
       candidatePoolCount: tuning.candidatePoolCount,
       candidateSelectionLimited: tuning.candidateSelectionLimited,
+      minimumTradeCount: tuning.minimumTradeCount,
+      eligibleCandidateCount: tuning.eligibleCandidateCount,
+      minimumTradeFallback: tuning.minimumTradeFallback,
       bestConfig: tuning.best.config,
       metrics: trainingMetrics
     },
@@ -2464,7 +2578,9 @@ export function walkForwardValidatePortfolio(rawCandlesByMarket, baseConfig = {}
       circuitBlockedEntries: validationMetrics.circuitBlockedEntries,
       circuitBreaks: validationMetrics.circuitBreaks,
       marketRegimeBlockedEntries: validationMetrics.marketRegimeBlockedEntries,
-      signalWindowBlockedEntries: validationMetrics.signalWindowBlockedEntries
+      signalWindowBlockedEntries: validationMetrics.signalWindowBlockedEntries,
+      volatilityScaledEntries: validationMetrics.volatilityScaledEntries,
+      volatilityBlockedEntries: validationMetrics.volatilityBlockedEntries
     },
     dataQuality,
     promotion: 'diagnostic_only_never_authorizes_live_orders'
@@ -2544,7 +2660,9 @@ export function walkForwardValidatePortfolioFolds(rawCandlesByMarket, baseConfig
       holdoutReturnPercent: sum(validation => validation.validation?.totalReturnPercent),
       marketRegimeBlockedEntries: sum(validation => validation.selection?.marketRegimeBlockedEntries),
       circuitBlockedEntries: sum(validation => validation.selection?.circuitBlockedEntries),
-      signalWindowBlockedEntries: sum(validation => validation.selection?.signalWindowBlockedEntries)
+      signalWindowBlockedEntries: sum(validation => validation.selection?.signalWindowBlockedEntries),
+      volatilityScaledEntries: sum(validation => validation.selection?.volatilityScaledEntries),
+      volatilityBlockedEntries: sum(validation => validation.selection?.volatilityBlockedEntries)
     },
     promotion: 'diagnostic_only_never_authorizes_live_orders'
   };
@@ -2590,7 +2708,14 @@ export function walkForwardValidate(candles, baseConfig = {}, options = {}) {
     trainingCandles,
     resolvedConfig,
     options.grid || DEFAULT_TUNING_GRID,
-    { maxCandidates: options.maxTuningCandidates }
+    {
+      maxCandidates: options.maxTuningCandidates,
+      minimumTradeCount: options.minimumTuningTrades ?? (
+        options.requireStatisticalConfidence === true
+          ? options.minimumTrainingConfidenceTrades ?? 10
+          : options.minimumTrainingTrades ?? 3
+      )
+    }
   );
   // Preserve indicator state across the train/holdout boundary. Recomputing
   // RSI from the first holdout candle would create a different signal stream
@@ -2668,6 +2793,9 @@ export function walkForwardValidate(candles, baseConfig = {}, options = {}) {
       candidateCount: tuning.candidateCount,
       candidatePoolCount: tuning.candidatePoolCount,
       candidateSelectionLimited: tuning.candidateSelectionLimited,
+      minimumTradeCount: tuning.minimumTradeCount,
+      eligibleCandidateCount: tuning.eligibleCandidateCount,
+      minimumTradeFallback: tuning.minimumTradeFallback,
       bestConfig: tuning.best.config,
       metrics: tuning.best.result.metrics
     },

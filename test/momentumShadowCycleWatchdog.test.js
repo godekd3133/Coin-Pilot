@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   DEFAULT_MOMENTUM_SHADOW_MAX_CYCLE_DURATION_MS,
+  formatMomentumShadowCycleTimeoutMessage,
   isMomentumShadowCycleTimedOut,
   resolveMomentumShadowMaxCycleDurationMs
 } from '../src/research/momentumShadowCycleWatchdog.js';
@@ -36,4 +37,14 @@ test('cycle watchdog distinguishes an in-budget fetch from a timed-out cycle', (
     now: 601_001,
     timeoutMs: 600_000
   }), false);
+});
+
+test('cycle watchdog timeout message preserves the last stage and market', () => {
+  assert.equal(formatMomentumShadowCycleTimeoutMessage({
+    elapsedMs: 600123.9,
+    timeoutMs: 600_000,
+    stage: 'daily fetch',
+    market: 'KRW-ETH'
+  }), 'shadow cycle exceeded 600s (elapsedMs=600123 stage=daily_fetch market=KRW-ETH)');
+  assert.match(formatMomentumShadowCycleTimeoutMessage({}), /stage=unknown market=none/);
 });

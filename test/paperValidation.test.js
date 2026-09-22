@@ -141,6 +141,16 @@ test('forward paper 세션은 기존 포트폴리오와 별도 ledger로 시작/
     assert.equal(started.configConsistent, true);
     assert.equal(fs.existsSync(ledger), true);
 
+    const activeStatus = await trader.getPaperValidationStatus();
+    assert.equal(activeStatus.eligible, false);
+    assert.equal(activeStatus.exitEvidence.researchOnly, true);
+    assert.equal(activeStatus.exitEvidence.promoted, false);
+    assert.equal(activeStatus.exitEvidence.strict.validTradeCount, 0);
+    assert.equal(activeStatus.exitEvidence.shadow.validTradeCount, 0);
+    assert.equal(activeStatus.exitEvidence.looseShadow.validTradeCount, 0);
+    assert.ok(activeStatus.promotionBlockers.some(blocker => blocker.includes('관찰 세션')));
+    assert.ok(activeStatus.promotionBlockers.some(blocker => blocker.includes('청산 표본')));
+
     const stopped = await trader.stopPaperValidationSession();
     assert.equal(stopped.active, false);
     assert.equal(stopped.state, 'STOPPED');
@@ -309,6 +319,10 @@ test('soft 후보는 strict 포트폴리오와 분리된 shadow 장부로만 추
     assert.equal(started.closedTradeCount, 0);
     assert.equal(started.shadowEvaluation.entryCount, 1);
     assert.equal(started.shadowEvaluation.activePositions, 1);
+    assert.equal(started.shadowEvaluation.positions.length, 1);
+    assert.equal(started.shadowEvaluation.positions[0].coin, 'KRW-BTC');
+    assert.equal(started.shadowEvaluation.positions[0].maxFavorableExcursionPercent, 0);
+    assert.equal(started.shadowEvaluation.positions[0].maxAdverseExcursionPercent, 0);
     assert.equal(trader.virtualPortfolio.krwBalance, 1_000_000);
 
     trader.recordPaperSignalTelemetry([{
@@ -322,6 +336,7 @@ test('soft 후보는 strict 포트폴리오와 분리된 shadow 장부로만 추
     assert.equal(closed.shadowEvaluation.closedTradeCount, 1);
     assert.ok(closed.shadowEvaluation.realizedProfit > 0);
     assert.equal(closed.shadowEvaluation.activePositions, 0);
+    assert.deepEqual(closed.shadowEvaluation.positions, []);
     assert.equal(closed.shadowEvaluation.recentTrades.length, 1);
     assert.equal(closed.shadowEvaluation.recentTrades[0].coin, 'KRW-BTC');
     assert.ok(closed.shadowEvaluation.recentTrades[0].netProfit > 0);
@@ -696,6 +711,97 @@ test('winner shadow는 strict confirmed signal만 복제하고 winner-hold exit�
   const drifted = await trader.getPaperValidationStatus();
   assert.equal(drifted.paperExperimentConsistent, false);
   assert.ok(drifted.paperExperimentDrift.includes('winnerExtendMinutes'));
+});
+
+test('strict-only forward는 relaxed diagnostic shadow를 생성하지 않고 설정 drift를 감시한다', () => {
+  const trader = new MultiCoinTrader({
+    strategyMode: 'oversold_reaction_scalping',
+    targetCoins: ['KRW-BTC'],
+    dryRun: true,
+    dryRunSeedMoney: 1_000_000,
+    useNews: false,
+    paperDiagnosticShadowsEnabled: false
+  });
+  trader.savePaperValidation = () => {};
+  trader.paperValidation = {
+    active: true,
+    baselineAssets: 1_000_000,
+    telemetry: {},
+    shadow: { positions: {}, closedTrades: [] },
+    looseShadow: { positions: {}, closedTrades: [] }
+  };
+
+  trader.recordPaperSignalTelemetry([{
+    coin: 'KRW-BTC',
+    currentPrice: 100.2,
+    decision: {
+      action: 'HOLD',
+      reason: 'strict-only 진단 비활성화 확인',
+      details: {
+        rebound: {
+          available: true,
+          previousWasOversold: true,
+          bullishCandle: true,
+          referencePrice: 100,
+          reboundPriceChangePercent: 0.5,
+          priceChangePercent: 0.5,
+          rsiRecovery: 2,
+          signalKey: 'strict-only-shadow-disabled',
+          rejectionReasons: ['previous_high_break_failed']
+        }
+      }
+    }
+  }]);
+
+  assert.equal(trader.getPaperExperimentSnapshot().diagnosticShadows.enabled, false);
+  assert.equal(trader.paperValidation.shadow.entryCount || 0, 0);
+  assert.equal(trader.paperValidation.looseShadow.entryCount || 0, 0);
+  assert.equal(trader.paperValidation.telemetry.shadowCandidates || 0, 0);
+  assert.equal(trader.paperValidation.telemetry.looseShadowCandidates || 0, 0);
+  const recordedStrictOnly = trader.getPaperExperimentSnapshot();
+  assert.equal(trader.comparePaperExperimentConfig(recordedStrictOnly).consistent, true);
+
+  trader.paperDiagnosticShadowsEnabled = true;
+  const drift = trader.comparePaperExperimentConfig(recordedStrictOnly);
+  assert.equal(drift.consistent, false);
+  assert.ok(drift.drift.includes('diagnosticShadows.enabled'));
+});
+
+test('strict-only paper session은 ledger snapshot에 진단 장부 비활성 상태를 보존한다', async () => {
+  const suffix = `coinpilot-strict-only-session-${Date.now()}`;
+  const ledger = path.join(os.tmpdir(), `${suffix}.json`);
+  const portfolio = path.join(os.tmpdir(), `${suffix}-portfolio.json`);
+  const trader = new MultiCoinTrader({
+    strategyMode: 'oversold_reaction_scalping',
+    targetCoins: ['KRW-BTC'],
+    dryRun: true,
+    dryRunSeedMoney: 1_000_000,
+    virtualPortfolioFile: portfolio,
+    paperValidationFile: ledger,
+    useNews: false,
+    paperDiagnosticShadowsEnabled: false
+  });
+  trader.strategies = new Map();
+  trader.calculateTotalAssets = async () => 1_000_000;
+
+  try {
+    const started = await trader.startPaperValidationSession({ reset: true });
+    assert.equal(started.paperExperiments.diagnosticShadows.enabled, false);
+    assert.equal(started.shadowEvaluation.closedTradeCount, 0);
+    assert.equal(started.looseShadowEvaluation.closedTradeCount, 0);
+
+    const stopped = await trader.stopPaperValidationSession();
+    assert.equal(stopped.active, false);
+    assert.equal(stopped.paperExperiments.diagnosticShadows.enabled, false);
+    assert.equal(stopped.endedWithDiagnosticOpenPositions, false);
+    const persisted = JSON.parse(fs.readFileSync(ledger, 'utf8'));
+    assert.equal(persisted.paperExperiments.diagnosticShadows.enabled, false);
+  } finally {
+    trader.stopPositionRiskMonitor();
+    for (const file of [ledger, portfolio]) {
+      if (fs.existsSync(file)) fs.unlinkSync(file);
+    }
+  }
 });
 
 test('runtime config snapshot은 선언된 validation contract 키를 모두 방출한다', () => {
@@ -1664,6 +1770,84 @@ test('반복 cycle은 고유 signal window telemetry에서 한 번만 집계된�
   assert.equal(status.signalTelemetry.available, true);
   assert.equal(status.signalTelemetry.uniqueSignalWindows, 2);
   assert.equal(status.signalAvailability.uniqueSignalWindows, 2);
+});
+
+test('고유 signal window별 직전 RSI와 과매도 임계값 근접도를 별도로 기록한다', async () => {
+  const trader = new MultiCoinTrader({
+    strategyMode: 'oversold_reaction_scalping',
+    targetCoins: ['KRW-BTC'],
+    rsiOversold: 30,
+    dryRun: true,
+    dryRunSeedMoney: 1_000_000,
+    useNews: false
+  });
+  trader.paperValidation = {
+    active: true,
+    startedAt: new Date(Date.now() - 60_000).toISOString(),
+    telemetry: {}
+  };
+  trader.paperDiagnosticShadowsEnabled = false;
+  trader.savePaperValidation = () => {};
+
+  const analysisFor = (signalKey, previousRsi) => ({
+    coin: 'KRW-BTC',
+    candleFreshness: { valid: true },
+    decision: {
+      action: 'HOLD',
+      reason: '과매도 조건 없음 - 관망',
+      details: {
+        candleFreshness: { valid: true },
+        rebound: {
+          available: true,
+          signalKey,
+          previousRsi,
+          rsi: previousRsi + 1,
+          previousWasOversold: false,
+          bullishCandle: false,
+          reboundConfirmed: false,
+          rejectionReasons: ['previous_rsi_not_oversold']
+        }
+      }
+    }
+  });
+
+  trader.recordPaperSignalTelemetry([analysisFor('rsi-window-a', 34)]);
+  trader.recordPaperSignalTelemetry([analysisFor('rsi-window-a', 34)]);
+  trader.recordPaperSignalTelemetry([analysisFor('rsi-window-b', 38)]);
+
+  const telemetry = trader.paperValidation.telemetry;
+  assert.equal(telemetry.rsiProximity.uniqueAvailableWindows, 2);
+  assert.deepEqual(telemetry.rsiProximity.uniqueAvailableWindowsByCoin, { 'KRW-BTC': 2 });
+  assert.equal(telemetry.rsiProximity.minimumPreviousRsi, 34);
+  assert.deepEqual(telemetry.rsiProximity.minimumPreviousRsiByCoin, { 'KRW-BTC': 34 });
+  assert.equal(telemetry.rsiProximity.nearThresholdWindows, 1);
+  assert.deepEqual(telemetry.rsiProximity.nearThresholdWindowsByCoin, { 'KRW-BTC': 1 });
+  assert.deepEqual(telemetry.signalFunnel, {
+    version: 1,
+    availableWindows: 2,
+    oversoldWindows: 0,
+    bullishWindows: 0,
+    priceReboundWindows: 0,
+    rsiRecoveryWindows: 0,
+    volumeWindows: 0,
+    candleRangeWindows: 0,
+    closeStrengthWindows: 0,
+    trendWindows: 0,
+    previousHighBreakWindows: 0,
+    profileWindows: 0,
+    confirmedWindows: 0
+  });
+
+  trader.calculateTotalAssets = async () => 1_000_000;
+  const status = await trader.getPaperValidationStatus();
+  assert.equal(status.signalAvailability.rsiProximity.threshold, 30);
+  assert.equal(status.signalAvailability.rsiProximity.minimumPreviousRsi, 34);
+  assert.equal(status.signalAvailability.rsiProximity.nearThresholdWindows, 1);
+  assert.equal(status.signalAvailability.signalFunnel.availableWindows, 2);
+  assert.equal(status.signalAvailability.signalFunnel.confirmedWindows, 0);
+  assert.equal(status.signalAvailability.lastSignalEvidenceByCoin['KRW-BTC'].signalKey, 'rsi-window-b');
+  assert.equal(status.signalAvailability.lastSignalEvidenceByCoin['KRW-BTC'].previousRsi, 38);
+  assert.deepEqual(status.signalAvailability.lastSignalEvidenceByCoin['KRW-BTC'].rejectionReasons, ['previous_rsi_not_oversold']);
 });
 
 test('캔들 수가 부족한 마켓은 stale과 별도의 데이터 품질 telemetry로 기록한다', async () => {
@@ -2854,12 +3038,79 @@ test('과매도 반등 후보가 없는 조용한 시장은 filter starvation으
 
   assert.equal(status.filterStarvation, false);
   assert.equal(status.marketQuiet, true);
+  assert.equal(status.oversoldObservedNoRebound, false);
   assert.deepEqual(status.signalAvailability, {
     oversoldObservations: 0,
     strictReboundCandidates: 0,
     strictConfirmedCandidates: 0,
-    uniqueSignalWindows: null
+    uniqueSignalWindows: null,
+    rsiProximity: {
+      version: 1,
+      threshold: 30,
+      nearThresholdBand: 5,
+      uniqueAvailableWindows: 0,
+      uniqueAvailableWindowsByCoin: {},
+      minimumPreviousRsi: null,
+      minimumPreviousRsiByCoin: {},
+      nearThresholdWindows: 0,
+      nearThresholdWindowsByCoin: {}
+    },
+    signalFunnel: {
+      version: 1,
+      availableWindows: 0,
+      oversoldWindows: 0,
+      bullishWindows: 0,
+      priceReboundWindows: 0,
+      rsiRecoveryWindows: 0,
+      volumeWindows: 0,
+      candleRangeWindows: 0,
+      closeStrengthWindows: 0,
+      trendWindows: 0,
+      previousHighBreakWindows: 0,
+      profileWindows: 0,
+      confirmedWindows: 0
+    },
+    lastSignalEvidenceByCoin: {}
   });
+  assert.deepEqual(status.suggestedAdjustments, []);
+});
+
+test('과매도 관측은 있지만 반등 후보가 없는 상태를 조용한 시장과 구분한다', async () => {
+  const trader = new MultiCoinTrader({
+    strategyMode: 'oversold_reaction_scalping',
+    targetCoins: ['KRW-BTC'],
+    dryRun: true,
+    dryRunSeedMoney: 1_000_000,
+    useNews: false
+  });
+  trader.calculateTotalAssets = async () => 1_000_000;
+  trader.paperValidation = {
+    active: true,
+    startedAt: new Date(Date.now() - 20 * 86_400_000).toISOString(),
+    processId: process.pid,
+    baselineAssets: 1_000_000,
+    configSnapshot: trader.getPaperValidationConfigSnapshot(),
+    configSnapshotComplete: true,
+    strictTrades: [],
+    strictOpenPositions: [],
+    telemetry: {
+      cycles: 20,
+      buyCandidates: 0,
+      oversoldObservations: 2,
+      strictReboundCandidates: 0,
+      strictConfirmedCandidates: 0,
+      signalTelemetryVersion: 1,
+      signalTelemetryCoverageStartedAt: new Date().toISOString()
+    },
+    shadow: { positions: {}, closedTrades: [] },
+    looseShadow: { positions: {}, closedTrades: [] },
+    snapshots: [{ timestamp: new Date().toISOString(), totalAssets: 1_000_000 }]
+  };
+
+  const status = await trader.getPaperValidationStatus();
+  assert.equal(status.filterStarvation, false);
+  assert.equal(status.marketQuiet, false);
+  assert.equal(status.oversoldObservedNoRebound, true);
   assert.deepEqual(status.suggestedAdjustments, []);
 });
 

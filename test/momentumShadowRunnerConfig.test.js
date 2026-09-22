@@ -61,6 +61,7 @@ test('shadow runner resolves optional cooldown and drawdown risk controls withou
   assert.equal(absent.maxSpreadPercent, null);
   assert.equal(absent.requestIntervalMs, null);
   assert.equal(absent.relativeTrendMinPercent, null);
+  assert.equal(absent.executionModel, null);
 
   const explicit = resolveMomentumShadowRunnerContract({
     cooldownAfterLossDays: '3',
@@ -70,7 +71,8 @@ test('shadow runner resolves optional cooldown and drawdown risk controls withou
     maxSpreadPercent: '0.5',
     requestIntervalMs: '500',
     minUpBars: '2',
-    relativeTrendMinPercent: '0'
+    relativeTrendMinPercent: '0',
+    executionModel: 'quote_cross'
   });
   assert.equal(explicit.cooldownAfterLossDays, 3);
   assert.equal(explicit.maxPortfolioDrawdownPercent, 10);
@@ -80,9 +82,10 @@ test('shadow runner resolves optional cooldown and drawdown risk controls withou
   assert.equal(explicit.requestIntervalMs, 500);
   assert.equal(explicit.minUpBars, 2);
   assert.equal(explicit.relativeTrendMinPercent, 0);
+  assert.equal(explicit.executionModel, 'quote_cross');
 
   const persisted = resolveMomentumShadowRunnerContract({
-    persistedConfig: { cooldownAfterLossDays: 2, maxPortfolioDrawdownPercent: 15, maxEntryGapPercent: 0.3, maxDailyCandleAgeHours: 24, maxSpreadPercent: 0.4, requestIntervalMs: 700, minUpBars: 2, relativeTrendMinPercent: 0.5 }
+    persistedConfig: { cooldownAfterLossDays: 2, maxPortfolioDrawdownPercent: 15, maxEntryGapPercent: 0.3, maxDailyCandleAgeHours: 24, maxSpreadPercent: 0.4, requestIntervalMs: 700, minUpBars: 2, relativeTrendMinPercent: 0.5, executionModel: 'quote_cross' }
   });
   assert.equal(persisted.cooldownAfterLossDays, 2);
   assert.equal(persisted.maxPortfolioDrawdownPercent, 15);
@@ -92,6 +95,7 @@ test('shadow runner resolves optional cooldown and drawdown risk controls withou
   assert.equal(persisted.requestIntervalMs, 700);
   assert.equal(persisted.minUpBars, 2);
   assert.equal(persisted.relativeTrendMinPercent, 0.5);
+  assert.equal(persisted.executionModel, 'quote_cross');
 });
 
 test('shadow runner inherits persisted volatility sizing while explicit env stays authoritative', () => {

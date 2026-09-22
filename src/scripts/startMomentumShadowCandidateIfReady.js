@@ -1,12 +1,28 @@
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { inspectMomentumShadowCandidate } from '../research/momentumShadowCandidatePreflight.js';
-import { resolveMomentumShadowCandidateConfig } from '../research/momentumShadowCandidateConfig.js';
+import {
+  resolveMomentumShadowCandidateProfile
+} from '../research/momentumShadowCandidateProfiles.js';
 import { DEFAULT_MOMENTUM_SHADOW_CANDIDATE_SLOT_FILE } from '../research/momentumShadowCandidateSlot.js';
 
 const csv = value => String(value || '').split(',').map(item => item.trim()).filter(Boolean);
 
-const targetDir = process.env.MOMO_SHADOW_CANDIDATE_DIR || '.paper-momentum-shadow-btc-gate-v2';
+let profileResolution;
+try {
+  profileResolution = resolveMomentumShadowCandidateProfile();
+} catch (error) {
+  console.error(`candidate launch refused: ${error.message}`);
+  process.exit(4);
+}
+const {
+  candidateProfile,
+  targetDir,
+  candidateConfig,
+  requireQuoteQuality,
+  fixedHoldQuoteCrossDir,
+  fixedHoldLossCapDir
+} = profileResolution;
 const benchmarkDir = process.env.MOMO_SHADOW_BENCHMARK_DIR || '.paper-momentum-shadow-btc-gate-v1';
 const fixedHoldDir = process.env.MOMO_SHADOW_FIXED_HOLD_DIR || '.paper-momentum-shadow-fixed-hold-2d-v1';
 const fixedHoldSpreadDir = process.env.MOMO_SHADOW_FIXED_HOLD_SPREAD_DIR || '.paper-momentum-shadow-fixed-hold-2d-spread-v1';
@@ -19,9 +35,10 @@ const ownerDirs = csv(process.env.MOMO_SHADOW_OWNER_DIRS || [
   process.env.MOMO_SHADOW_NEXT_OPEN_DIR || '.paper-momentum-shadow-next-open-v1',
   fixedHoldDir,
   fixedHoldSpreadDir,
-  fixedHoldRelativeDir
+  fixedHoldRelativeDir,
+  fixedHoldQuoteCrossDir,
+  fixedHoldLossCapDir
 ].join(','));
-const candidateConfig = resolveMomentumShadowCandidateConfig();
 const candidateSlotFile = path.resolve(
   process.env.MOMO_SHADOW_CANDIDATE_SLOT_FILE || DEFAULT_MOMENTUM_SHADOW_CANDIDATE_SLOT_FILE
 );
@@ -32,13 +49,23 @@ const readiness = inspectMomentumShadowCandidate({
   ownerDirs,
   expectedConfig: candidateConfig,
   requireBenchmarkOpen: process.env.MOMO_SHADOW_REQUIRE_BENCHMARK_OPEN !== 'false',
+  requireQuoteQuality,
+  quoteReportFile: process.env.MOMO_SHADOW_QUOTE_REPORT_FILE,
+  quoteMaxAgeSeconds: Number.isFinite(Number(process.env.MOMO_SHADOW_QUOTE_MAX_AGE_SECONDS))
+    ? Number(process.env.MOMO_SHADOW_QUOTE_MAX_AGE_SECONDS)
+    : 15 * 60,
   candidateSlotFile,
   minimumPollMs: Number.isFinite(Number(process.env.MOMO_SHADOW_MIN_POLL_MS))
     ? Number(process.env.MOMO_SHADOW_MIN_POLL_MS)
     : 15 * 60 * 1000
 });
 
-console.log(JSON.stringify({ ...readiness, startAttempt: true, readOnly: false }, null, 2));
+console.log(JSON.stringify({
+  ...readiness,
+  candidateProfile,
+  startAttempt: true,
+  readOnly: false
+}, null, 2));
 
 if (!readiness.launchAllowed) {
   console.error(`candidate launch refused: ${readiness.blockers.join(', ')}`);
@@ -82,6 +109,7 @@ if (!readiness.launchAllowed) {
       MOMO_SHADOW_VOLATILITY_LOOKBACK_DAYS: String(candidateConfig.volatilityLookbackDays),
       MOMO_SHADOW_POLL_MS: String(candidateConfig.pollMs),
       MOMO_SHADOW_ENTRY_EXECUTION: candidateConfig.entryExecution,
+      MOMO_SHADOW_EXECUTION_MODEL: candidateConfig.executionModel,
       ...(candidateConfig.volatilityTargetPercent === null
         ? {}
         : { MOMO_SHADOW_VOLATILITY_TARGET_PERCENT: String(candidateConfig.volatilityTargetPercent) })

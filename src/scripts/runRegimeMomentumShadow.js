@@ -9,6 +9,7 @@ import {
   ensureMomentumShadowInitialBalance,
   getMomentumShadowEquity,
   isMomentumShadowPositionCoveredByBar,
+  markMomentumShadowPosition,
   markMomentumShadowPositions,
   updateMomentumShadowEquity
 } from '../research/momentumShadowLedger.js';
@@ -17,7 +18,13 @@ import {
   recordMomentumShadowRunnerStop
 } from '../research/momentumShadowRunnerState.js';
 import { resolveMomentumShadowRunnerContract } from '../research/momentumShadowRunnerConfig.js';
-import { getMomentumShadowBenchmarkGate } from '../research/momentumShadowBenchmark.js';
+import {
+  appendMomentumShadowBenchmarkObservationCheckpoint,
+  calculateMomentumShadowRelativeMarkedReturnPercent,
+  getMomentumShadowBenchmarkGate,
+  MOMENTUM_SHADOW_BENCHMARK_OBSERVATION_SCHEMA_VERSION,
+  projectMomentumShadowBenchmarkObservation
+} from '../research/momentumShadowBenchmark.js';
 import {
   isMomentumShadowCooldownActive,
   recordMomentumShadowExit,
@@ -48,13 +55,20 @@ import {
   resolveMomentumShadowFetchFailureLimit
 } from '../research/momentumShadowNetworkGuard.js';
 import {
+  formatMomentumShadowCycleTimeoutMessage,
   isMomentumShadowCycleTimedOut,
   resolveMomentumShadowMaxCycleDurationMs
 } from '../research/momentumShadowCycleWatchdog.js';
 import {
   assessMomentumShadowQuoteQuality,
+  compactMomentumShadowQuote,
+  projectMomentumShadowQuoteExecutionEvidence,
   projectMomentumShadowQuote
 } from '../research/momentumShadowQuoteQuality.js';
+import {
+  projectMomentumShadowExecutionPrice,
+  resolveMomentumShadowExecutionModel
+} from '../research/momentumShadowExecutionModel.js';
 import { isMomentumShadowRelativeTrendAllowed } from '../research/momentumShadowRelativeTrend.js';
 import {
   acquireMomentumShadowCandidateSlot,
@@ -108,6 +122,7 @@ let MAX_ENTRY_GAP_PERCENT = 0;
 let MAX_DAILY_CANDLE_AGE_HOURS = DEFAULT_MAX_DAILY_CANDLE_AGE_HOURS;
 let MAX_SPREAD_PERCENT = 0;
 let REQUEST_INTERVAL_MS = DEFAULT_REQUEST_INTERVAL_MS;
+let EXECUTION_MODEL = resolveMomentumShadowExecutionModel(process.env.MOMO_SHADOW_EXECUTION_MODEL);
 const COST_PERCENT = Number(process.env.MOMO_SHADOW_COST_PERCENT) || 0.2;
 const POSITION_FRACTION = Number(process.env.MOMO_SHADOW_POSITION_FRACTION) || 0.25;
 const MAX_POSITIONS = Number(process.env.MOMO_SHADOW_MAX_POSITIONS) || 4;
@@ -382,6 +397,93 @@ function timestampMs(value) {
   return Number.isFinite(timestamp) ? timestamp : null;
 }
 
+function recordMomentumShadowBenchmarkObservation(ledger, series, benchmarkMarket) {
+  const observation = projectMomentumShadowBenchmarkObservation({
+    existing: ledger,
+    bars: series?.[benchmarkMarket],
+    benchmarkMarket
+  });
+  ledger.benchmarkObservationAvailable = observation.available === true;
+  ledger.benchmarkObservationReason = observation.reason || null;
+  if (observation.available !== true) return observation;
+
+  ledger.benchmarkObservationMarket = observation.benchmarkObservationMarket;
+  ledger.benchmarkObservationStartPrice = observation.benchmarkObservationStartPrice;
+  ledger.benchmarkObservationStartTs = observation.benchmarkObservationStartTs;
+  ledger.benchmarkObservationMarkPrice = observation.benchmarkObservationMarkPrice;
+  ledger.benchmarkObservationMarkTs = observation.benchmarkObservationMarkTs;
+  ledger.benchmarkObservationReturnPercent = observation.benchmarkObservationReturnPercent;
+  return observation;
+}
+
+function recordMomentumShadowBenchmarkCheckpoint(ledger, equity, capturedAt) {
+  if (ledger.benchmarkObservationAvailable !== true ||
+    !ledger.benchmarkObservationMarkTs) return;
+  const relativeMarkedReturnPercent = calculateMomentumShadowRelativeMarkedReturnPercent(
+    equity?.markedReturnPercent,
+    ledger.benchmarkObservationReturnPercent
+  );
+  if (relativeMarkedReturnPercent === null) return;
+  ledger.benchmarkObservationCheckpoints = appendMomentumShadowBenchmarkObservationCheckpoint(
+    ledger.benchmarkObservationCheckpoints,
+    {
+      benchmarkMarkTs: ledger.benchmarkObservationMarkTs,
+      capturedAt,
+      markedEquity: equity.markedEquity,
+      markedReturnPercent: equity.markedReturnPercent,
+      benchmarkReturnPercent: ledger.benchmarkObservationReturnPercent,
+      relativeMarkedReturnPercent,
+      openPositionCount: equity.openPositionCount,
+      dataQualityValid: ledger.dataQuality?.valid === true,
+      benchmarkGateOpen: ledger.benchmarkGateOpen === true
+    }
+  );
+}
+
+function markMomentumShadowPositionsForCycle(ledger, series, quoteQuality) {
+  if (EXECUTION_MODEL !== 'quote_cross') {
+    return markMomentumShadowPositions(ledger, series, COST_PERCENT);
+  }
+
+  let markedCount = 0;
+  for (const [market, position] of Object.entries(ledger.positions || {})) {
+    const bars = series?.[market];
+    const latest = Array.isArray(bars) && bars.length > 0 ? bars.at(-1) : null;
+    if (!isMomentumShadowPositionCoveredByBar(position, latest)) continue;
+    const projection = projectMomentumShadowExecutionPrice({
+      model: EXECUTION_MODEL,
+      side: 'mark',
+      candlePrice: latest?.trade_price,
+      quote: compactMomentumShadowQuote(quoteQuality?.byMarket?.[market])
+    });
+    if (!projection.available) {
+      ledger.executionModelMarkBlocked = (ledger.executionModelMarkBlocked || 0) + 1;
+      ledger.lastExecutionModelBlock = {
+        stage: 'mark',
+        market,
+        reason: projection.reason,
+        at: new Date().toISOString()
+      };
+      continue;
+    }
+    const marked = markMomentumShadowPosition(
+      position,
+      projection.price,
+      latest?.ts,
+      COST_PERCENT
+    );
+    if (!marked) continue;
+    ledger.positions[market] = {
+      ...marked,
+      executionModel: projection.model,
+      markPriceSource: projection.source,
+      markQuoteTimestamp: projection.quoteTimestamp
+    };
+    markedCount += 1;
+  }
+  return markedCount;
+}
+
 function currentDailyOpen(candles, nowMs) {
   const todayUtc = new Date(nowMs).toISOString().slice(0, 10);
   const current = candles.find(candle =>
@@ -412,6 +514,15 @@ async function cycle(ledger, strategies) {
   const series = {};
   const currentOpenByMarket = {};
   const cycleNow = Date.now();
+  let cycleStage = 'initializing';
+  let cycleMarket = null;
+  const markCycleStage = (stage, market = null) => {
+    cycleStage = stage;
+    cycleMarket = market;
+    ledger.currentCycleStage = stage;
+    ledger.currentCycleMarket = market;
+  };
+  markCycleStage('daily_fetch');
   let cycleTimeout = null;
   const onCycleTimeout = () => {
     if (shutdownStarted) return;
@@ -432,9 +543,12 @@ async function cycle(ledger, strategies) {
       cycleTimeout.unref?.();
       return;
     }
-    const error = new Error(
-      `shadow cycle exceeded ${Math.round(MAX_CYCLE_DURATION_MS / 1000)}s`
-    );
+    const error = new Error(formatMomentumShadowCycleTimeoutMessage({
+      elapsedMs,
+      timeoutMs: MAX_CYCLE_DURATION_MS,
+      stage: cycleStage,
+      market: cycleMarket
+    }));
     console.error(`FAIL_CLOSED: ${error.message}`);
     stopRunner('cycle_timeout', error);
     process.exitCode = 2;
@@ -448,6 +562,7 @@ async function cycle(ledger, strategies) {
     ledger.networkFetchMaxConsecutiveFailures = MAX_CONSECUTIVE_FETCH_FAILURES;
     ledger.networkFetchMaxCycleDurationMs = MAX_CYCLE_DURATION_MS;
     for (const m of MARKETS) {
+      markCycleStage('daily_fetch', m);
       try {
         const candles = await fetchDailyCandles(m);
         series[m] = toBars(candles, new Date(cycleNow));
@@ -461,6 +576,7 @@ async function cycle(ledger, strategies) {
         const networkState = recordMomentumShadowFetchFailure(ledger, e, {
           consecutiveFailures: consecutiveFetchFailures,
           maxConsecutiveFailures: MAX_CONSECUTIVE_FETCH_FAILURES,
+          market: m,
           now: Date.now()
         });
         if (networkState.circuitOpen) {
@@ -473,12 +589,25 @@ async function cycle(ledger, strategies) {
       }
       await sleep(REQUEST_INTERVAL_MS);
     }
+    markCycleStage('daily_quality');
     const now = cycleNow;
     const nowIso = new Date().toISOString();
     const dataQuality = assessMomentumShadowDailyGrid(series, MARKETS, {
       now,
       maxAgeHours: MAX_DAILY_CANDLE_AGE_HOURS
     });
+    ledger.dataQualityObservationCycles = (Number(ledger.dataQualityObservationCycles) || 0) + 1;
+    if (dataQuality.valid) {
+      ledger.dataQualityValidCycles = (Number(ledger.dataQualityValidCycles) || 0) + 1;
+    } else {
+      ledger.dataQualityInvalidCycles = (Number(ledger.dataQualityInvalidCycles) || 0) + 1;
+      if (!ledger.dataQualityInvalidReasonCounts ||
+        typeof ledger.dataQualityInvalidReasonCounts !== 'object') {
+        ledger.dataQualityInvalidReasonCounts = {};
+      }
+      ledger.dataQualityInvalidReasonCounts[dataQuality.reason] =
+        (Number(ledger.dataQualityInvalidReasonCounts[dataQuality.reason]) || 0) + 1;
+    }
     ledger.dataQuality = {
       valid: dataQuality.valid,
       reason: dataQuality.reason,
@@ -494,7 +623,9 @@ async function cycle(ledger, strategies) {
     };
 
     let quoteQuality = null;
-    if (MAX_SPREAD_PERCENT > 0) {
+    const quoteRequiredForExecution = EXECUTION_MODEL === 'quote_cross';
+    if (MAX_SPREAD_PERCENT > 0 || quoteRequiredForExecution) {
+      markCycleStage('orderbook_fetch');
       try {
         quoteQuality = assessMomentumShadowQuoteQuality({
           markets: MARKETS,
@@ -510,9 +641,15 @@ async function cycle(ledger, strategies) {
           error: error.message
         });
       }
+      quoteQuality.executionModel = EXECUTION_MODEL;
+      quoteQuality.executionRequired = quoteRequiredForExecution;
+      quoteQuality.executionReady = !quoteQuality.error &&
+        quoteQuality.missingMarkets.length === 0 &&
+        quoteQuality.invalidMarkets.length === 0;
       ledger.quoteQuality = quoteQuality;
     }
 
+    markCycleStage('benchmark');
     const benchmark = getMomentumShadowBenchmarkGate(
       series,
       BENCHMARK_MARKET,
@@ -524,15 +661,19 @@ async function cycle(ledger, strategies) {
     ledger.benchmarkTrendPercent = benchmark.trendPercent;
     ledger.benchmarkGateOpen = benchmark.gateOpen;
     ledger.benchmarkAvailable = benchmark.available;
+    recordMomentumShadowBenchmarkObservation(ledger, series, BENCHMARK_MARKET);
 
-    // Mark-to-market is descriptive only. Entry/exit decisions still use the
-    // same completed-candle prices and strategy contract as before.
-    markMomentumShadowPositions(ledger, series, COST_PERCENT);
+    // Mark-to-market is descriptive only. The optional quote_cross model uses
+    // best bid for a conservative liquidation mark; the default keeps the
+    // completed-candle price contract unchanged.
+    markCycleStage('position_mark');
+    markMomentumShadowPositionsForCycle(ledger, series, quoteQuality);
     if (!ledger.cooldownUntilByMarket || typeof ledger.cooldownUntilByMarket !== 'object') {
       ledger.cooldownUntilByMarket = {};
     }
 
     // exits first (mark to latest completed daily close)
+    markCycleStage('exits');
     for (const [m, pos] of Object.entries(ledger.positions)) {
       const bars = series[m];
       if (!bars || !bars.length) continue;
@@ -555,9 +696,48 @@ async function cycle(ledger, strategies) {
         ex = { exit: 'BENCHMARK_OFF', profitPercent: ((last.trade_price - pos.entryPrice) / pos.entryPrice) * 100 };
       }
       if (ex.exit) {
-        const profit = ex.profitPercent - COST_PERCENT;
+        const exitQuote = compactMomentumShadowQuote(quoteQuality?.byMarket?.[m]);
+        const execution = projectMomentumShadowExecutionPrice({
+          model: EXECUTION_MODEL,
+          side: 'exit',
+          candlePrice: last.trade_price,
+          quote: exitQuote
+        });
+        if (!execution.available) {
+          ledger.executionModelExitBlocked = (ledger.executionModelExitBlocked || 0) + 1;
+          ledger.lastExecutionModelBlock = {
+            stage: 'exit',
+            market: m,
+            reason: execution.reason,
+            at: nowIso
+          };
+          continue;
+        }
+        const grossProfitPercent = ((execution.price - pos.entryPrice) / pos.entryPrice) * 100;
+        const profit = grossProfitPercent - COST_PERCENT;
         ledger.balance += pos.size * (1 + profit / 100);
-        ledger.trades.push({ market: m, entry: pos, exitTs: last.ts, exitPrice: last.trade_price, exit: ex.exit, profitPercent: profit });
+        const trade = {
+          market: m,
+          entry: pos,
+          exitTs: last.ts,
+          exitPrice: execution.price,
+          decisionExitPrice: last.trade_price,
+          executionModel: execution.model,
+          executionPriceSource: execution.source,
+          executionQuoteTimestamp: execution.quoteTimestamp,
+          exit: ex.exit,
+          profitPercent: profit
+        };
+        if (MAX_SPREAD_PERCENT > 0 || EXECUTION_MODEL === 'quote_cross') {
+          trade.quoteExecutionEvidence = {
+            market: m,
+            ...projectMomentumShadowQuoteExecutionEvidence({
+              entryQuote: pos.entryQuote,
+              exitQuote: compactMomentumShadowQuote(quoteQuality?.byMarket?.[m])
+            })
+          };
+        }
+        ledger.trades.push(trade);
         delete ledger.positions[m];
         recordMomentumShadowExit(ledger, m, profit, now, COOLDOWN_AFTER_LOSS_DAYS);
         notify.send(`momentum close ${m.replace('KRW-', '')}`,
@@ -566,6 +746,7 @@ async function cycle(ledger, strategies) {
       }
     }
 
+    markCycleStage('drawdown_guard');
     const markedBeforeEntries = getMomentumShadowEquity(
       ledger,
       Number(process.env.MOMO_SHADOW_INITIAL_BALANCE) || 100_000_000
@@ -584,17 +765,48 @@ async function cycle(ledger, strategies) {
         if (!last) continue;
         if (positionNeedsCompletedEntryBar(pos) &&
           !isMomentumShadowPositionCoveredByBar(pos, last)) continue;
-        const rawProfitPercent = ((last.trade_price - pos.entryPrice) / pos.entryPrice) * 100;
+        const exitQuote = compactMomentumShadowQuote(quoteQuality?.byMarket?.[m]);
+        const execution = projectMomentumShadowExecutionPrice({
+          model: EXECUTION_MODEL,
+          side: 'exit',
+          candlePrice: last.trade_price,
+          quote: exitQuote
+        });
+        if (!execution.available) {
+          ledger.executionModelExitBlocked = (ledger.executionModelExitBlocked || 0) + 1;
+          ledger.lastExecutionModelBlock = {
+            stage: 'drawdown_exit',
+            market: m,
+            reason: execution.reason,
+            at: nowIso
+          };
+          continue;
+        }
+        const rawProfitPercent = ((execution.price - pos.entryPrice) / pos.entryPrice) * 100;
         const profit = rawProfitPercent - COST_PERCENT;
         ledger.balance += pos.size * (1 + profit / 100);
-        ledger.trades.push({
+        const trade = {
           market: m,
           entry: pos,
           exitTs: last.ts,
-          exitPrice: last.trade_price,
+          exitPrice: execution.price,
+          decisionExitPrice: last.trade_price,
+          executionModel: execution.model,
+          executionPriceSource: execution.source,
+          executionQuoteTimestamp: execution.quoteTimestamp,
           exit: 'PORTFOLIO_DRAWDOWN_STOP',
           profitPercent: profit
-        });
+        };
+        if (MAX_SPREAD_PERCENT > 0 || EXECUTION_MODEL === 'quote_cross') {
+          trade.quoteExecutionEvidence = {
+            market: m,
+            ...projectMomentumShadowQuoteExecutionEvidence({
+              entryQuote: pos.entryQuote,
+              exitQuote: compactMomentumShadowQuote(quoteQuality?.byMarket?.[m])
+            })
+          };
+        }
+        ledger.trades.push(trade);
         delete ledger.positions[m];
         recordMomentumShadowExit(ledger, m, profit, now, COOLDOWN_AFTER_LOSS_DAYS);
         notify.send(`momentum drawdown stop ${m.replace('KRW-', '')}`,
@@ -607,20 +819,26 @@ async function cycle(ledger, strategies) {
     // liquidation: an exit decided at the last completed close frees its slot
     // and cash before an open-time fill is evaluated, matching the simulator's
     // boundary ordering.
+    markCycleStage('pending_entries');
     executeMomentumShadowPendingEntries({
       ledger,
       series,
       currentOpenByMarket,
       dataQuality,
+      quoteQuality,
+      entryQuotes: quoteQuality?.byMarket || {},
+      executionModel: EXECUTION_MODEL,
       maxPositions: MAX_POSITIONS,
       now,
       entryExecution: ENTRY_EXECUTION,
       maxEntryGapPercent: MAX_ENTRY_GAP_PERCENT,
+      maxSpreadPercent: MAX_SPREAD_PERCENT,
       notify,
       bookName
     });
 
     // breadth: count markets with trailing trend above threshold
+    markCycleStage('entry_selection');
     const trends = {};
     for (const m of MARKETS) {
       const bars = series[m];
@@ -731,6 +949,27 @@ async function cycle(ledger, strategies) {
       // A below-minimum entry must not consume the signal key: the order is
       // skipped, not executed, and the same candle may retry once cash allows.
       if (size < 5000) continue;
+      const entryQuote = (MAX_SPREAD_PERCENT > 0 || EXECUTION_MODEL === 'quote_cross')
+        ? compactMomentumShadowQuote(quoteQuality?.byMarket?.[m])
+        : null;
+      const entryExecution = projectMomentumShadowExecutionPrice({
+        model: EXECUTION_MODEL,
+        side: 'entry',
+        candlePrice: r.referencePrice,
+        quote: entryQuote
+      });
+      if (!entryExecution.available) {
+        ledger.executionModelEntryBlocked = (ledger.executionModelEntryBlocked || 0) + 1;
+        ledger.lastExecutionModelBlock = {
+          stage: 'entry',
+          market: m,
+          reason: entryExecution.reason,
+          at: nowIso
+        };
+        // Do not consume an otherwise valid signal when the execution model
+        // cannot observe its required quote boundary.
+        continue;
+      }
       if (!strategies[m].consumeSignal(r.signalKey)) {
         ledger.duplicateSignalBlocked = (ledger.duplicateSignalBlocked || 0) + 1;
         continue;
@@ -749,12 +988,17 @@ async function cycle(ledger, strategies) {
           selectionRank: selectionRank + 1,
           trendPercent: r.trendPercent,
           breadth,
+          signalQuote: entryQuote,
           entryExecution: ENTRY_EXECUTION
         });
       } else {
         ledger.balance -= size;
         ledger.positions[m] = {
-          entryPrice: r.referencePrice,
+          entryPrice: entryExecution.price,
+          decisionEntryPrice: r.referencePrice,
+          executionModel: entryExecution.model,
+          executionPriceSource: entryExecution.source,
+          executionQuoteTimestamp: entryExecution.quoteTimestamp,
           entryTs: bars[bars.length - 1].ts,
           entryTimeMs: now,
           signalKey: r.signalKey,
@@ -764,6 +1008,8 @@ async function cycle(ledger, strategies) {
           selectionRank: selectionRank + 1,
           trendPercent: r.trendPercent,
           breadth,
+          signalQuote: entryQuote,
+          entryQuote,
           entryExecution: ENTRY_EXECUTION
         };
         ledger.entries = (ledger.entries || 0) + 1;
@@ -773,11 +1019,19 @@ async function cycle(ledger, strategies) {
       }
     }
 
+    markCycleStage('cycle_finalize');
     ledger.lastCycleAt = nowIso;
     ledger.cycles = (ledger.cycles || 0) + 1;
     ledger.breadth = breadth;
     ledger.trends = trends;
-    updateMomentumShadowEquity(ledger, Number(process.env.MOMO_SHADOW_INITIAL_BALANCE) || 100_000_000, nowIso);
+    const equity = updateMomentumShadowEquity(
+      ledger,
+      Number(process.env.MOMO_SHADOW_INITIAL_BALANCE) || 100_000_000,
+      nowIso
+    );
+    recordMomentumShadowBenchmarkCheckpoint(ledger, equity, nowIso);
+    delete ledger.currentCycleStage;
+    delete ledger.currentCycleMarket;
     saveLedger(ledger);
     console.log(`[${nowIso}] cycle ${ledger.cycles} bal=${Math.round(ledger.balance)} equity=${Math.round(ledger.markedEquity || ledger.balance)} unrealized=${Math.round(ledger.unrealizedProfit || 0)} open=${Object.keys(ledger.positions).join(',') || 'none'} breadth=${breadth} trades=${ledger.trades.length}`);
   } finally {
@@ -796,6 +1050,23 @@ async function main() {
   }
   const staleRecovery = acquireLock();
   let ledger = loadLedger();
+  const explicitExecutionModel = process.env.MOMO_SHADOW_EXECUTION_MODEL !== undefined;
+  const persistedExecutionModel = ledger?.config?.executionModel;
+  if (explicitExecutionModel && ledger && persistedExecutionModel !== undefined &&
+    resolveMomentumShadowExecutionModel(persistedExecutionModel) !==
+      resolveMomentumShadowExecutionModel(process.env.MOMO_SHADOW_EXECUTION_MODEL) &&
+    ((ledger.pendingEntries || []).length > 0 || Object.keys(ledger.positions || {}).length > 0)) {
+    throw new Error(
+      `FAIL_CLOSED: open paper state requires persisted execution model=${resolveMomentumShadowExecutionModel(persistedExecutionModel)}`
+    );
+  }
+  if (explicitExecutionModel && ledger && persistedExecutionModel === undefined &&
+    ((ledger.pendingEntries || []).length > 0 || Object.keys(ledger.positions || {}).length > 0 ||
+      (ledger.trades || []).length > 0)) {
+    throw new Error(
+      'FAIL_CLOSED: legacy paper state cannot adopt quote execution without a fresh isolated ledger'
+    );
+  }
   const explicitEntryExecution = process.env.MOMO_SHADOW_ENTRY_EXECUTION !== undefined;
   const persistedEntryExecution = ledger?.config?.entryExecution;
   if (!explicitEntryExecution && persistedEntryExecution !== undefined) {
@@ -826,6 +1097,7 @@ async function main() {
     minUpBars: process.env.MOMO_SHADOW_MIN_UP_BARS,
     volatilityLookbackDays: process.env.MOMO_SHADOW_VOLATILITY_LOOKBACK_DAYS,
     volatilityTargetPercent: process.env.MOMO_SHADOW_VOLATILITY_TARGET_PERCENT,
+    executionModel: process.env.MOMO_SHADOW_EXECUTION_MODEL,
     persistedConfig: ledger?.config
   });
   MODE = contract.mode;
@@ -840,6 +1112,9 @@ async function main() {
   MAX_DAILY_CANDLE_AGE_HOURS = contract.maxDailyCandleAgeHours ?? DEFAULT_MAX_DAILY_CANDLE_AGE_HOURS;
   MAX_SPREAD_PERCENT = contract.maxSpreadPercent ?? 0;
   REQUEST_INTERVAL_MS = contract.requestIntervalMs ?? DEFAULT_REQUEST_INTERVAL_MS;
+  EXECUTION_MODEL = contract.executionModel || resolveMomentumShadowExecutionModel(
+    process.env.MOMO_SHADOW_EXECUTION_MODEL || ledger?.config?.executionModel
+  );
   strategyConfig.minUpBars = contract.minUpBars ?? 1;
   strategyConfig.maxHoldHours = Number(process.env.MOMO_SHADOW_MAX_HOLD_HOURS) ||
     (MODE === 'regime' ? 24 * 365 : 72);
@@ -878,6 +1153,10 @@ async function main() {
   if (contract.maxSpreadPercent !== null || !ledger ||
     Object.prototype.hasOwnProperty.call(ledger?.config || {}, 'maxSpreadPercent')) {
     optionalRiskConfig.maxSpreadPercent = MAX_SPREAD_PERCENT;
+  }
+  if (contract.executionModel !== null || !ledger ||
+    Object.prototype.hasOwnProperty.call(ledger?.config || {}, 'executionModel')) {
+    optionalRiskConfig.executionModel = EXECUTION_MODEL;
   }
   if (contract.requestIntervalMs !== null || !ledger ||
     Object.prototype.hasOwnProperty.call(ledger?.config || {}, 'requestIntervalMs')) {
@@ -924,6 +1203,8 @@ async function main() {
     }
   }
   if (!Array.isArray(ledger.pendingEntries)) ledger.pendingEntries = [];
+  ledger.benchmarkObservationSchemaVersion =
+    MOMENTUM_SHADOW_BENCHMARK_OBSERVATION_SCHEMA_VERSION;
   ensureMomentumShadowConsumedSignalState(ledger);
   activeLedger = ledger;
   recordMomentumShadowRunnerStart(ledger, {
@@ -933,7 +1214,7 @@ async function main() {
   });
   saveLedger(ledger);
   startHeartbeatWatchdog(ledger);
-  console.log(`momentum shadow started: ${MARKETS.join(',')} hold=${strategyConfig.maxHoldHours}h trend>${TREND_MIN_PERCENT}% breadth>=${BREADTH_MIN} cooldown=${COOLDOWN_AFTER_LOSS_DAYS}d drawdownStop=${MAX_PORTFOLIO_DRAWDOWN_PERCENT}% volatilityTarget=${VOLATILITY_TARGET_PERCENT ?? 'off'}%/${VOLATILITY_LOOKBACK_DAYS}d relativeTrend=${RELATIVE_TREND_MIN_PERCENT === null ? 'off' : `>${RELATIVE_TREND_MIN_PERCENT}% over benchmark`} entryExecution=${ENTRY_EXECUTION} entryGapCeiling=${MAX_ENTRY_GAP_PERCENT}% dailyCandleMaxAge=${MAX_DAILY_CANDLE_AGE_HOURS}h spreadCeiling=${MAX_SPREAD_PERCENT > 0 ? `${MAX_SPREAD_PERCENT}%` : 'off'} requestInterval=${REQUEST_INTERVAL_MS}ms candidateSlot=${CANDIDATE_SLOT_FILE ? 'global' : 'off'}`);
+  console.log(`momentum shadow started: ${MARKETS.join(',')} hold=${strategyConfig.maxHoldHours}h trend>${TREND_MIN_PERCENT}% breadth>=${BREADTH_MIN} cooldown=${COOLDOWN_AFTER_LOSS_DAYS}d drawdownStop=${MAX_PORTFOLIO_DRAWDOWN_PERCENT}% volatilityTarget=${VOLATILITY_TARGET_PERCENT ?? 'off'}%/${VOLATILITY_LOOKBACK_DAYS}d relativeTrend=${RELATIVE_TREND_MIN_PERCENT === null ? 'off' : `>${RELATIVE_TREND_MIN_PERCENT}% over benchmark`} entryExecution=${ENTRY_EXECUTION} executionModel=${EXECUTION_MODEL} entryGapCeiling=${MAX_ENTRY_GAP_PERCENT}% dailyCandleMaxAge=${MAX_DAILY_CANDLE_AGE_HOURS}h spreadCeiling=${MAX_SPREAD_PERCENT > 0 ? `${MAX_SPREAD_PERCENT}%` : 'off'} requestInterval=${REQUEST_INTERVAL_MS}ms candidateSlot=${CANDIDATE_SLOT_FILE ? 'global' : 'off'}`);
   while (true) {
     try { await cycle(ledger, strategies); }
     catch (e) { console.error('cycle error:', e.message); }

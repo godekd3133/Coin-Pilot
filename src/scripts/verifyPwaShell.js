@@ -50,9 +50,14 @@ function main() {
     `scope=${manifest.scope || 'missing'}`);
   check('manifest-start-url', manifest.start_url === '/?source=pwa',
     `start_url=${manifest.start_url || 'missing'}`);
+  check('manifest-id-stable', manifest.id === '/?source=pwa',
+    `id=${manifest.id || 'missing'}`);
 
   const icons = Array.isArray(manifest.icons) ? manifest.icons : [];
   check('manifest-icons-present', icons.length >= 3, `count=${icons.length}`);
+  check('manifest-install-icons-raster',
+    icons.length > 0 && icons.every(icon => icon?.type === 'image/png'),
+  'install manifest uses browser-compatible raster icons');
   for (const icon of icons) {
     const file = safePublicFile(icon?.src);
     const exists = file && fs.existsSync(file) && fs.statSync(file).isFile();
@@ -61,10 +66,31 @@ function main() {
       exists ? `${bytes} bytes` : 'missing or outside public root');
   }
 
+  const svgIconFile = safePublicFile('/icon.svg');
+  const svgIconSource = svgIconFile && fs.existsSync(svgIconFile) ? read(svgIconFile) : '';
+  check('svg-icon-explicit-square-geometry',
+    /<svg\b[^>]*\bwidth=["']512["'][^>]*\bheight=["'][^>]*\bviewBox=["']0 0 512 512["']/.test(svgIconSource),
+  'SVG install icon declares explicit 512x512 geometry');
+
   const scriptAsset = indexSource.match(/<script\s+src=["'](\/pilot-redesign\.js\?v=[^"']+)["']/)?.[1];
   const styleAsset = indexSource.match(/<link\s+rel=["']stylesheet["']\s+href=["'](\/pilot-redesign\.css\?v=[^"']+)["']/)?.[1];
   check('index-redesign-script-version', Boolean(scriptAsset), scriptAsset || 'missing');
   check('index-redesign-style-version', Boolean(styleAsset), styleAsset || 'missing');
+  check('index-mobile-web-app-capable',
+    /<meta\s+name=["']mobile-web-app-capable["']\s+content=["']yes["']/i.test(indexSource),
+    'Android install metadata declares mobile web app capability');
+  check('index-apple-web-app-capable',
+    /<meta\s+name=["']apple-mobile-web-app-capable["']\s+content=["']yes["']/i.test(indexSource),
+    'iOS home-screen metadata declares standalone capability');
+  check('index-apple-web-app-title',
+    /<meta\s+name=["']apple-mobile-web-app-title["']\s+content=["']CoinPilot["']/i.test(indexSource),
+    'iOS home-screen title is stable');
+  check('index-apple-status-bar-style',
+    /<meta\s+name=["']apple-mobile-web-app-status-bar-style["']\s+content=["'][^"']+["']/i.test(indexSource),
+    'iOS standalone status-bar metadata is declared');
+  check('index-apple-touch-icon-link',
+    /<link\s+rel=["']apple-touch-icon["']\s+href=["']\/apple-touch-icon\.png["']/i.test(indexSource),
+    'iOS home-screen raster icon is linked');
 
   const shellAssets = [
     '/',
@@ -88,6 +114,9 @@ function main() {
 
   check('service-worker-api-bypass', /url\.pathname\.startsWith\(['"]\/api\//.test(serviceWorkerSource),
     'dynamic API state is not served from the shell cache');
+  check('service-worker-shell-network-first', /NETWORK_FIRST_SHELL_PATHS/.test(serviceWorkerSource) &&
+    /fetch\(request\)[\s\S]*ignoreSearch: true/.test(serviceWorkerSource),
+  'online shell assets refresh from the network and fall back to cache offline');
   check('redesign-service-worker-registration', /navigator\.serviceWorker\.register\(['"]\/sw\.js['"]\)/.test(read(path.join(publicRoot, 'pilot-redesign.js'))),
     'redesign owns service worker registration');
 
