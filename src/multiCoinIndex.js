@@ -2,59 +2,70 @@ import dotenv from 'dotenv';
 import MultiCoinTrader from './trader/multiCoinTrader.js';
 import DashboardServer from './api/dashboardServer.js';
 import Logger from './utils/logger.js';
+import { loadEnv, formatEnvErrors, formatEnvWarnings } from './config/envLoader.js';
 
 dotenv.config();
 
-function createConfig() {
+function createConfig(env) {
   return {
-    accessKey: process.env.UPBIT_ACCESS_KEY || '',
-    secretKey: process.env.UPBIT_SECRET_KEY || '',
+    accessKey: env.UPBIT_ACCESS_KEY || '',
+    secretKey: env.UPBIT_SECRET_KEY || '',
 
     // 다중 코인 설정
-    targetCoins: process.env.TARGET_COINS
-      ? process.env.TARGET_COINS.split(',')
+    targetCoins: env.TARGET_COINS
+      ? env.TARGET_COINS.split(',')
       : ['KRW-BTC', 'KRW-ETH', 'KRW-XRP'],
 
-    maxPositions: parseInt(process.env.MAX_POSITIONS) || 1000,
-    portfolioAllocation: parseFloat(process.env.PORTFOLIO_ALLOCATION) || 0.3,
+    maxPositions: env.MAX_POSITIONS || 1000,
+    portfolioAllocation: env.PORTFOLIO_ALLOCATION || 0.3,
 
     // 동적 투자금액 설정
-    investmentAmount: parseInt(process.env.INVESTMENT_AMOUNT) || 50000,
-    useProportionalInvestment: process.env.USE_PROPORTIONAL_INVESTMENT !== 'false', // 기본 true
-    investmentRatio: parseFloat(process.env.INVESTMENT_RATIO) || 0.05, // 총 자산의 5%
-    minInvestmentAmount: parseInt(process.env.MIN_INVESTMENT_AMOUNT) || 5000,
-    maxInvestmentAmount: parseInt(process.env.MAX_INVESTMENT_AMOUNT) || 500000,
+    investmentAmount: env.INVESTMENT_AMOUNT || 50000,
+    useProportionalInvestment: env.USE_PROPORTIONAL_INVESTMENT !== false, // 기본 true
+    investmentRatio: env.INVESTMENT_RATIO || 0.05, // 총 자산의 5%
+    minInvestmentAmount: env.MIN_INVESTMENT_AMOUNT || 5000,
+    maxInvestmentAmount: env.MAX_INVESTMENT_AMOUNT || 500000,
 
     // 시드머니 설정 (드라이모드/실전모드 공통 - 누적손익 계산 기준)
-    dryRunSeedMoney: parseInt(process.env.DRY_RUN_SEED_MONEY) || 10000000,
-    initialSeedMoney: parseInt(process.env.INITIAL_SEED_MONEY) || 0, // 실전모드 초기투자금 (0이면 자동계산)
+    dryRunSeedMoney: env.DRY_RUN_SEED_MONEY || 10000000,
+    initialSeedMoney: env.INITIAL_SEED_MONEY || 0, // 실전모드 초기투자금 (0이면 자동계산)
 
-    stopLossPercent: parseFloat(process.env.STOP_LOSS_PERCENT) || 5,
-    takeProfitPercent: parseFloat(process.env.TAKE_PROFIT_PERCENT) || 10,
+    stopLossPercent: env.STOP_LOSS_PERCENT || 5,
+    takeProfitPercent: env.TAKE_PROFIT_PERCENT || 10,
 
-    rsiPeriod: parseInt(process.env.RSI_PERIOD) || 14,
-    rsiOversold: parseInt(process.env.RSI_OVERSOLD) || 30,
-    rsiOverbought: parseInt(process.env.RSI_OVERBOUGHT) || 70,
+    rsiPeriod: env.RSI_PERIOD || 14,
+    rsiOversold: env.RSI_OVERSOLD || 30,
+    rsiOverbought: env.RSI_OVERBOUGHT || 70,
 
-    newsCheckInterval: parseInt(process.env.NEWS_CHECK_INTERVAL) || 300000,
-    buyThreshold: parseInt(process.env.BUY_THRESHOLD) || 55,  // 기본값 55로 적극적 매수
-    sellThreshold: parseInt(process.env.SELL_THRESHOLD) || 55,
-    buyOnly: process.env.BUY_ONLY === 'true',  // 매수 전용 모드
-    allowAveraging: process.env.ALLOW_AVERAGING !== 'false',  // 추가 매수 허용
-    checkInterval: parseInt(process.env.CHECK_INTERVAL) || 60000,
+    newsCheckInterval: env.NEWS_CHECK_INTERVAL || 300000,
+    buyThreshold: env.BUY_THRESHOLD || 55,  // 기본값 55로 적극적 매수
+    sellThreshold: env.SELL_THRESHOLD || 55,
+    buyOnly: env.BUY_ONLY === true,  // 매수 전용 모드
+    allowAveraging: env.ALLOW_AVERAGING !== false,  // 추가 매수 허용
+    checkInterval: env.CHECK_INTERVAL || 60000,
 
-    dryRun: process.env.DRY_RUN !== 'false',
-    logLevel: process.env.LOG_LEVEL || 'info',
-    enableDashboard: process.env.ENABLE_DASHBOARD !== 'false',
-    dashboardPort: parseInt(process.env.DASHBOARD_PORT) || 3000
+    dryRun: env.DRY_RUN !== false,
+    logLevel: env.LOG_LEVEL || 'info',
+    enableDashboard: env.ENABLE_DASHBOARD !== false,
+    dashboardPort: env.DASHBOARD_PORT || 3000
   };
 }
 
 async function main() {
+  // 스키마 검증: 필수 env 누락/형식 오류는 부팅 시점에 실패시킨다.
+  const { values: env, errors: envErrors, warnings: envWarnings } = loadEnv();
+  if (envErrors.length > 0) {
+    console.error(formatEnvErrors(envErrors));
+    process.exit(1);
+  }
+  if (envWarnings.length > 0) {
+    console.warn(formatEnvWarnings(envWarnings));
+  }
+
   // 이 엔트리의 createConfig는 레거시 전략 형태이며 SCALP_* 계약을 매핑하지 않는다.
   // strategyMode 미설정 시 trader가 스캘핑으로 fallback하면서 레거시 risk 값이
   // 적용되므로, 스캘핑 해석이면 fail-closed로 종료하고 index.js로 유도한다.
-  const strategyMode = process.env.TRADING_STRATEGY || 'oversold_reaction_scalping';
+  const strategyMode = env.TRADING_STRATEGY || 'oversold_reaction_scalping';
   if (strategyMode === 'oversold_reaction_scalping') {
     console.error('⛔ multiCoinIndex.js는 레거시 엔트리입니다. 스캘핑 모드는 `npm start`(src/index.js)로 실행하세요.');
     process.exit(1);
@@ -64,9 +75,9 @@ async function main() {
   console.log('🤖 다중 코인 자동매매 시스템');
   console.log('='.repeat(80));
 
-  const config = createConfig();
+  const config = createConfig(env);
   config.strategyMode = strategyMode;
-  const logger = new Logger(config.logLevel);
+  new Logger(config.logLevel);
 
   console.log('\n⚙️  설정:');
   console.log(`  모드: ${config.dryRun ? '🧪 모의투자' : '💰 실전투자'}`);

@@ -179,7 +179,7 @@ async function resolveMarkets() {
     try {
       sourceLedger = JSON.parse(fs.readFileSync(sourceFile, 'utf8'));
     } catch (error) {
-      throw new Error(`freshness 원장 로드 실패 (${sourceFile}): ${error.message}`);
+      throw new Error(`freshness 원장 로드 실패 (${sourceFile}): ${error.message}`, { cause: error });
     }
     const cohort = selectFreshMarketCohort({
       markets: sourceLedger?.targetCoins,
@@ -295,7 +295,9 @@ async function main() {
       trader.paperValidation.configSnapshotComplete = false;
       trader.paperValidation.configSnapshotBackfilledAt = resumedAt;
     }
-    const gapMs = Number(existingPaperStatus.heartbeatAgeMs) || 0;
+    const gapMs = Number.isFinite(Number(existingPaperStatus.heartbeatAgeMs))
+      ? Number(existingPaperStatus.heartbeatAgeMs)
+      : null;
     trader.paperValidation.interruptions = [
       ...(Array.isArray(trader.paperValidation.interruptions)
         ? trader.paperValidation.interruptions

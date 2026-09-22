@@ -72,7 +72,7 @@ test('읽기 전용 paper dashboard는 최신 ledger를 표시하고 원본을 �
     );
     assert.equal(fs.readFileSync(ledgerFile, 'utf8'), JSON.stringify(updated, null, 2));
 
-    const dashboard = new DashboardServer(trader, 0);
+    const dashboard = new DashboardServer(trader, 0, { env: { ...process.env, DASHBOARD_TOKEN: '' } });
     const httpServer = dashboard.start();
     await new Promise(resolve => httpServer.once('listening', resolve));
     const port = httpServer.address().port;
@@ -145,7 +145,7 @@ test('읽기 전용 observer는 orphan 미청산 ledger를 UI에서도 fail-clos
   try {
     fs.writeFileSync(ledgerFile, JSON.stringify(ledger, null, 2), 'utf8');
     attachReadOnlyPaperLedger(trader, ledgerFile);
-    const dashboard = new DashboardServer(trader, 0);
+    const dashboard = new DashboardServer(trader, 0, { env: { ...process.env, DASHBOARD_TOKEN: '' } });
     const httpServer = dashboard.start();
     await new Promise(resolve => httpServer.once('listening', resolve));
     const port = httpServer.address().port;

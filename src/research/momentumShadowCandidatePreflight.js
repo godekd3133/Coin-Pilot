@@ -1,5 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import {
+  DEFAULT_MOMENTUM_SHADOW_CANDIDATE_SLOT_FILE,
+  inspectMomentumShadowCandidateSlot
+} from './momentumShadowCandidateSlot.js';
 
 function readJson(file) {
   try {
@@ -21,20 +25,41 @@ function ownerAlive(pid) {
 }
 
 function normalizedConfig(config = {}) {
+  const relativeTrendValue = config.relativeTrendMinPercent;
   return {
     mode: config.mode || 'regime',
+    maxHoldHours: Math.max(1, Number(config.maxHoldHours) || 0),
     markets: Array.isArray(config.markets) ? [...config.markets] : [],
     trendMinPercent: Number(config.trendMinPercent) || 0,
     breadthMin: Number(config.breadthMin) || 0,
     minUpBars: Number(config.minUpBars) || 1,
     positionFraction: Number(config.positionFraction) || 0,
     maxPositions: Number(config.maxPositions) || 0,
+    costPercent: Math.max(0, Number(config.costPercent) || 0),
     benchmarkMarket: config.benchmarkMarket || null,
     benchmarkTrendMinPercent: Number.isFinite(Number(config.benchmarkTrendMinPercent))
       ? Number(config.benchmarkTrendMinPercent)
       : null,
+    relativeTrendMinPercent: relativeTrendValue === null ||
+      relativeTrendValue === undefined || relativeTrendValue === ''
+      ? null
+      : Number.isFinite(Number(relativeTrendValue))
+        ? Math.max(0, Number(relativeTrendValue))
+        : null,
     exitOnBenchmarkOff: config.exitOnBenchmarkOff === true,
     cooldownAfterLossDays: Number(config.cooldownAfterLossDays) || 0,
+    volatilityLookbackDays: Math.max(2, Number(config.volatilityLookbackDays) || 14),
+    volatilityTargetPercent: Number.isFinite(Number(config.volatilityTargetPercent)) &&
+      Number(config.volatilityTargetPercent) > 0
+      ? Number(config.volatilityTargetPercent)
+      : null,
+    entryExecution: config.entryExecution === 'next_open' ? 'next_open' : 'close',
+    maxEntryGapPercent: Math.max(0, Number(config.maxEntryGapPercent) || 0),
+    maxDailyCandleAgeHours: Math.max(0, Number(config.maxDailyCandleAgeHours) || 0),
+    maxSpreadPercent: Math.max(0, Number(config.maxSpreadPercent) || 0),
+    requestIntervalMs: Math.max(100, Number(config.requestIntervalMs) || 500),
+    stopLossPercent: Math.max(0, Number(config.stopLossPercent) || 0),
+    takeProfitPercent: Math.max(0, Number(config.takeProfitPercent) || 0),
     maxPortfolioDrawdownPercent: Number(config.maxPortfolioDrawdownPercent) || 0,
     pollMs: Number(config.pollMs) || 0
   };
@@ -63,10 +88,19 @@ export function inspectMomentumShadowCandidate({
   expectedConfig = {},
   requireBenchmarkOpen = true,
   minimumPollMs = 15 * 60 * 1000,
+  candidateSlotFile = DEFAULT_MOMENTUM_SHADOW_CANDIDATE_SLOT_FILE,
   now = Date.now()
 } = {}) {
   const blockers = [];
   const warnings = [];
+  const candidateSlot = inspectMomentumShadowCandidateSlot(candidateSlotFile);
+  if (!candidateSlot.valid) {
+    blockers.push('candidate_slot_unverifiable');
+  } else if (candidateSlot.occupied) {
+    blockers.push('candidate_slot_occupied');
+  } else if (candidateSlot.exists) {
+    warnings.push('candidate_slot_is_stale');
+  }
   const target = path.resolve(targetDir || '.paper-momentum-shadow-candidate');
   const targetLedgerFile = path.join(target, 'ledger.json');
   const targetLockFile = path.join(target, '.momentum-shadow.lock');
@@ -100,6 +134,9 @@ export function inspectMomentumShadowCandidate({
   const liveOwnerCount = owners.filter(owner => owner.alive && owner.runnerState === 'running').length;
   if (liveOwnerCount > 0) warnings.push(`existing_live_owner_count:${liveOwnerCount}`);
 
+  const expectedBenchmarkThreshold = Number.isFinite(Number(expectedConfig?.benchmarkTrendMinPercent))
+    ? Number(expectedConfig.benchmarkTrendMinPercent)
+    : null;
   const benchmark = readJson(path.join(path.resolve(benchmarkDir || ''), 'ledger.json'));
   let benchmarkHeartbeatAgeSeconds = null;
   let benchmarkHeartbeatFresh = false;
@@ -107,13 +144,22 @@ export function inspectMomentumShadowCandidate({
   let benchmarkStaleLimitMs = null;
   let benchmarkNextPollAt = null;
   let benchmarkNextPollDueInSeconds = null;
+  let benchmarkTrend = null;
+  let benchmarkCandidateGateOpen = false;
+  let benchmarkSourceGateOpen = false;
+  let benchmarkDataQuality = null;
+  let benchmarkFetchErrors = 0;
+  let benchmarkFetchFailureStreak = 0;
+  let benchmarkFetchCircuitOpen = false;
   if (!benchmark) {
     blockers.push('benchmark_ledger_missing');
   } else {
     const heartbeatMs = Date.parse(benchmark.heartbeatAt || '');
     const pollMs = Number(benchmark.config?.pollMs) || 15 * 60 * 1000;
-    const heartbeatAgeSeconds = Number.isFinite(heartbeatMs)
-      ? Math.max(0, Math.round((Number(now) - heartbeatMs) / 1000))
+    // A heartbeat written in the future is clock-skewed, not fresh — treat
+    // it as unverifiable like a missing timestamp instead of age zero.
+    const heartbeatAgeSeconds = Number.isFinite(heartbeatMs) && Number(now) >= heartbeatMs
+      ? Math.round((Number(now) - heartbeatMs) / 1000)
       : null;
     const staleLimitMs = Math.max(600_000, pollMs * 5);
     const heartbeatFresh = heartbeatAgeSeconds !== null && heartbeatAgeSeconds * 1000 <= staleLimitMs;
@@ -126,16 +172,59 @@ export function inspectMomentumShadowCandidate({
     benchmarkNextPollDueInSeconds = nextPollAtMs === null
       ? null
       : Math.max(0, Math.ceil((nextPollAtMs - Number(now)) / 1000));
+    const rawBenchmarkTrend = benchmark.benchmarkTrendPercent;
+    benchmarkTrend = rawBenchmarkTrend === null ||
+      rawBenchmarkTrend === undefined || rawBenchmarkTrend === ''
+      ? null
+      : Number(rawBenchmarkTrend);
+    benchmarkFetchErrors = Math.max(0, Number(benchmark.fetchErrors) || 0);
+    benchmarkFetchFailureStreak = Math.max(0, Number(benchmark.networkFetchFailureStreak) || 0);
+    benchmarkFetchCircuitOpen = benchmark.networkFetchCircuitOpen === true;
+    benchmarkDataQuality = benchmark.dataQuality && typeof benchmark.dataQuality === 'object'
+      ? {
+        valid: benchmark.dataQuality.valid === true,
+        reason: benchmark.dataQuality.reason || null,
+        marketCount: Number(benchmark.dataQuality.marketCount) || 0,
+        missingMarkets: Array.isArray(benchmark.dataQuality.missingMarkets)
+          ? benchmark.dataQuality.missingMarkets
+          : [],
+        invalidMarkets: Array.isArray(benchmark.dataQuality.invalidMarkets)
+          ? benchmark.dataQuality.invalidMarkets
+          : [],
+        unalignedMarkets: Array.isArray(benchmark.dataQuality.unalignedMarkets)
+          ? benchmark.dataQuality.unalignedMarkets
+          : [],
+        staleMarkets: Array.isArray(benchmark.dataQuality.staleMarkets)
+          ? benchmark.dataQuality.staleMarkets
+          : [],
+        latestTimestamp: benchmark.dataQuality.latestTimestamp || null
+      }
+      : null;
+    benchmarkCandidateGateOpen = expectedBenchmarkThreshold !== null &&
+      Number.isFinite(benchmarkTrend) && benchmarkTrend > expectedBenchmarkThreshold;
+    benchmarkSourceGateOpen = benchmark.benchmarkGateOpen === true;
     if (benchmark.runnerState !== 'running' || !ownerAlive(benchmark.ownerPid)) {
       blockers.push('benchmark_owner_not_running');
     }
     if (!heartbeatFresh) {
       blockers.push('benchmark_heartbeat_stale');
     }
-    if (requireBenchmarkOpen && benchmark.benchmarkGateOpen !== true) {
+    if (benchmarkDataQuality?.valid !== true) {
+      blockers.push(benchmarkDataQuality
+        ? 'benchmark_data_quality_invalid'
+        : 'benchmark_data_quality_unverified');
+    }
+    if (requireBenchmarkOpen && !benchmarkCandidateGateOpen) {
       blockers.push('benchmark_gate_closed');
     }
     if (pollMs < minimumPollMs) warnings.push('benchmark_poll_below_candidate_budget');
+    // fetchErrors is a lifetime counter that never clears, so it cannot
+    // distinguish a currently failing owner from a recovered one. Warn only
+    // on an active streak or open circuit; the lifetime count stays visible
+    // in the benchmark projection below.
+    if (benchmarkFetchFailureStreak > 0 || benchmarkFetchCircuitOpen) {
+      warnings.push(`benchmark_fetch_failures_active:${benchmarkFetchFailureStreak}`);
+    }
   }
 
   const candidateConfig = normalizedConfig(expectedConfig);
@@ -150,17 +239,40 @@ export function inspectMomentumShadowCandidate({
     targetDir: target,
     targetLedgerExists: Boolean(targetLedger),
     targetLockExists: Boolean(targetLock),
+    candidateSlot: {
+      exists: candidateSlot.exists,
+      valid: candidateSlot.valid,
+      occupied: candidateSlot.occupied,
+      ownerPid: candidateSlot.ownerPid,
+      startedAt: candidateSlot.startedAt
+    },
     candidateConfig,
     benchmark: benchmark ? {
       ownerPid: benchmark.ownerPid || null,
       runnerState: benchmark.runnerState || null,
-      gateOpen: benchmark.benchmarkGateOpen === true,
-      trendPercent: Number.isFinite(Number(benchmark.benchmarkTrendPercent))
-        ? Number(benchmark.benchmarkTrendPercent)
+      gateOpen: benchmarkCandidateGateOpen,
+      sourceGateOpen: benchmarkSourceGateOpen,
+      candidateThresholdPercent: expectedBenchmarkThreshold,
+      sourceThresholdPercent: Number.isFinite(Number(benchmark.config?.benchmarkTrendMinPercent))
+        ? Number(benchmark.config.benchmarkTrendMinPercent)
         : null,
+      trendPercent: Number.isFinite(benchmarkTrend) ? benchmarkTrend : null,
+      fetchErrors: benchmarkFetchErrors,
+      fetchFailureStreak: benchmarkFetchFailureStreak,
+      fetchCircuitOpen: benchmarkFetchCircuitOpen,
       heartbeatAt: benchmark.heartbeatAt || null,
       heartbeatAgeSeconds: benchmarkHeartbeatAgeSeconds,
       heartbeatFresh: benchmarkHeartbeatFresh,
+      dataQuality: benchmarkDataQuality || {
+        valid: false,
+        reason: 'benchmark_data_quality_unverified',
+        marketCount: 0,
+        missingMarkets: [],
+        invalidMarkets: [],
+        unalignedMarkets: [],
+        staleMarkets: [],
+        latestTimestamp: null
+      },
       pollMs: benchmarkPollMs,
       staleLimitSeconds: Math.round(benchmarkStaleLimitMs / 1000),
       nextPollAt: benchmarkNextPollAt,

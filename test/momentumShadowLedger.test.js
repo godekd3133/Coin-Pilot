@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   ensureMomentumShadowInitialBalance,
   getMomentumShadowEquity,
+  isMomentumShadowPositionCoveredByBar,
   markMomentumShadowPosition,
   markMomentumShadowPositions,
   updateMomentumShadowEquity
@@ -27,6 +28,27 @@ test('momentum shadow position mark includes round-trip cost and tracks excursio
   assert.equal(second.maxAdverseExcursionPercent, -2.2);
 });
 
+test('momentum shadow mark normalizes naive candle timestamps to UTC', () => {
+  const marked = markMomentumShadowPosition(
+    { entryPrice: 100, size: 10 },
+    102,
+    '2026-09-13T00:00:00',
+    0.2
+  );
+  // Naive candle timestamps are UTC in this ledger, not host-local time, so
+  // the mark must keep the Z-suffixed instant regardless of machine zone.
+  assert.equal(marked.markTimestamp, '2026-09-13T00:00:00.000Z');
+
+  const epoch = markMomentumShadowPosition({ entryPrice: 100, size: 10 }, 102, 1789000000000, 0.2);
+  assert.equal(epoch.markTimestamp, new Date(1789000000000).toISOString());
+
+  const invalid = markMomentumShadowPosition({ entryPrice: 100, size: 10 }, 102, 'not-a-date', 0.2);
+  assert.equal(invalid.markTimestamp, null);
+
+  const absent = markMomentumShadowPosition({ entryPrice: 100, size: 10 }, 102, null, 0.2);
+  assert.equal(absent.markTimestamp, null);
+});
+
 test('momentum shadow marking leaves markets without a valid completed bar untouched', () => {
   const ledger = {
     positions: {
@@ -41,6 +63,20 @@ test('momentum shadow marking leaves markets without a valid completed bar untou
   assert.equal(marked, 1);
   assert.equal(ledger.positions['KRW-BTC'].markPrice, 105);
   assert.equal(ledger.positions['KRW-ETH'].markPrice, 201);
+});
+
+test('momentum shadow marking does not mark a next-open position with a pre-entry close', () => {
+  const ledger = {
+    positions: {
+      'KRW-BTC': { entryPrice: 110, entryTs: '2026-09-14T00:00:00', size: 100 }
+    }
+  };
+  const marked = markMomentumShadowPositions(ledger, {
+    'KRW-BTC': [{ trade_price: 100, ts: '2026-09-13T00:00:00' }]
+  }, 0.2);
+
+  assert.equal(marked, 0);
+  assert.equal(ledger.positions['KRW-BTC'].markPrice, undefined);
 });
 
 test('momentum shadow equity separates cash, open marked value, and unrealized P&L', () => {
@@ -66,4 +102,23 @@ test('momentum shadow initial balance is backfilled without changing an existing
   assert.equal(ensureMomentumShadowInitialBalance(ledger, 1234), 1234);
   assert.equal(ledger.initialBalance, 1234);
   assert.equal(ensureMomentumShadowInitialBalance(ledger, 9999), 1234);
+});
+
+test('momentum shadow covered-by-bar check only trusts post-entry completed bars', () => {
+  const position = { entryTs: '2026-01-03T00:00:00' };
+  assert.equal(
+    isMomentumShadowPositionCoveredByBar(position, { ts: '2026-01-03T00:00:00' }),
+    true
+  );
+  assert.equal(
+    isMomentumShadowPositionCoveredByBar(position, { ts: '2026-01-02T00:00:00' }),
+    false
+  );
+  // Unparseable timestamps cannot prove pre-entry, so they keep evaluation
+  // instead of silently freezing a position's exit checks.
+  assert.equal(isMomentumShadowPositionCoveredByBar(position, { ts: 'n/a' }), true);
+  assert.equal(
+    isMomentumShadowPositionCoveredByBar({ entryTs: 'n/a' }, { ts: '2026-01-02T00:00:00' }),
+    true
+  );
 });

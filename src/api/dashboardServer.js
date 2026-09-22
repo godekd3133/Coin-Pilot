@@ -1,5 +1,4 @@
 import express from 'express';
-import cors from 'cors';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -19,6 +18,7 @@ import createAiRoutes from './routes/ai.js';
 import createResearchRoutes from './routes/research.js';
 import AIAdvisorService from '../ai/aiAdvisorService.js';
 import MonitoringSessionService from '../ai/monitoringSessionService.js';
+import { createDashboardAuth, createOriginGuard } from './auth.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -26,11 +26,18 @@ const __dirname = path.dirname(__filename);
 const PROJECT_ROOT = path.resolve(__dirname, '..', '..');
 
 class DashboardServer {
-  constructor(tradingSystem, port = 3000) {
+  constructor(tradingSystem, port = 3000, options = {}) {
     this.app = express();
     this.port = port;
     this.tradingSystem = tradingSystem;
     this.logger = new Logger('debug');
+
+    // API/소켓 데이터 평면 인증. 정적 셸은 공개이며, DASHBOARD_TOKEN이 없으면
+    // 루프백 전용 바인딩으로 강제된다 (src/api/auth.js 참고).
+    this.auth = createDashboardAuth(options.env || process.env, {
+      loginRateLimiter: options.loginRateLimiter
+    });
+    this.originGuard = createOriginGuard(this.auth.corsOrigins);
 
     // AI 자문은 로컬 구독 CLI를 호출하는 읽기 전용 계층이다. 이 서비스는
     // 주문 객체나 기존 전략 설정을 참조만 하며 자동주문 경로를 소유하지
@@ -48,7 +55,12 @@ class DashboardServer {
     // HTTP 서버 및 Socket.io 초기화
     this.httpServer = createServer(this.app);
     this.io = new SocketIOServer(this.httpServer, {
-      cors: { origin: '*', methods: ['GET', 'POST'] }
+      // WebSocket 업그레이드는 CORS 대상이 아니므로 Origin을 직접 검사하고,
+      // 실제 인가는 handshake auth 토큰(socketMiddleware)이 담당한다.
+      cors: { origin: false },
+      allowRequest: (req, callback) => {
+        callback(null, this.originGuard.isOriginAllowed(req.headers.origin, req.headers.host));
+      }
     });
 
     // API 응답 캐싱 (rate limit 방지)
@@ -227,12 +239,32 @@ class DashboardServer {
   }
 
   setupMiddleware() {
-    this.app.use(cors());
+    this.app.use(this.originGuard.middleware);
     this.app.use(express.json());
     this.app.use(express.static(path.join(PROJECT_ROOT, 'public')));
   }
 
   setupRoutes() {
+    // 인프라 프로브는 /api 네임스페이스 밖, 토큰 게이트 밖에 둔다.
+    // 프로세스/런타임 boolean만 담고 포지션·설정·계좌 정보는 노출하지 않는다.
+    this.app.get('/health', (req, res) => {
+      res.json({
+        status: 'ok',
+        uptimeSec: Math.floor(process.uptime()),
+        pid: process.pid,
+        timestamp: new Date().toISOString()
+      });
+    });
+    this.app.get('/ready', (req, res) => {
+      const readiness = this.buildReadiness();
+      res.status(readiness.ready ? 200 : 503).json(readiness);
+    });
+
+    // 공개 인증 엔드포인트는 가드보다 먼저 마운트한다.
+    this.app.get('/api/auth/status', this.auth.statusHandler);
+    this.app.post('/api/auth/login', this.auth.loginHandler);
+    this.app.use('/api', this.auth.middleware);
+
     if (this.tradingSystem?.readOnlyObserver) {
       this.app.use('/api', (req, res, next) => {
         // Portfolio snapshots are allowed because the observer redirects them
@@ -406,7 +438,7 @@ class DashboardServer {
         if (this.tradingSystem.strategies) {
           const processedTradeIds = new Set(todayTrades.map(t => t.id || t.timestamp));
 
-          for (const [coin, strategy] of this.tradingSystem.strategies.entries()) {
+          for (const strategy of this.tradingSystem.strategies.values()) {
             const history = strategy.tradeHistory || [];
             history.forEach(trade => {
               // 이미 smartTradeHistory에서 처리된 거래는 스킵
@@ -646,7 +678,7 @@ class DashboardServer {
     });
 
     // 전역 에러 핸들러
-    this.app.use((err, req, res, next) => {
+    this.app.use((err, req, res, _next) => {
       const statusCode = err.status || 500;
       const message = err.message || 'Internal Server Error';
 
@@ -686,6 +718,8 @@ class DashboardServer {
    * Socket.io 설정 및 실시간 알림 시스템
    */
   setupSocketIO() {
+    this.io.use(this.auth.socketMiddleware);
+
     this.io.on('connection', (socket) => {
       console.log('📡 클라이언트 연결:', socket.id);
 
@@ -846,7 +880,7 @@ class DashboardServer {
               sellValue: holding.amount * currentPrice
             });
           }
-        } catch (e) { /* skip */ }
+        } catch { /* skip */ }
         await new Promise(r => setTimeout(r, 100));
       }
 
@@ -908,7 +942,7 @@ class DashboardServer {
               volume24h: ticker.acc_trade_price_24h
             });
           }
-        } catch (e) { /* skip */ }
+        } catch { /* skip */ }
         await new Promise(r => setTimeout(r, 100));
       }
 
@@ -1001,11 +1035,19 @@ class DashboardServer {
       console.log('   🔔 자동매매 알림 콜백 설정됨');
     }
 
-    this.server = this.httpServer.listen(this.port, () => {
-      console.log(`\n🌐 대시보드 서버 시작: http://localhost:${this.port}`);
-      console.log(`   API 엔드포인트: http://localhost:${this.port}/api`);
+    for (const warning of this.auth.warnings) {
+      console.warn(`⚠️  ${warning}`);
+      this.logger.warn(warning);
+    }
+
+    this.server = this.httpServer.listen(this.port, this.auth.host, () => {
+      const address = this.server.address();
+      const boundPort = typeof address === 'object' && address ? address.port : this.port;
+      console.log(`\n🌐 대시보드 서버 시작: http://${this.auth.host}:${boundPort}`);
+      console.log(`   API 엔드포인트: http://${this.auth.host}:${boundPort}/api`);
+      console.log(`   🔐 인증: ${this.auth.enabled ? 'DASHBOARD_TOKEN 필요' : '비활성 (루프백 전용)'}`);
       console.log(`   📡 실시간 알림: Socket.io 활성화`);
-      this.logger.info(`Dashboard server started on port ${this.port}`);
+      this.logger.info(`Dashboard server started on ${this.auth.host}:${boundPort} (auth=${this.auth.enabled})`);
     });
 
     // 서버 에러 핸들링
@@ -1022,6 +1064,53 @@ class DashboardServer {
     });
 
     return this.server;
+  }
+
+  /**
+   * Readiness verdict for infra probes. Reuses the trader's own fail-closed
+   * accessors (risk data gap / analysis cycle gap) instead of re-deriving
+   * freshness, so a stalled or stale loop reports not-ready the same way the
+   * trading loop stops itself. Dashboard-only observers without an isRunning
+   * trader report ready purely on the HTTP listener.
+   */
+  buildReadiness(now = Date.now()) {
+    const checks = {
+      httpServerListening: this.httpServer?.listening === true
+    };
+    let ready = checks.httpServerListening;
+
+    const trader = this.tradingSystem;
+    if (trader && typeof trader.isRunning === 'boolean') {
+      checks.traderRunning = trader.isRunning;
+      ready = ready && trader.isRunning;
+
+      const lastCycleAt = trader.paperValidation?.telemetry?.lastCycleAt || null;
+      const lastCycleMs = lastCycleAt ? Date.parse(lastCycleAt) : null;
+      checks.lastCycleAt = lastCycleAt;
+      if (Number.isFinite(lastCycleMs)) {
+        checks.lastCycleAgeSeconds = Math.max(0, Math.floor((now - lastCycleMs) / 1000));
+      }
+
+      if (typeof trader.getAnalysisDataHealthStatus === 'function') {
+        const analysis = trader.getAnalysisDataHealthStatus(now);
+        checks.analysisHealthy = analysis.failClosed !== true;
+        checks.analysisStaleReason = analysis.staleReason || null;
+        ready = ready && checks.analysisHealthy;
+      }
+      if (typeof trader.getRiskMonitorStatus === 'function') {
+        const risk = trader.getRiskMonitorStatus(now);
+        checks.riskHealthy = risk.failClosed !== true;
+        checks.riskStaleReason = risk.staleReason || null;
+        ready = ready && checks.riskHealthy;
+      }
+    }
+
+    return {
+      ready,
+      uptimeSec: Math.floor(process.uptime()),
+      timestamp: new Date(now).toISOString(),
+      checks
+    };
   }
 
   // 최적화 상태 파일 경로
@@ -1322,11 +1411,18 @@ class DashboardServer {
       this.notificationInitialTimer = null;
     }
 
-    if (this.server) {
-      this.server.close(() => {
-        console.log('\n🌐 대시보드 서버 종료');
-        this.logger.info('Dashboard server stopped');
-      });
+    const logClosed = () => {
+      console.log('\n🌐 대시보드 서버 종료');
+      this.logger.info('Dashboard server stopped');
+    };
+    // io.close()는 연결된 소켓을 끊고 바인딩된 http 서버까지 함께 닫는다.
+    if (this.io) {
+      this.io.close(logClosed);
+      this.io = null;
+      this.server = null;
+    } else if (this.server) {
+      this.server.close(logClosed);
+      this.server = null;
     }
   }
 }

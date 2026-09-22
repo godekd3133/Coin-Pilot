@@ -78,7 +78,6 @@ class RegimeMomentumStrategy {
     const lookbackBars = Math.ceil((this.trendLookbackHours * 60) / this.candleUnitMinutes);
     const rsi = RegimeMomentumStrategy.computeRsi(closes, i, this.rsiPeriod);
     if (rsi == null) return { signal: null, reason: 'rsi_unavailable' };
-    const barReturn = ((closes[i] - closes[i - 1]) / closes[i - 1]) * 100;
     const trendPercent = ((closes[i] - closes[i - lookbackBars]) / closes[i - lookbackBars]) * 100;
 
     if (rsi < this.rsiEntryThreshold) return { signal: null, reason: 'rsi_below_threshold', rsi, trendPercent };

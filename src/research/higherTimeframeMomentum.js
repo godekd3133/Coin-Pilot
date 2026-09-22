@@ -230,7 +230,6 @@ export function calculateHigherTimeframeMomentumSignals(rawCandles, config = {})
 
   for (let higherIndex = Math.max(options.rsiPeriod, trendBars); higherIndex < higherCandles.length; higherIndex += 1) {
     const current = higherCandles[higherIndex];
-    const previous = higherCandles[higherIndex - 1];
     const rsi = rsiSeries[higherIndex];
     const previousRsi = rsiSeries[higherIndex - 1];
     const trendReference = higherCandles[higherIndex - trendBars];

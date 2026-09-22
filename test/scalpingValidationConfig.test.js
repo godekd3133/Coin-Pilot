@@ -74,9 +74,11 @@ test('완료된 snapshot은 validation config를 덮어쓰고 CLI candle unit을
 
 
 test('live entry와 forward-paper entry는 동일한 SCALP_* env 계약을 해석한다', () => {
+  // The live entry reads the validated env map (`env.X` from src/config),
+  // while script lanes still read process.env directly — both spellings count.
   const envNames = source =>
     new Set(
-      [...source.matchAll(/(?:process\.env\.|envNumber\(')([A-Z_]+)'?\)?/g)]
+      [...source.matchAll(/(?:process\.env\.|envNumber\('|env\.)([A-Z_]+)'?\)?/g)]
         .map(match => match[1])
         .filter(name => name.startsWith('SCALP_'))
     );

@@ -23,12 +23,14 @@ function loadCandleCache(filePath) {
   try {
     parsed = JSON.parse(fs.readFileSync(filePath, 'utf8'));
   } catch (error) {
-    throw new Error(`candle cache를 읽을 수 없습니다 (${filePath}): ${error.message}`);
+    throw new Error(`candle cache를 읽을 수 없습니다 (${filePath}): ${error.message}`, { cause: error });
   }
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     throw new Error(`candle cache 형식이 잘못되었습니다: ${filePath}`);
   }
-  return parsed;
+  return parsed?.candles && typeof parsed.candles === 'object' && !Array.isArray(parsed.candles)
+    ? parsed.candles
+    : parsed;
 }
 
 function resolveMarkets(cache) {

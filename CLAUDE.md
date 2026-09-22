@@ -99,6 +99,8 @@ npm run backtest     # Run backtesting only
 npm run optimize     # Run parameter optimization only
 npm run dashboard    # Run web dashboard only (http://localhost:3000)
 npm run dashboard:paper # Observe an explicitly selected forward paper ledger (read-only)
+npm test             # Run the node:test suite (required green for CI)
+npm run lint         # ESLint flat-config check (required clean for CI)
 ```
 
 `runDashboard.js` is a deterministic mock for UI smoke. To show the actual
@@ -265,6 +267,8 @@ Pre-configured mappings for major coins (BTC, ETH, XRP, SOL, etc.) with:
 - Twitter cashtag (e.g., "$BTC")
 
 ## Web Dashboard API Endpoints
+
+**Access control contract (fail-closed):** when `DASHBOARD_TOKEN` is set, every `/api/*` route except `GET /api/auth/status` and `POST /api/auth/login` requires `Authorization: Bearer <token>`, and every Socket.io handshake must carry `auth.token`. Browser cross-origin calls are limited to same-origin plus `DASHBOARD_CORS_ORIGINS`. Without a token the server binds to `127.0.0.1` only; exposing it on a non-loopback interface without auth requires the explicit `DASHBOARD_ALLOW_INSECURE=true` opt-out. The static shell stays public — never let a new endpoint leak trading state outside the authenticated `/api` plane.
 
 **Core APIs:**
 
@@ -594,6 +598,15 @@ server.tradingSystem.saveVirtualPortfolio();
 - `portfolio_history.json` - Asset value snapshots for chart display
 
 ## Configuration
+
+All documented env vars are declared in `src/config/envSchema.js` (type, range,
+enum, secret). Boot (`src/index.js`, `src/multiCoinIndex.js`) calls
+`loadEnv()` from `src/config/envLoader.js` and exits immediately when a
+required key is missing or a set value fails its schema — the error names
+every offending key and why. Adding or renaming a knob means updating BOTH
+`.env.example` and `ENV_SCHEMA`; `test/envDocumentation.test.js` fails CI on
+any drift. Boolean literals are strict `true`/`false` — `DRY_RUN=0` or
+`DRY_RUN=yes` now fails fast instead of being silently misread.
 
 Key environment variables:
 - `DRY_RUN=true/false` - Simulated vs real trading

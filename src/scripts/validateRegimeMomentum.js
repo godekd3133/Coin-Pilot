@@ -2,7 +2,6 @@ import dotenv from 'dotenv';
 import fs from 'node:fs';
 import RegimeMomentumStrategy from '../strategy/regimeMomentumStrategy.js';
 import {
-  analyzeHistoricalCandleContinuity,
   splitHistoricalCandleSegments,
   calculateTradeReturnConfidence,
   evaluateStatisticalConfidenceGate

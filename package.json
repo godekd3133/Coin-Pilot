@@ -13,12 +13,16 @@
     "validate:scalping:segments": "node src/scripts/validateScalpingSegments.js",
     "validate:scalping:no-trade-fill": "node src/scripts/validateScalpingNoTradeFill.js",
     "research:htf-momentum": "node src/scripts/validateHigherTimeframeMomentum.js",
+    "research:htf-momentum:fetch": "node src/scripts/fetchHigherTimeframeMomentumCandles.js",
     "research:daily-momentum:fetch": "node src/scripts/fetchDailyMomentumCandles.js",
     "research:daily-momentum": "node src/scripts/validateDailyMomentumVariants.js",
     "research:daily-momentum:robustness": "node src/scripts/validateDailyMomentumRobustness.js",
+    "research:daily-momentum:rolling": "node src/scripts/validateDailyMomentumRollingWindows.js",
+    "research:daily-momentum:benchmark-confirmation": "node src/scripts/validateDailyMomentumBenchmarkConfirmation.js",
     "research:daily-market-neutral": "node src/scripts/validateDailyMarketNeutral.js",
     "research:momentum-shadow:status": "node src/scripts/momentumShadowStatus.js",
     "research:momentum-shadow:preflight": "node src/scripts/preflightMomentumShadowCandidate.js",
+    "research:momentum-shadow:quotes": "node src/scripts/measureMomentumShadowQuotes.js",
     "research:momentum-shadow:start-if-ready": "node src/scripts/startMomentumShadowCandidateIfReady.js",
     "verify:pwa": "node src/scripts/verifyPwaShell.js",
     "validate:scalping:portfolio": "node src/scripts/validatePortfolio.js",
@@ -33,7 +37,8 @@
     "ai:smoke": "node src/scripts/runAiAdvisorSmoke.js",
     "ai:replay": "node src/scripts/runAiHistoricalReplay.js",
     "ai:robustness": "node src/scripts/runAiReplayRobustness.js",
-    "test": "NODE_ENV=test node --test"
+    "test": "NODE_ENV=test node --test",
+    "lint": "eslint ."
   },
   "keywords": [
     "upbit",
@@ -58,7 +63,7 @@
   },
   "homepage": "https://github.com/godekd3133/Coin-Pilot#readme",
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=20.0.0"
   },
   "dependencies": {
     "axios": "^1.6.2",
@@ -71,5 +76,10 @@
     "sentiment": "^5.0.2",
     "socket.io": "^4.8.3",
     "uuid": "^9.0.1"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.10.0",
+    "globals": "^17.12.0"
   }
 }

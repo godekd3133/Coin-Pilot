@@ -28,9 +28,9 @@ test('redesign은 백그라운드 탭이 다시 보일 때 paper 상태를 즉�
 
 test('PWA shell은 redesign asset version과 service worker cache version을 함께 갱신한다', () => {
   const scriptAsset = indexSource.match(/<script\s+src=["'](\/pilot-redesign\.js\?v=[^"']+)["']/)?.[1];
-  assert.equal(scriptAsset, '/pilot-redesign.js?v=observer-readonly-23');
+  assert.equal(scriptAsset, '/pilot-redesign.js?v=observer-readonly-34');
   assert.match(indexSource, /<link\s+rel=["']stylesheet["']\s+href=["']\/pilot-redesign\.css\?v=20260914-04["']/);
-  assert.match(serviceWorkerSource, /const CACHE_NAME = ['"]coinpilot-shell-v29['"]/);
+  assert.match(serviceWorkerSource, /const CACHE_NAME = ['"]coinpilot-shell-v41['"]/);
   assert.match(serviceWorkerSource, new RegExp(`['"]${scriptAsset.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}['"]`));
   assert.match(serviceWorkerSource, /['"]\/pilot-redesign\.css\?v=20260914-04['"]/);
 });
@@ -57,8 +57,9 @@ test('PWA manifest icon과 service worker app shell의 모든 정적 자산이 �
     '/icon-192.png',
     '/icon-512.png',
     '/apple-touch-icon.png',
+    '/auth-client.js',
     '/pilot-redesign.css?v=20260914-04',
-    '/pilot-redesign.js?v=observer-readonly-23'
+    '/pilot-redesign.js?v=observer-readonly-34'
   ];
   for (const asset of shellAssets) {
     assert.match(
@@ -140,10 +141,44 @@ test('momentum shadow UI는 두 장부의 평가자산을 읽기 전용 연구 �
   assert.match(redesignSource, /benchmark.gateOpen/);
   assert.match(redesignSource, /heartbeatAgeSeconds/);
   assert.match(redesignSource, /benchmarkTrendMinPercent/);
+  assert.match(redesignSource, /dataQuality/);
+  assert.match(redesignSource, /데이터 품질 차단/);
   assert.match(redesignSource, /promotionBlockers/);
   assert.match(redesignSource, /riskControls/);
   assert.match(redesignSource, /보호중단 발동/);
   assert.match(redesignSource, /candidateReadiness/);
+  assert.match(redesignSource, /candidateReadinessVariants/);
+  assert.match(redesignSource, /candidate_slot_occupied/);
+  assert.match(redesignSource, /candidate_slot_unverifiable/);
+  assert.match(redesignSource, /readinessWarningsHtml/);
+  assert.match(redesignSource, /기준 시장의 시세 수집이 현재 실패 중입니다/);
+  assert.match(redesignSource, /변동성 제한 후보/);
+  assert.match(redesignSource, /next_open/);
+  assert.match(redesignSource, /비용 대응·다음 시가 후보/);
+  assert.match(redesignSource, /fixedHoldReadiness/);
+  assert.match(redesignSource, /2일 고정 종료 후보/);
+  assert.match(redesignSource, /fixedHoldRelativeReadiness/);
+  assert.match(redesignSource, /2일·상대추세 후보/);
+  assert.match(redesignSource, /relativeTrendMinPercent/);
+  assert.match(redesignSource, /relativeTrendBlockedEntries/);
+  assert.match(redesignSource, /fixed_2d_spread/);
+  assert.match(redesignSource, /호가/);
+  assert.match(redesignSource, /quoteQuality/);
+  assert.match(redesignSource, /network\.circuitOpen/);
+  assert.match(redesignSource, /network\.failureStreak/);
+  assert.match(redesignSource, /network\.fetchErrors/);
+  assert.match(redesignSource, /누적 오류/);
+  assert.match(redesignSource, /누적 오류 확인/);
+  assert.match(redesignSource, /시세 수집/);
+  assert.match(redesignSource, /benchmark_data_quality_invalid/);
+  assert.match(redesignSource, /일봉 품질/);
+  assert.match(redesignSource, /volatilityReadiness\.candidateConfig\?\.costPercent/);
+  assert.match(redesignSource, /변동성 목표/);
+  assert.match(redesignSource, /다음 일봉 시작가 체결/);
+  assert.match(redesignSource, /추격 갭 상한/);
+  assert.match(redesignSource, /일봉 신선도/);
+  assert.match(redesignSource, /pendingEntryCount/);
+  assert.match(redesignSource, /중복 신호 차단/);
   assert.match(redesignSource, /다음 (?:risk-capped|리스크 제한) 후보/);
   assert.match(redesignSource, /benchmarkThresholdSummary/);
   assert.match(redesignSource, /기준 시장 임계값 비교/);

@@ -52,7 +52,7 @@ test('DashboardServer가 trader 분석 callback을 AI session/consultation까지
     setAnalysisCallback(callback) { analysisCallback = callback; },
     setTradeCallback() {}
   };
-  const server = new DashboardServer(trader, 0);
+  const server = new DashboardServer(trader, 0, { env: { ...process.env, DASHBOARD_TOKEN: '' } });
 
   // Avoid a real provider call while exercising the real DashboardServer seam.
   server.aiAdvisor.runner = async () => ({

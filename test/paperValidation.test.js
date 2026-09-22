@@ -1814,6 +1814,41 @@ test('저장된 owner 프로세스가 없으면 heartbeat 유예 전에도 orpha
   }
 });
 
+test('미래 시각의 heartbeat는 검증 불가로 간주해 orphan fail-closed로 표시한다', async () => {
+  const ledger = path.join(os.tmpdir(), `coinpilot-orphan-future-hb-${Date.now()}.json`);
+  const trader = new MultiCoinTrader({
+    strategyMode: 'oversold_reaction_scalping',
+    targetCoins: ['KRW-BTC'],
+    dryRun: true,
+    dryRunSeedMoney: 1_000_000,
+    useNews: false,
+    checkInterval: 60_000
+  });
+
+  try {
+    trader.paperValidationFile = ledger;
+    trader.virtualPortfolio = { krwBalance: 1_000_000, holdings: new Map() };
+    trader.strategies = new Map();
+    trader.calculateTotalAssets = async () => 1_000_000;
+    await trader.startPaperValidationSession();
+    // owner는 살아 있지만 heartbeat가 미래 시각이면 신선도를 검증할 수 없다.
+    const futureHeartbeat = new Date(Date.now() + 60_000).toISOString();
+    trader.paperValidation.heartbeatAt = futureHeartbeat;
+    trader.paperValidation.telemetry.heartbeatAt = futureHeartbeat;
+
+    const status = await trader.getPaperValidationStatus();
+    assert.equal(status.processAlive, true);
+    assert.equal(status.heartbeatAgeMs, null);
+    assert.equal(status.orphaned, true);
+    assert.equal(status.orphanReason, 'heartbeat_stale');
+    assert.equal(status.active, false);
+    assert.equal(status.state, 'STOPPED');
+    assert.equal(status.continuityEligible, false);
+  } finally {
+    if (fs.existsSync(ledger)) fs.unlinkSync(ledger);
+  }
+});
+
 test('전략 설정이 바뀐 paper 세션은 재현성 drift로 승격하지 않는다', async () => {
   const ledger = path.join(os.tmpdir(), `coinpilot-config-drift-${Date.now()}.json`);
   const trader = new MultiCoinTrader({

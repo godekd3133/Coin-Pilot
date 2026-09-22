@@ -4413,6 +4413,8 @@
 
     <!-- Socket.io Client -->
     <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <!-- Auth gate: socket.io 다음, 앱 스크립트 이전에 로드되어야 한다 -->
+    <script src="/auth-client.js"></script>
 
     <script>
         const API_BASE = '';
@@ -10232,6 +10234,6 @@
             }
         });
     </script>
-    <script src="/pilot-redesign.js?v=observer-readonly-23"></script>
+    <script src="/pilot-redesign.js?v=observer-readonly-34"></script>
 </body>
 </html>

@@ -91,9 +91,6 @@ class PricePredictor {
     // 정규방정식을 사용한 선형 회귀
     // β = (X^T X)^-1 X^T y
 
-    const n = X.length;
-    const m = X[0].length;
-
     // X에 bias 항 추가
     const X_with_bias = X.map(row => [1, ...row]);
 

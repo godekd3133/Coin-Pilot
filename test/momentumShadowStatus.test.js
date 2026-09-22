@@ -61,3 +61,128 @@ test('momentum shadow status fails closed when runner state is absent', () => {
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('momentum shadow status fails closed when the heartbeat is not verifiable', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'coinpilot-shadow-status-'));
+  try {
+    const dir = writeLedger(root, {
+      runnerState: 'running',
+      ownerPid: process.pid,
+      heartbeatAt: new Date(Date.now() + 60_000).toISOString(),
+      config: { mode: 'regime', pollMs: 900_000 },
+      balance: 100_000_000,
+      positions: {},
+      trades: []
+    });
+    const result = runStatus(dir);
+    assert.equal(result.status, 0);
+    assert.match(result.stdout, /\[STOPPED:heartbeat_stale\]/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('momentum shadow status reports volatility target and scale readback', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'coinpilot-shadow-status-'));
+  try {
+    const dir = writeLedger(root, {
+      runnerState: 'running',
+      ownerPid: 999999,
+      heartbeatAt: new Date().toISOString(),
+      config: {
+        mode: 'regime',
+        pollMs: 900_000,
+        volatilityLookbackDays: 14,
+        volatilityTargetPercent: 1,
+        entryExecution: 'next_open',
+        maxEntryGapPercent: 0.2,
+        relativeTrendMinPercent: 0
+      },
+      balance: 100_000_000,
+      positions: {},
+      trades: [],
+      volatilityScaleByMarket: { 'KRW-BTC': 1, 'KRW-ETH': 0.25 },
+      volatilityBlocked: 2,
+      duplicateSignalBlocked: 3,
+      pendingEntries: [],
+      pendingEntryGapBlocked: 2,
+      relativeTrendBlocked: 4,
+      fetchErrors: 4
+    });
+    const result = runStatus(dir);
+    assert.equal(result.status, 0);
+    assert.match(result.stdout, /volatility target 1\.00%\/14d/);
+    assert.match(result.stdout, /scale 0\.250~1\.000/);
+    assert.match(result.stdout, /blocked 2/);
+    assert.match(result.stdout, /duplicateSignalBlocked 3/);
+    assert.match(result.stdout, /entry gap ceiling 0\.20%/);
+    assert.match(result.stdout, /gapBlocked 2/);
+    assert.match(result.stdout, /relative trend > benchmark \+0\.00% \| blocked 4/);
+    assert.match(result.stdout, /network fetch errors 4 \| streak/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('momentum shadow status does not report a disabled relative-trend guard as enabled', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'coinpilot-shadow-status-'));
+  try {
+    const dir = writeLedger(root, {
+      runnerState: 'running',
+      ownerPid: 999999,
+      heartbeatAt: new Date().toISOString(),
+      config: {
+        mode: 'regime',
+        pollMs: 900_000,
+        // Fresh ledgers persist the key with a null value; Number(null) is 0,
+        // so a bare isFinite check would print a phantom +0.00% guard.
+        relativeTrendMinPercent: null
+      },
+      balance: 100_000_000,
+      positions: {},
+      trades: [],
+      relativeTrendBlocked: 4
+    });
+    const result = runStatus(dir);
+    assert.equal(result.status, 0);
+    assert.ok(!/relative trend/.test(result.stdout));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('momentum shadow status reports stale daily data as a separate safety block', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'coinpilot-shadow-status-'));
+  try {
+    const dir = writeLedger(root, {
+      runnerState: 'running',
+      ownerPid: 999999,
+      heartbeatAt: new Date().toISOString(),
+      config: { mode: 'regime', pollMs: 900_000 },
+      balance: 100_000_000,
+      positions: {},
+      trades: [],
+      dataQuality: {
+        valid: false,
+        reason: 'daily_market_stale',
+        staleMarkets: ['KRW-BTC'],
+        missingMarkets: [],
+        unalignedMarkets: [],
+        maxAgeHours: 36
+      },
+      dataQualityBlocked: 4
+    });
+    const result = runStatus(dir);
+    assert.equal(result.status, 0);
+    assert.match(result.stdout, /data quality BLOCKED: daily_market_stale/);
+    assert.match(result.stdout, /stale KRW-BTC/);
+    assert.match(result.stdout, /maxAge 36h/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('momentum shadow status includes the relative-strength A/B book in its default inventory', () => {
+  const source = fs.readFileSync(statusScript, 'utf8');
+  assert.match(source, /\.paper-momentum-shadow-fixed-hold-2d-relative-v1/);
+});
