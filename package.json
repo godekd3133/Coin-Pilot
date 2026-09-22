@@ -35,6 +35,7 @@
     "verify:pwa": "node src/scripts/verifyPwaShell.js",
     "validate:scalping:portfolio": "node src/scripts/validatePortfolio.js",
     "compare:scalping": "node src/scripts/compareScalpingVariants.js",
+    "paper:variants": "node src/scripts/runScalpingVariantForward.js",
     "validate:shadow": "node src/scripts/validateShadowCandidate.js",
     "paper:smoke": "node src/scripts/runPaperSmoke.js",
     "paper:forward": "PAPER_FORWARD_MODE=true node src/scripts/runPaperSmoke.js",

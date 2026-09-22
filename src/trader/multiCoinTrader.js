@@ -733,28 +733,34 @@ class MultiCoinTrader {
   /**
    * 총 자산 계산 (KRW + 코인 평가액) - 드라이/실전 모드 모두 지원
    */
-  async calculateTotalAssets() {
+  async calculateTotalAssets(priceMapOverride = null) {
     if (this.dryRun) {
       // 드라이 모드: 가상 포트폴리오 사용
       let totalAssets = this.virtualPortfolio.krwBalance;
 
       const holdingCoins = Array.from(this.virtualPortfolio.holdings.keys());
       if (holdingCoins.length > 0) {
-        // 현재가 맵 초기화
-        const priceMap = new Map();
+        // A shared research snapshot may provide one common mark for every
+        // variant. In normal runtime paths this remains null and the method
+        // keeps its existing exchange read behavior.
+        const priceMap = priceMapOverride instanceof Map
+          ? priceMapOverride
+          : new Map();
 
-        try {
-          const tickers = await this.upbit.getTicker(holdingCoins);
-          // ticker 응답을 맵으로 변환
-          if (tickers && Array.isArray(tickers)) {
-            for (const ticker of tickers) {
-              if (ticker && ticker.market && typeof ticker.trade_price === 'number') {
-                priceMap.set(ticker.market, ticker.trade_price);
+        if (!(priceMapOverride instanceof Map)) {
+          try {
+            const tickers = await this.upbit.getTicker(holdingCoins);
+            // ticker 응답을 맵으로 변환
+            if (tickers && Array.isArray(tickers)) {
+              for (const ticker of tickers) {
+                if (ticker && ticker.market && typeof ticker.trade_price === 'number') {
+                  priceMap.set(ticker.market, ticker.trade_price);
+                }
               }
             }
+          } catch {
+            // ticker 조회 실패 시 priceMap은 비어있음 → 평균단가로 계산됨
           }
-        } catch {
-          // ticker 조회 실패 시 priceMap은 비어있음 → 평균단가로 계산됨
         }
 
         // 모든 보유 코인에 대해 계산 (현재가 또는 평균단가)
@@ -2342,7 +2348,7 @@ class MultiCoinTrader {
     return this.getPaperValidationStatus();
   }
 
-  async recordPaperValidationSnapshot(reason = 'periodic') {
+  async recordPaperValidationSnapshot(reason = 'periodic', priceMapOverride = null) {
     if (!this.dryRun || !this.paperValidation?.active) return null;
 
     const now = Date.now();
@@ -2351,7 +2357,7 @@ class MultiCoinTrader {
       return this.getPaperValidationStatus();
     }
 
-    const totalAssets = await this.calculateTotalAssets();
+    const totalAssets = await this.calculateTotalAssets(priceMapOverride);
     this.paperValidation.snapshots = [
       ...(this.paperValidation.snapshots || []),
       { timestamp: new Date(now).toISOString(), totalAssets, reason }
@@ -4590,7 +4596,7 @@ class MultiCoinTrader {
     this.positionRiskTimer = null;
   }
 
-  async monitorOpenPositions() {
+  async monitorOpenPositions(snapshotContext = null) {
     if (!this.isRunning || this._riskCheckInProgress || this._orderInProgress) return;
 
     const riskFreshness = this.enforceRiskMonitorFreshness();
@@ -4637,12 +4643,18 @@ class MultiCoinTrader {
 
     this._riskCheckInProgress = true;
     try {
-      const tickers = await this.riskUpbit.getTicker(monitoredCoins, { priority: 'risk' });
-      const priceMap = new Map(
-        (Array.isArray(tickers) ? tickers : [])
-          .filter(ticker => ticker?.market && Number.isFinite(Number(ticker.trade_price)))
-          .map(ticker => [ticker.market, Number(ticker.trade_price)])
-      );
+      const tickers = snapshotContext?.sharedSnapshot === true &&
+        snapshotContext.tickerMap instanceof Map
+        ? [...snapshotContext.tickerMap.values()]
+        : await this.riskUpbit.getTicker(monitoredCoins, { priority: 'risk' });
+      const priceMap = snapshotContext?.sharedSnapshot === true &&
+        snapshotContext.priceMap instanceof Map
+        ? new Map(snapshotContext.priceMap)
+        : new Map(
+          (Array.isArray(tickers) ? tickers : [])
+            .filter(ticker => ticker?.market && Number.isFinite(Number(ticker.trade_price)))
+            .map(ticker => [ticker.market, Number(ticker.trade_price)])
+        );
       if (priceMap.size < monitoredCoins.length) {
         const missingCoins = monitoredCoins.filter(coin => !priceMap.has(coin));
         const error = new Error(`risk ticker 응답 불완전 (${missingCoins.join(', ') || 'unknown'})`);
@@ -4677,7 +4689,8 @@ class MultiCoinTrader {
             this.getKRWBalance(accounts),
             this.getCoinBalance(accounts, coin),
             currentPositions,
-            []
+            [],
+            snapshotContext
           );
           currentPositions = this.getCurrentPositionCount();
         }
@@ -4884,10 +4897,22 @@ class MultiCoinTrader {
     for (const coin of this.targetCoins) {
       try {
         const prefetchedTicker = tickerMap?.get(coin);
+        const snapshotMarketData = this._snapshotContext?.marketDataByCoin instanceof Map
+          ? this._snapshotContext.marketDataByCoin.get(coin)
+          : this._snapshotContext?.marketDataByCoin?.[coin];
+        const marketData = snapshotMarketData
+          ? {
+              ...snapshotMarketData,
+              ticker: prefetchedTicker || snapshotMarketData.ticker,
+              sharedSnapshot: true
+            }
+          : prefetchedTicker
+            ? { ticker: prefetchedTicker }
+            : {};
         const analysis = await this.analyzeCoin(
           coin,
           newsSentiment,
-          prefetchedTicker ? { ticker: prefetchedTicker } : {}
+          marketData
         );
         coinAnalyses.push(analysis);
         this.analysisCycleProgress?.add(coin);
@@ -4986,7 +5011,8 @@ class MultiCoinTrader {
         updatedKrwBalance,
         analysis.coinBalance,
         updatedPositions,
-        coinAnalyses  // 리밸런싱용 전체 분석 결과 전달
+        coinAnalyses,  // 리밸런싱용 전체 분석 결과 전달
+        this._snapshotContext
       );
     }
 
@@ -4995,9 +5021,58 @@ class MultiCoinTrader {
   }
 
   /**
+   * Evaluate one paper cycle against a caller-owned shared market snapshot.
+   *
+   * This is intentionally research-only. The caller supplies one ticker and
+   * candle set per market, and the normal dry-run analysis/order/ledger paths
+   * are reused for the individual virtual book. Live traders are rejected so
+   * this cannot accidentally turn a comparison runner into an order router.
+   */
+  async executeTradingCycleFromSnapshot(snapshot) {
+    if (!this.dryRun) {
+      throw new Error('shared snapshot cycle은 DRY_RUN 연구 세션에서만 사용할 수 있습니다.');
+    }
+    if (!snapshot || !(snapshot.tickerMap instanceof Map) || !(snapshot.priceMap instanceof Map)) {
+      throw new Error('shared snapshot cycle에는 tickerMap과 priceMap이 필요합니다.');
+    }
+    if (!(snapshot.marketDataByCoin instanceof Map) &&
+      (!snapshot.marketDataByCoin || typeof snapshot.marketDataByCoin !== 'object')) {
+      throw new Error('shared snapshot cycle에는 marketDataByCoin이 필요합니다.');
+    }
+
+    if (!this.isRunning || this._stopRequested) {
+      throw new Error('shared snapshot cycle의 trader가 실행 상태가 아닙니다.');
+    }
+    const previousSnapshotContext = this._snapshotContext;
+    this._snapshotContext = {
+      ...snapshot,
+      sharedSnapshot: true,
+      skipConfirmationDelay: true
+    };
+
+    try {
+      // Risk exits are evaluated from the same snapshot before new entries,
+      // matching the normal runner's protection-first ordering without a
+      // second ticker request per variant.
+      await this.monitorOpenPositions(this._snapshotContext);
+      await this.executeTradingCycle();
+      return await this.recordPaperValidationSnapshot(
+        'shared_snapshot_cycle',
+        this._snapshotContext.priceMap
+      );
+    } finally {
+      this._snapshotContext = previousSnapshotContext;
+    }
+  }
+
+  /**
    * 개별 코인 분석
    */
   async getTickerMapForCycle() {
+    if (this._snapshotContext?.sharedSnapshot === true &&
+      this._snapshotContext.tickerMap instanceof Map) {
+      return this._snapshotContext.tickerMap;
+    }
     if (!Array.isArray(this.targetCoins) || this.targetCoins.length === 0) return null;
     this.cycleRequestStats = this.cycleRequestStats || {
       batchTickerRequests: 0,
@@ -5034,8 +5109,13 @@ class MultiCoinTrader {
       candleRequests: 0,
       batchTickerFailures: 0
     };
-    if (!marketData.ticker) this.cycleRequestStats.individualTickerRequests += 1;
-    const ticker = marketData.ticker ? [marketData.ticker] : await this.upbit.getTicker(coin);
+    const sharedSnapshot = marketData.sharedSnapshot === true;
+    if (!marketData.ticker && !sharedSnapshot) this.cycleRequestStats.individualTickerRequests += 1;
+    const ticker = marketData.ticker
+      ? [marketData.ticker]
+      : sharedSnapshot
+        ? null
+        : await this.upbit.getTicker(coin);
     if (!ticker || !Array.isArray(ticker) || ticker.length === 0) {
       throw new Error(`${coin} 현재가 조회 실패 - 응답 없음`);
     }
@@ -5045,8 +5125,10 @@ class MultiCoinTrader {
     const currentPrice = ticker[0].trade_price;
 
     // 캔들 데이터 조회
-    if (marketData.candles === undefined) this.cycleRequestStats.candleRequests += 1;
-    const candles = marketData.candles || await this.upbit.getMinuteCandles(coin, this.candleUnit, this.candleCount);
+    if (marketData.candles === undefined && !sharedSnapshot) this.cycleRequestStats.candleRequests += 1;
+    const candles = marketData.candles || (sharedSnapshot
+      ? null
+      : await this.upbit.getMinuteCandles(coin, this.candleUnit, this.candleCount));
     const minimumCandleCount = Math.max(50, (this.config.rsiPeriod || 14) + 10);
     if (!candles || !Array.isArray(candles) || candles.length < minimumCandleCount) {
       this.recordInsufficientCandleData(coin, Array.isArray(candles) ? candles.length : 0, minimumCandleCount);
@@ -5146,17 +5228,20 @@ class MultiCoinTrader {
    * 반등 후보를 주문 직전에 다시 확인한다.
    * 지연 동안 가격/캔들이 바뀌면 기존 분석 결과를 재사용하지 않는다.
    */
-  async confirmScalpingEntry(coin, decision, strategy) {
+  async confirmScalpingEntry(coin, decision, strategy, marketData = null) {
     const requestedDelay = Number(decision.entryDelayMs);
     const minDelay = Math.max(1000, Number(this.entryDelayMinMs) || 1000);
     const maxDelay = Math.max(minDelay, Number(this.entryDelayMaxMs) || 5000);
-    const delayMs = Math.min(maxDelay, Math.max(minDelay, Number.isFinite(requestedDelay)
-      ? requestedDelay
-      : strategy.getEntryDelayMs()));
+    const skipDelay = marketData?.skipConfirmationDelay === true;
+    const delayMs = skipDelay
+      ? 0
+      : Math.min(maxDelay, Math.max(minDelay, Number.isFinite(requestedDelay)
+        ? requestedDelay
+        : strategy.getEntryDelayMs()));
 
     this.recordPaperEntryConfirmation(coin, 'attempt', 'pending');
     console.log(`\n⏳ [${coin}] 반등 확인 완료 - ${delayMs}ms 후 주문 재검증`);
-    await this.sleep(delayMs);
+    if (!skipDelay) await this.sleep(delayMs);
 
     if (this._stopRequested) {
       this.recordPaperEntryConfirmation(coin, 'cancelled', 'stop_requested');
@@ -5168,10 +5253,15 @@ class MultiCoinTrader {
     let ticker;
     let candles;
     try {
-      [ticker, candles] = await Promise.all([
-        this.upbit.getTicker(coin),
-        this.upbit.getMinuteCandles(coin, this.candleUnit, this.candleCount)
-      ]);
+      if (marketData?.sharedSnapshot === true) {
+        ticker = marketData.ticker ? [marketData.ticker] : null;
+        candles = marketData.candles;
+      } else {
+        [ticker, candles] = await Promise.all([
+          this.upbit.getTicker(coin),
+          this.upbit.getMinuteCandles(coin, this.candleUnit, this.candleCount)
+        ]);
+      }
     } catch (error) {
       this.recordPaperEntryConfirmation(coin, 'cancelled', 'revalidation_request_failed');
       this.resolveWinnerShadowBlockedEntryAsNotFilled(coin, decision, 'revalidation_request_failed');
@@ -5235,7 +5325,16 @@ class MultiCoinTrader {
     }
   }
 
-  async _executeOrder(coin, decision, currentPrice, krwBalance, coinBalance, currentPositions, coinAnalyses = []) {
+  async _executeOrder(
+    coin,
+    decision,
+    currentPrice,
+    krwBalance,
+    coinBalance,
+    currentPositions,
+    coinAnalyses = [],
+    executionContext = null
+  ) {
     if (this._stopRequested) return null;
     if (!this.dryRun && (this.liveExecutionEvidenceWriteError || this.liveExecutionEvidenceDataError)) {
       const reason = this.liveExecutionEvidenceWriteError || this.liveExecutionEvidenceDataError;
@@ -5306,7 +5405,21 @@ class MultiCoinTrader {
       // 스캘핑 매수는 신호 발생 시점의 가격을 사용하지 않고,
       // 1~5초 지연 후 ticker/완료 캔들을 다시 확인한 뒤 진행한다.
       if (this.isScalpingMode) {
-        const confirmation = await this.confirmScalpingEntry(coin, decision, strategy);
+        const snapshotMarketData = executionContext?.marketDataByCoin instanceof Map
+          ? executionContext.marketDataByCoin.get(coin)
+          : executionContext?.marketDataByCoin?.[coin];
+        const confirmation = await this.confirmScalpingEntry(
+          coin,
+          decision,
+          strategy,
+          snapshotMarketData
+            ? {
+                ...snapshotMarketData,
+                sharedSnapshot: executionContext.sharedSnapshot === true,
+                skipConfirmationDelay: executionContext.skipConfirmationDelay === true
+              }
+            : null
+        );
         if (!confirmation) return;
 
         // 지연 중 수동 주문/다른 경로에서 포지션이 먼저 생겼다면
@@ -5330,7 +5443,7 @@ class MultiCoinTrader {
       }
 
       // 동적 투자금액 계산 (시드머니 + 신호 강도 기반)
-      const totalAssets = await this.calculateTotalAssets();
+      const totalAssets = await this.calculateTotalAssets(executionContext?.priceMap);
       const dynamicInvestment = await this.calculateDynamicInvestmentAmount(totalAssets, signalStrength);
 
       // 잔액 부족 시 강한 신호면 추가 리밸런싱

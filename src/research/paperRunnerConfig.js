@@ -1,0 +1,102 @@
+const number = (value, fallback) => Number.isFinite(Number(value)) ? Number(value) : fallback;
+
+/**
+ * Build the dry-run configuration for the shared-snapshot variant runner.
+ *
+ * The variant runner deliberately uses the same runtime contract as
+ * runPaperSmoke. Variant overrides are applied only to strategy/research
+ * fields; storage, target markets, and dry-run mode remain owned by the
+ * runner so one variant cannot redirect another book or enable live orders.
+ */
+export function buildPaperRunnerConfig({
+  portfolioFile,
+  paperFile,
+  markets,
+  variantOverrides = {},
+  seedMoney = number(process.env.PAPER_SMOKE_SEED_MONEY, 1_000_000),
+  diagnosticShadowsEnabled = true
+} = {}) {
+  return {
+    strategyMode: 'oversold_reaction_scalping',
+    dryRunSeedMoney: seedMoney,
+    paperMinimumStorageMiB: number(process.env.SCALP_PAPER_MIN_STORAGE_MIB, 1024),
+    maxPositions: number(process.env.SCALP_MAX_POSITIONS, 3),
+    portfolioAllocation: number(process.env.SCALP_PORTFOLIO_ALLOCATION, 0.1),
+    investmentRatio: number(process.env.SCALP_INVESTMENT_RATIO, 0.02),
+    maxCandleAgeSeconds: number(process.env.SCALP_MAX_CANDLE_AGE_SECONDS, 0),
+    stopLossPercent: number(process.env.SCALP_STOP_LOSS_PERCENT, 1.2),
+    takeProfitPercent: number(process.env.SCALP_TAKE_PROFIT_PERCENT, 1.8),
+    rsiPeriod: number(process.env.SCALP_RSI_PERIOD, number(process.env.RSI_PERIOD, 14)),
+    rsiOversold: number(process.env.SCALP_RSI_OVERSOLD, number(process.env.RSI_OVERSOLD, 30)),
+    rsiOverbought: number(process.env.SCALP_RSI_OVERBOUGHT, number(process.env.RSI_OVERBOUGHT, 70)),
+    oversoldLookback: number(process.env.SCALP_OVERSOLD_LOOKBACK, 1),
+    candleUnit: number(process.env.SCALP_CANDLE_UNIT, 1),
+    candleCount: number(process.env.SCALP_CANDLE_COUNT, 120),
+    minReboundPercent: number(process.env.SCALP_MIN_REBOUND_PERCENT, 0.15),
+    minRsiRecovery: number(process.env.SCALP_MIN_RSI_RECOVERY, 2),
+    minVolumeRatio: number(process.env.SCALP_MIN_VOLUME_RATIO, 1),
+    volumeLookback: number(process.env.SCALP_VOLUME_LOOKBACK, 20),
+    minCloseStrength: number(process.env.SCALP_MIN_CLOSE_STRENGTH, 0.65),
+    trendPeriod: number(process.env.SCALP_TREND_PERIOD, 30),
+    trendSlopeLookback: number(process.env.SCALP_TREND_SLOPE_LOOKBACK, 3),
+    minTrendSlopePercent: number(process.env.SCALP_MIN_TREND_SLOPE_PERCENT, -0.2),
+    requirePreviousHighBreak: process.env.SCALP_REQUIRE_PREVIOUS_HIGH_BREAK !== 'false',
+    maxSignalRangePercent: number(process.env.SCALP_MAX_SIGNAL_RANGE_PERCENT, 0),
+    minSignalRangePercent: number(process.env.SCALP_MIN_SIGNAL_RANGE_PERCENT, 0),
+    maxReboundPercent: number(process.env.SCALP_MAX_REBOUND_PERCENT, 0),
+    marketRegimeEnabled: process.env.SCALP_MARKET_REGIME_ENABLED === 'true',
+    marketRegimeLookback: number(process.env.SCALP_MARKET_REGIME_LOOKBACK, 5),
+    marketRegimeMinBreadth: number(process.env.SCALP_MARKET_REGIME_MIN_BREADTH, 0.5),
+    marketRegimeMinReturnPercent: number(process.env.SCALP_MARKET_REGIME_MIN_RETURN_PERCENT, -0.2),
+    requireReboundBelowOverbought: process.env.SCALP_REQUIRE_REBOUND_BELOW_OVERBOUGHT === 'true',
+    signalProfile: process.env.SCALP_SIGNAL_PROFILE || 'rsi_rebound',
+    bbPeriod: number(process.env.BB_PERIOD, 20),
+    bbStdDev: number(process.env.BB_STD_DEV, 2),
+    emaLong: number(process.env.EMA_LONG, 60),
+    entryDelayMinMs: number(process.env.SCALP_ENTRY_DELAY_MIN_MS, 1000),
+    entryDelayMaxMs: number(process.env.SCALP_ENTRY_DELAY_MAX_MS, 5000),
+    maxEntryRetracePercent: number(process.env.SCALP_MAX_ENTRY_RETRACE_PERCENT, 0.25),
+    maxEntryChasePercent: number(process.env.SCALP_MAX_ENTRY_CHASE_PERCENT, 0.35),
+    breakEvenTriggerPercent: number(process.env.SCALP_BREAK_EVEN_TRIGGER_PERCENT, 0),
+    breakEvenOffsetPercent: number(process.env.SCALP_BREAK_EVEN_OFFSET_PERCENT, 0.05),
+    trailingActivationPercent: number(process.env.SCALP_TRAILING_ACTIVATION_PERCENT, 0),
+    trailingStopPercent: number(process.env.SCALP_TRAILING_STOP_PERCENT, 0),
+    maxHoldMinutes: number(process.env.SCALP_MAX_HOLD_MINUTES, 30),
+    maxLosingHoldMinutes: number(process.env.SCALP_MAX_LOSING_HOLD_MINUTES, 0),
+    winnerExtendMinutes: number(process.env.SCALP_WINNER_EXTEND_MINUTES, 0),
+    winnerExtendMinProfitPercent: number(process.env.SCALP_WINNER_EXTEND_MIN_PROFIT_PERCENT, 0),
+    winnerShadowExtendMinutes: 0,
+    winnerShadowExtendMinProfitPercent: 0,
+    winnerShadowMaxReboundPercent: 0,
+    maxEntriesPerSignalWindow: number(process.env.SCALP_MAX_ENTRIES_PER_SIGNAL_WINDOW, 0),
+    positionRiskCheckIntervalMs: 0,
+    maxRiskDataGapSeconds: number(process.env.SCALP_MAX_RISK_DATA_GAP_SECONDS, 30),
+    maxAnalysisDataGapSeconds: number(process.env.SCALP_MAX_ANALYSIS_DATA_GAP_SECONDS, 60),
+    cooldownAfterLossMinutes: number(process.env.SCALP_COOLDOWN_AFTER_LOSS_MINUTES, 15),
+    maxConsecutiveLosses: number(process.env.SCALP_MAX_CONSECUTIVE_LOSSES, 3),
+    lossCircuitBreakerCount: number(process.env.SCALP_LOSS_CIRCUIT_BREAKER_COUNT, 0),
+    lossCircuitBreakerWindowMinutes: number(process.env.SCALP_LOSS_CIRCUIT_BREAKER_WINDOW_MINUTES, 30),
+    lossCircuitBreakerCooldownMinutes: number(process.env.SCALP_LOSS_CIRCUIT_BREAKER_COOLDOWN_MINUTES, 60),
+    checkInterval: number(process.env.PAPER_SMOKE_INTERVAL_MS, 5_000),
+    upbitRequestTimeoutMs: number(process.env.UPBIT_REQUEST_TIMEOUT_MS, 10_000),
+    useNews: false,
+    requireValidationPassForLive: true,
+    paperValidationMinDays: number(process.env.SCALP_PAPER_MIN_DAYS, 7),
+    paperValidationMinTrades: number(process.env.SCALP_PAPER_MIN_TRADES, 20),
+    paperValidationMinReturnPercent: number(process.env.SCALP_PAPER_MIN_RETURN_PERCENT, 0.2),
+    paperValidationMaxDrawdownPercent: number(process.env.SCALP_PAPER_MAX_DRAWDOWN_PERCENT, 15),
+    paperValidationMaxHeartbeatGapMinutes: number(process.env.SCALP_PAPER_MAX_HEARTBEAT_GAP_MINUTES, 15),
+    scalpingValidationOutputFile: process.env.SCALP_VALIDATION_OUTPUT_FILE || 'scalping_validation.json',
+    logLevel: process.env.LOG_LEVEL || 'warn',
+    ...variantOverrides,
+    // Runner-owned safety and storage boundaries cannot be overridden by a
+    // variant definition or an environment typo.
+    accessKey: '',
+    secretKey: '',
+    dryRun: true,
+    targetCoins: markets,
+    virtualPortfolioFile: portfolioFile,
+    paperValidationFile: paperFile,
+    paperDiagnosticShadowsEnabled: diagnosticShadowsEnabled
+  };
+}

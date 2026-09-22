@@ -160,9 +160,14 @@ npm run research:momentum-shadow:start-quote-cross-if-ready # quote-cross fixed 
 npm run verify:pwa # manifest/icon/service worker shell 설치 계약 검증
 npm run paper:smoke       # 기존 포트폴리오와 분리된 짧은 DRY_RUN forward smoke
 npm run paper:forward     # .paper-forward에 격리된 장기 DRY_RUN forward 세션
+npm run paper:variants    # 공통 ticker/candle snapshot 기반 multi-variant DRY_RUN forward A/B
 npm run research:paper:cohort -- . /private/tmp/coinpilot-paper-forward-cohort.json # 기존 forward ledger read-only cohort 요약
 npm run research:paper:exit-evidence -- .paper-forward-sealed-rsi-20260917-r2 /private/tmp/coinpilot-paper-exit-evidence-r2.json # exit reason/MFE/MAE/보유시간 read-only 집계
 ```
+
+`npm run paper:variants`는 하나의 owner가 시장별 ticker/candle을 한 번만 읽고, 같은 snapshot을 사전 지정한 여러 virtual book에 fan-out하는 연구 전용 runner입니다. 기본 variant는 `baseline,volume_15,rebound_25,max_rebound_04,loss_timeout_5m`이며, `SCALP_FORWARD_VARIANT_NAMES`·`SCALP_FORWARD_MARKETS`·`SCALP_FORWARD_VARIANT_SECONDS`로 별도 설정할 수 있습니다. 각 variant는 독립 `dry_portfolio.json`과 `paper_validation.json`을 가지며, report는 live promotion 파일에 쓰지 않습니다. `PAPER_ALLOW_CONCURRENT_SESSIONS=true`로 여러 paper owner를 억지로 병렬 실행하는 방식과 다릅니다.
+
+장기 관찰은 `SCALP_FORWARD_VARIANT_MODE=true npm run paper:variants`로 실행할 수 있고, output directory를 명시하지 않으면 `.paper-forward-variants/run-<timestamp>/` 아래에 새로 만듭니다. 이 runner의 결과는 동일 데이터·비용·시각 조건에서의 비교 근거이지, 실거래 체결·wallet settlement 또는 수익 보장이 아닙니다.
 
 candidate preflight와 detached launcher는 동일한 sealed profile resolver를 사용합니다. 따라서 `MOMO_SHADOW_CANDIDATE_PROFILE=loss_cap`을 지정하면 두 명령 모두 `.paper-momentum-shadow-fixed-hold-2d-loss-cap-v1`, fixed `48h`, next-open, cost `0.3%`, 완료 일봉 종가 손실 상한 `4%`를 검사합니다. `loss_cap_no_doge`는 같은 계약에서 DOGE만 제외한 별도 target `.paper-momentum-shadow-fixed-hold-2d-loss-cap-no-doge-v1`이며, 400/800일 historical study가 각각 `+4.6566%/+9.2981%`, PF `1.84/1.66`, MDD `1.32%/1.82%`, blockers 없음으로 `SHADOW_CANDIDATE`가 된 후보입니다. 두 profile 모두 실전 승격값이 아니라 다음 single-owner paper shadow를 위한 연구 가설입니다. 4%는 새로 받은 400/800일·cost `0.3%` sweep에서 두 window의 MDD를 낮춘 risk-first 연구 가설이며, 실전 승격값이 아닙니다. profile을 생략하면 baseline이므로, 후보를 시작하기 전에 실제 시작할 profile을 붙인 preflight 결과의 `candidateProfile`, `candidateConfig`, `targetDir`, `blockers`를 확인해야 합니다. 이 profile은 paper research owner만 대상으로 하며 실전 주문·승격을 의미하지 않습니다.
 
