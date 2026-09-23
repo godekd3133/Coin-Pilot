@@ -5,7 +5,7 @@ import { fileURLToPath } from 'url';
 import { createServer } from 'http';
 import { createServer as createHttpsServer } from 'https';
 import { Server as SocketIOServer } from 'socket.io';
-import Logger from '../utils/logger.js';
+import Logger, { resolveLogDirectory } from '../utils/logger.js';
 
 // Route modules
 import createAccountRoutes from './routes/account.js';
@@ -33,8 +33,10 @@ class DashboardServer {
     this.app = express();
     this.port = port;
     this.tradingSystem = tradingSystem;
-    this.logger = new Logger('debug');
     const dashboardEnv = options.env || process.env;
+    this.logger = new Logger('debug', {
+      logDir: resolveLogDirectory(PROJECT_ROOT, dashboardEnv.STAGING_OUTPUT_DIR)
+    });
     this.tlsConfig = resolveDashboardTls(dashboardEnv, PROJECT_ROOT);
     if (this.tlsConfig.error) {
       throw new Error(this.tlsConfig.error);
@@ -324,7 +326,7 @@ class DashboardServer {
         }
 
         // 에러 로그 확인
-        const logDir = path.join(PROJECT_ROOT, 'logs');
+        const logDir = this.logger.logDir;
         const today = now.toISOString().split('T')[0];
         const errorLogFile = path.join(logDir, `error-${today}.log`);
         let recentErrors = [];

@@ -29,9 +29,9 @@ test('redesign은 백그라운드 탭이 다시 보일 때 paper 상태를 즉�
 
 test('PWA shell은 redesign asset version과 service worker cache version을 함께 갱신한다', () => {
   const scriptAsset = indexSource.match(/<script\s+src=["'](\/pilot-redesign\.js\?v=[^"']+)["']/)?.[1];
-  assert.equal(scriptAsset, '/pilot-redesign.js?v=observer-readonly-87');
+  assert.equal(scriptAsset, '/pilot-redesign.js?v=observer-readonly-95');
   assert.match(indexSource, /<link\s+rel=["']stylesheet["']\s+href=["']\/pilot-redesign\.css\?v=20260918-06["']/);
-  assert.match(serviceWorkerSource, /const CACHE_NAME = ['"]coinpilot-shell-v96['"]/);
+  assert.match(serviceWorkerSource, /const CACHE_NAME = ['"]coinpilot-shell-v104['"]/);
   assert.match(serviceWorkerSource, new RegExp(`['"]${scriptAsset.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}['"]`));
   assert.match(serviceWorkerSource, /['"]\/pilot-redesign\.css\?v=20260918-06['"]/);
   assert.match(serviceWorkerSource, /NETWORK_FIRST_SHELL_PATHS/);
@@ -67,7 +67,7 @@ test('PWA manifest icon과 service worker app shell의 모든 정적 자산이 �
     '/apple-touch-icon.png',
     '/auth-client.js',
     '/pilot-redesign.css?v=20260918-06',
-    '/pilot-redesign.js?v=observer-readonly-87'
+    '/pilot-redesign.js?v=observer-readonly-95'
   ];
   for (const asset of shellAssets) {
     assert.match(
@@ -76,6 +76,14 @@ test('PWA manifest icon과 service worker app shell의 모든 정적 자산이 �
       `service worker app shell missing: ${asset}`
     );
   }
+});
+
+test('offline recovery keeps mutations locked until current mode, account, and selected quote are ready', () => {
+  assert.match(redesignSource, /function isCoreTradingSnapshotReady\(/);
+  assert.match(redesignSource, /state\.coreReady\s*=\s*isCoreTradingSnapshotReady\(/);
+  assert.match(redesignSource, /state\.coreReady !== true/);
+  assert.match(redesignSource, /state\.actualMode === ['"]DRY_RUN['"]/);
+  assert.match(redesignSource, /refreshAfterCurrent/);
 });
 
 test('iOS와 Android 설치 메타가 visible shell에 함께 선언된다', () => {
@@ -119,6 +127,17 @@ test('visible redesign shell owns PWA registration and installation controls', (
   assert.match(serviceWorkerSource, /SKIP_WAITING/);
 });
 
+test('SPA navigation exposes its landmark and current view to assistive technology', () => {
+  assert.match(redesignSource, /<nav class="pilot-sidebar-nav" aria-label="주 메뉴">/);
+  assert.doesNotMatch(redesignSource, /<aside class="pilot-sidebar" aria-label="주 메뉴">/);
+  assert.match(redesignSource, /data-pilot-view="overview" aria-current="page"/);
+  assert.match(redesignSource, /function syncViewNavigation\(view\)/);
+  assert.match(redesignSource, /button\.setAttribute\(['"]aria-current['"], ['"]page['"]\)/);
+  assert.match(redesignSource, /button\.removeAttribute\(['"]aria-current['"]\)/);
+  assert.match(redesignSource, /syncViewNavigation\(nextView\)/);
+  assert.match(redesignSource, /syncViewNavigation\(view\)/);
+});
+
 test('활성 paper evidence 세션 중 UI도 설정·최적화 mutation을 잠근다', () => {
   assert.match(redesignSource, /function paperEvidenceMutationLock\(\)/);
   assert.match(redesignSource, /isPaperEvidenceMutationLocked/);
@@ -138,25 +157,10 @@ test('paper/live 주문 확인 취소는 서버 호출 없이 사용자에게 �
   );
 });
 
-test('momentum shadow card displays benchmark-relative evidence without implying a fill', () => {
-  assert.match(redesignSource, /benchmarkObservation/);
-  assert.match(redesignSource, /benchmarkCheckpoints/);
-  assert.match(redesignSource, /checkpoint/);
-  assert.match(redesignSource, /전략 평가 차이/);
-  assert.match(redesignSource, /실제 체결 아님/);
-  assert.match(redesignSource, /realizedByMarket/);
-  assert.match(redesignSource, /시장별 실현/);
-  assert.match(redesignSource, /paperForwardCohort/);
-  assert.match(redesignSource, /무결성 통과/);
-  assert.match(redesignSource, /active\/ended/);
-  assert.match(redesignSource, /과매도 관측 · 반등 조건 미충족/);
-});
-
-test('momentum shadow card separates integrity cohort from profitability evidence cohort', () => {
-  assert.match(redesignSource, /profitabilityEvidenceProfitAggregation/);
-  assert.match(redesignSource, /수익성 표본 미충족/);
-  assert.match(redesignSource, /최소 관찰\/거래 조건/);
-  assert.match(redesignSource, /혼합 config 합산 금지/);
+test('모의투자 설정 경고는 내부 변경 필드 대신 사용자용 안내를 표시한다', () => {
+  assert.match(redesignSource, /설정이 변경되어 관찰을 다시 확인해야 합니다/);
+  assert.doesNotMatch(redesignSource, /pilot-momentum-shadow-config-drift/);
+  assert.doesNotMatch(redesignSource, /최근 owner 재시작/);
 });
 
 test('same-window scalping variant evidence is visible without hiding invalid markets', () => {
@@ -176,17 +180,11 @@ test('paper UI는 in-flight analysis cycle을 정상 수신과 구분해 표시�
   assert.match(indexSource, /analysisDataHealth\.analysisActive/);
 });
 
-test('paper UI는 server promotion blockers를 동일한 보류 사유로 표시한다', () => {
-  assert.match(redesignSource, /promotionBlockers/);
-  assert.match(redesignSource, /전환 보류 사유/);
-  assert.match(redesignSource, /promotionBlockers\.join/);
-});
-
-test('overview paper gate는 최소 거래·관찰 기간 대비 진행률을 표시한다', () => {
-  assert.match(redesignSource, /paperMinimumTrades/);
-  assert.match(redesignSource, /paperMinimumDays/);
-  assert.match(redesignSource, /청산 \$\{paperClosedTrades\}\/\$\{paperMinimumTrades\}회/);
-  assert.match(redesignSource, /관찰 \$\{paperObservationDays\}\/\$\{paperMinimumDays\}일/);
+test('대시보드 세션 카드에는 현재 상태와 청산 횟수만 표시한다', () => {
+  const cards = redesignSource.split('function renderGateCards() {')[1]?.split('function renderChartPeriodButtons() {')[0];
+  assert.ok(cards);
+  assert.match(cards, /paper\.closedTradeCount/);
+  assert.doesNotMatch(cards, /paperMinimumTrades|paperMinimumDays|freshnessCohort/);
 });
 
 test('mobile redesigned shell은 두 줄 고정 네비게이션 아래에 콘텐츠 여백을 확보한다', () => {
@@ -219,7 +217,7 @@ test('mobile redesigned shell은 두 줄 고정 네비게이션 아래에 콘텐
 test('mobile fixed navigation stays compact enough to leave the first viewport readable', () => {
   assert.match(
     redesignStyleSource,
-    /@media\s*\(max-width:\s*760px\)[\s\S]*\.pilot-nav-button\s*\{[\s\S]*min-height:\s*43px[\s\S]*font-size:\s*9px/
+    /@media\s*\(max-width:\s*760px\)[\s\S]*\.pilot-nav-button\s*\{[\s\S]*min-height:\s*44px[\s\S]*font-size:\s*9px/
   );
   assert.match(
     redesignStyleSource,
@@ -227,83 +225,10 @@ test('mobile fixed navigation stays compact enough to leave the first viewport r
   );
 });
 
-test('paper 카드가 strict와 relaxed diagnostic 손익을 분리하고 모바일에서 접힌다', () => {
-  assert.match(redesignSource, /shadowEvaluation/);
-  assert.match(redesignSource, /looseShadowEvaluation/);
-  assert.match(redesignSource, /maxFavorableExcursionPercent/);
-  assert.match(redesignSource, /maxAdverseExcursionPercent/);
-  assert.match(redesignSource, /pilot-paper-diagnostic-open/);
-  assert.match(redesignSource, /미청산 · 실현손익 제외/);
-  assert.match(redesignSource, /rejectionOutcomes/);
-  assert.match(redesignSource, /pilot-paper-diagnostic-rejection/);
-  assert.match(redesignSource, /거래량 확인 실패/);
-  assert.match(redesignSource, /(?:진단용 relaxed 장부|참고용 비교 장부)/);
-  assert.match(redesignSource, /(?:strict 승격 제외|실제 자산·전환과 무관)/);
-  assert.match(redesignSource, /exitEvidence/);
-  assert.match(redesignSource, /evidence\.validTradeCount/);
-  assert.match(redesignSource, /실제 종료 경로 집계/);
-  assert.match(redesignSource, /조기 청산·실제 fill·wallet settlement·수익성은 추정하지 않습니다/);
-  assert.match(redesignStyleSource, /\.pilot-paper-diagnostics\s*\{/);
-  assert.match(redesignStyleSource, /\.pilot-paper-diagnostic-grid\s*\{/);
-  assert.match(redesignStyleSource, /\.pilot-paper-diagnostic-open\s*\{/);
-  assert.match(redesignStyleSource, /@media\s*\(max-width:\s*760px\)[\s\S]*\.pilot-paper-diagnostic-grid\s*\{\s*grid-template-columns:\s*1fr/);
-});
-
-test('paper UI는 strict-only efficacy 관찰 모드를 명시한다', () => {
-  assert.match(redesignSource, /paperExperiments\?\.diagnosticShadows\?\.enabled/);
-  assert.match(redesignSource, /diagnosticModeHtml/);
-  assert.match(redesignSource, /strict-only 관찰/);
-  assert.match(redesignSource, /독립 efficacy cohort/);
-});
-
-test('paper UI는 RSI proximity 진단을 수익성 증거와 구분해 표시한다', () => {
-  assert.match(redesignSource, /signalAvailability\.rsiProximity/);
-  assert.match(redesignSource, /직전 RSI 최저/);
-  assert.match(redesignSource, /과매도 기준/);
-});
-
-test('paper UI는 signal gate funnel을 고유 window 진단으로 표시한다', () => {
-  assert.match(redesignSource, /signalAvailability\.signalFunnel/);
-  assert.match(redesignSource, /funnel/);
-  assert.match(indexSource, /signalAvailability\.signalFunnel/);
-});
-
-test('paper UI는 시장별 최신 signal evidence를 별도 read-only note로 표시한다', () => {
-  assert.match(redesignSource, /lastSignalEvidenceByCoin/);
-  assert.match(redesignSource, /최신 signal evidence/);
-  assert.match(indexSource, /signalAvailability\?\.lastSignalEvidenceByCoin/);
-});
-
-test('momentum UI는 DOGE 제외 loss-cap 후보 readiness와 blocker를 표시한다', () => {
-  assert.match(redesignSource, /fixed_2d_loss_cap_no_doge/);
-  assert.match(redesignSource, /DOGE 제외 손실 상한 후보/);
-  assert.match(redesignSource, /fixedHoldLossCapNoDogeReadiness/);
-  assert.match(redesignSource, /historical/);
-  assert.match(redesignSource, /promotion 아님/);
-  assert.match(redesignSource, /rolling/);
-  assert.match(redesignSource, /boundary unknown/);
-  assert.match(redesignSource, /cost 경계/);
-});
-
-test('paper UI는 relaxed 실행경계 차단 telemetry를 표시한다', () => {
-  assert.match(redesignSource, /shadowEntryExecutionBlockedEntries/);
-  assert.match(redesignSource, /(?:실행경계 차단|진입 경계 차단)/);
-  assert.match(redesignSource, /(?:차단 counterfactual|가상 정산)/);
-  assert.match(redesignSource, /(?:실제 체결·strict 승격 제외|실제 체결 아님 · 전환 무관)/);
-  assert.match(redesignSource, /(?:손실 방향|손실 회피)/);
-  assert.match(redesignSource, /놓친 (?:이익 방향|이익)/);
-  assert.match(indexSource, /shadowEntryExecutionBlockedEntries/);
-  assert.match(indexSource, /(?:실행경계 차단|진입 경계 차단)/);
-});
-
-test('paper UI는 동일 signal 실행경계 비교와 부호 변경을 실제 체결과 구분해 표시한다', () => {
-  assert.match(redesignSource, /executionOutcomeComparison/);
-  assert.match(redesignSource, /strictVsShadow/);
-  assert.match(redesignSource, /strictPositiveDiagnosticNegativeCount/);
-  assert.match(redesignSource, /동일 signal 실행경계 비교/);
-  assert.match(redesignSource, /executionRobustnessGate/);
-  assert.match(redesignSource, /실행 강건성 gate/);
-  assert.match(redesignSource, /실제 fill·partial fill·wallet settlement·전환 근거가 아닙니다/);
+test('모의투자 시작 보류 사유는 사용자에게 필요한 조건만 표시한다', () => {
+  assert.match(redesignSource, /기준 시장 데이터가 불완전합니다/);
+  assert.match(redesignSource, /다른 모의투자 세션이 실행 중입니다/);
+  assert.match(redesignSource, /보유 포지션이 있어 새 세션을 시작할 수 없습니다/);
 });
 
 test('smart order UI는 mixed fill 결과를 성공으로 오인하지 않는다', () => {
@@ -312,19 +237,21 @@ test('smart order UI는 mixed fill 결과를 성공으로 오인하지 않는다
   assert.match(tradingRouteSource, /orders\.length === 0 \? 409 : 207/);
 });
 
-test('validation UI는 historical candle continuity 실패를 수익률과 분리해 표시한다', () => {
-  assert.match(redesignSource, /(?:캔들 연속성 실패|캔들 공백)/);
-  assert.match(redesignSource, /quality\.gapCount/);
-  assert.match(indexSource, /(?:캔들 연속성 실패|캔들 공백)/);
-  assert.match(indexSource, /quality\.largestGapSeconds/);
-});
-
 test('validation UI는 오래된 report를 최신 raw window 근거와 구분한다', () => {
   assert.match(redesignSource, /validationReportFreshness/);
   assert.match(redesignSource, /report\.reportFreshness/);
   assert.match(redesignSource, /최신 raw window 재점검 필요/);
   assert.match(indexSource, /최신 raw window 재점검 필요/);
   assert.match(indexSource, /report\.reportFreshness/);
+});
+
+test('전략 준비 UI는 현재 서버 판정과 최신 결과가 모두 있어야 통과로 표시한다', () => {
+  const validation = redesignSource.split('function renderValidationDetail() {')[1]?.split('function renderPaperDetail() {')[0];
+  assert.ok(validation);
+  assert.match(validation, /gate.checked === true && gate.passed === true && report\?\.freshness\?\.fresh === true/);
+  assert.match(validation, /readiness\?\.currentEvidence === true/);
+  assert.match(validation, /gate.checked === true && gate.passed === false/);
+  assert.doesNotMatch(validation, /report\?\.filename|runtime gate|blockerDetails/);
 });
 
 test('research UI는 higher-timeframe 결과를 strict/live gate와 분리해 표시한다', () => {
@@ -336,130 +263,38 @@ test('research UI는 higher-timeframe 결과를 strict/live gate와 분리해 �
   assert.match(indexSource, /pilot-redesign-root/);
 });
 
-test('momentum shadow UI는 두 장부의 평가자산을 읽기 전용 연구 결과로 표시한다', () => {
-  assert.match(redesignSource, /momentumShadow/);
-  assert.match(redesignSource, /\/momentum-shadow/);
-  assert.match(redesignSource, /방어형 모멘텀 비교/);
-  assert.match(redesignSource, /평가수익률/);
-  assert.match(redesignSource, /(?:주문 승인과 무관|실제 주문과 무관)/);
-  assert.match(redesignSource, /configurationWarning/);
-  assert.match(redesignSource, /cycleDiagnostics/);
-  assert.match(redesignSource, /cycle 진단/);
-  assert.match(redesignSource, /benchmark.gateOpen/);
-  assert.match(redesignSource, /heartbeatAgeSeconds/);
-  assert.match(redesignSource, /benchmarkTrendMinPercent/);
-  assert.match(redesignSource, /observationRestart/);
-  assert.match(redesignSource, /안전 재시작/);
-  assert.match(redesignSource, /dataQuality/);
-  assert.match(redesignSource, /데이터 품질 차단/);
-  assert.match(redesignSource, /promotionBlockers/);
-  assert.match(redesignSource, /observationDays/);
-  assert.match(redesignSource, /minimumResearchDays/);
-  assert.match(redesignSource, /realizedReturnPercent/);
-  assert.match(redesignSource, /realizedTradeConfidence/);
-  assert.match(redesignSource, /거래수익 95% 하한/);
-  assert.match(redesignSource, /blockedChecksAttribution/);
-  assert.match(redesignSource, /과거 owner 원인 미분류/);
-  assert.match(redesignSource, /minimumResearchTrades/);
-  assert.match(redesignSource, /수익성 기준/);
-  assert.match(redesignStyleSource, /\.pilot-momentum-shadow-profitability-gate\s*\{/);
-  assert.match(redesignStyleSource, /@media\s*\(max-width:\s*760px\)/);
-  assert.match(redesignSource, /관찰 기간/);
-  assert.match(redesignSource, /riskControls/);
-  assert.match(redesignSource, /보호중단 발동/);
-  assert.match(redesignSource, /candidateReadiness/);
-  assert.match(redesignSource, /candidateReadinessVariants/);
-  assert.match(redesignSource, /candidate_slot_occupied/);
-  assert.match(redesignSource, /candidate_slot_unverifiable/);
-  assert.match(redesignSource, /readinessWarningsHtml/);
-  assert.match(redesignSource, /exportMomentumShadowEvidence/);
-  assert.match(redesignSource, /export-momentum-evidence/);
-  assert.match(redesignSource, /sanitizeMomentumShadowEvidenceValue/);
-  assert.match(redesignSource, /coinpilot\.momentum-shadow\.evidence\.v1/);
-  assert.match(redesignSource, /실제 fill, wallet settlement, live profitability/);
-  assert.match(redesignSource, /기준 시장의 시세 수집이 현재 실패 중입니다/);
-  assert.match(redesignSource, /기준 시장 상대성과 anchor가 아직 기록되지 않았습니다/);
-  assert.match(redesignSource, /기준 시장 owner가 새 상대성과 계측을 아직 로드하지 않았습니다/);
-  assert.match(redesignSource, /상대성과 계측 대기 · owner 재시작 필요/);
-  assert.match(redesignSource, /변동성 제한 후보/);
-  assert.match(redesignSource, /next_open/);
-  assert.match(redesignSource, /비용 대응·다음 시가 후보/);
-  assert.match(redesignSource, /fixedHoldReadiness/);
-  assert.match(redesignSource, /2일 고정 종료 후보/);
-  assert.match(redesignSource, /fixedHoldRelativeReadiness/);
-  assert.match(redesignSource, /2일·상대추세 후보/);
-  assert.match(redesignSource, /relativeTrendMinPercent/);
-  assert.match(redesignSource, /relativeTrendBlockedEntries/);
-  assert.match(redesignSource, /fixed_2d_spread/);
-  assert.match(redesignSource, /fixed_2d_quote_cross/);
-  assert.match(redesignSource, /fixed_2d_loss_cap/);
-  assert.match(redesignSource, /종가 손실 상한/);
-  assert.match(redesignSource, /stopLossPercent/);
-  assert.match(redesignSource, /lossCapCounterfactual/);
-  assert.match(redesignSource, /종가 손실 상한 가상 비교/);
-  assert.match(redesignSource, /호가/);
-  assert.match(redesignSource, /호가 경계 모델/);
-  assert.match(redesignSource, /best ask 매수 · best bid 매도\/평가/);
-  assert.match(redesignSource, /quoteQuality/);
-  assert.match(redesignSource, /quoteQualitySnapshot/);
-  assert.match(redesignSource, /quoteQualitySnapshot\?\.fresh/);
-  assert.match(redesignSource, /costCompatibility/);
-  assert.match(redesignSource, /스캘핑 비용 호환성/);
-  assert.match(redesignSource, /adverse-slippage 예산/);
-  assert.match(redesignSource, /quoteHistory/);
-  assert.match(redesignSource, /liveExecutionEvidence/);
-  assert.match(redesignSource, /실거래 증거/);
-  assert.match(redesignSource, /체결·settlement 비교 준비/);
-  assert.match(redesignSource, /실제 fill과 wallet settlement가 별도로 관측될 때만 비교/);
-  assert.match(redesignSource, /repeatedOverCeilingMarkets/);
-  assert.match(redesignSource, /반복 호가/);
-  assert.match(redesignSource, /반복 ceiling 초과/);
-  assert.match(redesignSource, /오래됨/);
-  assert.match(redesignSource, /blockedMarkets/);
-  assert.match(redesignSource, /ceiling 초과/);
-  assert.match(redesignSource, /network\.circuitOpen/);
-  assert.match(redesignSource, /network\.failureStreak/);
-  assert.match(redesignSource, /network\.fetchErrors/);
-  assert.match(redesignSource, /lastErrorMarket/);
-  assert.match(redesignSource, /missingMarkets/);
-  assert.match(redesignSource, /확인 시장/);
-  assert.match(redesignSource, /invalidCycles/);
-  assert.match(redesignSource, /일봉 품질 이력/);
-  assert.match(redesignSource, /시장 검토 차단/);
-  assert.match(redesignSource, /quoteExecution/);
-  assert.match(redesignSource, /호가 경계 evidence/);
-  assert.match(redesignSource, /모델 crossing drag/);
-  assert.match(redesignSource, /executionModel/);
-  assert.match(redesignSource, /best ask 매수 · best bid 매도\/평가/);
-  assert.match(redesignSource, /가격 모델/);
-  assert.match(redesignSource, /state\.online/);
-  assert.match(redesignSource, /networkGeneration/);
-  assert.match(redesignSource, /clearDynamicStateForOffline/);
-  assert.match(redesignSource, /window\.addEventListener\(['"]offline['"]/);
-  assert.match(redesignSource, /window\.addEventListener\(['"]online['"]/);
-  assert.match(redesignSource, /pilot-offline-banner/);
-  assert.match(redesignSource, /오프라인 모드/);
-  assert.match(redesignSource, /pendingEntryQuoteBlocked/);
-  assert.match(redesignSource, /quote 차단/);
-  assert.match(redesignSource, /누적 오류/);
-  assert.match(redesignSource, /누적 오류 확인/);
-  assert.match(redesignSource, /시세 수집/);
-  assert.match(redesignSource, /benchmark_data_quality_invalid/);
-  assert.match(redesignSource, /일봉 품질/);
-  assert.match(redesignSource, /volatilityReadiness\.candidateConfig\?\.costPercent/);
-  assert.match(redesignSource, /변동성 목표/);
-  assert.match(redesignSource, /다음 일봉 시작가 체결/);
-  assert.match(redesignSource, /추격 갭 상한/);
-  assert.match(redesignSource, /일봉 신선도/);
-  assert.match(redesignSource, /pendingEntryCount/);
-  assert.match(redesignSource, /중복 신호 차단/);
-  assert.match(redesignSource, /다음 (?:risk-capped|리스크 제한) 후보/);
-  assert.match(redesignSource, /benchmarkThresholdSummary/);
-  assert.match(redesignSource, /기준 시장 임계값 비교/);
-  assert.match(redesignStyleSource, /\.pilot-momentum-shadow-grid\s*\{/);
-  assert.match(redesignStyleSource, /\.pilot-momentum-shadow-card\s*\{/);
-  assert.match(redesignStyleSource, /@media\s*\(max-width:\s*980px\)[\s\S]*\.pilot-momentum-shadow-grid\s*\{\s*grid-template-columns:\s*1fr/);
-  assert.match(redesignSource, /daily_momentum_robustness_grid/);
-  assert.match(redesignSource, /보호중단 모의 후보/);
-  assert.match(redesignSource, /최악 (?:segment|구간)/);
+test('모의투자 현황은 연구 원자료를 사용자 화면에 렌더하지 않는다', () => {
+  const render = redesignSource.split('function renderMomentumShadow() {')[1]?.split('function renderAll() {')[0];
+  assert.ok(render);
+  assert.match(render, /pilot-momentum-shadow-card/);
+  assert.match(render, /markedEquity/);
+  assert.match(render, /markedReturnPercent/);
+  assert.doesNotMatch(render, /SIGTERM|config drift|quoteQuality|paperForwardCohort|profitabilityEvidence|실거래 증거|증거 저장/);
+});
+
+test('AI 자문 화면은 저장 파일명과 CLI 구현 방식을 설명하지 않는다', () => {
+  const shell = redesignSource.split('function aiDeskMarkup() {')[1]?.split('function mountAiDesk() {')[0];
+  assert.ok(shell);
+  assert.doesNotMatch(shell, /ai_monitoring_sessions\.json|Codex CLI|Claude CLI|API key 미사용|snapshot을 보냅니다|provider 상태/);
+});
+
+test('준비 현황은 세션 상태와 주문 잠금 사유만 간결하게 표시한다', () => {
+  const history = redesignSource.split('data-pilot-page="history"')[1]?.split('function mountPageEnhancements()')[0];
+  const paper = redesignSource.split('function renderPaperDetail() {')[1]?.split('function renderSettings() {')[0];
+  assert.ok(history && paper);
+  assert.match(history, /pilot-validation-detail/);
+  assert.match(history, /pilot-paper-detail/);
+  assert.doesNotMatch(history, /pilot-strategy-research-panel|pilot-momentum-shadow-panel|pilot-optimization-history|pilot-backtest-results/);
+  assert.match(paper, /riskMonitor\?\.failClosed/);
+  assert.match(paper, /analysisDataHealth\?\.failClosed/);
+  assert.match(paper, /초기화하면 기존 모의 포트폴리오와 포지션이 지워집니다/);
+  assert.doesNotMatch(paper, /MFE|MAE|funnel|counterfactual|signal evidence|wallet settlement/);
+});
+
+test('전략 점검은 사용자에게 준비 상태만 표시한다', () => {
+  const validation = redesignSource.split('function renderValidationDetail() {')[1]?.split('function renderPaperDetail() {')[0];
+  assert.ok(validation);
+  assert.match(validation, /현재 전략은 실제투자 준비가 되지 않았습니다/);
+  assert.match(validation, /실제투자 준비 여부를 확인할 때까지 주문은 잠겨 있습니다/);
+  assert.doesNotMatch(validation, /파일명|API 종합 상태|승격 표시|runtime gate/);
 });

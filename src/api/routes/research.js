@@ -42,6 +42,7 @@ import {
 } from '../../research/momentumShadowLossCapCounterfactual.js';
 import { summarizePaperForwardCohort } from '../../research/paperForwardCohort.js';
 import { assessScalpingValidationReportFreshness } from '../../research/scalpingValidationFreshness.js';
+import { getMomentumShadowConfigDriftChanges } from '../../research/momentumShadowRunnerConfig.js';
 import {
   projectLiveExecutionEvidenceStatus
 } from '../../research/liveExecutionEvidence.js';
@@ -539,6 +540,36 @@ function formatRunnerStopReason(reason) {
   return labels[reason] || (reason ? '종료 원인 확인 필요' : null);
 }
 
+function projectMomentumShadowRunnerLifecycle(ledger) {
+  const events = Array.isArray(ledger.runnerEvents) ? ledger.runnerEvents : [];
+  let latestStartIndex = -1;
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    if (events[index]?.type === 'started') {
+      latestStartIndex = index;
+      break;
+    }
+  }
+  if (latestStartIndex <= 0) return null;
+
+  let previousStop = null;
+  for (let index = latestStartIndex - 1; index >= 0; index -= 1) {
+    if (events[index]?.type === 'stopped') {
+      previousStop = events[index];
+      break;
+    }
+  }
+  if (!previousStop) return null;
+
+  const latestStart = events[latestStartIndex];
+  return {
+    previousStopReason: previousStop.reason || null,
+    previousStopReasonLabel: formatRunnerStopReason(previousStop.reason),
+    previousStopAt: previousStop.at || null,
+    restartedAt: latestStart.at || null,
+    currentOpenPositionCount: Object.keys(ledger.positions || {}).length
+  };
+}
+
 function projectMomentumShadowBook(definition, fallbackInitialBalance, server) {
   const ledgerFile = path.join(definition.directory, 'ledger.json');
   if (!fs.existsSync(ledgerFile)) {
@@ -742,6 +773,7 @@ function projectMomentumShadowBook(definition, fallbackInitialBalance, server) {
         stopReason: ledger.runnerStopReason || null,
         stoppedAt: ledger.runnerStoppedAt || null
       },
+      runnerLifecycle: projectMomentumShadowRunnerLifecycle(ledger),
       researchOnly: true,
       promoted: false,
       executionModel,
@@ -772,6 +804,9 @@ function projectMomentumShadowBook(definition, fallbackInitialBalance, server) {
       configurationWarning: ledger.configDrift
         ? '중간 설정 변경 이력이 있어 이 장부는 A/B 비교와 승격에 사용할 수 없습니다.'
         : null,
+      configurationDriftChanges: ledger.configDrift?.previous && ledger.config
+        ? getMomentumShadowConfigDriftChanges(ledger.configDrift.previous, ledger.config)
+        : [],
       promotionStatus: '승격 보류',
       promotionBlockers,
       dataQuality: ledger.dataQuality ? {

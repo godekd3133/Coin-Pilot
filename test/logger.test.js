@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import Logger from '../src/utils/logger.js';
+import Logger, { resolveLogDirectory } from '../src/utils/logger.js';
 
 function tempLogDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'coin-pilot-logs-'));
@@ -126,4 +126,37 @@ test('cleanOldLogs removes aged log/report files but leaves other files alone', 
   assert.equal(fs.existsSync(agedReport), false);
   assert.equal(fs.existsSync(agedOther), true);
   assert.equal(fs.existsSync(freshLog), true);
+});
+
+test('staging output routes the default logger and retention cleanup into the isolated run directory', () => {
+  const previousStagingOutputDir = process.env.STAGING_OUTPUT_DIR;
+  const stagingRoot = tempLogDir();
+  const workspaceRoot = tempLogDir();
+  const old = Date.now() - 9 * 24 * 60 * 60 * 1000;
+  const workspaceLogs = path.join(workspaceRoot, 'logs');
+  fs.mkdirSync(workspaceLogs, { recursive: true });
+  const workspaceLog = path.join(workspaceLogs, 'trading-old.log');
+  fs.writeFileSync(workspaceLog, 'preserve');
+  fs.utimesSync(workspaceLog, old / 1000, old / 1000);
+
+  try {
+    process.env.STAGING_OUTPUT_DIR = stagingRoot;
+    const logger = new Logger('info');
+    const stagedOldLog = path.join(logger.logDir, 'trading-old.log');
+    fs.writeFileSync(stagedOldLog, 'staging');
+    fs.utimesSync(stagedOldLog, old / 1000, old / 1000);
+
+    assert.equal(logger.logDir, path.join(stagingRoot, 'logs'));
+    assert.equal(resolveLogDirectory(workspaceRoot, stagingRoot), path.join(stagingRoot, 'logs'));
+
+    logger.cleanOldLogs(7);
+
+    assert.equal(fs.existsSync(stagedOldLog), false);
+    assert.equal(fs.readFileSync(workspaceLog, 'utf8'), 'preserve');
+  } finally {
+    if (previousStagingOutputDir === undefined) delete process.env.STAGING_OUTPUT_DIR;
+    else process.env.STAGING_OUTPUT_DIR = previousStagingOutputDir;
+    fs.rmSync(stagingRoot, { recursive: true, force: true });
+    fs.rmSync(workspaceRoot, { recursive: true, force: true });
+  }
 });

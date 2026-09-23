@@ -17,7 +17,10 @@ import {
   recordMomentumShadowRunnerStart,
   recordMomentumShadowRunnerStop
 } from '../research/momentumShadowRunnerState.js';
-import { resolveMomentumShadowRunnerContract } from '../research/momentumShadowRunnerConfig.js';
+import {
+  recordMomentumShadowConfigDrift,
+  resolveMomentumShadowRunnerContract
+} from '../research/momentumShadowRunnerConfig.js';
 import {
   appendMomentumShadowBenchmarkObservationCheckpoint,
   calculateMomentumShadowRelativeMarkedReturnPercent,
@@ -1197,10 +1200,7 @@ async function main() {
   } else {
     ensureMomentumShadowInitialBalance(ledger, Number(process.env.MOMO_SHADOW_INITIAL_BALANCE) || 100_000_000);
     const active = { mode: MODE, ...persistedStrategyConfig, trendMinPercent: TREND_MIN_PERCENT, breadthMin: BREADTH_MIN, costPercent: COST_PERCENT, positionFraction: POSITION_FRACTION, maxPositions: MAX_POSITIONS, markets: MARKETS, pollMs: POLL_MS, benchmarkMarket: BENCHMARK_MARKET, benchmarkTrendMinPercent: BENCHMARK_TREND_MIN_PERCENT, exitOnBenchmarkOff: EXIT_ON_BENCHMARK_OFF, ...optionalRiskConfig };
-    if (JSON.stringify(ledger.config) !== JSON.stringify(active)) {
-      ledger.configDrift = { previous: ledger.config, changedAt: new Date().toISOString() };
-      ledger.config = active;
-    }
+    recordMomentumShadowConfigDrift(ledger, active);
   }
   if (!Array.isArray(ledger.pendingEntries)) ledger.pendingEntries = [];
   ledger.benchmarkObservationSchemaVersion =

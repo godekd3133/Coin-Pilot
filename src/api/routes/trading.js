@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'node:path';
 import { assessScalpingValidationReportFreshness } from '../../research/scalpingValidationFreshness.js';
 import { projectLiveAccountReadback } from '../../research/liveExecutionEvidence.js';
+import { getStrategyReadiness } from '../../research/strategyReadiness.js';
 
 function projectLiveFillResult(fillResult, orderId = null) {
   const order = fillResult?.order;
@@ -227,6 +228,11 @@ export default function createTradingRoutes(server) {
     } catch (error) {
       return res.status(500).json({ available: false, promoted: false, error: error.message });
     }
+  });
+
+  // 현재 설정된 validation report와 runtime live gate를 읽기 전용으로 판정한다.
+  router.get('/strategy-readiness', (req, res) => {
+    res.json(getStrategyReadiness(server?.tradingSystem));
   });
 
   // 코인 분석 (애매한 신호 포함)

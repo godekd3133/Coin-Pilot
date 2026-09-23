@@ -22,6 +22,13 @@ function safeJsonLine(value) {
   });
 }
 
+export function resolveLogDirectory(baseDir = process.cwd(), stagingOutputDir = process.env.STAGING_OUTPUT_DIR) {
+  const rootDir = typeof stagingOutputDir === 'string' && stagingOutputDir.trim()
+    ? path.resolve(baseDir, stagingOutputDir)
+    : path.resolve(baseDir);
+  return path.join(rootDir, 'logs');
+}
+
 class Logger {
   constructor(logLevel = 'info', options = {}) {
     this.logLevel = logLevel;
@@ -33,7 +40,7 @@ class Logger {
     };
 
     // 로그 디렉토리 생성
-    this.logDir = options.logDir || path.join(process.cwd(), 'logs');
+    this.logDir = options.logDir || resolveLogDirectory();
     if (!fs.existsSync(this.logDir)) {
       fs.mkdirSync(this.logDir, { recursive: true });
     }

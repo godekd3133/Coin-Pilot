@@ -1,4 +1,4 @@
-const CACHE_NAME = 'coinpilot-shell-v96';
+const CACHE_NAME = 'coinpilot-shell-v104';
 const NETWORK_FIRST_SHELL_PATHS = new Set([
   '/',
   '/index.html',
@@ -16,7 +16,7 @@ const APP_SHELL = [
   '/apple-touch-icon.png',
   '/auth-client.js',
   '/pilot-redesign.css?v=20260918-06',
-  '/pilot-redesign.js?v=observer-readonly-87'
+  '/pilot-redesign.js?v=observer-readonly-95'
 ];
 
 self.addEventListener('install', event => {

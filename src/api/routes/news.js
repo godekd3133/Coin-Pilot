@@ -1,6 +1,7 @@
 import express from 'express';
 import fs from 'fs';
 import path from 'path';
+import { resolveLogDirectory } from '../../utils/logger.js';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -124,7 +125,7 @@ export default function createNewsRoutes(server) {
       const type = req.query.type || 'trading';
       const lines = parseInt(req.query.lines) || 100;
 
-      const logDir = path.join(PROJECT_ROOT, 'logs');
+      const logDir = resolveLogDirectory(PROJECT_ROOT);
       const today = new Date().toISOString().split('T')[0];
 
       let logFile;

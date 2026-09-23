@@ -255,6 +255,21 @@ test('momentum shadow route projects marked equity as read-only research evidenc
   const regimeDir = path.join(os.tmpdir(), `coinpilot-momentum-regime-${process.pid}-${Date.now()}`);
   fs.mkdirSync(fixedDir, { recursive: true });
   fs.mkdirSync(regimeDir, { recursive: true });
+  const fixedConfig = {
+    markets: ['KRW-BTC'],
+    costPercent: 0.2,
+    trendMinPercent: 0,
+    breadthMin: 1,
+    maxHoldHours: 72,
+    positionFraction: 0.25,
+    maxPositions: 4,
+    cooldownAfterLossDays: 3,
+    maxPortfolioDrawdownPercent: 10,
+    executionModel: 'quote_cross',
+    requestIntervalMs: 500
+  };
+  const previousFixedConfig = { ...fixedConfig };
+  delete previousFixedConfig.requestIntervalMs;
   fs.writeFileSync(path.join(fixedDir, 'ledger.json'), JSON.stringify({
     diagnosticOnly: true,
     promoted: false,
@@ -262,19 +277,11 @@ test('momentum shadow route projects marked equity as read-only research evidenc
     ownerPid: process.pid,
     runnerState: 'running',
     cycles: 4,
-    configDrift: { changedAt: '2026-09-14T00:00:00.000Z' },
-    config: {
-      markets: ['KRW-BTC'],
-      costPercent: 0.2,
-      trendMinPercent: 0,
-      breadthMin: 1,
-      maxHoldHours: 72,
-      positionFraction: 0.25,
-      maxPositions: 4,
-      cooldownAfterLossDays: 3,
-      maxPortfolioDrawdownPercent: 10,
-      executionModel: 'quote_cross'
+    configDrift: {
+      previous: previousFixedConfig,
+      changedAt: '2026-09-14T00:00:00.000Z'
     },
+    config: fixedConfig,
     initialBalance: 1_000,
     balance: 700,
     drawdownStopTriggered: true,
@@ -299,6 +306,11 @@ test('momentum shadow route projects marked equity as read-only research evidenc
       market: 'KRW-BTC',
       at: '2026-09-14T00:00:01.000Z'
     },
+    runnerEvents: [
+      { type: 'started', at: '2026-09-13T23:00:00.000Z' },
+      { type: 'stopped', at: '2026-09-14T00:01:00.000Z', reason: 'signal:SIGTERM' },
+      { type: 'started', at: '2026-09-14T00:01:05.000Z' }
+    ],
     dataQuality: {
       valid: false,
       reason: 'daily_market_latest_timestamp_mismatch',
@@ -356,6 +368,20 @@ test('momentum shadow route projects marked equity as read-only research evidenc
     assert.ok(body.books[0].promotionBlockers.some(blocker => blocker.includes('관찰 세션')));
     assert.equal(body.books[0].status, '증거 보류');
     assert.equal(body.books[0].statusReason, '설정 변경 이력으로 A/B·승격 증거 사용 불가');
+    assert.deepEqual(body.books[0].configurationDriftChanges, [{
+      key: 'requestIntervalMs',
+      previousRecorded: false,
+      previousValue: null,
+      currentRecorded: true,
+      currentValue: 500
+    }]);
+    assert.deepEqual(body.books[0].runnerLifecycle, {
+      previousStopReason: 'signal:SIGTERM',
+      previousStopReasonLabel: '프로세스 종료 신호',
+      previousStopAt: '2026-09-14T00:01:00.000Z',
+      restartedAt: '2026-09-14T00:01:05.000Z',
+      currentOpenPositionCount: 1
+    });
     assert.equal(body.books[0].markedEquity, 1030);
     assert.ok(Math.abs(body.books[0].markedReturnPercent - 3) < 1e-12);
     assert.equal(body.books[0].unrealizedProfit, 30);

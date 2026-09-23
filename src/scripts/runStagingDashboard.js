@@ -3,7 +3,10 @@ import fs from 'fs';
 import path from 'path';
 import { spawn } from 'child_process';
 import { fileURLToPath } from 'url';
-import { resolveStagingCheckIntervalMs } from './stagingDashboardConfig.js';
+import {
+  resolveStagingCheckIntervalMs,
+  withStagingOutputDir
+} from './stagingDashboardConfig.js';
 
 dotenv.config();
 
@@ -22,7 +25,7 @@ const protocol = process.env.DASHBOARD_TLS_CERT_FILE && process.env.DASHBOARD_TL
 fs.mkdirSync(outputRoot, { recursive: true });
 
 const childEnv = {
-  ...process.env,
+  ...withStagingOutputDir(process.env, outputRoot),
   DRY_RUN: 'true',
   ENABLE_DASHBOARD: 'true',
   DASHBOARD_PORT: port,

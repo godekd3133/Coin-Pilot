@@ -1,8 +1,34 @@
+import { isDeepStrictEqual } from 'node:util';
 import { resolveMomentumShadowExecutionModel } from './momentumShadowExecutionModel.js';
 
 export const DEFAULT_MOMENTUM_SHADOW_MARKETS = Object.freeze([
   'KRW-BTC', 'KRW-ETH', 'KRW-XRP', 'KRW-SOL'
 ]);
+
+export function getMomentumShadowConfigDriftChanges(previous, current) {
+  const isRecord = value => value !== null && typeof value === 'object' && !Array.isArray(value);
+  if (!isRecord(previous) || !isRecord(current)) return [];
+
+  const keys = [...new Set([...Object.keys(previous), ...Object.keys(current)])];
+  return keys
+    .filter(key => !isDeepStrictEqual(previous[key], current[key]))
+    .map(key => ({
+      key,
+      previousRecorded: Object.hasOwn(previous, key),
+      previousValue: Object.hasOwn(previous, key) ? previous[key] : null,
+      currentRecorded: Object.hasOwn(current, key),
+      currentValue: Object.hasOwn(current, key) ? current[key] : null
+  }));
+}
+
+// Object key order is serialization detail; array order and every value remain
+// part of the sealed runner contract.
+export function recordMomentumShadowConfigDrift(ledger, activeConfig, changedAt = new Date().toISOString()) {
+  if (isDeepStrictEqual(ledger?.config, activeConfig)) return false;
+  ledger.configDrift = { previous: ledger.config, changedAt };
+  ledger.config = activeConfig;
+  return true;
+}
 
 function parseMarkets(value) {
   if (typeof value !== 'string') return null;

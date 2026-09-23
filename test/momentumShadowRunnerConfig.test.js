@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   DEFAULT_MOMENTUM_SHADOW_MARKETS,
+  getMomentumShadowConfigDriftChanges,
+  recordMomentumShadowConfigDrift,
   resolveMomentumShadowRunnerContract
 } from '../src/research/momentumShadowRunnerConfig.js';
 
@@ -50,6 +52,53 @@ test('new shadow runners retain the four-market default contract', () => {
   const contract = resolveMomentumShadowRunnerContract();
   assert.equal(contract.mode, 'fixed');
   assert.deepEqual(contract.markets, DEFAULT_MOMENTUM_SHADOW_MARKETS);
+});
+
+test('shadow config reconciliation ignores key order but preserves real value and array drift', () => {
+  const persisted = {
+    mode: 'fixed',
+    markets: ['KRW-BTC', 'KRW-ETH'],
+    execution: { model: 'candle_close', costPercent: 0.2 }
+  };
+  const sameValuesDifferentOrder = {
+    execution: { costPercent: 0.2, model: 'candle_close' },
+    markets: ['KRW-BTC', 'KRW-ETH'],
+    mode: 'fixed'
+  };
+  const ledger = { config: persisted };
+
+  assert.equal(recordMomentumShadowConfigDrift(ledger, sameValuesDifferentOrder, '2026-09-23T00:00:00.000Z'), false);
+  assert.equal(ledger.configDrift, undefined);
+  assert.equal(ledger.config, persisted);
+  assert.deepEqual(getMomentumShadowConfigDriftChanges(persisted, sameValuesDifferentOrder), []);
+
+  const driftedLedger = { config: persisted };
+  const explicitRequestInterval = { ...sameValuesDifferentOrder, requestIntervalMs: 500 };
+  assert.deepEqual(getMomentumShadowConfigDriftChanges(persisted, explicitRequestInterval), [{
+    key: 'requestIntervalMs',
+    previousRecorded: false,
+    previousValue: null,
+    currentRecorded: true,
+    currentValue: 500
+  }]);
+  assert.equal(recordMomentumShadowConfigDrift(driftedLedger, explicitRequestInterval, '2026-09-23T00:00:01.000Z'), true);
+  assert.deepEqual(driftedLedger.configDrift, {
+    previous: persisted,
+    changedAt: '2026-09-23T00:00:01.000Z'
+  });
+  assert.equal(driftedLedger.config, explicitRequestInterval);
+
+  const valueDriftLedger = { config: persisted };
+  assert.equal(recordMomentumShadowConfigDrift(valueDriftLedger, {
+    ...sameValuesDifferentOrder,
+    mode: 'regime'
+  }, '2026-09-23T00:00:02.000Z'), true);
+
+  const arrayDriftLedger = { config: persisted };
+  assert.equal(recordMomentumShadowConfigDrift(arrayDriftLedger, {
+    ...sameValuesDifferentOrder,
+    markets: ['KRW-ETH', 'KRW-BTC']
+  }, '2026-09-23T00:00:03.000Z'), true);
 });
 
 test('shadow runner resolves optional cooldown and drawdown risk controls without inventing them for old ledgers', () => {
