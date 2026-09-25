@@ -87,8 +87,54 @@ test('quote history summarizes repeated ceiling violations without treating them
   assert.equal(projection.markets['KRW-DOGE'].overCeilingRate, 2 / 3);
   assert.equal(projection.markets['KRW-DOGE'].latestP95, 0.7);
   assert.equal(projection.markets['KRW-DOGE'].maxP95, 0.9);
+  assert.equal(projection.markets['KRW-DOGE'].topOfBookDepth.twoSidedDepthReportCount, 0);
+  assert.equal(projection.markets['KRW-DOGE'].topOfBookDepth.status, 'INSUFFICIENT_DEPTH_REPORT_HISTORY');
   assert.equal(projection.promoted, false);
   assert.equal(projection.researchOnly, true);
+});
+
+test('quote history depth projection preserves legacy gaps and stays insufficient below 30 reports', () => {
+  const now = Date.parse('2026-09-16T12:00:00.000Z');
+  const depth = (minimumBidNotionalKrw, minimumAskNotionalKrw) => ({
+    requestedSampleCount: 5,
+    bidSampleCount: 5,
+    askSampleCount: 5,
+    minimumBidNotionalKrw,
+    minimumAskNotionalKrw
+  });
+  const projection = summarizeMomentumShadowQuoteHistory({
+    now,
+    maxReports: 48,
+    minimumDepthReports: 30,
+    records: [
+      {
+        generatedAt: '2026-09-16T11:40:00.000Z',
+        complete: true,
+        errors: 0,
+        summary: { markets: { 'KRW-BTC': { p95: 0.05 } } }
+      },
+      {
+        generatedAt: '2026-09-16T11:50:00.000Z',
+        complete: true,
+        errors: 0,
+        summary: { markets: { 'KRW-BTC': { p95: 0.05, topOfBookDepth: depth(100_000, 90_000) } } }
+      },
+      {
+        generatedAt: '2026-09-16T12:00:00.000Z',
+        complete: true,
+        errors: 0,
+        summary: { markets: { 'KRW-BTC': { p95: 0.06, topOfBookDepth: depth(80_000, 70_000) } } }
+      }
+    ]
+  });
+  const depthSummary = projection.markets['KRW-BTC'].topOfBookDepth;
+
+  assert.equal(projection.windowLimit, 48);
+  assert.equal(projection.minimumDepthReports, 30);
+  assert.equal(depthSummary.twoSidedDepthReportCount, 2);
+  assert.equal(depthSummary.missingDepthReportCount, 1);
+  assert.equal(depthSummary.p05PerReportMinimumBidNotionalKrw, 80_000);
+  assert.equal(depthSummary.status, 'INSUFFICIENT_DEPTH_REPORT_HISTORY');
 });
 
 test('quote history projector reads JSONL suffix and hides the filesystem path', () => {

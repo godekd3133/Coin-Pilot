@@ -26,6 +26,8 @@
     "research:momentum-shadow:export-evidence": "node src/scripts/exportMomentumShadowEvidence.js",
     "research:momentum-shadow:quotes": "node src/scripts/measureMomentumShadowQuotes.js",
     "research:quote-cost-compatibility": "node src/scripts/checkQuoteExecutionCostCompatibility.js",
+    "research:quote-cost-history": "node src/scripts/summarizeMomentumShadowQuoteCostHistory.js",
+    "research:momentum-shadow:trade-cost-audit": "node src/scripts/auditMomentumShadowTradeCosts.js",
     "research:live-execution-evidence": "node src/scripts/reconcileLiveExecutionEvidence.js",
     "research:paper:cohort": "node src/scripts/summarizePaperForwardCohort.js",
     "research:paper:exit-evidence": "node src/scripts/analyzePaperExitEvidence.js",

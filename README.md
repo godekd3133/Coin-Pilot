@@ -149,7 +149,7 @@ npm run research:daily-momentum:robustness # position/risk envelope와 최악 se
 npm run research:daily-momentum:robustness -- /tmp/candles.json /tmp/report.json # 입력·출력 cache/report를 positional 인자로 지정
 npm run research:daily-momentum:benchmark-confirmation -- /tmp/candles.json /tmp/report.json 1,2,3 continuous # benchmark 확인일 비교 (research 전용)
 npm run research:daily-market-neutral # synthetic long/short 상대강도 연구 (현물 short 미연결)
-npm run research:momentum-shadow:status # 실행 중인 daily shadow owner의 read-only 상태(실현수익률·95% 하한·관찰기간 포함)
+npm run research:momentum-shadow:status # 실행 중인 daily shadow owner의 read-only 상태(실현수익률·95% 하한·관찰기간·MDD·비용 하한·승리 집중도)
 npm run research:momentum-shadow:preflight # 새 risk-capped shadow owner 시작 전 read-only 점검
 MOMO_SHADOW_CANDIDATE_PROFILE=loss_cap npm run research:momentum-shadow:preflight # loss-cap target/config를 같은 계약으로 read-only 점검
 MOMO_SHADOW_CANDIDATE_PROFILE=loss_cap_no_doge npm run research:momentum-shadow:preflight # 400/800일 DOGE 제외 loss-cap 후보를 read-only 점검
@@ -157,6 +157,8 @@ MOMO_SHADOW_CANDIDATE_PROFILE=quote_cross npm run research:momentum-shadow:prefl
 npm run research:momentum-shadow:verify-evidence # 기본 export artifact의 schema/provenance/path 무결성 검증
 npm run research:momentum-shadow:verify-evidence -- /path/to/coinpilot-momentum-shadow-evidence.json # 별도 snapshot 검증
 npm run research:momentum-shadow:export-evidence -- http://127.0.0.1:3000/api/momentum-shadow /private/tmp/coinpilot-momentum-shadow-evidence-current.json # read-only API projection을 sanitize·verify해 evidence artifact로 저장
+npm run research:momentum-shadow:trade-cost-audit # fixed paper close에 직전 complete quote-history를 시간 매칭한 비용 민감도 (진단 전용)
+npm run research:momentum-shadow:trade-cost-audit -- .paper-momentum-shadow-regime /path/to/quote-history.jsonl # 다른 보존 ledger/history 지정 (read-only)
 npm run research:momentum-shadow:start-if-ready # gate 통과 시에만 별도 owner 시작; 실행에는 ALLOW_START 명시 필요
 npm run research:momentum-shadow:start-quote-cross-if-ready # quote-cross fixed 2일 후보; gate/preflight 통과와 ALLOW_START 없이는 시작하지 않음
 npm run verify:pwa # manifest/icon/service worker shell 설치 계약 검증
@@ -167,13 +169,19 @@ npm run research:paper:cohort -- . /private/tmp/coinpilot-paper-forward-cohort.j
 npm run research:paper:exit-evidence -- .paper-forward-sealed-rsi-20260917-r2 /private/tmp/coinpilot-paper-exit-evidence-r2.json # exit reason/MFE/MAE/보유시간 read-only 집계
 ```
 
+`research:momentum-shadow:trade-cost-audit`는 daily-candle close ledger의 실제 진입 시각과 완료 일봉의 다음 시각을 quote-history의 **직전** complete report와 900초 이내에서만 매칭한다. 현재 paper cost 가정을 모델 floor까지 보정하고 matched trade subset에만 best-level spread median/report-p95 시나리오를 별도로 계산한다. quote가 맞지 않은 거래의 spread cost는 `unknown`으로 남기며 full-cohort quote-adjusted P&L을 만들지 않는다. 같은 compact 결과는 전략 분석 화면의 candle-close shadow card에도 표시되며, floor-only 손익과 전체 quote-adjusted 손익을 구분한다. 이 출력은 `researchOnly=true`, `promoted=false`인 민감도 진단으로, 호가 요약은 실제 주문 체결·수수료 정산·지속 수익을 증명하지 않는다.
+
+Shadow ledger와 전략 분석 카드는 현재 peak 기준 `drawdownPercent`·설정된 보호 한도와 owner poll 지점의 `observed MDD`를 서로 구분해 표시한다. observed MDD는 sampled marked-equity 낙폭이지 intraday MDD가 아니다. 구형 장부는 지난 MDD를 추정하지 않고 관측 시작 시점부터 partial로 표기하므로 full-session coverage 없이는 위험조정 승격 판단에 사용할 수 없다. 이 telemetry는 진입·청산·stop 로직을 바꾸지 않는다.
+
 `npm run paper:variants`는 하나의 owner가 시장별 ticker/candle을 한 번만 읽고, 같은 snapshot을 사전 지정한 여러 virtual book에 fan-out하는 연구 전용 runner입니다. 기본 variant는 `baseline,volume_15,rebound_25,max_rebound_04,loss_timeout_5m`이며, `SCALP_FORWARD_VARIANT_NAMES`·`SCALP_FORWARD_MARKETS`·`SCALP_FORWARD_VARIANT_SECONDS`로 별도 설정할 수 있습니다. 각 variant는 독립 `dry_portfolio.json`과 `paper_validation.json`을 가지며, report는 live promotion 파일에 쓰지 않습니다. `PAPER_ALLOW_CONCURRENT_SESSIONS=true`로 여러 paper owner를 억지로 병렬 실행하는 방식과 다릅니다.
 
 장기 관찰은 `SCALP_FORWARD_VARIANT_MODE=true npm run paper:variants`로 실행할 수 있고, output directory를 명시하지 않으면 `.paper-forward-variants/run-<timestamp>/` 아래에 새로 만듭니다. 이 runner의 결과는 동일 데이터·비용·시각 조건에서의 비교 근거이지, 실거래 체결·wallet settlement 또는 수익 보장이 아닙니다.
 
 candidate preflight와 detached launcher는 동일한 sealed profile resolver를 사용합니다. 따라서 `MOMO_SHADOW_CANDIDATE_PROFILE=loss_cap`을 지정하면 두 명령 모두 `.paper-momentum-shadow-fixed-hold-2d-loss-cap-v1`, fixed `48h`, next-open, cost `0.3%`, 완료 일봉 종가 손실 상한 `4%`를 검사합니다. `loss_cap_no_doge`는 같은 계약에서 DOGE만 제외한 별도 target `.paper-momentum-shadow-fixed-hold-2d-loss-cap-no-doge-v1`이며, 400/800일 historical study가 각각 `+4.6566%/+9.2981%`, PF `1.84/1.66`, MDD `1.32%/1.82%`, blockers 없음으로 `SHADOW_CANDIDATE`가 된 후보입니다. 두 profile 모두 실전 승격값이 아니라 다음 single-owner paper shadow를 위한 연구 가설입니다. 4%는 새로 받은 400/800일·cost `0.3%` sweep에서 두 window의 MDD를 낮춘 risk-first 연구 가설이며, 실전 승격값이 아닙니다. profile을 생략하면 baseline이므로, 후보를 시작하기 전에 실제 시작할 profile을 붙인 preflight 결과의 `candidateProfile`, `candidateConfig`, `targetDir`, `blockers`를 확인해야 합니다. 이 profile은 paper research owner만 대상으로 하며 실전 주문·승격을 의미하지 않습니다.
 
-candidate preflight는 이제 살아 있는 momentum-shadow owner가 하나라도 있으면 `existing_live_owner_count:N` blocker를 반환합니다. 기존 owner가 config drift 상태이거나 benchmark gate가 아직 닫힌 경우에도 새 후보를 병렬 실행하지 않습니다. 이전에는 이 상태가 warning에만 남아 benchmark gate가 나중에 열릴 때 evidence와 public API budget을 오염시킬 수 있었으므로, single-owner research contract를 launch gate 자체에 연결했습니다. 이 변경은 기존 owner를 종료하거나 ledger를 수정하지 않으며 read-only preflight와 새 후보 시작에만 적용됩니다.
+candidate preflight는 필수 benchmark gate owner만 source로 구분해 실행 owner collision count에서 제외합니다. benchmark owner는 별도 PID·heartbeat·daily data quality·gate 검사로 계속 필수이고 재시작되지 않습니다. fixed/regime 및 기존 candidate owner는 여전히 `existing_live_owner_count:N` blocker가 되어 새 candidate와 병렬 실행할 수 없습니다. 이를 통해 benchmark gate를 제공하는 owner가 살아 있어야 한다는 조건과 single-candidate concurrency guard가 양립합니다. 이 변경은 기존 owner를 종료하거나 ledger를 수정하지 않으며 read-only preflight와 새 후보 시작에만 적용됩니다.
+
+candidate preflight는 비용도 fail-closed로 비교합니다. `costPercent`는 왕복 청산 비용으로 한 번 차감되며, 기본 비용 진단의 fee `0.05%/side` + adverse slippage `0.10%/side`는 왕복 `0.30%`입니다. 새 baseline research 기본값은 이 하한과 공유되고, 명시적 비용 override가 그보다 낮으면 `candidate_cost_below_round_trip_cost_floor`로 차단됩니다. Runner도 같은 floor를 진입 시 다시 확인해 under-floor 비용이면 신규 진입을 막고 pending next-open 항목은 사유를 남겨 void하며, 기존 포지션 exit 감시는 유지합니다. 차단 횟수와 guard 적용 버전을 장부·read-only status/API에 기록합니다. 이미 실행 중인 legacy owner/ledger의 `0.20%` 기록은 바꾸거나 재시작하지 않으며 config drift가 있는 과거 표본으로 남습니다. 더 높은 비용을 명시해도 호가 관측은 실제 체결 증명이 아니며, 이 gate는 수익성·승격을 승인하지 않습니다.
 
 DOGE 제외 후보의 trailing-window 재현도 별도 report로 보존합니다. 120일은 `26 trades`로 표본 부족이고, 180~800일은 모두 `POSITIVE_OBSERVATION`(`42/53/66/77/88/118/141/213 trades`)이었으며 rolling boundary unknown은 `0`건입니다. 이 결과는 후보 일관성을 높이는 historical evidence지만 `promoted=false`이며 실제 fill·wallet settlement를 대체하지 않습니다. report는 `/private/tmp/coinpilot-daily-momentum-rolling-loss-cap-no-doge-20260918.json`입니다.
 

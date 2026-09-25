@@ -38,6 +38,33 @@ function finiteOrNull(value) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function positiveOrNull(value) {
+  const parsed = finiteOrNull(value);
+  return parsed !== null && parsed > 0 ? parsed : null;
+}
+
+function quoteHistoryQuantile(values, probability) {
+  const sorted = values.filter(Number.isFinite).sort((left, right) => left - right);
+  if (!sorted.length) return null;
+  const index = Math.max(0, Math.ceil(probability * sorted.length) - 1);
+  return sorted[index];
+}
+
+function summarizeQuoteHistoryCadence(records, expectedIntervalSeconds, freshnessLimitSeconds) {
+  const gaps = records.slice(1)
+    .map((record, index) => (record.generatedAtMs - records[index].generatedAtMs) / 1000)
+    .filter(gap => Number.isFinite(gap) && gap >= 0);
+  return {
+    intervalCount: gaps.length,
+    expectedIntervalSeconds,
+    freshnessLimitSeconds,
+    medianGapSeconds: quoteHistoryQuantile(gaps, 0.5),
+    p95GapSeconds: quoteHistoryQuantile(gaps, 0.95),
+    maxGapSeconds: gaps.length ? Math.max(...gaps) : null,
+    gapsOverFreshnessLimit: gaps.filter(gap => gap > freshnessLimitSeconds).length
+  };
+}
+
 function positiveInteger(value, fallback) {
   const parsed = Math.floor(Number(value));
   return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
@@ -58,6 +85,51 @@ function normalizeHistoryRecord(value, nowMs) {
   };
 }
 
+function summarizeQuoteDepthHistory(records, market, {
+  minimumDepthReports = 30,
+  minimumSamplesPerReport = 5
+} = {}) {
+  const minimumReports = positiveInteger(minimumDepthReports, 30);
+  const minimumSamples = positiveInteger(minimumSamplesPerReport, 5);
+  const twoSidedDepth = [];
+
+  for (const record of records) {
+    const row = record.summary.markets?.[market];
+    const depth = row?.topOfBookDepth;
+    if (record.complete !== true || !depth || typeof depth !== 'object' || Array.isArray(depth)) continue;
+    const requested = Math.max(0, Number(depth.requestedSampleCount) || 0);
+    const bidSamples = Math.max(0, Number(depth.bidSampleCount) || 0);
+    const askSamples = Math.max(0, Number(depth.askSampleCount) || 0);
+    const minimumBid = positiveOrNull(depth.minimumBidNotionalKrw);
+    const minimumAsk = positiveOrNull(depth.minimumAskNotionalKrw);
+    if (requested < minimumSamples || bidSamples !== requested || askSamples !== requested ||
+      minimumBid === null || minimumAsk === null) continue;
+    twoSidedDepth.push({ bid: minimumBid, ask: minimumAsk });
+  }
+
+  return {
+    twoSidedDepthReportCount: twoSidedDepth.length,
+    missingDepthReportCount: Math.max(0, records.length - twoSidedDepth.length),
+    minimumDepthReports: minimumReports,
+    status: twoSidedDepth.length >= minimumReports
+      ? 'TOP_OF_BOOK_REFERENCE_ONLY'
+      : 'INSUFFICIENT_DEPTH_REPORT_HISTORY',
+    p05PerReportMinimumBidNotionalKrw: quoteHistoryQuantile(
+      twoSidedDepth.map(row => row.bid), 0.05
+    ),
+    medianPerReportMinimumBidNotionalKrw: quoteHistoryQuantile(
+      twoSidedDepth.map(row => row.bid), 0.5
+    ),
+    p05PerReportMinimumAskNotionalKrw: quoteHistoryQuantile(
+      twoSidedDepth.map(row => row.ask), 0.05
+    ),
+    medianPerReportMinimumAskNotionalKrw: quoteHistoryQuantile(
+      twoSidedDepth.map(row => row.ask), 0.5
+    ),
+    note: 'best-quote level only; not full orderbook depth or an observed fill'
+  };
+}
+
 /**
  * Summarize append-only quote reports without treating quote observations as
  * fills, realized P&L, or an order authorization. Invalid and future-dated
@@ -67,6 +139,10 @@ export function summarizeMomentumShadowQuoteHistory({
   records = [],
   maxReports = DEFAULT_MOMENTUM_SHADOW_QUOTE_HISTORY_LIMIT,
   maxAgeSeconds = 15 * 60,
+  minimumDepthReports = 30,
+  minimumSamplesPerReport = 5,
+  expectedIntervalSeconds = 600,
+  freshnessLimitSeconds = 900,
   now = Date.now()
 } = {}) {
   const nowMs = Number(now);
@@ -74,6 +150,12 @@ export function summarizeMomentumShadowQuoteHistory({
   const maxAge = Number.isFinite(Number(maxAgeSeconds)) && Number(maxAgeSeconds) >= 60
     ? Number(maxAgeSeconds)
     : 15 * 60;
+  const expectedInterval = Number.isFinite(Number(expectedIntervalSeconds)) && Number(expectedIntervalSeconds) > 0
+    ? Number(expectedIntervalSeconds)
+    : 600;
+  const freshnessLimit = Number.isFinite(Number(freshnessLimitSeconds)) && Number(freshnessLimitSeconds) > 0
+    ? Number(freshnessLimitSeconds)
+    : 900;
   const validRecords = (Array.isArray(records) ? records : [])
     .map(record => normalizeHistoryRecord(record, nowMs))
     .filter(Boolean)
@@ -109,7 +191,11 @@ export function summarizeMomentumShadowQuoteHistory({
       overCeilingReports,
       overCeilingRate: reportCount > 0 ? overCeilingReports / reportCount : null,
       latestP95,
-      maxP95
+      maxP95,
+      topOfBookDepth: summarizeQuoteDepthHistory(validRecords, market, {
+        minimumDepthReports,
+        minimumSamplesPerReport
+      })
     }];
   }));
 
@@ -133,6 +219,8 @@ export function summarizeMomentumShadowQuoteHistory({
     researchOnly: true,
     promoted: false,
     windowLimit: limit,
+    minimumDepthReports: positiveInteger(minimumDepthReports, 30),
+    cadence: summarizeQuoteHistoryCadence(validRecords, expectedInterval, freshnessLimit),
     reportCount: validRecords.length,
     completeReportCount: validRecords.filter(record => record.complete).length,
     errorReportCount: validRecords.filter(record => !record.complete || record.errorCount > 0).length,
@@ -159,6 +247,10 @@ export function projectMomentumShadowQuoteHistory({
   historyFile = DEFAULT_MOMENTUM_SHADOW_QUOTE_HISTORY_FILE,
   maxReports = DEFAULT_MOMENTUM_SHADOW_QUOTE_HISTORY_LIMIT,
   maxAgeSeconds = 15 * 60,
+  minimumDepthReports = 30,
+  minimumSamplesPerReport = 5,
+  expectedIntervalSeconds = 600,
+  freshnessLimitSeconds = 900,
   now = Date.now()
 } = {}) {
   const reportFile = path.basename(String(historyFile));
@@ -187,6 +279,10 @@ export function projectMomentumShadowQuoteHistory({
       records,
       maxReports: limit,
       maxAgeSeconds,
+      minimumDepthReports,
+      minimumSamplesPerReport,
+      expectedIntervalSeconds,
+      freshnessLimitSeconds,
       now
     });
     return { ...projection, reportFile };

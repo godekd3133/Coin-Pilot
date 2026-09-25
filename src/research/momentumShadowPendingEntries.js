@@ -39,14 +39,34 @@ export function executeMomentumShadowPendingEntries({
   quoteQuality = null,
   entryQuotes = {},
   executionModel = 'candle_close',
+  costFloorReady = true,
   now = Date.now(),
   entryExecution = 'next_open',
   notify = null,
   bookName = ''
 } = {}) {
-  if (entryExecution !== 'next_open' || !ledger ||
-    !Array.isArray(ledger.pendingEntries) || ledger.pendingEntries.length === 0) {
+  if (!ledger || !Array.isArray(ledger.pendingEntries) || ledger.pendingEntries.length === 0) {
     return { filled: 0, blocked: 0, pending: ledger?.pendingEntries?.length || 0 };
+  }
+  if (costFloorReady !== true) {
+    const at = new Date(now).toISOString();
+    const blocked = ledger.pendingEntries.length;
+    for (const pending of ledger.pendingEntries) {
+      recordVoidedPendingEntry(
+        ledger,
+        pending,
+        'pending_entry_cost_below_round_trip_cost_floor',
+        at
+      );
+    }
+    ledger.pendingEntries = [];
+    ledger.costFloorBlockedPendingEntries =
+      (Number(ledger.costFloorBlockedPendingEntries) || 0) + blocked;
+    ledger.pendingEntryBlocked = (Number(ledger.pendingEntryBlocked) || 0) + blocked;
+    return { filled: 0, blocked, pending: 0, costFloorBlocked: blocked };
+  }
+  if (entryExecution !== 'next_open') {
+    return { filled: 0, blocked: 0, pending: ledger.pendingEntries.length };
   }
   // A triggered portfolio drawdown stop permanently halts new positions, so
   // queued entries are voided as terminal rather than left to fill later.

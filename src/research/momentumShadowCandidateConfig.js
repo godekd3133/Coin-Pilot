@@ -1,4 +1,5 @@
 import { resolveMomentumShadowExecutionModel } from './momentumShadowExecutionModel.js';
+import { DEFAULT_QUOTE_EXECUTION_COST_MODEL } from './quoteExecutionCostCompatibility.js';
 
 const DEFAULT_MARKETS = Object.freeze([
   'KRW-BTC', 'KRW-ETH', 'KRW-XRP', 'KRW-SOL', 'KRW-DOGE', 'KRW-ADA',
@@ -15,7 +16,9 @@ const DEFAULT_CONFIG = Object.freeze({
   minUpBars: 2,
   positionFraction: 0.125,
   maxPositions: 2,
-  costPercent: 0.2,
+  // Keep new baseline research at the modeled round-trip floor. Older active
+  // ledgers with 0.2% remain untouched and are not eligible for promotion.
+  costPercent: DEFAULT_QUOTE_EXECUTION_COST_MODEL.assumedRoundTripCostPercent,
   benchmarkMarket: 'KRW-BTC',
   benchmarkTrendMinPercent: 2,
   // Optional relative-strength guard. Null preserves the existing candidate

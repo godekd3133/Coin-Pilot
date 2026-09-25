@@ -3,11 +3,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { getMomentumShadowEquity } from '../../research/momentumShadowLedger.js';
+import { assessMomentumShadowCostFloor } from '../../research/momentumShadowCostFloor.js';
 import {
   calculateMomentumShadowRealizedProfit,
   calculateMomentumShadowRealizedReturnPercent,
   calculateMomentumShadowTradeConfidence,
   summarizeMomentumShadowTradesByMarket,
+  summarizeMomentumShadowProfitConcentration,
   calculateMomentumShadowObservationDays,
   DEFAULT_MOMENTUM_SHADOW_MIN_RESEARCH_DAYS
 } from '../../research/momentumShadowProfitability.js';
@@ -36,6 +38,7 @@ import {
   summarizeMomentumShadowQuoteExecutionEvidence
 } from '../../research/momentumShadowQuoteQuality.js';
 import { assessQuoteExecutionCostCompatibility } from '../../research/quoteExecutionCostCompatibility.js';
+import { summarizeMomentumShadowTradeCostAudit } from '../../research/momentumShadowTradeCostAudit.js';
 import { resolveMomentumShadowExecutionModel } from '../../research/momentumShadowExecutionModel.js';
 import {
   summarizeMomentumShadowLossCapCounterfactual
@@ -54,6 +57,72 @@ const DEFAULT_MOMENTUM_SHADOW_QUOTE_MAX_AGE_SECONDS = 15 * 60;
 const DEFAULT_SCALP_QUOTE_COMPATIBILITY_MARKETS = [
   'KRW-BTC', 'KRW-ETH', 'KRW-XRP', 'KRW-SOL'
 ];
+
+function resolveMomentumShadowQuoteHistoryFile(server) {
+  const config = server?.tradingSystem?.config || {};
+  const configuredHistoryFile = config.momentumShadowQuoteHistoryFile ||
+    process.env.MOMO_SHADOW_QUOTE_HISTORY_FILE ||
+    resolveMomentumShadowQuoteRuntimeFile('quote-history.jsonl');
+  return path.isAbsolute(configuredHistoryFile)
+    ? configuredHistoryFile
+    : path.resolve(PROJECT_ROOT, configuredHistoryFile);
+}
+
+function readMomentumShadowQuoteHistoryRecords(server) {
+  const historyFile = resolveMomentumShadowQuoteHistoryFile(server);
+  if (!fs.existsSync(historyFile)) {
+    return { available: false, records: [], invalidRecordCount: 0, inputReportCount: 0 };
+  }
+  try {
+    const lines = fs.readFileSync(historyFile, 'utf8').split(/\r?\n/).filter(Boolean);
+    const records = [];
+    let invalidRecordCount = 0;
+    for (const line of lines) {
+      try { records.push(JSON.parse(line)); } catch { invalidRecordCount += 1; }
+    }
+    return { available: true, records, invalidRecordCount, inputReportCount: lines.length };
+  } catch {
+    return { available: false, records: [], invalidRecordCount: 1, inputReportCount: 0 };
+  }
+}
+
+function projectMomentumShadowTradeCostAudit(ledger, quoteHistorySource) {
+  const audit = summarizeMomentumShadowTradeCostAudit({
+    ledger,
+    quoteHistoryRecords: quoteHistorySource.records,
+    invalidQuoteHistoryRecordCount: quoteHistorySource.invalidRecordCount
+  });
+  return {
+    available: audit.ledger.closedTradeCount > 0,
+    researchOnly: true,
+    promoted: false,
+    actualFillsObserved: false,
+    executionModel: ledger.config?.executionModel || 'unknown',
+    closedTradeCount: audit.ledger.closedTradeCount,
+    ledgerCostPercent: audit.ledger.configCostPercent,
+    requiredRoundTripCostPercent: audit.ledger.requiredRoundTripCostPercent,
+    additionalCostToFloorPercent: audit.ledger.additionalCostToFloorPercent,
+    configDrift: audit.ledger.configDrift,
+    openPositionCount: audit.ledger.openPositionCount,
+    quoteHistory: {
+      available: quoteHistorySource.available,
+      inputReportCount: quoteHistorySource.inputReportCount,
+      usableReportCount: audit.quoteHistory.usableReportCount,
+      latestGeneratedAt: audit.quoteHistory.latestGeneratedAt,
+      latestAgeSeconds: audit.quoteHistory.latestAgeSeconds,
+      latestFresh: audit.quoteHistory.latestFresh,
+      latestUsable: audit.quoteHistory.latestUsable,
+      invalidRecordCount: audit.quoteHistory.invalidRecordCount
+    },
+    quoteMatchedTradeCount: audit.quoteMatchedTradeCount,
+    unmatchedQuoteTradeCount: audit.unmatchedQuoteTradeCount,
+    spreadScenarioTradeCount: audit.spreadScenarioTradeCount,
+    unmatchedSpreadCostTradeCount: audit.unmatchedSpreadCostTradeCount,
+    fullCohort: audit.fullCohort,
+    quoteMatchedSubset: audit.quoteMatchedSubset,
+    note: audit.note
+  };
+}
 
 const csv = value => String(value || '').split(',').map(item => item.trim()).filter(Boolean);
 
@@ -135,15 +204,15 @@ function projectMomentumShadowQuoteQualitySnapshot(server) {
   const maxAgeSeconds = Number.isFinite(Number(configuredMaxAge)) && Number(configuredMaxAge) >= 60
     ? Number(configuredMaxAge)
     : DEFAULT_MOMENTUM_SHADOW_QUOTE_MAX_AGE_SECONDS;
-  const configuredHistoryFile = config.momentumShadowQuoteHistoryFile ||
-    process.env.MOMO_SHADOW_QUOTE_HISTORY_FILE ||
-    resolveMomentumShadowQuoteRuntimeFile('quote-history.jsonl');
-  const historyFile = path.isAbsolute(configuredHistoryFile)
-    ? configuredHistoryFile
-    : path.resolve(PROJECT_ROOT, configuredHistoryFile);
+  const historyFile = resolveMomentumShadowQuoteHistoryFile(server);
   const history = projectMomentumShadowQuoteHistory({
     historyFile,
-    maxAgeSeconds
+    maxReports: 48,
+    maxAgeSeconds,
+    minimumDepthReports: 30,
+    minimumSamplesPerReport: 5,
+    expectedIntervalSeconds: 600,
+    freshnessLimitSeconds: 900
   });
   const unavailable = reason => ({
     available: false,
@@ -167,11 +236,25 @@ function projectMomentumShadowQuoteQualitySnapshot(server) {
     const rawMarkets = summary.markets && typeof summary.markets === 'object'
       ? summary.markets
       : {};
+    const positiveNotionalOrNull = value => {
+      if (value === null || value === undefined || value === '') return null;
+      const parsed = Number(value);
+      return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+    };
     const markets = Object.fromEntries(Object.entries(rawMarkets).map(([market, row]) => [market, {
       sampleCount: Math.max(0, Number(row?.sampleCount) || 0),
       p95: finiteOrNull(row?.p95),
       max: finiteOrNull(row?.max),
-      overCeiling: Math.max(0, Number(row?.overCeiling) || 0)
+      overCeiling: Math.max(0, Number(row?.overCeiling) || 0),
+      topOfBookDepth: row?.topOfBookDepth && typeof row.topOfBookDepth === 'object'
+        ? {
+          requestedSampleCount: Math.max(0, Number(row.topOfBookDepth.requestedSampleCount) || 0),
+          bidSampleCount: Math.max(0, Number(row.topOfBookDepth.bidSampleCount) || 0),
+          askSampleCount: Math.max(0, Number(row.topOfBookDepth.askSampleCount) || 0),
+          minimumBidNotionalKrw: positiveNotionalOrNull(row.topOfBookDepth.minimumBidNotionalKrw),
+          minimumAskNotionalKrw: positiveNotionalOrNull(row.topOfBookDepth.minimumAskNotionalKrw)
+        }
+        : null
     }]));
     const overCeilingMarkets = Object.entries(markets)
       .filter(([, row]) => row.overCeiling > 0)
@@ -214,6 +297,15 @@ function projectMomentumShadowQuoteQualitySnapshot(server) {
       maxAgeSeconds,
       now
     });
+    const allObservedMarketCostCompatibility = assessQuoteExecutionCostCompatibility({
+      report,
+      markets: Object.keys(rawMarkets),
+      tradingFee: compatibilityTradingFee,
+      slippage: compatibilitySlippage,
+      minimumSamples: compatibilityMinimumSamples,
+      maxAgeSeconds,
+      now
+    });
     return {
       available: true,
       researchOnly: true,
@@ -241,8 +333,9 @@ function projectMomentumShadowQuoteQualitySnapshot(server) {
       markets,
       overCeilingMarkets,
       costCompatibility: quoteCostCompatibility,
+      allObservedMarketCostCompatibility,
       history,
-      note: 'orderbook quote observations are research-only and do not represent fills, realized P&L, or live-order authorization'
+      note: '호가 관측치는 참고 자료입니다. 실제 체결이나 실현 손익을 뜻하지 않으며, 실제 주문을 허용하지 않습니다.'
     };
   } catch {
     return unavailable('quote_quality_report_invalid');
@@ -435,7 +528,7 @@ const momentumShadowBookDefinitions = server => {
   return [
     {
       key: 'fixed',
-      label: '고정 72시간',
+      label: '진입 후 72시간 유지',
       description: '현재 진입계약 · 72시간 종료',
       directory: config.momentumShadowFixedDir ||
         process.env.MOMO_SHADOW_FIXED_DIR ||
@@ -443,7 +536,7 @@ const momentumShadowBookDefinitions = server => {
     },
     {
       key: 'regime',
-      label: '추세 전환',
+      label: '추세 약화 시 청산',
       description: '현재 진입계약 · 추세 off 종료',
       directory: config.momentumShadowRegimeDir ||
         process.env.MOMO_SHADOW_REGIME_DIR ||
@@ -451,7 +544,7 @@ const momentumShadowBookDefinitions = server => {
     },
     {
       key: 'benchmark',
-      label: 'BTC gate 방어 후보',
+      label: '비트코인 추세 필터',
       description: 'BTC 7일 추세 gate · benchmark off 청산',
       directory: config.momentumShadowBenchmarkDir ||
         process.env.MOMO_SHADOW_BENCHMARK_DIR ||
@@ -459,7 +552,7 @@ const momentumShadowBookDefinitions = server => {
     },
     {
       key: 'volatility',
-      label: '변동성 제한 A/B 후보',
+      label: '변동성에 따라 비중 조절',
       description: '목표 일변동성 1% · 고변동 종목 비중 축소',
       directory: config.momentumShadowVolatilityDir ||
         process.env.MOMO_SHADOW_VOLATILITY_DIR ||
@@ -467,7 +560,7 @@ const momentumShadowBookDefinitions = server => {
     },
     {
       key: 'next_open',
-      label: '비용 대응·다음 시가 후보',
+      label: '거래 비용 반영 · 다음 날 시가 진입',
       description: 'cost 0.3% · 다음 일봉 시작가 체결',
       directory: config.momentumShadowNextOpenDir ||
         process.env.MOMO_SHADOW_NEXT_OPEN_DIR ||
@@ -475,7 +568,7 @@ const momentumShadowBookDefinitions = server => {
     },
     {
       key: 'fixed_2d',
-      label: '2일 고정 종료 A/B 후보',
+      label: '2일 뒤 청산',
       description: 'cost 0.3% · 다음 시가 진입 · 48시간 종료',
       directory: config.momentumShadowFixedHoldDir ||
         process.env.MOMO_SHADOW_FIXED_HOLD_DIR ||
@@ -483,7 +576,7 @@ const momentumShadowBookDefinitions = server => {
     },
     {
       key: 'fixed_2d_loss_cap',
-      label: '2일·종가 손실 상한 A/B 후보',
+      label: '2일 보유 · 종가 기준 손실 제한',
       description: 'cost 0.3% · 다음 시가 진입 · 48시간 종료 · 완료 일봉 종가 손실 상한 4%',
       directory: config.momentumShadowFixedHoldLossCapDir ||
         process.env.MOMO_SHADOW_FIXED_HOLD_LOSS_CAP_DIR ||
@@ -491,7 +584,7 @@ const momentumShadowBookDefinitions = server => {
     },
     {
       key: 'fixed_2d_spread',
-      label: '2일·호가 제한 A/B 후보',
+      label: '2일 보유 · 호가 제한',
       description: 'cost 0.3% · 다음 시가 진입 · 48시간 종료 · spread 0.5% 이하',
       directory: config.momentumShadowFixedHoldSpreadDir ||
         process.env.MOMO_SHADOW_FIXED_HOLD_SPREAD_DIR ||
@@ -499,7 +592,7 @@ const momentumShadowBookDefinitions = server => {
     },
     {
       key: 'fixed_2d_relative',
-      label: '2일·상대추세 A/B 후보',
+      label: '2일 보유 · 비트코인 대비 강한 추세',
       description: 'cost 0.3% · 다음 시가 진입 · 48시간 종료 · BTC 대비 상대추세 우위',
       directory: config.momentumShadowFixedHoldRelativeDir ||
         process.env.MOMO_SHADOW_FIXED_HOLD_RELATIVE_DIR ||
@@ -507,7 +600,7 @@ const momentumShadowBookDefinitions = server => {
     },
     {
       key: 'fixed_2d_quote_cross',
-      label: '2일·호가 경계 모델 A/B 후보',
+      label: '2일 보유 · 매수·매도 호가 기준',
       description: 'cost 0.3% · 다음 시가 진입 · 48시간 종료 · best ask 매수 · best bid 매도/평가',
       directory: config.momentumShadowFixedHoldQuoteCrossDir ||
         process.env.MOMO_SHADOW_FIXED_HOLD_QUOTE_CROSS_DIR ||
@@ -527,10 +620,10 @@ function formatRunnerStopReason(reason) {
   const labels = {
     'signal:SIGINT': '사용자 중지',
     'signal:SIGTERM': '프로세스 종료 신호',
-    heartbeat_timeout: '갱신 지연 자동 중지',
-    cycle_timeout: 'cycle 처리 시간 초과',
-    candidate_slot_lost: '후보 실행 슬롯 소유권 상실',
-    lock_lost: '잠금 소유권 상실 감지',
+    heartbeat_timeout: '갱신이 늦어 자동으로 중지됨',
+    cycle_timeout: '처리 시간이 너무 오래 걸려 중지됨',
+    candidate_slot_lost: '후보 실행 권한을 잃어 중지됨',
+    lock_lost: '실행 잠금을 잃어 중지됨',
     before_exit: '실행 종료 감지',
     startup_failure: '시작 실패',
     uncaught_exception: '처리되지 않은 오류',
@@ -570,7 +663,7 @@ function projectMomentumShadowRunnerLifecycle(ledger) {
   };
 }
 
-function projectMomentumShadowBook(definition, fallbackInitialBalance, server) {
+function projectMomentumShadowBook(definition, fallbackInitialBalance, server, quoteHistorySource) {
   const ledgerFile = path.join(definition.directory, 'ledger.json');
   if (!fs.existsSync(ledgerFile)) {
     return {
@@ -578,7 +671,7 @@ function projectMomentumShadowBook(definition, fallbackInitialBalance, server) {
       label: definition.label,
       description: definition.description,
       available: false,
-      status: '데이터 없음',
+      status: '기록 없음',
       researchOnly: true,
       promoted: false
     };
@@ -601,6 +694,9 @@ function projectMomentumShadowBook(definition, fallbackInitialBalance, server) {
       heartbeatAgeSeconds !== null && heartbeatAgeSeconds * 1000 <= heartbeatLimitMs;
     const equity = getMomentumShadowEquity(ledger, fallbackInitialBalance);
     const trades = Array.isArray(ledger.trades) ? ledger.trades : [];
+    const tradeCostAudit = trades.length > 0
+      ? projectMomentumShadowTradeCostAudit(ledger, quoteHistorySource)
+      : null;
     const executionModel = resolveMomentumShadowExecutionModel(ledger.config?.executionModel);
     const quoteExecution = summarizeMomentumShadowQuoteExecutionEvidence(trades);
     const winningTrades = trades.filter(trade => Number(trade.profitPercent) > 0).length;
@@ -652,59 +748,84 @@ function projectMomentumShadowBook(definition, fallbackInitialBalance, server) {
         DEFAULT_MOMENTUM_SHADOW_MIN_RESEARCH_DAYS
     );
     const observationDays = calculateMomentumShadowObservationDays(ledger);
+    const observedMddSampleCount = Math.max(0, Number(ledger.observedMddSampleCount) || 0);
+    const observedMddFullSessionCoverage = ledger.observedMddFullSessionCoverage === true;
+    const observedMddAvailable = observedMddSampleCount >= 2 &&
+      ledger.observedMddMaxDrawdownPercent !== null &&
+      ledger.observedMddMaxDrawdownPercent !== undefined &&
+      Number.isFinite(Number(ledger.observedMddMaxDrawdownPercent));
+    const costFloorStatus = assessMomentumShadowCostFloor(ledger.config?.costPercent);
+    const entryCostFloor = {
+      ...costFloorStatus,
+      runtimeGuardActive: Number(ledger.costFloorGuardVersion) === 1,
+      blockedEntrySignals: Math.max(0, Number(ledger.costFloorBlockedEntries) || 0),
+      blockedPendingEntries: Math.max(0, Number(ledger.costFloorBlockedPendingEntries) || 0),
+      note: '거래 비용이 최소 기준에 못 미치면 새 매수 신호와 대기 주문을 막습니다. 이미 보유한 자산은 계속 감시합니다. 이전 실행 기록은 차단 조건 적용 여부를 확인하지 못할 수 있습니다.'
+    };
     const promotionBlockers = [];
+    if (!costFloorStatus.ready) {
+      const configuredCostLabel = costFloorStatus.configuredCostPercent === null
+        ? '확인 불가'
+        : `${costFloorStatus.configuredCostPercent.toFixed(2)}%`;
+      promotionBlockers.push(
+        `왕복 거래 비용 가정 ${configuredCostLabel}가 최소 기준 ${costFloorStatus.requiredCostPercent.toFixed(2)}%보다 낮거나 확인되지 않았습니다.`
+      );
+    }
     if (ledger.configDrift) {
       promotionBlockers.push('설정 변경 이력이 있어 동일 조건 비교를 할 수 없습니다.');
     }
+    if (!observedMddAvailable || !observedMddFullSessionCoverage) {
+      promotionBlockers.push('최대 낙폭 기록이 없거나 관찰 기간의 기록이 빠져 있어 위험 대비 수익성을 비교할 수 없습니다.');
+    }
     if (trades.length < minimumResearchTrades) {
-      promotionBlockers.push(`청산 표본이 ${trades.length}/${minimumResearchTrades}회로 부족합니다.`);
+      promotionBlockers.push(`종료된 거래가 ${trades.length}/${minimumResearchTrades}건으로, 비교에 필요한 수보다 적습니다.`);
     }
     if (tradeReturnConfidence.sampleCount < trades.length) {
-      promotionBlockers.push(`유효한 청산 수익률이 ${tradeReturnConfidence.sampleCount}/${trades.length}건으로 부족합니다.`);
+      promotionBlockers.push(`수익률을 계산할 수 있는 종료 거래가 ${tradeReturnConfidence.sampleCount}/${trades.length}건뿐입니다.`);
     }
     if (tradeReturnConfidence.sampleCount >= minimumResearchTrades &&
       (tradeReturnConfidence.lowerBoundPercent === null ||
         tradeReturnConfidence.lowerBoundPercent < 0)) {
-      promotionBlockers.push('거래수익 95% 하한이 0% 미만이라 안정적인 양수 수익을 확인할 수 없습니다.');
+      promotionBlockers.push('수익률을 보수적으로 계산했을 때 0%를 밑돌아, 안정적인 수익으로 보기 어렵습니다.');
     }
     if (tradeReturnConfidence.sampleCount >= minimumResearchTrades &&
       (realizedReturnPercent === null ||
         !Number.isFinite(Number(realizedReturnPercent)) ||
         Number(realizedReturnPercent) <= 0)) {
-      promotionBlockers.push('실현 순수익률이 0% 이하라 실제 순수익으로 이어졌다고 확인할 수 없습니다.');
+      promotionBlockers.push('기록된 모의 거래 수익률이 0% 이하입니다.');
     }
     if (observationDays === null) {
-      promotionBlockers.push('관찰 시작/종료 시각을 확인할 수 없어 관찰 기간을 증명할 수 없습니다.');
+      promotionBlockers.push('관찰 시작일이나 종료일을 확인할 수 없어 관찰 기간을 계산할 수 없습니다.');
     } else if (observationDays < minimumResearchDays) {
-      promotionBlockers.push(`관찰 기간 ${observationDays.toFixed(2)}/${minimumResearchDays}일로 부족합니다.`);
+      promotionBlockers.push(`관찰 기간이 ${observationDays.toFixed(2)}/${minimumResearchDays}일로, 필요한 기간에 못 미칩니다.`);
     }
     if (active) {
       promotionBlockers.push('관찰 세션이 아직 진행 중이라 최종 수익성 판정을 할 수 없습니다.');
     }
     if (ledger.runnerState !== 'running' || live !== true) {
-      promotionBlockers.push('owner process가 현재 관찰 중 상태가 아닙니다.');
+      promotionBlockers.push('관찰을 실행하는 프로그램이 실행 중 상태가 아닙니다.');
     }
     if (heartbeatAgeSeconds === null || heartbeatAgeSeconds * 1000 > heartbeatLimitMs) {
-      promotionBlockers.push('owner heartbeat가 오래되어 관찰 연속성을 확인할 수 없습니다.');
+      promotionBlockers.push('실행 중 프로그램의 최근 갱신 시각이 오래되어 관찰이 계속 이어졌는지 확인할 수 없습니다.');
     }
     const openPositionCount = Object.keys(ledger.positions || {}).length;
     if (openPositionCount > 0) {
-      promotionBlockers.push(`미청산 포지션 ${openPositionCount}개가 있어 평가손익만으로는 전환할 수 없습니다.`);
+      promotionBlockers.push(`아직 종료되지 않은 포지션이 ${openPositionCount}개 있어 평가손익만으로 수익성을 판단할 수 없습니다.`);
     }
     if (ledger.networkFetchCircuitOpen === true) {
-      promotionBlockers.push('시세 수집 회로가 현재 열려 있어 관찰 연속성이 끊겼습니다.');
+      promotionBlockers.push('시세 수집이 중단되어 관찰 기록이 이어지지 않았습니다.');
     } else if (Number(ledger.networkFetchFailureStreak) > 0) {
-      promotionBlockers.push(`시세 수집이 현재 ${Number(ledger.networkFetchFailureStreak)}회 연속 실패 중입니다.`);
+      promotionBlockers.push(`시세를 ${Number(ledger.networkFetchFailureStreak)}회 연속 가져오지 못했습니다.`);
     }
     if (ledger.quoteQuality?.enabled === true && ledger.quoteQuality.valid !== true) {
-      promotionBlockers.push('호가 품질이 현재 유효하지 않아 실제 체결 비용을 확인할 수 없습니다.');
+      promotionBlockers.push('최근 호가 정보가 유효하지 않아 예상 거래 비용을 계산할 수 없습니다.');
     }
     if (executionModel === 'quote_cross' && ledger.quoteQuality?.executionReady !== true) {
-      promotionBlockers.push('quote_cross 실행 모델에 필요한 호가 경계가 유효하지 않습니다.');
+      promotionBlockers.push('매수·매도 호가를 기준으로 계산하는 방식에 필요한 호가 정보가 유효하지 않습니다.');
     }
     if (Number(ledger.config?.maxSpreadPercent) > 0 && trades.length > 0 &&
       quoteExecution.availableCount < trades.length) {
-      promotionBlockers.push(`호가 경계 evidence가 ${quoteExecution.availableCount}/${trades.length}건으로 부족해 체결 비용을 확인할 수 없습니다.`);
+      promotionBlockers.push(`매수·매도 호가 기록이 ${quoteExecution.availableCount}/${trades.length}건뿐이라 예상 거래 비용을 계산할 자료가 부족합니다.`);
     }
     const executionModelBlockedCount =
       (Number(ledger.executionModelEntryBlocked) || 0) +
@@ -712,10 +833,10 @@ function projectMomentumShadowBook(definition, fallbackInitialBalance, server) {
       (Number(ledger.executionModelMarkBlocked) || 0) +
       (Number(ledger.pendingEntryExecutionBlocked) || 0);
     if (executionModelBlockedCount > 0) {
-      promotionBlockers.push(`가격 실행 모델 차단 ${executionModelBlockedCount}회가 있어 해당 paper 표본을 완전한 관찰로 사용할 수 없습니다.`);
+      promotionBlockers.push(`가격 모델이 ${executionModelBlockedCount}회 진입을 막아 이 모의 거래 기록을 연속된 관찰 자료로 보기 어렵습니다.`);
     }
     if (!ledger.dataQuality || ledger.dataQuality.valid !== true) {
-      promotionBlockers.push('일봉 데이터 grid가 불완전해 신규 진입이 차단되었습니다.');
+      promotionBlockers.push('일봉 시세 기록이 불완전해 신규 진입을 막았습니다.');
     }
     const dataQualityObservationCycles = Math.max(
       0,
@@ -740,18 +861,18 @@ function projectMomentumShadowBook(definition, fallbackInitialBalance, server) {
       const qualityHistory = [];
       if (dataQualityInvalidCycles > 0) {
         qualityHistory.push(
-          `일봉 품질 실패 ${dataQualityInvalidCycles}/${Math.max(1, dataQualityObservationCycles)} cycle`
+          `일봉 시세 오류 ${dataQualityInvalidCycles}/${Math.max(1, dataQualityObservationCycles)}회`
         );
       }
       if (dataQualityBlockedChecks > 0) {
         qualityHistory.push(
           `시장 검토 차단 ${dataQualityBlockedChecks}회${dataQualityBlockedChecksAttribution === 'legacy_unclassified'
-            ? ' · 과거 owner 원인 미분류'
+            ? ' · 과거 실행 원인 미분류'
             : ''}`
         );
       }
       promotionBlockers.push(
-        `일봉 품질·시장 검토 이력(${qualityHistory.join(' · ')})으로 인해 동일 조건의 연속 관찰을 입증할 수 없습니다.`
+        `일봉 시세 오류와 시장 확인 기록(${qualityHistory.join(' · ')}) 때문에 같은 조건으로 관찰이 이어졌는지 확인할 수 없습니다.`
       );
     }
 
@@ -761,10 +882,10 @@ function projectMomentumShadowBook(definition, fallbackInitialBalance, server) {
       description: definition.description,
       available: true,
       status: ledger.configDrift
-        ? '증거 보류'
+        ? '설정 변경 · 확인 필요'
         : active ? '관찰 중' : ledger.runnerStopReason ? '중지' : '상태 확인 필요',
       statusReason: ledger.configDrift
-        ? '설정 변경 이력으로 A/B·승격 증거 사용 불가'
+        ? '설정이 바뀌어 이 기록은 다른 전략과 비교하거나 실제 거래를 검토하는 데 사용할 수 없습니다.'
         : active ? null : formatRunnerStopReason(ledger.runnerStopReason),
       cycleDiagnostics: {
         active: Boolean(ledger.currentCycleStage),
@@ -778,8 +899,8 @@ function projectMomentumShadowBook(definition, fallbackInitialBalance, server) {
       promoted: false,
       executionModel,
       executionModelNote: executionModel === 'quote_cross'
-        ? 'best ask entry · best bid exit/mark 모델이며 실제 fill·wallet settlement가 아닙니다.'
-        : '완료 일봉 종가 기반 paper 가격 모델입니다.',
+        ? '매수할 때는 가장 낮은 매도 호가, 매도·평가할 때는 가장 높은 매수 호가를 적용한 가격 모델입니다. 실제 체결이나 계좌 정산 기록은 아닙니다.'
+        : '완료된 일봉의 종가를 기준으로 계산한 모의 거래 가격입니다.',
       executionModelBlockedCount,
       heartbeatAt: ledger.heartbeatAt || null,
       heartbeatAgeSeconds,
@@ -796,18 +917,50 @@ function projectMomentumShadowBook(definition, fallbackInitialBalance, server) {
       realizedReturnPercent,
       realizedByMarket,
       realizedTradeConfidence: tradeReturnConfidence,
+      entryCostFloor,
+      profitConcentration: summarizeMomentumShadowProfitConcentration(ledger),
       lossCapCounterfactual: summarizeMomentumShadowLossCapCounterfactual(ledger),
       unrealizedProfit: equity.unrealizedProfit,
+      observedDrawdown: {
+        available: observedMddAvailable,
+        fullSessionCoverage: observedMddFullSessionCoverage,
+        coverageReasons: Array.isArray(ledger.observedMddCoverageReasons)
+          ? ledger.observedMddCoverageReasons
+          : [],
+        sampleCount: observedMddSampleCount,
+        startedAt: ledger.observedMddStartedAt || null,
+        lastObservedAt: ledger.observedMddLastAt || null,
+        samplingIntervalMs: Number.isFinite(Number(ledger.observedMddSamplingIntervalMs))
+          ? Number(ledger.observedMddSamplingIntervalMs)
+          : null,
+        observedPeakEquity: Number.isFinite(Number(ledger.observedMddPeakEquity))
+          ? Number(ledger.observedMddPeakEquity)
+          : null,
+        currentDrawdownPercent: Number.isFinite(Number(ledger.observedMddCurrentDrawdownPercent))
+          ? Number(ledger.observedMddCurrentDrawdownPercent)
+          : null,
+        maxDrawdownPercent: observedMddAvailable
+          ? Number(ledger.observedMddMaxDrawdownPercent)
+          : null,
+        maxDrawdownAt: ledger.observedMddMaxDrawdownAt || null,
+        maxDrawdownPeakEquity: Number.isFinite(Number(ledger.observedMddMaxDrawdownPeakEquity))
+          ? Number(ledger.observedMddMaxDrawdownPeakEquity)
+          : null,
+        maxDrawdownTroughEquity: Number.isFinite(Number(ledger.observedMddMaxDrawdownTroughEquity))
+          ? Number(ledger.observedMddMaxDrawdownTroughEquity)
+          : null,
+        note: '일정 간격으로 기록한 평가자산 기준 최대 낙폭입니다. 장중의 세밀한 가격 변동은 포함하지 않습니다.'
+      },
       closedTradeCount: trades.length,
       winningTrades,
       losingTrades: trades.length - winningTrades,
       configurationWarning: ledger.configDrift
-        ? '중간 설정 변경 이력이 있어 이 장부는 A/B 비교와 승격에 사용할 수 없습니다.'
+        ? '관찰 중 설정이 바뀌어 이 기록은 같은 조건의 전략 비교나 실제 거래 판단에 사용할 수 없습니다.'
         : null,
       configurationDriftChanges: ledger.configDrift?.previous && ledger.config
         ? getMomentumShadowConfigDriftChanges(ledger.configDrift.previous, ledger.config)
         : [],
-      promotionStatus: '승격 보류',
+      promotionStatus: '실거래 적용 보류',
       promotionBlockers,
       dataQuality: ledger.dataQuality ? {
         valid: ledger.dataQuality.valid === true,
@@ -889,6 +1042,7 @@ function projectMomentumShadowBook(definition, fallbackInitialBalance, server) {
           : []
       } : null,
       quoteExecution,
+      tradeCostAudit,
       network: {
         fetchErrors: Number(ledger.fetchErrors) || 0,
         circuitOpen: ledger.networkFetchCircuitOpen === true,
@@ -990,7 +1144,7 @@ function projectMomentumShadowBook(definition, fallbackInitialBalance, server) {
       label: definition.label,
       description: definition.description,
       available: false,
-      status: '읽기 실패',
+      status: '기록을 불러오지 못함',
       researchOnly: true,
       promoted: false,
       error: error.message
@@ -1033,8 +1187,14 @@ export default function createResearchRoutes(server) {
 
   router.get('/momentum-shadow', (req, res) => {
     const fallbackInitialBalance = Number(process.env.MOMO_SHADOW_INITIAL_BALANCE) || 100_000_000;
+    const quoteHistorySource = readMomentumShadowQuoteHistoryRecords(server);
     const books = momentumShadowBookDefinitions(server)
-      .map(definition => projectMomentumShadowBook(definition, fallbackInitialBalance, server));
+      .map(definition => projectMomentumShadowBook(
+        definition,
+        fallbackInitialBalance,
+        server,
+        quoteHistorySource
+      ));
     const candidateReadiness = projectMomentumShadowCandidateReadiness(server);
     const paperForwardCohort = summarizePaperForwardCohort({ rootDir: PROJECT_ROOT });
     const lossCapNoDogeReadiness = projectMomentumShadowFixedHoldReadiness(server, {
@@ -1043,47 +1203,47 @@ export default function createResearchRoutes(server) {
     });
     lossCapNoDogeReadiness.historicalEvidence = getMomentumShadowHistoricalEvidence('loss_cap_no_doge');
     const candidateReadinessVariants = [
-      { key: 'baseline', label: '기본 후보', readiness: candidateReadiness },
+      { key: 'baseline', label: '기본 전략', readiness: candidateReadiness },
       {
         key: 'volatility',
-        label: '변동성 제한 A/B 후보',
+        label: '변동성에 따라 비중 조절',
         readiness: projectMomentumShadowVolatilityReadiness(server)
       },
       {
         key: 'next_open',
-        label: '비용 대응·다음 시가 후보',
+        label: '거래 비용 반영 · 다음 날 시가 진입',
         readiness: projectMomentumShadowNextOpenReadiness(server)
       },
       {
         key: 'fixed_2d',
-        label: '2일 고정 종료 A/B 후보',
+        label: '2일 뒤 청산',
         readiness: projectMomentumShadowFixedHoldReadiness(server)
       },
       {
         key: 'fixed_2d_loss_cap',
-        label: '2일·종가 손실 상한 A/B 후보',
+        label: '2일 보유 · 종가 기준 손실 제한',
         readiness: projectMomentumShadowFixedHoldReadiness(server, { stopLossPercent: 4 })
       },
       {
         key: 'fixed_2d_loss_cap_no_doge',
-        label: '2일·DOGE 제외 손실 상한 후보',
+        label: '2일 보유 · 도지코인 제외 · 손실 제한',
         readiness: lossCapNoDogeReadiness
       },
       {
       key: 'fixed_2d_relative',
-        label: '2일·상대추세 A/B 후보',
+        label: '2일 보유 · 비트코인 대비 강한 추세',
         readiness: projectMomentumShadowFixedHoldReadiness(server, {
           relativeTrendMinPercent: 0
         })
       },
       {
         key: 'fixed_2d_spread',
-        label: '2일·호가 제한 A/B 후보',
+        label: '2일 보유 · 호가 제한',
         readiness: projectMomentumShadowFixedHoldReadiness(server, { spreadGuard: true })
       },
       {
         key: 'fixed_2d_quote_cross',
-        label: '2일·호가 경계 모델 A/B 후보',
+        label: '2일 보유 · 매수·매도 호가 기준',
         readiness: projectMomentumShadowFixedHoldReadiness(server, { quoteCross: true })
       }
     ];

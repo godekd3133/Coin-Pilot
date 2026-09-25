@@ -8,6 +8,7 @@ import {
   recordRiskMonitorAttempt,
   recordRiskMonitorStale,
   recordRiskMonitorSuccess,
+  recordRiskMonitorWatchdogTick,
   resolveMaxRiskDataGapSeconds
 } from '../src/risk/riskMonitor.js';
 
@@ -130,4 +131,24 @@ test('허용 공백 뒤 도착한 성공 callback도 risk continuity를 되살�
   assert.equal(delayed.continuityEligible, false);
   assert.equal(delayed.maxObservedGapSeconds, 31);
   assert.equal(delayed.currentOutageStartedAt, new Date(start).toISOString());
+});
+
+test('risk watchdog callback 간격을 continuity 판정과 별도로 보존한다', () => {
+  const start = Date.parse('2026-09-23T00:00:00.000Z');
+  let state = createRiskMonitorState({ monitoringActive: true });
+
+  state = recordRiskMonitorWatchdogTick(state, start);
+  assert.equal(state.watchdogTelemetryVersion, 1);
+  assert.equal(state.lastWatchdogTickGapMs, null);
+
+  state = recordRiskMonitorWatchdogTick(state, start + 1_000);
+  state = recordRiskMonitorWatchdogTick(state, start + 427_771);
+  assert.equal(state.lastWatchdogTickGapMs, 426_771);
+  assert.equal(state.maxWatchdogTickGapMs, 426_771);
+  assert.equal(state.continuityEligible, true);
+
+  state = recordRiskMonitorIdle(state);
+  state = recordRiskMonitorWatchdogTick(state, start + 3_600_000);
+  assert.equal(state.lastWatchdogTickGapMs, null);
+  assert.equal(state.maxWatchdogTickGapMs, 426_771);
 });

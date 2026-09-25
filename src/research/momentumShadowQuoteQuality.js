@@ -233,28 +233,53 @@ export function summarizeMomentumShadowQuoteSamples({
   const ceiling = Number.isFinite(Number(maxSpreadPercent)) && Number(maxSpreadPercent) > 0
     ? Number(maxSpreadPercent)
     : 0;
-  const byMarket = Object.fromEntries(selectedMarkets.map(market => [market, []]));
+  const byMarket = Object.fromEntries(selectedMarkets.map(market => [market, {
+    spreads: [],
+    bidNotionals: [],
+    askNotionals: []
+  }]));
   for (const sample of Array.isArray(samples) ? samples : []) {
     for (const quote of Array.isArray(sample?.quotes) ? sample.quotes : []) {
-      if (Object.hasOwn(byMarket, quote.market) && Number.isFinite(Number(quote.spreadPercent))) {
-        byMarket[quote.market].push(Number(quote.spreadPercent));
-      }
+      if (!Object.hasOwn(byMarket, quote.market)) continue;
+      const market = byMarket[quote.market];
+      if (Number.isFinite(Number(quote.spreadPercent))) market.spreads.push(Number(quote.spreadPercent));
+      if (quote.available !== true) continue;
+      const bidPrice = finitePositive(quote.bidPrice);
+      const bidSize = finitePositive(quote.bidSize);
+      const askPrice = finitePositive(quote.askPrice);
+      const askSize = finitePositive(quote.askSize);
+      const bidNotional = bidPrice === null || bidSize === null ? null : bidPrice * bidSize;
+      const askNotional = askPrice === null || askSize === null ? null : askPrice * askSize;
+      if (Number.isFinite(bidNotional) && bidNotional > 0) market.bidNotionals.push(bidNotional);
+      if (Number.isFinite(askNotional) && askNotional > 0) market.askNotionals.push(askNotional);
     }
   }
+  const requestedSampleCount = Array.isArray(samples) ? samples.length : 0;
   const summary = Object.fromEntries(selectedMarkets.map(market => {
-    const values = byMarket[market];
+    const { spreads, bidNotionals, askNotionals } = byMarket[market];
     return [market, {
-      sampleCount: values.length,
-      median: quantile(values, 0.5),
-      p95: quantile(values, 0.95),
-      max: values.length ? Math.max(...values) : null,
-      overCeiling: ceiling > 0 ? values.filter(value => value > ceiling).length : 0
+      sampleCount: spreads.length,
+      median: quantile(spreads, 0.5),
+      p95: quantile(spreads, 0.95),
+      max: spreads.length ? Math.max(...spreads) : null,
+      overCeiling: ceiling > 0 ? spreads.filter(value => value > ceiling).length : 0,
+      topOfBookDepth: {
+        requestedSampleCount,
+        bidSampleCount: bidNotionals.length,
+        askSampleCount: askNotionals.length,
+        missingBidSampleCount: Math.max(0, requestedSampleCount - bidNotionals.length),
+        missingAskSampleCount: Math.max(0, requestedSampleCount - askNotionals.length),
+        medianBidNotionalKrw: quantile(bidNotionals, 0.5),
+        minimumBidNotionalKrw: bidNotionals.length ? Math.min(...bidNotionals) : null,
+        medianAskNotionalKrw: quantile(askNotionals, 0.5),
+        minimumAskNotionalKrw: askNotionals.length ? Math.min(...askNotionals) : null
+      }
     }];
   }));
-  const allValues = Object.values(byMarket).flat();
+  const allValues = Object.values(byMarket).flatMap(market => market.spreads);
   const complete = selectedMarkets.length > 0 &&
     Array.isArray(samples) && samples.length > 0 &&
-    selectedMarkets.every(market => byMarket[market].length === (samples?.length || 0));
+    selectedMarkets.every(market => byMarket[market].spreads.length === (samples?.length || 0));
   return {
     valid: complete,
     maxSpreadPercent: ceiling,
@@ -262,7 +287,7 @@ export function summarizeMomentumShadowQuoteSamples({
     sampleCount: Array.isArray(samples) ? samples.length : 0,
     incompleteMarkets: !Array.isArray(samples) || samples.length === 0
       ? selectedMarkets
-      : selectedMarkets.filter(market => byMarket[market].length !== samples.length),
+      : selectedMarkets.filter(market => byMarket[market].spreads.length !== samples.length),
     overall: {
       median: quantile(allValues, 0.5),
       p95: quantile(allValues, 0.95),

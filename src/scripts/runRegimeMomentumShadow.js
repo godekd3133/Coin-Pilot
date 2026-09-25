@@ -53,6 +53,11 @@ import {
 } from '../research/momentumShadowEntryExecution.js';
 import { executeMomentumShadowPendingEntries } from '../research/momentumShadowPendingEntries.js';
 import {
+  assessMomentumShadowCostFloor,
+  gateMomentumShadowEntryCandidates,
+  resolveMomentumShadowCostPercent
+} from '../research/momentumShadowCostFloor.js';
+import {
   recordMomentumShadowFetchFailure,
   recordMomentumShadowFetchSuccess,
   resolveMomentumShadowFetchFailureLimit
@@ -126,7 +131,8 @@ let MAX_DAILY_CANDLE_AGE_HOURS = DEFAULT_MAX_DAILY_CANDLE_AGE_HOURS;
 let MAX_SPREAD_PERCENT = 0;
 let REQUEST_INTERVAL_MS = DEFAULT_REQUEST_INTERVAL_MS;
 let EXECUTION_MODEL = resolveMomentumShadowExecutionModel(process.env.MOMO_SHADOW_EXECUTION_MODEL);
-const COST_PERCENT = Number(process.env.MOMO_SHADOW_COST_PERCENT) || 0.2;
+const COST_PERCENT = resolveMomentumShadowCostPercent(process.env.MOMO_SHADOW_COST_PERCENT);
+const COST_FLOOR_STATUS = assessMomentumShadowCostFloor(COST_PERCENT);
 const POSITION_FRACTION = Number(process.env.MOMO_SHADOW_POSITION_FRACTION) || 0.25;
 const MAX_POSITIONS = Number(process.env.MOMO_SHADOW_MAX_POSITIONS) || 4;
 const TREND_MIN_PERCENT = Number(process.env.MOMO_SHADOW_TREND_MIN_PERCENT) || 0;
@@ -823,7 +829,7 @@ async function cycle(ledger, strategies) {
     // and cash before an open-time fill is evaluated, matching the simulator's
     // boundary ordering.
     markCycleStage('pending_entries');
-    executeMomentumShadowPendingEntries({
+    const pendingEntryResult = executeMomentumShadowPendingEntries({
       ledger,
       series,
       currentOpenByMarket,
@@ -836,9 +842,19 @@ async function cycle(ledger, strategies) {
       entryExecution: ENTRY_EXECUTION,
       maxEntryGapPercent: MAX_ENTRY_GAP_PERCENT,
       maxSpreadPercent: MAX_SPREAD_PERCENT,
+      costFloorReady: COST_FLOOR_STATUS.ready,
       notify,
       bookName
     });
+    if (pendingEntryResult.costFloorBlocked > 0) {
+      ledger.lastCostFloorEntryBlock = {
+        stage: 'pending_entries',
+        at: nowIso,
+        configuredCostPercent: COST_PERCENT,
+        requiredCostPercent: COST_FLOOR_STATUS.requiredCostPercent,
+        blockedPendingEntryCount: pendingEntryResult.costFloorBlocked
+      };
+    }
 
     // breadth: count markets with trailing trend above threshold
     markCycleStage('entry_selection');
@@ -939,8 +955,23 @@ async function cycle(ledger, strategies) {
 
     // entries
     let plannedBalance = ledger.balance;
+    const costGatedEntries = gateMomentumShadowEntryCandidates(
+      entryCandidates,
+      COST_FLOOR_STATUS
+    );
+    if (costGatedEntries.blockedEntryCount > 0) {
+      ledger.costFloorBlockedEntries = (Number(ledger.costFloorBlockedEntries) || 0) +
+        costGatedEntries.blockedEntryCount;
+      ledger.lastCostFloorEntryBlock = {
+        stage: 'new_entry',
+        at: nowIso,
+        configuredCostPercent: COST_PERCENT,
+        requiredCostPercent: COST_FLOOR_STATUS.requiredCostPercent,
+        blockedEntryCount: costGatedEntries.blockedEntryCount
+      };
+    }
     for (const [selectionRank, candidate] of rankMomentumShadowEntryCandidates(
-      entryCandidates
+      costGatedEntries.entryCandidates
     ).entries()) {
       const { market: m, bars, signal: r, volatilityScale } = candidate;
       const pendingCount = ENTRY_EXECUTION === 'next_open' ? (ledger.pendingEntries || []).length : 0;
@@ -1203,6 +1234,9 @@ async function main() {
     recordMomentumShadowConfigDrift(ledger, active);
   }
   if (!Array.isArray(ledger.pendingEntries)) ledger.pendingEntries = [];
+  // This process protects future entries when started from a direct/legacy
+  // launch path. Existing positions still pass through the normal exit logic.
+  ledger.costFloorGuardVersion = 1;
   ledger.benchmarkObservationSchemaVersion =
     MOMENTUM_SHADOW_BENCHMARK_OBSERVATION_SCHEMA_VERSION;
   ensureMomentumShadowConsumedSignalState(ledger);
@@ -1214,7 +1248,7 @@ async function main() {
   });
   saveLedger(ledger);
   startHeartbeatWatchdog(ledger);
-  console.log(`momentum shadow started: ${MARKETS.join(',')} hold=${strategyConfig.maxHoldHours}h trend>${TREND_MIN_PERCENT}% breadth>=${BREADTH_MIN} cooldown=${COOLDOWN_AFTER_LOSS_DAYS}d drawdownStop=${MAX_PORTFOLIO_DRAWDOWN_PERCENT}% volatilityTarget=${VOLATILITY_TARGET_PERCENT ?? 'off'}%/${VOLATILITY_LOOKBACK_DAYS}d relativeTrend=${RELATIVE_TREND_MIN_PERCENT === null ? 'off' : `>${RELATIVE_TREND_MIN_PERCENT}% over benchmark`} entryExecution=${ENTRY_EXECUTION} executionModel=${EXECUTION_MODEL} entryGapCeiling=${MAX_ENTRY_GAP_PERCENT}% dailyCandleMaxAge=${MAX_DAILY_CANDLE_AGE_HOURS}h spreadCeiling=${MAX_SPREAD_PERCENT > 0 ? `${MAX_SPREAD_PERCENT}%` : 'off'} requestInterval=${REQUEST_INTERVAL_MS}ms candidateSlot=${CANDIDATE_SLOT_FILE ? 'global' : 'off'}`);
+  console.log(`momentum shadow started: ${MARKETS.join(',')} hold=${strategyConfig.maxHoldHours}h trend>${TREND_MIN_PERCENT}% breadth>=${BREADTH_MIN} cooldown=${COOLDOWN_AFTER_LOSS_DAYS}d drawdownStop=${MAX_PORTFOLIO_DRAWDOWN_PERCENT}% volatilityTarget=${VOLATILITY_TARGET_PERCENT ?? 'off'}%/${VOLATILITY_LOOKBACK_DAYS}d relativeTrend=${RELATIVE_TREND_MIN_PERCENT === null ? 'off' : `>${RELATIVE_TREND_MIN_PERCENT}% over benchmark`} entryExecution=${ENTRY_EXECUTION} executionModel=${EXECUTION_MODEL} cost=${COST_PERCENT}%/${COST_FLOOR_STATUS.requiredCostPercent}% floor=${COST_FLOOR_STATUS.ready ? 'met' : 'new-entry-blocked'} entryGapCeiling=${MAX_ENTRY_GAP_PERCENT}% dailyCandleMaxAge=${MAX_DAILY_CANDLE_AGE_HOURS}h spreadCeiling=${MAX_SPREAD_PERCENT > 0 ? `${MAX_SPREAD_PERCENT}%` : 'off'} requestInterval=${REQUEST_INTERVAL_MS}ms candidateSlot=${CANDIDATE_SLOT_FILE ? 'global' : 'off'}`);
   while (true) {
     try { await cycle(ledger, strategies); }
     catch (e) { console.error('cycle error:', e.message); }

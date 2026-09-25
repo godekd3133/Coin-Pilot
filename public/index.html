@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <meta name="theme-color" content="#f7f4ee">
-    <meta name="description" content="CoinPilot 과매도 반응 스캘핑 모의투자·실제투자 거래 대시보드">
+    <meta name="description" content="CoinPilot 거래 대시보드. 모의투자 결과와 실제 주문 전 점검, 계좌 잔액과 시장 현황을 확인할 수 있습니다.">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-title" content="CoinPilot">
@@ -16,8 +16,8 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&family=Noto+Sans+KR:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/pilot-redesign.css?v=20260918-06">
-    <title>CoinPilot | Automated Trading</title>
+    <link rel="stylesheet" href="/pilot-redesign.css?v=20260924-07">
+    <title>CoinPilot | 거래 대시보드</title>
     <style>
         :root {
             --bg-primary: #0d1117;
@@ -3169,7 +3169,7 @@
         <div id="tab-overview" class="tab-content">
             <div class="card pilot-validation-card" style="margin-bottom: 20px;">
                 <div class="card-header">
-                    <h2>🧪 실전 전환 상태</h2>
+                    <h2>🧭 실제 주문 전 점검</h2>
                     <span id="validationGeneratedAt" style="color: var(--text-muted); font-size: 11px;">점검 리포트 로딩 중</span>
                 </div>
                 <div class="card-body" id="scalpingValidationPanel">
@@ -3180,12 +3180,12 @@
             <div class="card pilot-validation-card" style="margin-bottom: 20px;">
                 <div class="card-header">
                     <h2>🧭 모의투자 세션</h2>
-                    <span id="paperValidationUpdatedAt" style="color: var(--text-muted); font-size: 11px;">세션 없음</span>
+                    <span id="paperValidationUpdatedAt" style="color: var(--text-muted); font-size: 11px;">실행 기록 없음</span>
                 </div>
                 <div class="card-body" id="paperValidationPanel">
-                    <div class="empty-state">기존 모의 포트폴리오를 자동 초기화하지 않았습니다. 깨끗한 paper 세션을 시작할 때만 아래 버튼을 사용하세요.</div>
+                    <div class="empty-state">기존 모의 포트폴리오는 자동으로 초기화하지 않았습니다. 처음 금액으로 새로 시작할 때만 아래 버튼을 사용하세요.</div>
                     <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top: 12px;">
-                        <button class="btn btn-secondary btn-sm" onclick="startPaperValidationSession(false)">현재 상태 기준 세션 시작</button>
+                        <button class="btn btn-secondary btn-sm" onclick="startPaperValidationSession(false)">현재 자산으로 모의투자 시작</button>
                         <button class="btn btn-danger btn-sm" onclick="startPaperValidationSession(true)">새 시드로 초기화 후 시작</button>
                     </div>
                 </div>
@@ -3300,9 +3300,9 @@
             <section class="card ai-desk">
                 <div class="ai-hero">
                     <div>
-                        <div class="ai-kicker">AI 자문 / 상시 감시</div>
-                        <h2>판단이 필요한 순간만, 빠르게 자문</h2>
-                        <p>모니터링 이벤트를 고르고 GPT·Claude 구독 세션에 읽기 전용 자문을 요청합니다. 기존 설정값 기반 자동 매수·매도는 그대로 별도 실행됩니다.</p>
+                        <div class="ai-kicker">AI 자문 / 신호 감시</div>
+                        <h2>필요한 신호가 보이면 AI 의견을 확인하세요.</h2>
+                        <p>감시할 신호를 선택해 GPT·Claude 구독 계정으로 AI 의견을 요청합니다. AI 의견은 기록되며 자동 매수·매도와는 별도로 관리됩니다.</p>
                     </div>
                     <div class="ai-policy-stamp">참고용 의견<br>주문 연결 없음</div>
                 </div>
@@ -3318,20 +3318,20 @@
                         </div>
 
                         <div class="ai-section-title">
-                            <span>장기 모니터링 세션</span>
+                            <span>AI 감시 목록</span>
                             <small id="aiSessionCount">0개 실행 중</small>
                         </div>
                         <div id="aiSessionList" class="ai-session-list">
-                            <div class="ai-empty">아직 만든 모니터링 세션이 없습니다.</div>
+                            <div class="ai-empty">등록한 AI 감시가 없습니다.</div>
                         </div>
 
                         <div class="ai-section-title" style="margin-top: 20px;">
-                            <span>새 세션 열기</span>
-                            <small>상시 감시</small>
+                            <span>감시 설정 추가</span>
+                            <small>계속 감시</small>
                         </div>
                         <form class="ai-form" onsubmit="createAiMonitoringSession(event)">
                             <div class="form-group">
-                                <label class="form-label" for="aiSessionName">세션 이름</label>
+                                <label class="form-label" for="aiSessionName">감시 이름</label>
                                 <input id="aiSessionName" class="form-input" maxlength="80" placeholder="예: BTC 반등 감시" value="시장 이벤트 자문">
                             </div>
                             <div class="form-group">
@@ -3342,7 +3342,7 @@
                                 </div>
                             </div>
                             <div class="form-group">
-                                <label class="form-label">감시할 이벤트</label>
+                                <label class="form-label">감시할 신호</label>
                                 <div class="ai-check-grid">
                                     <label class="ai-check"><input type="checkbox" name="aiEventType" value="BUY_SIGNAL" checked> 매수 신호</label>
                                     <label class="ai-check"><input type="checkbox" name="aiEventType" value="SELL_SIGNAL" checked> 매도 신호</label>
@@ -3353,12 +3353,12 @@
                                 </div>
                             </div>
                             <div class="form-group">
-                                <label class="form-label" for="aiSessionCoins">코인 필터 <span style="color: var(--text-muted);">(선택, BTC 또는 KRW-BTC 형식)</span></label>
-                                <input id="aiSessionCoins" class="form-input" placeholder="전체 코인 감시">
+                                <label class="form-label" for="aiSessionCoins">감시 대상 코인 <span style="color: var(--text-muted);">(선택 · BTC 또는 KRW-BTC)</span></label>
+                                <input id="aiSessionCoins" class="form-input" placeholder="모든 코인 감시">
                             </div>
                             <div class="grid grid-2" style="gap: 10px; margin-bottom: 4px;">
                                 <div class="form-group" style="margin-bottom: 10px;">
-                                    <label class="form-label" for="aiCooldown">동일 이벤트 재자문 간격 (초)</label>
+                                    <label class="form-label" for="aiCooldown">같은 신호를 다시 자문할 간격 (초)</label>
                                     <input id="aiCooldown" class="form-input" type="number" min="30" max="86400" step="30" value="300">
                                 </div>
                                 <div class="form-group" style="margin-bottom: 10px;">
@@ -3366,23 +3366,23 @@
                                     <label class="ai-check" style="height: 42px;"><input id="aiAutoConsult" type="checkbox" checked> 이벤트 발생 시 즉시 요청</label>
                                 </div>
                             </div>
-                            <button class="btn btn-primary" type="submit" style="width: 100%;">장기 모니터링 시작</button>
-                            <div class="ai-inline-note">세션은 기록으로 재시작 후에도 보존됩니다. 자동 자문은 선택한 이벤트와 재요청 간격 안에서만 실행됩니다.</div>
+                            <button class="btn btn-primary" type="submit" style="width: 100%;">감시 시작</button>
+                            <div class="ai-inline-note">감시 설정은 다시 접속해도 저장됩니다. 자동 자문은 선택한 신호가 발생하고 재요청 간격이 지났을 때 실행됩니다.</div>
                         </form>
                     </div>
 
                     <div class="ai-desk-column">
                         <div class="ai-section-title">
-                            <span>실시간 이벤트</span>
+                            <span>최근 시장 신호</span>
                             <small id="aiLatestSnapshotAt">수신 대기</small>
                         </div>
                         <div id="aiEventList" class="ai-event-list">
-                            <div class="ai-empty">자동매매 루프가 분석을 완료하면 매수·매도 이벤트가 여기에 표시됩니다.</div>
+                            <div class="ai-empty">자동매매가 분석을 마치면 매수·매도 신호가 여기에 표시됩니다.</div>
                         </div>
-                        <div class="ai-inline-note">이벤트 카드를 누르면 선택한 AI에 수동으로 자문을 요청할 수 있습니다.</div>
+                        <div class="ai-inline-note">신호를 누르면 선택한 AI에 직접 의견을 요청할 수 있습니다.</div>
 
                         <div class="ai-section-title" style="margin-top: 22px;">
-                            <span>AI 자문 결과</span>
+                            <span>AI 의견</span>
                             <small id="aiConsultationCount">0 consultations</small>
                         </div>
                         <div id="aiConsultationList" class="ai-consultation-list">
@@ -4570,7 +4570,7 @@
             const emoji = isBuy ? '🟢' : '🔴';
             const action = isBuy ? '매수' : '매도';
             const coin = trade.coin?.replace('KRW-', '') || '';
-            const modeLabel = trade.mode === 'DRY_RUN' ? '[모의]' : '[실전]';
+            const modeLabel = trade.mode === 'DRY_RUN' ? '[모의]' : '[실거래]';
 
             // 토스트 메시지
             const message = `${emoji} ${modeLabel} ${coin} ${action} ${formatNumber(trade.amount || 0)}원`;
@@ -4914,13 +4914,13 @@
             const container = document.getElementById('aiProviderStatus');
             if (!container) return;
             if (!status?.providers?.length) {
-                container.innerHTML = '<div class="ai-empty" style="grid-column: 1 / -1;">provider 상태를 불러오지 못했습니다.</div>';
+                container.innerHTML = '<div class="ai-empty" style="grid-column: 1 / -1;">AI 서비스 상태를 불러오지 못했습니다.</div>';
                 return;
             }
 
             container.innerHTML = status.providers.map(provider => {
                 const stateClass = provider.ready ? 'ready' : provider.status === 'NOT_AUTHENTICATED' ? 'warn' : 'error';
-                const stateText = provider.ready ? 'READY' : provider.status === 'NOT_AUTHENTICATED' ? 'LOGIN NEEDED' : provider.status || 'UNAVAILABLE';
+                const stateText = provider.ready ? '사용 가능' : provider.status === 'NOT_AUTHENTICATED' ? '로그인 필요' : '사용할 수 없음';
                 return `
                     <div class="ai-provider-card">
                         <div class="ai-provider-head">
@@ -4928,7 +4928,7 @@
                             <span class="ai-provider-state ${stateClass}">${escapeHtml(stateText)}</span>
                         </div>
                         <div class="ai-provider-detail">${escapeHtml(provider.detail || provider.subscriptionLabel || '')}</div>
-                        <div style="color: var(--text-muted); font: 10px/1.3 'SFMono-Regular', Consolas, monospace;">${provider.ready ? 'subscription session' : 'check local CLI login'}</div>
+                        <div style="color: var(--text-muted); font: 10px/1.3 'SFMono-Regular', Consolas, monospace;">${provider.ready ? '구독 계정 사용' : '로컬 로그인 상태를 확인하세요'}</div>
                     </div>
                 `;
             }).join('');
@@ -4941,7 +4941,7 @@
             const activeCount = (sessions || []).filter(session => session.status === 'RUNNING').length;
             if (count) count.textContent = `실행 중 ${activeCount}개 / 전체 ${(sessions || []).length}개`;
             if (!sessions?.length) {
-                container.innerHTML = '<div class="ai-empty">아직 만든 모니터링 세션이 없습니다.</div>';
+                container.innerHTML = '<div class="ai-empty">등록한 AI 감시가 없습니다.</div>';
                 return;
             }
 
@@ -4974,7 +4974,7 @@
             const container = document.getElementById('aiEventList');
             if (!container) return;
             if (!events?.length) {
-                container.innerHTML = '<div class="ai-empty">자동매매 루프가 분석을 완료하면 매수·매도 이벤트가 여기에 표시됩니다.</div>';
+                container.innerHTML = '<div class="ai-empty">자동매매가 분석을 마치면 매수·매도 신호가 여기에 표시됩니다.</div>';
                 return;
             }
 
@@ -5020,7 +5020,7 @@
                     return `
                         <div class="ai-advice-grid">
                             <div class="ai-advice-action ${actionClass}">${escapeHtml(advice.action)}</div>
-                            <div class="ai-consultation-result"><strong>${escapeHtml(aiProviderLabel(result.provider))}</strong> · ${escapeHtml(advice.horizon || '')}<br>${escapeHtml(advice.rationale || '')}${risks ? `<ul class="ai-risk-list">${risks}</ul>` : ''}<div class="ai-consultation-meta">재검토 조건: ${escapeHtml(advice.invalidation || '추가 확인 필요')}</div></div>
+                            <div class="ai-consultation-result"><strong>${escapeHtml(aiProviderLabel(result.provider))}</strong> · ${escapeHtml(advice.horizon || '')}<br>${escapeHtml(advice.rationale || '')}${risks ? `<ul class="ai-risk-list">${risks}</ul>` : ''}<div class="ai-consultation-meta">다시 확인할 조건: ${escapeHtml(advice.invalidation || '추가 확인 필요')}</div></div>
                         </div>
                     `;
                 }).join('');
@@ -5069,7 +5069,7 @@
             const providers = [...document.querySelectorAll('input[name="aiProvider"]:checked')].map(input => input.value);
             const eventTypes = [...document.querySelectorAll('input[name="aiEventType"]:checked')].map(input => input.value);
             if (!providers.length || !eventTypes.length) {
-                showToast('provider와 감시 이벤트를 하나 이상 선택해주세요', 'warning');
+                showToast('AI 서비스와 감시할 신호를 하나 이상 선택하세요.', 'warning');
                 return;
             }
             const result = await fetchAPI('/ai/sessions', {
@@ -5085,20 +5085,20 @@
                 })
             });
             if (!result?.success) {
-                showToast('AI session 시작 실패: ' + (result?.error || '서버 오류'), 'error');
+                showToast('AI 감시 시작 실패: ' + (result?.error || '서버 오류'), 'error');
                 return;
             }
-            showToast('장기 AI 모니터링 세션을 시작했습니다', 'success');
+            showToast('AI 신호 감시를 시작했습니다.', 'success');
             await loadAiDesk(false);
         }
 
         async function updateAiSession(sessionId, action) {
             const result = await fetchAPI(`/ai/sessions/${sessionId}/${action}`, { method: 'POST' });
             if (!result?.success) {
-                showToast('session 상태 변경 실패: ' + (result?.error || '서버 오류'), 'error');
+                showToast('감시 상태 변경 실패: ' + (result?.error || '서버 오류'), 'error');
                 return;
             }
-            showToast(action === 'stop' ? 'AI 모니터링 세션을 종료했습니다' : `session을 ${action === 'pause' ? '일시정지' : '재개'}했습니다`, 'success');
+            showToast(action === 'stop' ? 'AI 신호 감시를 종료했습니다.' : `감시를 ${action === 'pause' ? '일시정지' : '다시 시작'}했습니다`, 'success');
             await loadAiDesk(false);
         }
 
@@ -5121,7 +5121,7 @@
                 consultationStatus === 'COMPLETED'
                     ? 'AI 자문 결과를 받았습니다'
                     : consultationStatus === 'DEGRADED'
-                        ? 'provider 미연결 · 사실 기반 WAIT 브리프를 저장했습니다'
+                        ? 'AI 응답이 없어 확인된 정보만 요약했습니다.'
                         : 'AI 자문이 완료되지 않았습니다',
                 consultationStatus === 'COMPLETED' ? 'success' : 'warning'
             );
@@ -5165,7 +5165,7 @@
             const results = report.results || [];
             const validationCount = results.filter(result => result.validation?.validation).length;
             const stateClass = report.promoted ? 'pass' : '';
-            const stateText = report.promoted ? '전체 시장 전환 가능' : '전체 전환 보류';
+            const stateText = report.promoted ? '전체 시장 전환 가능' : '전체 실거래 적용 보류';
             const generated = report.generatedAt ? new Date(report.generatedAt).toLocaleString('ko-KR') : '-';
             const validationMode = report.validationMode === 'fixed_config'
                 ? '현재 설정 기준 점검'
@@ -5215,8 +5215,8 @@
                         <div class="pilot-validation-market-head"><span>${result.market}</span><span>${passed ? '통과' : '보류'}</span></div>
                         <div class="pilot-validation-market-detail">
                             점검 수익률 ${formatPercent(metrics.totalReturnPercent)}% · 거래 ${metrics.tradeCount}회<br>
-                            승률 ${formatPercent(metrics.winRate)}% · PF ${pf} · MDD ${formatPercent(metrics.maxDrawdownPercent)}%<br>
-                            학습 수익률 ${formatPercent(training?.totalReturnPercent)}% · 학습 거래 ${training?.tradeCount || 0}회 · 학습 PF ${trainingPf}<br>
+                            승률 ${formatPercent(metrics.winRate)}% · 이익/손실 비율 ${pf} · 최대 낙폭 ${formatPercent(metrics.maxDrawdownPercent)}%<br>
+                            학습 수익률 ${formatPercent(training?.totalReturnPercent)}% · 학습 거래 ${training?.tradeCount || 0}회 · 학습 이익/손실 비율 ${trainingPf}<br>
                             주요 거절: ${rejectionSummary}<br>
                             판정 사유 ${gateReason}${qualityNote}
                         </div>
@@ -5228,9 +5228,9 @@
                 <div class="pilot-validation-summary">
                     <div class="pilot-validation-lead">
                         <div class="pilot-validation-state ${stateClass}">${stateText}</div>
-                        <div class="pilot-validation-meta">실전 주문은 이 리포트의 PASS 여부와 별개로 DRY_RUN에서 먼저 확인해야 합니다.</div>
+                        <div class="pilot-validation-meta">실제 주문을 검토하기 전에 모의투자에서 전략을 먼저 확인하세요. 이 점검 결과만으로 실제 주문 가능 여부가 정해지지는 않습니다.</div>
                     </div>
-                    <div class="pilot-validation-stat"><div class="pilot-validation-stat-value">${promotedMarkets.length}/${results.length}</div><div class="pilot-validation-stat-label">전환 가능 시장</div></div>
+                    <div class="pilot-validation-stat"><div class="pilot-validation-stat-value">${promotedMarkets.length}/${results.length}</div><div class="pilot-validation-stat-label">실거래 적용 검토 시장</div></div>
                     <div class="pilot-validation-stat"><div class="pilot-validation-stat-value">${validationCount}</div><div class="pilot-validation-stat-label">점검 완료</div></div>
                     <div class="pilot-validation-stat"><div class="pilot-validation-stat-value">${report.candleUnit || 1}분</div><div class="pilot-validation-stat-label">캔들 단위</div></div>
                 </div>
@@ -5249,11 +5249,11 @@
             if (!panel) return;
 
             if (!status?.available) {
-                if (updatedAt) updatedAt.textContent = '세션 없음';
+                if (updatedAt) updatedAt.textContent = '실행 기록 없음';
                 panel.innerHTML = `
-                    <div class="empty-state">모의투자 관찰 세션이 없습니다. 기존 모의 자산은 자동 초기화하지 않았습니다.</div>
+                    <div class="empty-state">진행 중인 모의투자가 없습니다. 기존 모의 자산은 자동으로 초기화하지 않았습니다.</div>
                     <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top: 12px;">
-                        <button class="btn btn-secondary btn-sm" onclick="startPaperValidationSession(false)">현재 상태 기준 세션 시작</button>
+                        <button class="btn btn-secondary btn-sm" onclick="startPaperValidationSession(false)">현재 자산으로 모의투자 시작</button>
                         <button class="btn btn-danger btn-sm" onclick="startPaperValidationSession(true)">새 시드로 초기화 후 시작</button>
                     </div>
                 `;
@@ -5380,23 +5380,23 @@
                 ? `<div style="margin-top:6px; color:var(--accent-yellow);">⚠️ 진입 조건 장기 미충족: ${status.suggestedAdjustments?.join(' · ') || '별도 점검이 필요합니다'}</div>`
                 : '';
             const continuityHtml = status.continuityEligible === false
-                ? `<div style="margin-top:6px; color:var(--accent-red);">⚠️ 연속 관찰 조건 보류: ${formatPercent(status.maxInterruptionMinutes || 0)}분 공백 기록</div>`
+                ? `<div style="margin-top:6px; color:var(--accent-red);">⚠️ 기록 연속성 확인 필요: ${formatPercent(status.maxInterruptionMinutes || 0)}분 공백 기록</div>`
                 : '';
             const orphanHtml = status.orphaned
-                ? `<div class="pilot-paper-orphan-alert">⚠️ 연결이 끊긴 세션: ${status.orphanReason === 'heartbeat_stale' ? '응답이 오래되어' : '실행 프로세스가 사라져'} 자동 재개와 기록 재사용을 차단했습니다. 미청산 ${Number(status.strictEvaluation?.activePositions) || 0}개 · 비교 장부 미청산 ${Array.isArray(status.diagnosticOpenPositions) ? status.diagnosticOpenPositions.length : 0}개 · 마지막 응답 ${status.heartbeatAt ? escapeHtml(new Date(status.heartbeatAt).toLocaleString('ko-KR')) : '확인 불가'}${status.terminalError ? ` · 실행 오류 ${escapeHtml(status.terminalError.source || 'unknown')}: ${escapeHtml(status.terminalError.message || '상세 없음')}` : ''}</div>`
+                ? `<div class="pilot-paper-orphan-alert">⚠️ 연결이 끊긴 모의투자 실행: ${status.orphanReason === 'heartbeat_stale' ? '응답이 오래되어' : '실행이 중단되어'} 자동 재개와 기록 재사용을 막았습니다. 미청산 ${Number(status.strictEvaluation?.activePositions) || 0}개 · 비교 기록 미정리 ${Array.isArray(status.diagnosticOpenPositions) ? status.diagnosticOpenPositions.length : 0}개 · 마지막 응답 ${status.heartbeatAt ? escapeHtml(new Date(status.heartbeatAt).toLocaleString('ko-KR')) : '확인 불가'}${status.terminalError ? ` · 실행 오류 ${escapeHtml(status.terminalError.source || 'unknown')}: ${escapeHtml(status.terminalError.message || '상세 없음')}` : ''}</div>`
                 : '';
             const storage = status.storage || {};
             const storageHtml = storage.available && storage.healthy === false
                 ? `<div style="margin-top:6px; color:var(--accent-red);">⚠️ 저장공간 부족: ${formatPercent(storage.availableMiB || 0)}MiB 남음 · 최소 ${formatPercent(storage.minimumMiB || 128)}MiB 필요</div>`
                 : '';
             const configHtml = status.configSnapshotComplete !== true
-                ? '<div style="margin-top:6px; color:var(--accent-red);">⚠️ 전략 설정 기록이 없어 세션을 재확인할 수 없습니다. 전환 보류</div>'
+                ? '<div style="margin-top:6px; color:var(--accent-red);">⚠️ 전략 설정 기록이 없어 세션을 재확인할 수 없습니다. 실거래 적용 보류</div>'
                     : (status.configValueDrift || []).length > 0
-                        ? `<div style="margin-top:6px; color:var(--accent-red);">⚠️ 전략 설정값 변경 감지: ${(status.configDrift || []).join(', ') || '확인 필요'} · 전환 보류</div>`
+                        ? `<div style="margin-top:6px; color:var(--accent-red);">⚠️ 전략 설정값 변경 감지: ${(status.configDrift || []).join(', ') || '확인 필요'} · 실거래 적용 보류</div>`
                         : (status.configSchemaDrift || []).length > 0
-                            ? `<div style="margin-top:6px; color:var(--accent-yellow);">ℹ️ 전략 설정 항목 차이: ${(status.configSchemaDrift || []).join(', ')} · 실제 값 변경은 확인되지 않음 · 자동 재개·전환 보류</div>`
+                            ? `<div style="margin-top:6px; color:var(--accent-yellow);">ℹ️ 전략 설정 항목 차이: ${(status.configSchemaDrift || []).join(', ')} · 실제 값 변경은 확인되지 않음 · 자동 재개·실거래 적용 보류</div>`
                             : status.configConsistent === false
-                                ? `<div style="margin-top:6px; color:var(--accent-red);">⚠️ 전략 설정 변경 감지: ${(status.configDrift || []).join(', ') || '확인 필요'} · 전환 보류</div>`
+                                ? `<div style="margin-top:6px; color:var(--accent-red);">⚠️ 전략 설정 변경 감지: ${(status.configDrift || []).join(', ') || '확인 필요'} · 실거래 적용 보류</div>`
                                 : '';
             const circuitHtml = lossCircuitBreaker.enabled && lossCircuitBreaker.coolingDown
                 ? `<div style="margin-top:6px; color:var(--accent-red);">🛑 전역 손실 회로차단기 발동: ${lossCircuitBreaker.lossCount || 0}/${lossCircuitBreaker.maxLosses || 0}회 · ${Math.ceil((lossCircuitBreaker.cooldownRemainingMs || 0) / 60000)}분 후 신규 진입 재개 예정</div>`
@@ -5414,8 +5414,8 @@
                         <div class="pilot-paper-state ${stateClass}">${stateText}</div>
                         <div class="pilot-paper-meta">
                             경과 ${formatPercent(status.elapsedDays)}일 · 자산 ${formatNumber(status.currentAssets)}원 · 수익률 ${formatChange(status.returnPercent)}<br>
-                            청산 거래 ${status.closedTradeCount || 0}회 · 실현손익 ${formatProfit(status.realizedProfit)} · MDD ${formatPercent(status.maxDrawdownPercent)}%<br>
-                            현재 포지션 ${strictEvaluation.activePositions || 0}개 · ${strictEvaluation.positions?.map(position => `${position.coin} @ ${formatNumber(position.entryPrice)}원${position.entryDelayMs !== null && position.entryDelayMs !== undefined ? ` · 지연 ${formatNumber(position.entryDelayMs)}ms` : ''}${position.executionDriftPercent !== null && position.executionDriftPercent !== undefined ? ` · 체결 편차 ${formatChange(position.executionDriftPercent)}` : ''}${position.maxFavorableExcursionPercent !== null && position.maxFavorableExcursionPercent !== undefined ? ` · MFE ${formatChange(position.maxFavorableExcursionPercent)} · MAE ${formatChange(position.maxAdverseExcursionPercent)}` : ''}${position.breakEvenArmed ? ' · 손익분기 보호' : ''}${position.trailingArmed ? ' · 추적 손절' : ''}`).join(', ') || '없음'}<br>
+                            청산 거래 ${status.closedTradeCount || 0}회 · 실현 손익 ${formatProfit(status.realizedProfit)} · 최대 낙폭 ${formatPercent(status.maxDrawdownPercent)}%<br>
+                            현재 포지션 ${strictEvaluation.activePositions || 0}개 · ${strictEvaluation.positions?.map(position => `${position.coin} @ ${formatNumber(position.entryPrice)}원${position.entryDelayMs !== null && position.entryDelayMs !== undefined ? ` · 주문 확인 대기 ${formatNumber(position.entryDelayMs)}밀리초` : ''}${position.executionDriftPercent !== null && position.executionDriftPercent !== undefined ? ` · 체결 편차 ${formatChange(position.executionDriftPercent)}` : ''}${position.maxFavorableExcursionPercent !== null && position.maxFavorableExcursionPercent !== undefined ? ` · 보유 후 최고 수익률 ${formatChange(position.maxFavorableExcursionPercent)} · 보유 후 최대 하락률 ${formatChange(position.maxAdverseExcursionPercent)}` : ''}${position.breakEvenArmed ? ' · 손익분기 보호' : ''}${position.trailingArmed ? ' · 추적 손절' : ''}`).join(', ') || '없음'}<br>
                             전역 손실 차단: ${lossCircuitBreaker.enabled ? `${lossCircuitBreaker.lossCount || 0}/${lossCircuitBreaker.maxLosses || 0}회 · ${lossCircuitBreaker.windowMinutes || 0}분 창 · ${lossCircuitBreaker.cooldownMinutes || 0}분 차단` : '비활성화'} · 차단된 진입 ${telemetry.circuitBlockedEntries || 0}회<br>
                             동일 신호창 진입 상한: ${signalWindow.enabled ? `${signalWindow.maxEntriesPerSignalWindow}개 · 마지막 ${signalWindow.lastEntryCount || 0}개 기록 · 차단 ${signalWindow.blockedEntries || 0}회` : '비활성화'}<br>
                             시장 방향성 필터: ${marketRegimeEnabled ? `활성화 · 기준 ${status.configSnapshot?.marketRegimeMinBreadth ?? 0.5} · ${status.configSnapshot?.marketRegimeLookback ?? 5}봉 · 진입 차단 ${telemetry.marketRegimeBlockedEntries || 0}회 · 비교 차단 ${telemetry.shadowMarketRegimeBlockedEntries || 0}회 · 현재 ${lastMarketRegime ? `${lastMarketRegime.confirmed ? '통과' : '차단'} (${formatPercent(lastMarketRegime.breadth || 0)})` : '계산 전'}` : '비활성화'}<br>
@@ -5426,8 +5426,8 @@
                             캔들 데이터 부족: 최소 ${candleDataQuality.minimumCandleCount || 0}개 · 주요 시장 ${insufficientCandleText}<br>
                             분석 주기 ${telemetry.cycles || 0}회 · 매수 신호 ${telemetry.buyCandidates || 0}회 · 비교 후보 ${telemetry.shadowCandidates || 0}회 · 관망 ${telemetry.holdDecisions || 0}회<br>
                             신호 상태: ${signalSummary}<br>
-                            비교 장부 A ${shadowEvaluation.closedTradeCount || 0}회 청산 · 참고손익 ${formatProfit(shadowEvaluation.realizedProfit || 0)} · 참고 PF ${Number.isFinite(shadowEvaluation.profitFactor) ? Number(shadowEvaluation.profitFactor).toFixed(2) : '∞'}<br>
-                            비교 장부 B ${looseShadowEvaluation.closedTradeCount || 0}회 청산 · 참고손익 ${formatProfit(looseShadowEvaluation.realizedProfit || 0)} · 참고 PF ${Number.isFinite(looseShadowEvaluation.profitFactor) ? Number(looseShadowEvaluation.profitFactor).toFixed(2) : '∞'}<br>
+                            비교 기록 1: ${shadowEvaluation.closedTradeCount || 0}건 청산 · 손익 ${formatProfit(shadowEvaluation.realizedProfit || 0)} · 이익/손실 비율 ${Number.isFinite(shadowEvaluation.profitFactor) ? Number(shadowEvaluation.profitFactor).toFixed(2) : '∞'}<br>
+                            비교 기록 2: ${looseShadowEvaluation.closedTradeCount || 0}건 청산 · 손익 ${formatProfit(looseShadowEvaluation.realizedProfit || 0)} · 이익/손실 비율 ${Number.isFinite(looseShadowEvaluation.profitFactor) ? Number(looseShadowEvaluation.profitFactor).toFixed(2) : '∞'}<br>
                             진입 경계 차단${executionBoundaryText}<br>
                             현재 주요 병목: ${topReason}<br>
                             필터별 병목: ${topRejection}<br>
@@ -5457,8 +5457,8 @@
 
         async function startPaperValidationSession(reset = false) {
             const message = reset
-                ? '새 시드로 가상 포트폴리오를 초기화하고 별도의 모의투자 관찰 세션을 시작합니다. 기존 모의 자산 데이터가 이 작업으로 덮어써집니다. 계속할까요?'
-                : '현재 가상 포트폴리오 상태를 기준으로 모의투자 관찰 세션을 시작합니다. 기존 포지션은 초기화하지 않습니다. 계속할까요?';
+                ? '새 시드로 가상 포트폴리오를 초기화하고 별도의 모의투자 실행을 시작합니다. 기존 모의 자산 데이터가 이 작업으로 덮어써집니다. 계속할까요?'
+                : '현재 가상 포트폴리오 상태를 기준으로 모의투자 실행을 시작합니다. 기존 포지션은 초기화하지 않습니다. 계속할까요?';
             if (!confirm(message)) return;
             const result = await fetchAPI('/paper-validation/start', {
                 method: 'POST',
@@ -5467,18 +5467,18 @@
             });
             if (result?.success) {
                 renderPaperValidation(result.status);
-                showToast('모의투자 관찰 세션을 시작했습니다', 'success');
+                showToast('모의투자 실행을 시작했습니다', 'success');
             } else {
                 showToast(result?.error || '모의투자 세션 시작 실패', 'error');
             }
         }
 
         async function stopPaperValidationSession() {
-            if (!confirm('현재 모의투자 관찰 세션을 중지할까요? 포트폴리오 자체는 유지됩니다.')) return;
+            if (!confirm('현재 모의투자 실행을 중지할까요? 포트폴리오 자체는 유지됩니다.')) return;
             const result = await fetchAPI('/paper-validation/stop', { method: 'POST' });
             if (result?.success) {
                 renderPaperValidation(result.status);
-                showToast('모의투자 관찰 세션을 중지했습니다', 'info');
+                showToast('모의투자 실행을 중지했습니다', 'info');
             } else {
                 showToast(result?.error || '모의투자 세션 중지 실패', 'error');
             }
@@ -6119,7 +6119,7 @@
 
             const modeBadge = status.mode === 'DRY_RUN'
                 ? '<span class="badge badge-dry">모의투자</span>'
-                : '<span class="badge badge-live">실전투자</span>';
+                : '<span class="badge badge-live">실거래</span>';
 
             const coinCount = Array.isArray(status.targetCoins) ? status.targetCoins.length : 0;
 
@@ -10281,6 +10281,6 @@
             }
         });
     </script>
-    <script src="/pilot-redesign.js?v=observer-readonly-95"></script>
+    <script src="/pilot-redesign.js?v=observer-readonly-123"></script>
 </body>
 </html>

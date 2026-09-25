@@ -1,0 +1,136 @@
+- generic [active] [ref=e1]:
+  - text: / AUTO PILOT
+  - generic [ref=e3]:
+    - complementary [ref=e4]:
+      - generic [ref=e6]:
+        - generic [aria-hidden] [ref=e8]: 
+        - generic [ref=e9]: CoinPilot
+      - navigation "주 메뉴" [ref=e10]:
+        - generic [ref=e11]: 메뉴
+        - button "대시보드" [ref=e12] [cursor=pointer]:
+          - generic [aria-hidden] [ref=e13]: 
+        - button "거래" [ref=e15] [cursor=pointer]:
+          - generic [aria-hidden] [ref=e16]: 
+        - button "포트폴리오" [ref=e18] [cursor=pointer]:
+          - generic [aria-hidden] [ref=e19]: 
+        - button "시장 현황" [ref=e21] [cursor=pointer]:
+          - generic [aria-hidden] [ref=e22]: 
+        - button "전략 분석" [ref=e24] [cursor=pointer]:
+          - generic [aria-hidden] [ref=e25]: 
+        - button "AI 자문" [ref=e27] [cursor=pointer]:
+          - generic [aria-hidden] [ref=e28]: 
+        - button "뉴스" [ref=e30] [cursor=pointer]:
+          - generic [aria-hidden] [ref=e31]: 
+        - generic [ref=e33]: 관리
+        - button "설정" [ref=e34] [cursor=pointer]:
+          - generic [aria-hidden] [ref=e35]: 
+        - button "주문 전 점검" [ref=e37] [cursor=pointer]:
+          - generic [aria-hidden] [ref=e38]: 
+      - button "환경 설정" [ref=e41] [cursor=pointer]:
+        - generic [aria-hidden] [ref=e42]: 
+    - generic [ref=e44]:
+      - banner [ref=e45]:
+        - group "투자 모드" [ref=e46]:
+          - button "모의투자" [pressed] [ref=e47] [cursor=pointer]:
+            - generic [aria-hidden] [ref=e48]: 
+          - button "실거래" [ref=e50] [cursor=pointer]:
+            - generic [aria-hidden] [ref=e51]: 
+        - generic [ref=e53]:
+          - strong [ref=e54]: 연결 확인 중
+          - generic [ref=e55]: 서버 모드와 계좌, 선택한 시장의 시세를 확인할 때까지 주문할 수 없습니다.
+        - generic [ref=e56]:
+          - generic [ref=e57]: 연결 확인 중
+          - generic [ref=e60]: 09. 24. 오후 07:21
+          - generic [ref=e61]:
+            - generic [ref=e62]: OP
+            - text: 운영자
+      - generic [ref=e63]:
+        - generic [ref=e64]:
+          - generic [aria-hidden] [ref=e65]: 
+          - generic [ref=e66]:
+            - strong [ref=e67]: 연결 확인 중 · 주문 잠금
+            - generic [ref=e68]: 서버 모드와 계좌, 선택한 시장의 시세를 확인할 때까지 주문할 수 없습니다.
+        - generic [ref=e69]:
+          - generic [ref=e70]: 설치 메뉴에서 추가
+          - button "설치 방법" [ref=e71] [cursor=pointer]
+          - button "주문 전 점검 보기" [ref=e72] [cursor=pointer]:
+            - text: 주문 전 점검 보기
+            - generic [aria-hidden] [ref=e73]: 
+      - text:  
+      - main [ref=e74]:
+        - text:                                
+        - generic [ref=e75]:
+          - generic [ref=e76]:
+            - heading "실제 주문 전 점검" [level=1] [ref=e78]
+            - button "새로고침" [ref=e80] [cursor=pointer]:
+              - generic [aria-hidden] [ref=e81]: 
+              - text: 새로고침
+          - generic [ref=e82]:
+            - generic [ref=e83]:
+              - generic [ref=e84]:
+                - heading "전략 점검" [level=2] [ref=e85]
+                - paragraph [ref=e86]: 점검 작성 시각 확인 불가
+              - generic [ref=e87]: 확인 필요
+            - generic [ref=e89]:
+              - generic [ref=e90]:
+                - generic [aria-hidden] [ref=e91]: "?"
+                - generic [ref=e92]: 실제 주문 가능 여부를 확인할 수 없습니다.
+              - list [ref=e94]:
+                - listitem [ref=e95]: 점검 결과를 불러오지 못했습니다.
+              - group [ref=e96]:
+                - generic "점검 결과와 실제 주문 조건 작성 시점과 적용 여부" [ref=e97] [cursor=pointer]:
+                  - generic [ref=e98]: 점검 결과와 실제 주문 조건
+                  - generic [ref=e99]: 작성 시점과 적용 여부
+          - generic [ref=e101]:
+            - generic [ref=e102]:
+              - generic [ref=e103]:
+                - heading "호가와 거래 비용" [level=2] [ref=e104]
+                - paragraph [ref=e105]: 호가 자료를 확인할 수 없음
+              - generic [ref=e106]: 확인 필요
+            - generic [ref=e107]: 읽을 수 있는 호가 자료가 없습니다. 자료가 없거나 오래된 경우 정상으로 처리하지 않습니다.
+          - generic [ref=e110]:
+            - generic [ref=e111]:
+              - generic [ref=e112]:
+                - heading "모의투자 실행" [level=2] [ref=e113]
+                - paragraph [ref=e114]: 상태를 확인할 수 없습니다.
+              - generic [ref=e115]:
+                - button "모의투자 시작" [disabled] [ref=e116]
+                - button "모의투자 중지" [disabled] [ref=e117]
+            - generic [ref=e119]:
+              - strong [ref=e121]: 모의투자 상태 확인 필요
+              - generic [ref=e122]: 모의투자 상태를 불러오지 못해 시작하거나 초기화할 수 없습니다.
+      - contentinfo [ref=e123]:
+        - strong [ref=e125]: CoinPilot
+  - generic:
+    - generic: 코인명
+    - generic:
+      - generic: 평가금액
+      - generic: 0원
+    - generic:
+      - generic: 비중
+      - generic: 0%
+  - generic:
+    - generic: 2025-01-01 12:00:00
+    - generic:
+      - generic: 총 자산
+      - generic: 0원
+    - generic:
+      - generic: 시작대비
+      - generic: 0%
+  - generic:
+    - generic: 2025-01-01 12:00:00
+    - generic:
+      - generic: 시가
+      - generic: 0원
+    - generic:
+      - generic: 고가
+      - generic: 0원
+    - generic:
+      - generic: 저가
+      - generic: 0원
+    - generic:
+      - generic: 종가
+      - generic: 0원
+    - generic:
+      - generic: 변동률
+      - generic: 0%

@@ -10,11 +10,13 @@ import {
   calculateMomentumShadowRealizedProfit,
   calculateMomentumShadowRealizedReturnPercent,
   calculateMomentumShadowTradeConfidence,
+  summarizeMomentumShadowProfitConcentration,
   summarizeMomentumShadowTradesByMarket,
   calculateMomentumShadowObservationDays,
   DEFAULT_MOMENTUM_SHADOW_MIN_RESEARCH_DAYS
 } from '../research/momentumShadowProfitability.js';
 import { summarizeMomentumShadowQuoteExecutionEvidence } from '../research/momentumShadowQuoteQuality.js';
+import { DEFAULT_QUOTE_EXECUTION_COST_MODEL } from '../research/quoteExecutionCostCompatibility.js';
 import { resolveMomentumShadowExecutionModel } from '../research/momentumShadowExecutionModel.js';
 
 /**
@@ -46,6 +48,72 @@ function ownerAlive(pid) {
   if (!Number.isInteger(value) || value <= 0) return null;
   if (value === process.pid) return true;
   try { process.kill(value, 0); return true; } catch { return false; }
+}
+
+function formatObservedDrawdownStatus(ledger) {
+  const sampleCount = Math.max(0, Number(ledger.observedMddSampleCount) || 0);
+  const rawMaximum = ledger.observedMddMaxDrawdownPercent;
+  const maximum = rawMaximum === null || rawMaximum === undefined || rawMaximum === ''
+    ? null
+    : Number(rawMaximum);
+  const available = sampleCount >= 2 && Number.isFinite(maximum);
+  const fullSession = ledger.observedMddFullSessionCoverage === true;
+  const coverage = fullSession
+    ? available ? 'full-session' : 'collecting'
+    : sampleCount > 0 ? 'partial' : 'not recorded';
+  const rawInterval = ledger.observedMddSamplingIntervalMs;
+  const intervalMs = rawInterval === null || rawInterval === undefined || rawInterval === ''
+    ? null
+    : Number(rawInterval);
+  const interval = Number.isFinite(intervalMs) && intervalMs > 0
+    ? `${Math.round(intervalMs / 1000)}s`
+    : 'unknown';
+  const reasons = Array.isArray(ledger.observedMddCoverageReasons)
+    ? ledger.observedMddCoverageReasons.filter(reason => typeof reason === 'string' && reason.length > 0)
+    : [];
+  const details = [
+    `observed MDD ${available ? `${maximum.toFixed(2)}%` : '미기록'}`,
+    `${sampleCount} marks`,
+    coverage,
+    `interval ${interval}`
+  ];
+  if (reasons.length > 0) details.push(`coverage blockers ${reasons.join(',')}`);
+  return details.join(' | ');
+}
+
+function formatProfitConcentrationStatus(ledger) {
+  const concentration = summarizeMomentumShadowProfitConcentration(ledger);
+  if (!concentration.available) {
+    return 'positive PnL concentration unavailable (no positive closes) | research-only';
+  }
+  const percent = value => Number.isFinite(Number(value))
+    ? `${Number(value).toFixed(2)}%`
+    : 'unavailable';
+  const lowerBound = percent(concentration.confidenceWithoutTopWinner?.lowerBoundPercent);
+  const sampleCount = Math.max(0, Number(concentration.confidenceWithoutTopWinner?.sampleCount) || 0);
+  return `positive PnL concentration top1 ${percent(concentration.topWinnerShareOfPositivePnlPercent)}, ` +
+    `top2 ${percent(concentration.topTwoWinnersShareOfPositivePnlPercent)} | ` +
+    `excluding top winner 95% lower bound ${lowerBound} (${sampleCount} trades) | research-only, not promotion evidence`;
+}
+
+function formatModeledCostStatus(ledger) {
+  const rawCost = ledger?.config?.costPercent;
+  const configuredCost = rawCost === null || rawCost === undefined || rawCost === ''
+    ? null
+    : Number(rawCost);
+  const costFloor = DEFAULT_QUOTE_EXECUTION_COST_MODEL.assumedRoundTripCostPercent;
+  if (!Number.isFinite(configuredCost) || configuredCost < 0) {
+    return `modeled round-trip cost unknown | floor ${costFloor.toFixed(2)}%`;
+  }
+  const state = configuredCost + 1e-9 >= costFloor ? 'meets floor' : 'UNDER FLOOR';
+  return `modeled round-trip cost ${configuredCost.toFixed(2)}% | floor ${costFloor.toFixed(2)}% | ${state}`;
+}
+
+function formatCostFloorGuardStatus(ledger) {
+  const guardState = Number(ledger.costFloorGuardVersion) === 1 ? 'active' : 'not confirmed';
+  const blockedEntries = Math.max(0, Number(ledger.costFloorBlockedEntries) || 0);
+  const blockedPendingEntries = Math.max(0, Number(ledger.costFloorBlockedPendingEntries) || 0);
+  return `entry cost-floor guard ${guardState} | blocked new entries ${blockedEntries} | voided pending entries ${blockedPendingEntries}`;
 }
 
 for (const dir of dirs) {
@@ -151,6 +219,10 @@ for (const dir of dirs) {
     ? 'unavailable'
     : `${confidenceLowerBoundValue >= 0 ? '+' : ''}${confidenceLowerBoundValue.toFixed(2)}%`;
   console.log(`closed trades: ${(l.trades || []).length} | realized ${Math.round(realized).toLocaleString()} KRW (${realizedReturn}) | trade-return 95% lower ${confidenceLowerBound} | valid returns ${confidence.sampleCount}/${(l.trades || []).length}`);
+  console.log(formatModeledCostStatus(l));
+  console.log(formatCostFloorGuardStatus(l));
+  console.log(formatProfitConcentrationStatus(l));
+  console.log(formatObservedDrawdownStatus(l));
   const marketAttribution = Object.entries(realizedByMarket)
     .filter(([, row]) => row.validReturnCount > 0)
     .map(([market, row]) => {

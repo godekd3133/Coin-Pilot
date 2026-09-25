@@ -19,6 +19,8 @@ export default [
       'docs/',
       '.paper-*/',
       '.staging-runtime/',
+      'mobile/www/',
+      'mobile/ios/App/App/public/',
       'coverage/',
     ],
   },
@@ -37,6 +39,28 @@ export default [
   },
   {
     files: ['public/**/*.js'],
+    languageOptions: {
+      ecmaVersion: 'latest',
+      sourceType: 'script',
+      globals: { ...globals.browser },
+    },
+    rules: {
+      'no-unused-vars': noUnusedVars,
+    },
+  },
+  {
+    files: ['mobile/scripts/**/*.mjs'],
+    languageOptions: {
+      ecmaVersion: 'latest',
+      sourceType: 'module',
+      globals: { ...globals.node },
+    },
+    rules: {
+      'no-unused-vars': noUnusedVars,
+    },
+  },
+  {
+    files: ['mobile/web/**/*.js'],
     languageOptions: {
       ecmaVersion: 'latest',
       sourceType: 'script',

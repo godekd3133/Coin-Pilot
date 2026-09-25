@@ -22,6 +22,7 @@ import {
   recordRiskMonitorIdle,
   recordRiskMonitorStale,
   recordRiskMonitorSuccess,
+  recordRiskMonitorWatchdogTick,
   resolveMaxRiskDataGapSeconds
 } from '../risk/riskMonitor.js';
 import {
@@ -3927,6 +3928,7 @@ class MultiCoinTrader {
         activePositions: strictOpenPositions.length,
         positions: strictOpenPositions,
         closedTradeCount: startedTrades.length,
+        signalWindowCoverage: exitEvidence.strict.signalWindowCoverage,
         realizedProfit,
         winningTrades: strictWinningTrades,
         losingTrades: strictLosingTrades,
@@ -4582,7 +4584,13 @@ class MultiCoinTrader {
   startPositionRiskMonitor() {
     if (this.positionRiskTimer || this.positionRiskCheckIntervalMs <= 0) return;
     this.positionRiskTimer = setInterval(() => {
-      this.enforceRiskMonitorFreshness();
+      const now = Date.now();
+      if (this.riskMonitorState.monitoringActive === true) {
+        this.riskMonitorState = recordRiskMonitorWatchdogTick(this.riskMonitorState, now);
+        this.syncRiskMonitorState();
+        this.persistRiskMonitorStateIfDue(now);
+      }
+      this.enforceRiskMonitorFreshness(now);
       if (!this.isRunning) return;
       this.monitorOpenPositions().catch(error => {
         console.error(`\n❌ 포지션 리스크 모니터 오류: ${error.message}`);

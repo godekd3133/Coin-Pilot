@@ -20,6 +20,7 @@ function baseExpected() {
     minUpBars: 2,
     positionFraction: 0.125,
     maxPositions: 2,
+    costPercent: 0.3,
     benchmarkMarket: 'KRW-BTC',
     benchmarkTrendMinPercent: 2,
     exitOnBenchmarkOff: true,
@@ -72,13 +73,15 @@ test('candidate preflight blocks while another momentum-shadow owner is alive', 
     const result = inspectMomentumShadowCandidate({
       targetDir: path.join(root, 'target'),
       benchmarkDir,
-      ownerDirs: [ownerDir],
+      ownerDirs: [benchmarkDir, ownerDir],
       expectedConfig: baseExpected(),
       now
     });
 
     assert.equal(result.liveOwnerCount, 1);
     assert.equal(result.launchAllowed, false);
+    assert.equal(result.owners[0].isBenchmarkGateSource, true);
+    assert.equal(result.owners[1].isBenchmarkGateSource, false);
     assert.ok(result.blockers.includes('existing_live_owner_count:1'));
     assert.equal(result.warnings.includes('existing_live_owner_count:1'), false);
   } finally {
@@ -165,7 +168,7 @@ test('candidate preflight allows a fresh open benchmark with an empty target', (
     const result = inspectMomentumShadowCandidate({
       targetDir: path.join(root, 'target'),
       benchmarkDir,
-      ownerDirs: [],
+      ownerDirs: [benchmarkDir],
       expectedConfig: {
         ...baseExpected(),
         maxEntryGapPercent: 0.2,
@@ -176,6 +179,9 @@ test('candidate preflight allows a fresh open benchmark with an empty target', (
     });
 
     assert.equal(result.launchAllowed, true);
+    assert.equal(result.liveOwnerCount, 0);
+    assert.equal(result.owners.length, 1);
+    assert.equal(result.owners[0].isBenchmarkGateSource, true);
     assert.equal(result.targetLedgerExists, false);
     assert.equal(result.targetLockExists, false);
     assert.equal(result.benchmark.gateOpen, true);
@@ -190,6 +196,50 @@ test('candidate preflight allows a fresh open benchmark with an empty target', (
     assert.equal(result.candidateConfig.maxDailyCandleAgeHours, 36);
     assert.equal(result.candidateConfig.relativeTrendMinPercent, null);
     assert.equal(result.candidateConfig.maxSpreadPercent, 0.5);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('candidate preflight rejects a round-trip cost below the modeled execution-cost floor', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'coinpilot-preflight-cost-floor-'));
+  const benchmarkDir = path.join(root, 'benchmark');
+  fs.mkdirSync(benchmarkDir, { recursive: true });
+  const now = Date.parse('2026-01-01T00:05:00.000Z');
+  fs.writeFileSync(path.join(benchmarkDir, 'ledger.json'), JSON.stringify({
+    ownerPid: process.pid,
+    runnerState: 'running',
+    heartbeatAt: new Date(now).toISOString(),
+    benchmarkGateOpen: true,
+    benchmarkTrendPercent: 2.5,
+    benchmarkObservationSchemaVersion: MOMENTUM_SHADOW_BENCHMARK_OBSERVATION_SCHEMA_VERSION,
+    dataQuality: { valid: true, reason: 'daily_grid_aligned_and_contiguous', marketCount: 2 },
+    config: { pollMs: 900_000 }
+  }));
+  try {
+    const undercosted = inspectMomentumShadowCandidate({
+      targetDir: path.join(root, 'undercosted-target'),
+      benchmarkDir,
+      ownerDirs: [],
+      expectedConfig: { ...baseExpected(), costPercent: 0.2 },
+      now
+    });
+    assert.equal(undercosted.launchAllowed, false);
+    assert.equal(undercosted.executionCost.ready, false);
+    assert.equal(undercosted.executionCost.candidateRoundTripCostPercent, 0.2);
+    assert.equal(undercosted.executionCost.requiredRoundTripCostPercent, 0.3);
+    assert.ok(undercosted.blockers.includes('candidate_cost_below_round_trip_cost_floor'));
+
+    const costAligned = inspectMomentumShadowCandidate({
+      targetDir: path.join(root, 'aligned-target'),
+      benchmarkDir,
+      ownerDirs: [],
+      expectedConfig: { ...baseExpected(), costPercent: 0.3 },
+      now
+    });
+    assert.equal(costAligned.launchAllowed, true);
+    assert.equal(costAligned.executionCost.ready, true);
+    assert.equal(costAligned.blockers.includes('candidate_cost_below_round_trip_cost_floor'), false);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#101613">
+    <meta name="color-scheme" content="dark">
+    <title>CoinPilot · 서버 연결</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="app.js" defer></script>
+  </head>
+  <body>
+    <main class="screen">
+      <header class="masthead" aria-label="CoinPilot">
+        <div class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></div>
+        <span class="brand-name">COIN<span>PILOT</span></span>
+        <span class="build-tag">IOS / FIELD LINK</span>
+      </header>
+
+      <section class="connection-card" aria-labelledby="title">
+        <div class="eyebrow"><span class="signal-dot"></span> PRIVATE DASHBOARD CONNECTION</div>
+        <h1 id="title">거래 서버에<br><em>연결하세요.</em></h1>
+        <p class="intro">이 앱은 CoinPilot 화면을 표시합니다. 자동매매 엔진과 API 키는 별도로 실행 중인 서버에 보관됩니다.</p>
+
+        <form id="server-form" novalidate>
+          <label for="server-url">대시보드 주소</label>
+          <div class="input-wrap">
+            <span class="input-prefix" aria-hidden="true">↗</span>
+            <input id="server-url" name="server-url" type="url" inputmode="url" autocomplete="url" autocapitalize="none" spellcheck="false" placeholder="https://coinpilot.example.com" required>
+          </div>
+          <p id="form-error" class="form-error" role="alert" aria-live="polite"></p>
+          <button class="primary-button" type="submit">
+            <span>CoinPilot 열기</span><span aria-hidden="true">→</span>
+          </button>
+        </form>
+
+        <div id="saved-server" class="saved-server" hidden>
+          <span class="saved-label">SAVED SERVER</span>
+          <strong id="saved-host"></strong>
+        </div>
+
+        <button id="forget-server" class="text-button" type="button" hidden>저장된 주소 지우기</button>
+      </section>
+
+      <section class="connection-notes" aria-label="연결 정보">
+        <article>
+          <span class="note-index">01</span>
+          <div><h2>같은 Wi-Fi에서 테스트</h2><p>Mac에서 서버를 켜고, Mac의 로컬 IP와 포트 3000을 입력하세요. 예: <code>http://192.168.0.12:3000</code></p></div>
+        </article>
+        <article>
+          <span class="note-index">02</span>
+          <div><h2>외부에서 접속</h2><p>인터넷에서 접속 가능한 HTTPS 서버 주소가 필요합니다. 개인 API 키는 이 앱에 입력하지 마세요.</p></div>
+        </article>
+      </section>
+
+      <footer class="footer-note">
+        <span class="footer-rule"></span>
+        <p>화면 연결 상태와 거래 엔진 실행 상태는 별개입니다.</p>
+      </footer>
+    </main>
+  </body>
+</html>

@@ -1057,6 +1057,12 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
     padding: 18px 20px 20px;
 }
 
+.pilot-analysis-research-panels {
+    display: grid;
+    gap: 16px;
+    margin-top: 18px;
+}
+
 .pilot-momentum-shadow-card {
     min-width: 0;
     padding: 14px;
@@ -1180,8 +1186,88 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
 
 .pilot-momentum-shadow-profitability-gate span {
     color: inherit;
+    font-size: 11px;
+    line-height: 1.5;
+}
+
+.pilot-momentum-shadow-execution-note {
+    display: block;
+    margin-top: 8px;
+    color: var(--sl-muted);
+    font-size: 11px;
+    line-height: 1.45;
+}
+
+.pilot-momentum-shadow-cost-audit {
+    min-width: 0;
+    margin-top: 10px;
+    border: 1px solid rgba(150, 89, 10, 0.22);
+    border-radius: 8px;
+    background: rgba(255, 243, 215, 0.58);
+    color: var(--sl-ink-soft);
+}
+
+.pilot-momentum-shadow-cost-audit > summary {
+    display: flex;
+    min-width: 0;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 9px 10px;
+    color: #80520f;
+    cursor: pointer;
+    font-size: 11px;
+    font-weight: 800;
+    list-style: none;
+}
+
+.pilot-momentum-shadow-cost-audit > summary::-webkit-details-marker {
+    display: none;
+}
+
+.pilot-momentum-shadow-cost-audit > summary span:last-child {
+    color: var(--sl-muted);
+    font-size: 10px;
+    font-weight: 600;
+    text-align: right;
+}
+
+.pilot-momentum-shadow-cost-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    padding: 0 10px 9px;
+}
+
+.pilot-momentum-shadow-cost-grid > div {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.pilot-momentum-shadow-cost-grid span,
+.pilot-momentum-shadow-cost-grid small {
+    color: var(--sl-muted);
+    font-size: 10px;
+    line-height: 1.4;
+    overflow-wrap: anywhere;
+}
+
+.pilot-momentum-shadow-cost-grid strong {
+    color: var(--sl-ink);
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+    overflow-wrap: anywhere;
+}
+
+.pilot-momentum-shadow-cost-note {
+    margin: 0;
+    padding: 0 10px 9px;
+    color: var(--sl-muted);
     font-size: 10px;
     line-height: 1.45;
+    overflow-wrap: anywhere;
 }
 
 .pilot-momentum-shadow-profitability-gate.is-positive {
@@ -2334,11 +2420,420 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
 
 .pilot-validation-detail {
     display: grid;
-    grid-template-columns: auto minmax(0, 1fr);
-    gap: 16px;
-    align-items: center;
-    padding: 20px;
+    gap: 14px;
+    padding: 18px 20px 20px;
     border-bottom: 1px solid var(--sl-line);
+}
+
+.pilot-validation-overview {
+    display: grid;
+    grid-template-columns: 34px minmax(0, 1fr);
+    gap: 12px;
+    align-items: start;
+}
+
+.pilot-validation-mark {
+    display: grid;
+    width: 34px;
+    height: 34px;
+    place-items: center;
+    border-radius: 50%;
+    background: var(--sl-amber-soft);
+    color: var(--sl-amber);
+    font-size: 17px;
+    font-weight: 800;
+}
+
+.pilot-validation-mark.is-ready {
+    background: var(--sl-green-soft);
+    color: var(--sl-green);
+}
+
+.pilot-validation-mark.is-blocked {
+    background: var(--sl-red-soft);
+    color: var(--sl-red);
+}
+
+.pilot-validation-blockers {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin: 0;
+    padding: 12px 0 0;
+    border-top: 1px solid var(--sl-line);
+    list-style: none;
+}
+
+.pilot-validation-blockers li {
+    padding: 5px 8px;
+    border: 1px solid var(--sl-amber-soft);
+    border-radius: 999px;
+    background: var(--sl-amber-soft);
+    color: var(--sl-ink-soft);
+    font-size: 10px;
+    line-height: 1.3;
+}
+
+.pilot-validation-audit {
+    overflow: hidden;
+    border: 1px solid var(--sl-line);
+    border-radius: 12px;
+    background: var(--sl-surface, #fff);
+}
+
+.pilot-validation-audit summary {
+    display: flex;
+    min-height: 48px;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px 14px;
+    color: var(--sl-ink);
+    font-size: 13px;
+    font-weight: 750;
+    cursor: pointer;
+}
+
+.pilot-validation-audit summary:focus-visible {
+    outline: 3px solid var(--sl-blue, #4d79bd);
+    outline-offset: -3px;
+}
+
+.pilot-validation-audit-hint {
+    color: var(--sl-muted);
+    font-size: 11px;
+    font-weight: 500;
+    text-align: right;
+}
+
+.pilot-validation-audit-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    margin: 0;
+    padding: 0 14px 12px;
+}
+
+.pilot-validation-audit-grid > div {
+    min-width: 0;
+    padding: 10px 11px;
+    border: 1px solid var(--sl-line);
+    border-radius: 9px;
+    background: var(--sl-page, #f7f8fa);
+}
+
+.pilot-validation-audit-grid dt {
+    color: var(--sl-muted);
+    font-size: 10px;
+    font-weight: 650;
+}
+
+.pilot-validation-audit-grid dd {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 4px 8px;
+    margin: 4px 0 0;
+    color: var(--sl-ink);
+    font-size: 12px;
+    font-weight: 650;
+    overflow-wrap: anywhere;
+}
+
+.pilot-validation-audit-grid dd > span + span {
+    color: var(--sl-muted);
+    font-size: 11px;
+    font-weight: 500;
+}
+
+.pilot-validation-audit-state.is-good { color: var(--sl-green); }
+.pilot-validation-audit-state.is-caution { color: var(--sl-amber); }
+
+.pilot-validation-audit-note {
+    margin: 0;
+    padding: 0 14px 13px;
+    color: var(--sl-muted);
+    font-size: 11px;
+    line-height: 1.5;
+}
+
+.pilot-quote-cost-overview {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 8px;
+    padding: 16px 20px 8px;
+}
+
+.pilot-quote-cost-overview > div {
+    min-width: 0;
+    padding: 12px;
+    border: 1px solid var(--sl-line);
+    border-radius: 10px;
+    background: var(--sl-page, #f7f8fa);
+}
+
+.pilot-quote-cost-overview span,
+.pilot-quote-cost-overview strong,
+.pilot-quote-cost-overview small {
+    display: block;
+}
+
+.pilot-quote-cost-overview span {
+    color: var(--sl-muted);
+    font-size: 10px;
+    font-weight: 650;
+}
+
+.pilot-quote-cost-overview strong {
+    margin-top: 5px;
+    color: var(--sl-ink);
+    font-size: 15px;
+    overflow-wrap: anywhere;
+}
+
+.pilot-quote-cost-preflight {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 8px 16px;
+    margin: 0 20px 8px;
+    padding: 10px 14px;
+    border: 1px solid var(--sl-line);
+    border-radius: 10px;
+    background: var(--sl-page, #f7f8fa);
+}
+
+.pilot-quote-cost-preflight > div {
+    display: grid;
+    min-width: 0;
+    gap: 4px;
+}
+
+.pilot-quote-cost-preflight strong {
+    color: var(--sl-ink);
+    font-size: 11px;
+}
+
+.pilot-quote-cost-preflight span,
+.pilot-quote-cost-preflight small {
+    color: var(--sl-muted);
+    font-size: 10px;
+    line-height: 1.45;
+    overflow-wrap: anywhere;
+}
+
+.pilot-quote-cost-preflight small {
+    margin-left: auto;
+}
+
+.pilot-quote-cost-preflight.is-blocked {
+    border-color: #f0d38e;
+    background: var(--sl-amber-soft);
+}
+
+.pilot-quote-cost-preflight.is-ready {
+    border-color: #a8ddc8;
+    background: #f5fbf8;
+}
+
+.pilot-quote-cost-candidates {
+    margin: 0 20px 10px;
+    overflow: hidden;
+    border: 1px solid var(--sl-line);
+    border-radius: 10px;
+    background: var(--sl-surface, #fff);
+}
+
+.pilot-quote-cost-candidates summary {
+    display: flex;
+    min-height: 42px;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px 12px;
+    padding: 10px 14px;
+    color: var(--sl-ink);
+    font-size: 11px;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.pilot-quote-cost-candidates summary:focus-visible {
+    outline: 3px solid var(--sl-blue, #4d79bd);
+    outline-offset: -3px;
+}
+
+.pilot-quote-cost-candidates-hint {
+    color: var(--sl-muted);
+    font-size: 10px;
+    font-weight: 500;
+    text-align: right;
+}
+
+.pilot-quote-cost-candidate-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+    padding: 0 12px 12px;
+}
+
+.pilot-quote-cost-candidate {
+    min-width: 0;
+    padding: 10px;
+    border: 1px solid var(--sl-line);
+    border-radius: 8px;
+    background: var(--sl-page, #f7f8fa);
+}
+
+.pilot-quote-cost-candidate.is-ready {
+    border-color: #a8ddc8;
+}
+
+.pilot-quote-cost-candidate.is-blocked {
+    border-color: #f0d38e;
+}
+
+.pilot-quote-cost-candidate-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 6px;
+}
+
+.pilot-quote-cost-candidate-head strong {
+    min-width: 0;
+    color: var(--sl-ink);
+    font-size: 10px;
+    overflow-wrap: anywhere;
+}
+
+.pilot-quote-cost-candidate-head span {
+    flex: 0 0 auto;
+    color: var(--sl-muted);
+    font-size: 9px;
+}
+
+.pilot-quote-cost-candidate.is-blocked .pilot-quote-cost-candidate-head span {
+    color: var(--sl-amber);
+}
+
+.pilot-quote-cost-candidate small,
+.pilot-quote-cost-candidate p {
+    display: block;
+    margin: 6px 0 0;
+    color: var(--sl-muted);
+    font-size: 9px;
+    line-height: 1.4;
+    overflow-wrap: anywhere;
+}
+
+.pilot-quote-cost-candidates .pilot-quote-cost-note {
+    margin: 0;
+    padding: 0 14px 12px;
+}
+
+.pilot-quote-cost-overview small {
+    margin-top: 4px;
+    color: var(--sl-muted);
+    font-size: 10px;
+    line-height: 1.45;
+    overflow-wrap: anywhere;
+}
+
+.pilot-quote-cost-markets {
+    margin: 10px 20px 12px;
+    overflow: hidden;
+    border: 1px solid var(--sl-line);
+    border-radius: 11px;
+    background: var(--sl-surface, #fff);
+}
+
+.pilot-quote-cost-markets summary {
+    display: flex;
+    min-height: 46px;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 11px 14px;
+    color: var(--sl-ink);
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.pilot-quote-cost-markets summary:focus-visible {
+    outline: 3px solid var(--sl-blue, #4d79bd);
+    outline-offset: -3px;
+}
+
+.pilot-quote-cost-markets-hint {
+    color: var(--sl-muted);
+    font-size: 10px;
+    font-weight: 500;
+}
+
+.pilot-quote-cost-market-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+    padding: 0 12px 12px;
+}
+
+.pilot-quote-cost-market {
+    min-width: 0;
+    padding: 11px;
+    border: 1px solid var(--sl-line);
+    border-radius: 9px;
+    background: var(--sl-page, #f7f8fa);
+}
+
+.pilot-quote-cost-market.is-caution {
+    border-color: var(--sl-amber-soft);
+}
+
+.pilot-quote-cost-market.is-observed {
+    border-color: var(--sl-green-soft);
+}
+
+.pilot-quote-cost-market-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 4px 8px;
+}
+
+.pilot-quote-cost-market-head strong {
+    color: var(--sl-ink);
+    font-size: 12px;
+}
+
+.pilot-quote-cost-market-head span,
+.pilot-quote-cost-market p,
+.pilot-quote-cost-market small {
+    color: var(--sl-muted);
+    font-size: 10px;
+    line-height: 1.45;
+}
+
+.pilot-quote-cost-market p {
+    margin: 7px 0 3px;
+}
+
+.pilot-quote-cost-market.is-caution p {
+    color: var(--sl-amber);
+}
+
+.pilot-quote-cost-market small {
+    display: block;
+    overflow-wrap: anywhere;
+}
+
+.pilot-quote-cost-note {
+    margin: 0;
+    padding: 0 20px 14px;
+    color: var(--sl-muted);
+    font-size: 11px;
+    line-height: 1.5;
 }
 
 .pilot-validation-ring {
@@ -2370,6 +2865,31 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
     margin-top: 4px;
     color: var(--sl-muted);
     font-size: 12px;
+}
+
+@media (max-width: 760px) {
+    .pilot-validation-detail { padding: 16px; }
+    .pilot-validation-audit-grid { grid-template-columns: minmax(0, 1fr); }
+    .pilot-validation-audit summary { align-items: flex-start; }
+    .pilot-quote-cost-overview { grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 14px 16px 8px; }
+    .pilot-quote-cost-preflight { margin-right: 16px; margin-left: 16px; }
+    .pilot-quote-cost-candidates { margin-right: 16px; margin-left: 16px; }
+    .pilot-quote-cost-candidate-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .pilot-quote-cost-markets { margin-right: 16px; margin-left: 16px; }
+    .pilot-quote-cost-market-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .pilot-quote-cost-note { padding-right: 16px; padding-left: 16px; }
+}
+
+@media (max-width: 480px) {
+    .pilot-quote-cost-overview,
+    .pilot-quote-cost-market-grid { grid-template-columns: minmax(0, 1fr); }
+    .pilot-momentum-shadow-cost-grid { grid-template-columns: minmax(0, 1fr); }
+    .pilot-quote-cost-preflight { flex-direction: column; gap: 6px; margin-right: 12px; margin-left: 12px; }
+    .pilot-quote-cost-preflight small { margin-left: 0; }
+    .pilot-quote-cost-candidates { margin-right: 12px; margin-left: 12px; }
+    .pilot-quote-cost-candidate-grid { grid-template-columns: minmax(0, 1fr); }
+    .pilot-quote-cost-candidates summary { align-items: flex-start; flex-direction: column; }
+    .pilot-quote-cost-candidates-hint { text-align: left; }
 }
 
 .pilot-validation-market-list {
@@ -2436,6 +2956,79 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
     color: var(--sl-muted);
     font-size: 12px;
     line-height: 1.6;
+}
+
+.pilot-paper-mark-note {
+    margin-top: 9px;
+}
+
+.pilot-paper-signal-funnel {
+    margin-top: 11px;
+    padding: 10px 11px 9px;
+    border: 1px solid var(--sl-line);
+    border-radius: 9px;
+    background: var(--sl-surface-2);
+}
+
+.pilot-paper-signal-funnel-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.pilot-paper-signal-funnel-head strong {
+    color: var(--sl-ink);
+    font-size: 11px;
+    font-weight: 800;
+}
+
+.pilot-paper-signal-funnel-head span,
+.pilot-paper-signal-funnel p {
+    color: var(--sl-muted);
+    font-size: 10px;
+    line-height: 1.4;
+}
+
+.pilot-paper-signal-funnel-head span {
+    text-align: right;
+}
+
+.pilot-paper-signal-funnel-steps {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 6px;
+    margin-top: 8px;
+}
+
+.pilot-paper-signal-step {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 2px;
+    padding: 6px 5px;
+    border-top: 2px solid var(--sl-blue);
+    background: var(--sl-surface-2);
+}
+
+.pilot-paper-signal-step span {
+    overflow: hidden;
+    color: var(--sl-muted);
+    font-size: 9px;
+    line-height: 1.2;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.pilot-paper-signal-step strong {
+    color: var(--sl-ink);
+    font-size: 14px;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.2;
+}
+
+.pilot-paper-signal-funnel p {
+    margin: 7px 0 0;
 }
 
 .pilot-paper-diagnostics {
@@ -3724,6 +4317,22 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
 }
 
 @media (max-width: 360px) {
+    .pilot-paper-signal-funnel {
+        padding: 8px 8px 7px;
+    }
+
+    .pilot-paper-signal-funnel-steps {
+        gap: 4px;
+    }
+
+    .pilot-paper-signal-step {
+        padding: 6px 2px;
+    }
+
+    .pilot-paper-signal-step span {
+        font-size: 8px;
+    }
+
     .pilot-mode-banner {
         display: grid;
         grid-template-columns: minmax(0, 1fr);

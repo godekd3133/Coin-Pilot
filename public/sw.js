@@ -1,4 +1,4 @@
-const CACHE_NAME = 'coinpilot-shell-v104';
+const CACHE_NAME = 'coinpilot-shell-v136';
 const NETWORK_FIRST_SHELL_PATHS = new Set([
   '/',
   '/index.html',
@@ -15,8 +15,8 @@ const APP_SHELL = [
   '/icon-512.png',
   '/apple-touch-icon.png',
   '/auth-client.js',
-  '/pilot-redesign.css?v=20260918-06',
-  '/pilot-redesign.js?v=observer-readonly-95'
+  '/pilot-redesign.css?v=20260924-07',
+  '/pilot-redesign.js?v=observer-readonly-123'
 ];
 
 self.addEventListener('install', event => {
@@ -46,6 +46,9 @@ self.addEventListener('fetch', event => {
   if (request.method !== 'GET') return;
 
   const url = new URL(request.url);
+  // Third-party fonts and assets must keep their own response type. Falling
+  // back to our HTML shell for an offline CDN request breaks font/image fetches.
+  if (url.origin !== self.location.origin) return;
   if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/socket.io/')) {
     // Trading/account state must never be served from an old shell cache.
     return;

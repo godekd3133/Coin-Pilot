@@ -114,6 +114,8 @@ function main() {
 
   check('service-worker-api-bypass', /url\.pathname\.startsWith\(['"]\/api\//.test(serviceWorkerSource),
     'dynamic API state is not served from the shell cache');
+  check('service-worker-cross-origin-bypass', /url\.origin\s*!==\s*self\.location\.origin\)\s*return/.test(serviceWorkerSource),
+    'third-party assets keep their own response types when offline');
   check('service-worker-shell-network-first', /NETWORK_FIRST_SHELL_PATHS/.test(serviceWorkerSource) &&
     /fetch\(request\)[\s\S]*ignoreSearch: true/.test(serviceWorkerSource),
   'online shell assets refresh from the network and fall back to cache offline');

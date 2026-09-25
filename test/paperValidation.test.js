@@ -1112,6 +1112,8 @@ test('strict paper 청산 거래는 프로세스 재시작 후에도 ledger에�
     assert.equal(sameProcess.strictRecentTrades[0].coin, 'KRW-BTC');
     assert.equal(sameProcess.strictRecentTrades[0].reason, '재시작 복원 테스트');
     assert.ok(sameProcess.strictRecentTrades[0].profit > 0);
+    assert.equal(sameProcess.strictEvaluation.signalWindowCoverage.tradeCount, 1);
+    assert.equal(sameProcess.strictEvaluation.signalWindowCoverage.unlinkedTradeCount, 1);
 
     const reloaded = new MultiCoinTrader({
       strategyMode: 'oversold_reaction_scalping',

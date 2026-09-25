@@ -49,8 +49,41 @@ export function createRiskMonitorState(existing = {}) {
     maxObservedGapSeconds: Number.isFinite(Number(existing.maxObservedGapSeconds))
       ? Math.max(0, Number(existing.maxObservedGapSeconds))
       : 0,
+    watchdogTelemetryVersion: positiveInteger(existing.watchdogTelemetryVersion) || null,
+    lastWatchdogTickAt: asIsoTimestamp(existing.lastWatchdogTickAt),
+    lastWatchdogTickGapMs: existing.lastWatchdogTickGapMs !== null &&
+      existing.lastWatchdogTickGapMs !== undefined &&
+      Number.isFinite(Number(existing.lastWatchdogTickGapMs))
+      ? Math.max(0, Number(existing.lastWatchdogTickGapMs))
+      : null,
+    maxWatchdogTickGapMs: Number.isFinite(Number(existing.maxWatchdogTickGapMs))
+      ? Math.max(0, Number(existing.maxWatchdogTickGapMs))
+      : 0,
     continuityEligible: existing.continuityEligible !== false
   };
+}
+
+/**
+ * Record the time between risk-watchdog callbacks. This is diagnostic only:
+ * it does not change the risk freshness budget or continuity decision. A
+ * long callback gap helps distinguish an unserviced watchdog from a series
+ * of explicit market-data failures in later paper evidence.
+ */
+export function recordRiskMonitorWatchdogTick(existing = {}, now = Date.now()) {
+  const timestamp = asTimestamp(now) || Date.now();
+  const state = createRiskMonitorState(existing);
+  const previousTickAt = asTimestamp(state.lastWatchdogTickAt);
+  const gapMs = previousTickAt === null
+    ? null
+    : Math.max(0, timestamp - previousTickAt);
+
+  state.watchdogTelemetryVersion = 1;
+  state.lastWatchdogTickAt = new Date(timestamp).toISOString();
+  if (gapMs !== null) {
+    state.lastWatchdogTickGapMs = gapMs;
+    state.maxWatchdogTickGapMs = Math.max(state.maxWatchdogTickGapMs, gapMs);
+  }
+  return state;
 }
 
 /**
@@ -72,6 +105,8 @@ export function recordRiskMonitorAttempt(existing = {}, now = Date.now()) {
     state.lastSuccessAt = null;
     state.currentOutageStartedAt = null;
     state.consecutiveFailures = 0;
+    state.lastWatchdogTickAt = null;
+    state.lastWatchdogTickGapMs = null;
   }
   state.monitoringActive = true;
   state.lastAttemptAt = isoTimestamp;
@@ -89,6 +124,8 @@ export function recordRiskMonitorIdle(existing = {}) {
   const state = createRiskMonitorState(existing);
   state.monitoringActive = false;
   state.monitoringStartedAt = null;
+  state.lastWatchdogTickAt = null;
+  state.lastWatchdogTickGapMs = null;
   return state;
 }
 

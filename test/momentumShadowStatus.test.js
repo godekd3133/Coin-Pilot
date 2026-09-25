@@ -153,6 +153,109 @@ test('momentum shadow status prints the same realized return and confidence read
   }
 });
 
+test('momentum shadow status exposes the shared cost floor and winner concentration as research-only diagnostics', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'coinpilot-shadow-status-'));
+  try {
+    const dir = writeLedger(root, {
+      runnerState: 'stopped',
+      ownerPid: 0,
+      heartbeatAt: new Date().toISOString(),
+      config: { mode: 'fixed', pollMs: 900_000, costPercent: 0.2 },
+      initialBalance: 1_000,
+      balance: 1_000,
+      positions: {},
+      costFloorGuardVersion: 1,
+      costFloorBlockedEntries: 2,
+      costFloorBlockedPendingEntries: 1,
+      trades: [
+        { entry: { size: 1_000 }, profitPercent: 10 },
+        { entry: { size: 1_000 }, profitPercent: 5 },
+        { entry: { size: 1_000 }, profitPercent: -5 }
+      ]
+    });
+    const result = runStatus(dir);
+    assert.equal(result.status, 0);
+    assert.match(result.stdout, /modeled round-trip cost 0\.20% \| floor 0\.30% \| UNDER FLOOR/);
+    assert.match(result.stdout, /entry cost-floor guard active \| blocked new entries 2 \| voided pending entries 1/);
+    assert.match(result.stdout, /positive PnL concentration top1 66\.67%, top2 100\.00%/);
+    assert.match(result.stdout, /excluding top winner 95% lower bound .+ \(2 trades\) \| research-only, not promotion evidence/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('momentum shadow status labels legacy MDD telemetry as unrecorded', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'coinpilot-shadow-status-'));
+  try {
+    const dir = writeLedger(root, {
+      runnerState: 'stopped',
+      ownerPid: 0,
+      heartbeatAt: new Date().toISOString(),
+      config: { mode: 'fixed', pollMs: 900_000 },
+      balance: 1_000,
+      positions: {},
+      trades: []
+    });
+    const result = runStatus(dir);
+    assert.equal(result.status, 0);
+    assert.match(result.stdout, /observed MDD 미기록 \| 0 marks \| not recorded \| interval unknown/);
+    assert.match(result.stdout, /positive PnL concentration unavailable \(no positive closes\) \| research-only/);
+    assert.match(result.stdout, /modeled round-trip cost unknown \| floor 0\.30%/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('momentum shadow status identifies full-session sampled MDD and poll interval', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'coinpilot-shadow-status-'));
+  try {
+    const dir = writeLedger(root, {
+      runnerState: 'stopped',
+      ownerPid: 0,
+      heartbeatAt: new Date().toISOString(),
+      config: { mode: 'fixed', pollMs: 900_000 },
+      balance: 1_000,
+      positions: {},
+      trades: [],
+      observedMddSampleCount: 3,
+      observedMddMaxDrawdownPercent: 2.5,
+      observedMddFullSessionCoverage: true,
+      observedMddSamplingIntervalMs: 900_000,
+      observedMddCoverageReasons: []
+    });
+    const result = runStatus(dir);
+    assert.equal(result.status, 0);
+    assert.match(result.stdout, /observed MDD 2\.50% \| 3 marks \| full-session \| interval 900s/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('momentum shadow status exposes sampled MDD as partial when coverage is invalid', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'coinpilot-shadow-status-'));
+  try {
+    const dir = writeLedger(root, {
+      runnerState: 'stopped',
+      ownerPid: 0,
+      heartbeatAt: new Date().toISOString(),
+      config: { mode: 'fixed', pollMs: 300_000 },
+      balance: 1_000,
+      positions: {},
+      trades: [],
+      observedMddSampleCount: 8,
+      observedMddMaxDrawdownPercent: 4.25,
+      observedMddFullSessionCoverage: false,
+      observedMddSamplingIntervalMs: 300_000,
+      observedMddCoverageReasons: ['config_drift', 'continuity_interruption']
+    });
+    const result = runStatus(dir);
+    assert.equal(result.status, 0);
+    assert.match(result.stdout, /observed MDD 4\.25% \| 8 marks \| partial \| interval 300s \| coverage blockers config_drift,continuity_interruption/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('momentum shadow status marks a live owner with config drift as not ready evidence', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'coinpilot-shadow-status-'));
   try {

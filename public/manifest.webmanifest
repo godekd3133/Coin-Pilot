@@ -1,7 +1,7 @@
 {
-  "name": "CoinPilot 과매도 반응 스캘핑",
+  "name": "CoinPilot 거래 대시보드",
   "short_name": "CoinPilot",
-  "description": "모의투자·실제투자 모드, 포트폴리오와 시장 상태를 한 화면에서 관리하는 CoinPilot 거래 대시보드",
+  "description": "모의투자 결과와 실제 주문 전 점검, 계좌와 시장 현황을 확인하는 CoinPilot 대시보드",
   "lang": "ko-KR",
   "start_url": "/?source=pwa",
   "id": "/?source=pwa",

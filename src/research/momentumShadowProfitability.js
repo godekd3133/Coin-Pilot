@@ -103,3 +103,95 @@ export function calculateMomentumShadowTradeConfidence(ledger) {
     profitPercent: trade.profitPercent
   })));
 }
+
+/**
+ * Describe whether positive simulated closed-trade P&L is concentrated in a
+ * small number of winners. The leave-winner-out values are post-hoc
+ * sensitivity diagnostics only; they do not change promotion or execution.
+ */
+export function summarizeMomentumShadowProfitConcentration(ledger) {
+  const trades = Array.isArray(ledger?.trades) ? ledger.trades : [];
+  const validTrades = trades.map((trade, index) => {
+    const investAmount = Number(trade?.entry?.size);
+    const profitPercent = trade?.profitPercent === null || trade?.profitPercent === undefined ||
+      trade?.profitPercent === ''
+      ? null
+      : Number(trade.profitPercent);
+    if (!Number.isFinite(investAmount) || investAmount <= 0 || !Number.isFinite(profitPercent)) {
+      return null;
+    }
+    const profitKrw = investAmount * profitPercent / 100;
+    if (!Number.isFinite(profitKrw)) return null;
+    return {
+      index,
+      investAmount,
+      profitPercent,
+      profitKrw
+    };
+  }).filter(Boolean);
+  const winners = validTrades
+    .filter(trade => trade.profitKrw > 0)
+    .sort((left, right) => right.profitKrw - left.profitKrw || left.index - right.index);
+  const totalPositivePnlKrw = winners.reduce((total, trade) => total + trade.profitKrw, 0);
+  const totalNetPnlKrw = validTrades.reduce((total, trade) => total + trade.profitKrw, 0);
+
+  const confidenceFor = excludedCount => {
+    const excluded = new Set(winners.slice(0, excludedCount).map(trade => trade.index));
+    const remaining = validTrades.filter(trade => !excluded.has(trade.index));
+    const confidence = calculateTradeReturnConfidence(remaining.map(trade => ({
+      action: 'CLOSE',
+      investAmount: trade.investAmount,
+      profitPercent: trade.profitPercent
+    })));
+    const excludedPnlKrw = winners.slice(0, excludedCount)
+      .reduce((total, trade) => total + trade.profitKrw, 0);
+    return {
+      excludedWinnerCount: Math.min(excludedCount, winners.length),
+      tradeCount: remaining.length,
+      realizedPnlKrw: totalNetPnlKrw - excludedPnlKrw,
+      tradeReturnConfidence: {
+        method: confidence.method,
+        confidenceLevel: confidence.confidenceLevel,
+        sampleCount: confidence.sampleCount,
+        lowerBoundPercent: confidence.lowerBoundPercent
+      }
+    };
+  };
+
+  const shareOfPositivePnl = profitKrw => totalPositivePnlKrw > 0
+    ? (profitKrw / totalPositivePnlKrw) * 100
+    : null;
+  const topWinner = winners[0] || null;
+  const topTwoWinnerPnlKrw = winners.slice(0, 2)
+    .reduce((total, trade) => total + trade.profitKrw, 0);
+
+  return {
+    available: totalPositivePnlKrw > 0,
+    researchOnly: true,
+    promoted: false,
+    actualFillsObserved: false,
+    closedTradeCount: trades.length,
+    validTradeCount: validTrades.length,
+    winningTradeCount: winners.length,
+    totalPositivePnlKrw,
+    topWinnerShareOfPositivePnlPercent: topWinner
+      ? shareOfPositivePnl(topWinner.profitKrw)
+      : null,
+    topTwoWinnersShareOfPositivePnlPercent: topWinner
+      ? shareOfPositivePnl(topTwoWinnerPnlKrw)
+      : null,
+    netPnlWithoutTopWinnerKrw: topWinner
+      ? confidenceFor(1).realizedPnlKrw
+      : null,
+    confidenceWithoutTopWinner: topWinner
+      ? confidenceFor(1).tradeReturnConfidence
+      : null,
+    netPnlWithoutTopTwoWinnersKrw: topWinner
+      ? confidenceFor(2).realizedPnlKrw
+      : null,
+    confidenceWithoutTopTwoWinners: topWinner
+      ? confidenceFor(2).tradeReturnConfidence
+      : null,
+    note: '양수 시뮬레이션 청산손익 중 상위 승리 거래 집중도와 사후 제외 민감도입니다. 승격 기준이나 실제 체결 증거가 아닙니다.'
+  };
+}

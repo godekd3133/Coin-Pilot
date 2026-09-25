@@ -5,7 +5,8 @@ import {
   calculateMomentumShadowRealizedReturnPercent,
   calculateMomentumShadowTradeConfidence,
   calculateMomentumShadowObservationDays,
-  summarizeMomentumShadowTradesByMarket
+  summarizeMomentumShadowTradesByMarket,
+  summarizeMomentumShadowProfitConcentration
 } from '../src/research/momentumShadowProfitability.js';
 
 test('momentum shadow profitability helper shares realized return and confidence semantics', () => {
@@ -54,6 +55,55 @@ test('momentum shadow profitability attributes realized results by market', () =
   assert.equal(byMarket['KRW-DOGE'].tradeCount, 1);
   assert.equal(byMarket['KRW-DOGE'].validReturnCount, 0);
   assert.equal(byMarket['KRW-DOGE'].averageProfitPercent, null);
+});
+
+test('momentum shadow profit concentration reports winner shares and leave-winner-out sensitivity', () => {
+  const ledger = {
+    trades: [
+      { market: 'KRW-NEAR', entry: { size: 1_000 }, profitPercent: 10 },
+      { market: 'KRW-SUI', entry: { size: 1_000 }, profitPercent: 5 },
+      { market: 'KRW-ETH', entry: { size: 1_000 }, profitPercent: -5 },
+      { market: 'KRW-DOGE', entry: { size: null }, profitPercent: 50 }
+    ]
+  };
+  const before = structuredClone(ledger);
+  const summary = summarizeMomentumShadowProfitConcentration(ledger);
+
+  assert.equal(summary.available, true);
+  assert.equal(summary.researchOnly, true);
+  assert.equal(summary.promoted, false);
+  assert.equal(summary.actualFillsObserved, false);
+  assert.equal(summary.closedTradeCount, 4);
+  assert.equal(summary.validTradeCount, 3);
+  assert.equal(summary.winningTradeCount, 2);
+  assert.equal(summary.totalPositivePnlKrw, 150);
+  assert.ok(Math.abs(summary.topWinnerShareOfPositivePnlPercent - (2 / 3 * 100)) < 1e-12);
+  assert.equal(summary.topTwoWinnersShareOfPositivePnlPercent, 100);
+  assert.equal(summary.netPnlWithoutTopWinnerKrw, 0);
+  assert.equal(summary.confidenceWithoutTopWinner.sampleCount, 2);
+  assert.equal(summary.netPnlWithoutTopTwoWinnersKrw, -50);
+  assert.equal(summary.confidenceWithoutTopTwoWinners.sampleCount, 1);
+  assert.equal(summary.confidenceWithoutTopTwoWinners.lowerBoundPercent, null);
+  assert.deepEqual(ledger, before);
+});
+
+test('momentum shadow profit concentration is unavailable when there are no positive valid closes', () => {
+  const summary = summarizeMomentumShadowProfitConcentration({
+    trades: [
+      { entry: { size: 1_000 }, profitPercent: -2 },
+      { entry: { size: 1_000 }, profitPercent: null },
+      { entry: { size: Number.MAX_VALUE }, profitPercent: Number.MAX_VALUE }
+    ]
+  });
+  assert.equal(summary.available, false);
+  assert.equal(summary.closedTradeCount, 3);
+  assert.equal(summary.validTradeCount, 1);
+  assert.equal(summary.winningTradeCount, 0);
+  assert.equal(summary.totalPositivePnlKrw, 0);
+  assert.equal(summary.topWinnerShareOfPositivePnlPercent, null);
+  assert.equal(summary.topTwoWinnersShareOfPositivePnlPercent, null);
+  assert.equal(summary.netPnlWithoutTopWinnerKrw, null);
+  assert.equal(summary.confidenceWithoutTopWinner, null);
 });
 
 test('momentum shadow observation window rejects future or reversed boundaries', () => {

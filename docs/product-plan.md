@@ -62,7 +62,7 @@ Coin Pilot은 업비트 계정의 시장 정보, 규칙 기반 자동매매, 전
 | 기존 전략 호환 | 종합점수 기반 기존 전략 및 단일 코인/멀티 코인 trader 경로 | 코드 존재. 현재 기본 전략과의 사용자 노출·운영 조합은 README와 설정을 확인할 것 |
 | 수동 거래 | 대시보드 매수·매도, 빠른/스마트 주문 및 묶음 주문 경로 | 구현 확인. LIVE는 공통 evidence 경로를 거쳐 체결 확인 뒤에만 거래 상태를 갱신하도록 설계됨 |
 | 라이브 거래 evidence | 주문 제출·fill 관측·계좌 readback을 기록하고 미완료 evidence가 있으면 새 LIVE 주문을 차단하는 경로 | 코드 계약 확인. 현재 로컬 계정에 실제 fill/정산이 존재하는지는 별도 런타임 evidence 없이는 확인 불가 |
-| 시세·계좌 대시보드 | 대시보드, 거래 실행, 포트폴리오, 시장 관찰, 전략 분석, 뉴스 센터, AI 자문, 설정, 준비 현황 화면과 관련 API route | 화면·route 코드 확인. 준비 화면에서 readiness 세부 필드를 파일명·freshness·차단 이유까지 안정적으로 표시하는 연동은 검증 미완료. 모든 화면의 최신 디자인 상태 및 실계정 데이터 정확성도 런타임 검증이 필요 |
+| 시세·계좌 대시보드 | 대시보드, 거래 실행, 포트폴리오, 시장 관찰, 전략 분석, 뉴스 센터, AI 자문, 설정, 준비 현황 화면과 관련 API route | 화면·route 코드는 존재. 준비 현황에는 gate와 분리된 호가·비용·sampler cadence 카드가 있고, 2026-09-23 격리 DRY_RUN staging에서 320/390px 무overflow·10초 refresh 후 disclosure 유지·12개 관측 마켓 표기를 확인. 실제 iOS/Android 설치 단말 QA는 미완료 |
 | 전략 준비 현황 API | `GET /api/strategy-readiness`가 설정된 검증 보고서 시점·freshness와 현재 trader promotion validator 판정을 읽기 전용으로 조회 | 구현 확인. route 테스트에서 파일 누락·읽기 오류·오래되거나 미래 시각의 보고서·현재 runtime 설정 불일치·validator 부재를 BLOCKED로 확인. LIVE gate 판정과 freshness 판정은 별도 필드이며 이 응답은 실거래 수익을 입증하지 않음 |
 | 백테스트·최적화 | 수수료/슬리피지를 고려한 백테스트, 포트폴리오 비교, 파라미터 연구 및 과거 검증 도구 | 구현 확인. 백테스트는 체결·실거래 수익 증거가 아님 |
 | 모의/forward 연구 | 격리된 paper ledger와 shadow cohort, 상태 및 후보 사전검사 route/CLI | 구현 확인. shadow/research lane은 `researchOnly=true`, `promoted=false` 계약으로 운용 |
@@ -89,7 +89,7 @@ Coin Pilot은 업비트 계정의 시장 정보, 규칙 기반 자동매매, 전
 
 읽기 전용 `GET /api/strategy-readiness`는 구현되어 있다. 응답의 `liveGate`는 실제 promotion validator 결과와 LIVE 적용 여부를 나타내며 `enforcedFreshness=false`로 보고서 나이가 LIVE gate의 강제 조건이 아님을 명시한다. `report.freshness`와 `currentEvidence`는 현재성 판단을 별도로 나타내므로, 오래된 보고서는 `liveGate.passed=true`일 수 있어도 readiness 상태는 `BLOCKED`가 된다. route 테스트는 설정 보고서의 정상·누락·손상·오래됨·미래 시각, runtime 설정 불일치 및 validator 부재를 확인한다. `READY`는 현재 검증 증거를 읽을 수 있다는 뜻일 뿐, 실거래 순이익이나 전략의 지속적인 수익성을 증명하지 않는다.
 
-준비 화면과 API의 세부 필드 연동은 아직 안정적으로 확인되지 않았다. 화면에서 보고서 파일명·생성 시각·freshness·gate 적용 여부·차단 이유를 구분해 보여주는 상세 표시를 우선순위 1의 후속 작업으로 둔다. 이 표시가 구현되고 검증되기 전까지 화면 연동 상태는 `부분 구현 / 검증 미완료`다.
+읽기 전용 `GET /api/strategy-readiness`는 보고서 freshness와 실제 promotion validator의 판정을 별도 필드로 제공하며, stale report도 `liveGate.passed=true`일 수 있다. 기본 요약을 유지하면서 펼침형 상세에 보고서 파일명·작성 시각·freshness·실제 LIVE gate 통과 여부·현재 적용 여부·freshness 강제 여부·DRY_RUN/LIVE 모드를 연결했다. 실제 체결·지속 순수익이 아님을 안내하고 주기 갱신 뒤 펼침 상태도 유지한다. 2026-09-23 DRY_RUN staging에서 missing-report fail-closed 표기와 320/390px 무가로 overflow를 확인했으며, 실제 설치 단말 QA는 남아 있다.
 
 ## 6. 운용 원칙과 중단 조건
 
@@ -166,8 +166,8 @@ Coin Pilot은 업비트 계정의 시장 정보, 규칙 기반 자동매매, 전
 
 아래는 최종 목표에 직접 기여하는 우선순위다. 상태를 `구현 확인`, `계획`, `검증 미완료`로 기록하며 실제 검증 전에는 완료로 올리지 않는다.
 
-1. **준비 화면의 gate와 보고서 세부 정보 통합 (부분 구현 / 검증 미완료)** — `GET /api/strategy-readiness`는 route 테스트를 포함해 구현 확인 상태다. 후속으로 화면에서 보고서 파일명·생성 시각·freshness, 실제 LIVE gate 적용 여부와 결과, 설정 불일치 등 차단 이유를 구분해 안정적으로 표시하고 화면 연동을 검증한다. 현재 gate는 freshness를 강제하지 않으므로 화면도 freshness를 실제 LIVE gate 통과 조건처럼 표시하지 않는다. 이후 forward 보고서와 연구 route를 연결해 실제 순이익 판단에 필요한 증거까지 추적한다.
-2. **동일 데이터 후보 비교와 비용 모델 완성** — 공통 snapshot, 고정 설정, 격리 장부로 기준 전략과 후보를 비교하고 실제 spread/수수료/지연에 맞춰 백테스트 가정을 보정한다. 후보 결과가 runtime 설정에 자동 반영되지 않게 한다.
+1. **준비 화면의 gate와 보고서 세부 정보 통합 (source·responsive staging 확인 / 설치 단말 QA 미완료)** — API와 backend tests는 보고서 파일명·시각·freshness, 실제 LIVE gate 판정·적용 여부를 구분해 제공한다. 요약 상태 아래에 선택형 상세를 연결했으며, freshness는 LIVE gate가 강제하지 않으므로 실제 gate 통과와 별도로 표시한다. 2026-09-23 320/390px responsive staging 확인은 통과했다. 실제 iOS/Android 설치 단말에서의 검증 전에는 완료 처리하지 않는다.
+2. **동일 데이터 후보 비교와 비용 모델 완성 (부분 구현 / 실제 fill 보정 미완료)** — `npm run research:quote-cost-history`는 report-level p95 spread, 600초 cadence·900초 freshness와 report-level best-quote depth 분포를 연구 전용으로 요약한다. 선택적 `--depth-notionals=...` 인자는 참고 금액별 양방향 quote-level coverage를 분석하지만 runtime 주문 설정은 바꾸지 않는다. `npm run research:momentum-shadow:trade-cost-audit`는 fixed daily close의 진입·완료-bar exit 시각을 직전 complete quote report에만 매칭하고, 매칭되지 않은 거래의 spread cost를 unknown으로 유지한다. matched subset의 median/report-p95 spread 시나리오도 실제 체결이나 full-cohort 수익으로 취급하지 않는다. 같은 compact 비용 감사가 candle-close shadow card에 표시되지만 full quote-adjusted 결과는 모든 청산을 매칭하지 못하면 보류한다. Shadow 장부는 이제 poll 간격에서 관측된 MDD와 coverage를 저장하지만 intraday drawdown은 복원하지 않으며, 기존 장부는 새 표본 이전의 MDD를 소급 생성하지 않는다. 기존 active owner를 재시작하지 않아 해당 장부는 full-session MDD 미기록으로 표시한다. 2026-09-23 09:53Z 기준 sampler는 12마켓 5/5 complete였고, 최근 24시간 quote report는 136/136 complete, 900초 초과 간격 2회였다. depth는 마켓당 9개 report까지 쌓였으나 최소 30개 전이므로 비용/깊이 비율은 계속 미산출이다. 참고 notional은 실거래 주문이 아니며 best-level 값은 전체 호가장이나 체결량을 보장하지 않는다. 과거 JSONL의 depth 결측은 0으로 대체하지 않고, spread tail·depth 관측 모두 실제 fill 비용/수익 증거가 아니다. 준비 현황 UI는 12개 관측 시장의 spread-cost 모델 비교와 최신 report 최저 best-level size를 order gate와 분리해 표시하며, 320/390px DRY_RUN staging에서 확인했다. 누적 depth 표본·공통 snapshot 후보 비교·실제 fill 보정은 남아 있고 계측/UI는 schedule, market set, runtime 설정, promotion을 바꾸지 않는다.
 3. **독립 holdout 및 단일 owner 모의 플로우** — 연구 재현성, 보고서/ledger 추적, 연속성·설정 drift·미청산 포지션 차단을 제품에서 관리한다. 현재 모의 표본의 유효성은 실행 중인 owner와 최신 ledger/report를 조회해 판정한다.
 4. **실거래 정산 증거 화면** — 주문 접수, 부분/완전 체결, 수수료, 잔고 대조 및 미해결 evidence를 거래 단위로 연결한다. 자동 스캘핑 승격은 수동 주문 기능과 별도 gate로 유지한다.
 5. **소액 검증 이후 자본 확대 판단 도구** — 검증된 실현 손익·최대 낙폭·비용·체결 오차·기준선 대비 결과를 기간별로 보여주고, 사전 손실 한도 도달 시 신규 진입 중지를 우선한다. 증액은 별도 근거와 운영 판단이 확보되기 전까지 후보 상태로 둔다.

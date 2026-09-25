@@ -60,12 +60,12 @@
     overlay.hidden = true;
     overlay.innerHTML = `
       <form class="cp-auth-card" novalidate>
-        <h1>CoinPilot 잠금 해제</h1>
-        <p>이 대시보드는 접근 토큰으로 보호되고 있습니다.<br>서버 <code>.env</code>의 <code>DASHBOARD_TOKEN</code> 값을 입력하세요.</p>
+        <h1>CoinPilot 접속</h1>
+        <p>대시보드에 접속하려면 서버 토큰이 필요합니다.<br>서버 <code>.env</code> 파일의 <code>DASHBOARD_TOKEN</code> 값을 입력하세요.</p>
         <input type="password" name="token" autocomplete="off" placeholder="DASHBOARD_TOKEN" aria-label="대시보드 토큰">
         <button type="submit">확인</button>
         <div class="cp-auth-error" role="alert"></div>
-        <div class="cp-auth-hint">토큰은 이 기기의 localStorage에만 저장되며 모든 API/실시간 요청에 Bearer로 첨부됩니다.</div>
+        <div class="cp-auth-hint">토큰은 이 브라우저에 저장되고, 대시보드가 서버로 보내는 요청에 함께 전송됩니다.</div>
       </form>`;
     document.body.appendChild(overlay);
 

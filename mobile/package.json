@@ -1,0 +1,11 @@
+{
+  "name": "coinpilot-ios-shell",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Native iOS client for the CoinPilot dashboard",
+  "scripts": {
+    "stage:web": "node scripts/stage-web.mjs",
+    "ios:sync": "npm run stage:web && node scripts/stage-ios.mjs",
+    "ios:open": "open ios/App/App.xcodeproj"
+  }
+}

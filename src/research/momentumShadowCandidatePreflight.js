@@ -7,6 +7,7 @@ import {
 import {
   MOMENTUM_SHADOW_BENCHMARK_OBSERVATION_SCHEMA_VERSION
 } from './momentumShadowBenchmark.js';
+import { assessMomentumShadowCostFloor } from './momentumShadowCostFloor.js';
 import { resolveMomentumShadowExecutionModel } from './momentumShadowExecutionModel.js';
 import { resolveMomentumShadowQuoteRuntimeFile } from './momentumShadowQuoteHistory.js';
 
@@ -209,6 +210,7 @@ export function inspectMomentumShadowCandidate({
     }
   }
 
+  const resolvedBenchmarkDir = path.resolve(benchmarkDir || '');
   const owners = ownerDirs.map(directory => {
     const resolved = path.resolve(directory);
     const ledger = readJson(path.join(resolved, 'ledger.json'));
@@ -218,14 +220,17 @@ export function inspectMomentumShadowCandidate({
       ownerPid: ledger?.ownerPid || null,
       alive,
       runnerState: ledger?.runnerState || null,
-      benchmarkGateOpen: ledger?.benchmarkGateOpen === true
+      benchmarkGateOpen: ledger?.benchmarkGateOpen === true,
+      isBenchmarkGateSource: resolved === resolvedBenchmarkDir
     };
   });
-  const liveOwnerCount = owners.filter(owner => owner.alive && owner.runnerState === 'running').length;
-  // A candidate must be the only live momentum-shadow owner. Keeping this as
-  // a warning allows a future benchmark gate to open while an older fixed,
-  // regime, or benchmark owner is still consuming the same public API budget;
-  // their config drift would then contaminate the candidate's evidence window.
+  const liveOwnerCount = owners.filter(owner =>
+    owner.alive && owner.runnerState === 'running' && !owner.isBenchmarkGateSource
+  ).length;
+  // The benchmark process is the required live source of the gate and is
+  // validated independently below. Other live momentum-shadow books still
+  // block a candidate so their API load and config drift cannot contaminate
+  // the new evidence window.
   if (liveOwnerCount > 0) blockers.push(`existing_live_owner_count:${liveOwnerCount}`);
 
   const expectedBenchmarkThreshold = Number.isFinite(Number(expectedConfig?.benchmarkTrendMinPercent))
@@ -380,6 +385,14 @@ export function inspectMomentumShadowCandidate({
   }
 
   const candidateConfig = normalizedConfig(expectedConfig);
+  const costFloor = assessMomentumShadowCostFloor(candidateConfig.costPercent);
+  const executionCost = {
+    candidateRoundTripCostPercent: candidateConfig.costPercent,
+    requiredRoundTripCostPercent: costFloor.requiredCostPercent,
+    ready: costFloor.ready
+  };
+  executionCost.reason = costFloor.reason;
+  if (!executionCost.ready) blockers.push('candidate_cost_below_round_trip_cost_floor');
   if (candidateConfig.pollMs < minimumPollMs) {
     blockers.push('candidate_poll_below_minimum');
   }
@@ -421,6 +434,7 @@ export function inspectMomentumShadowCandidate({
       startedAt: candidateSlot.startedAt
     },
     candidateConfig,
+    executionCost,
     quoteQuality,
     benchmark: benchmark ? {
       ownerPid: benchmark.ownerPid || null,

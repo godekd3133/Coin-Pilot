@@ -34,6 +34,31 @@ function pendingLedger(overrides = {}) {
   };
 }
 
+test('under-floor cost voids pending next-open entries without touching cash or positions', () => {
+  const first = pendingLedger().pendingEntries[0];
+  const ledger = pendingLedger({
+    pendingEntries: [first, { ...first, market: 'KRW-ETH', signalKey: '2026-01-01T00:01:00' }]
+  });
+  const result = executeMomentumShadowPendingEntries({
+    ledger,
+    dataQuality: { valid: true },
+    entryExecution: 'next_open',
+    costFloorReady: false,
+    now: Date.parse('2026-01-02T00:05:00Z')
+  });
+
+  assert.deepEqual(result, { filled: 0, blocked: 2, pending: 0, costFloorBlocked: 2 });
+  assert.equal(ledger.balance, 100_000);
+  assert.deepEqual(ledger.positions, {});
+  assert.deepEqual(ledger.pendingEntries, []);
+  assert.equal(ledger.pendingEntryBlocked, 2);
+  assert.equal(ledger.costFloorBlockedPendingEntries, 2);
+  assert.deepEqual(ledger.voidedEntries.map(entry => entry.reason), [
+    'pending_entry_cost_below_round_trip_cost_floor',
+    'pending_entry_cost_below_round_trip_cost_floor'
+  ]);
+});
+
 test('pending next-open fill debits cash and persists a restartable position', () => {
   const ledger = pendingLedger();
   const notifications = [];

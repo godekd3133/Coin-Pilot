@@ -4,6 +4,7 @@ import {
   DEFAULT_MOMENTUM_SHADOW_CANDIDATE_CONFIG,
   resolveMomentumShadowCandidateConfig
 } from '../src/research/momentumShadowCandidateConfig.js';
+import { DEFAULT_QUOTE_EXECUTION_COST_MODEL } from '../src/research/quoteExecutionCostCompatibility.js';
 
 test('candidate config has one evidence-backed default contract', () => {
   const config = resolveMomentumShadowCandidateConfig({});
@@ -16,7 +17,8 @@ test('candidate config has one evidence-backed default contract', () => {
   assert.equal(config.minUpBars, 2);
   assert.equal(config.positionFraction, 0.125);
   assert.equal(config.maxPositions, 2);
-  assert.equal(config.costPercent, 0.2);
+  assert.equal(config.costPercent, DEFAULT_QUOTE_EXECUTION_COST_MODEL.assumedRoundTripCostPercent);
+  assert.equal(config.costPercent, 0.3);
   assert.equal(config.relativeTrendMinPercent, null);
   assert.equal(config.maxEntryGapPercent, 0);
   assert.equal(config.maxDailyCandleAgeHours, 36);

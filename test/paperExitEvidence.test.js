@@ -6,8 +6,41 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import {
   PAPER_EXIT_EVIDENCE_SCHEMA,
+  summarizePaperSignalWindowCoverage,
   summarizePaperExitEvidence
 } from '../src/research/paperExitEvidence.js';
+
+test('signal-window coverage counts same-window trades as a cluster, not independent samples', () => {
+  const coverage = summarizePaperSignalWindowCoverage([
+    { signalKey: '2026-09-24T09:35:00', coin: 'KRW-BTC' },
+    { signalKey: '2026-09-24T09:35:00', coin: 'KRW-ETH' },
+    { signalKey: '2026-09-24T09:50:00', coin: 'KRW-XRP' },
+    { signalTime: '2026-09-24T10:05:00', coin: 'KRW-SOL' },
+    { coin: 'KRW-DOGE' }
+  ]);
+
+  assert.equal(coverage.tradeCount, 5);
+  assert.equal(coverage.uniqueSignalWindowCount, 3);
+  assert.equal(coverage.linkedTradeCount, 4);
+  assert.equal(coverage.signalKeyTradeCount, 3);
+  assert.equal(coverage.signalTimeFallbackTradeCount, 1);
+  assert.equal(coverage.unlinkedTradeCount, 1);
+  assert.equal(coverage.clusteredTradeCount, 1);
+  assert.equal(coverage.coverageComplete, false);
+});
+
+test('signal-window coverage handles an empty closed-trade cohort without fabricating samples', () => {
+  assert.deepEqual(summarizePaperSignalWindowCoverage([]), {
+    tradeCount: 0,
+    uniqueSignalWindowCount: 0,
+    linkedTradeCount: 0,
+    signalKeyTradeCount: 0,
+    signalTimeFallbackTradeCount: 0,
+    unlinkedTradeCount: 0,
+    clusteredTradeCount: 0,
+    coverageComplete: true
+  });
+});
 
 test('paper exit evidence groups realized outcomes without inventing earlier exits', () => {
   const result = summarizePaperExitEvidence([
@@ -50,7 +83,36 @@ test('paper exit evidence groups realized outcomes without inventing earlier exi
   assert.equal(result.byReason[0].netProfit, 50);
   assert.ok(Math.abs(result.byReason[0].averageMaxFavorableExcursionPercent - 0.8) < 1e-12);
   assert.equal(result.byReason[1].reason, 'STOP_LOSS');
+  assert.deepEqual(result.signalWindowCoverage, {
+    tradeCount: 4,
+    uniqueSignalWindowCount: 0,
+    linkedTradeCount: 0,
+    signalKeyTradeCount: 0,
+    signalTimeFallbackTradeCount: 0,
+    unlinkedTradeCount: 4,
+    clusteredTradeCount: 0,
+    coverageComplete: false
+  });
   assert.equal(result.promoted, false);
+});
+
+test('completed paper trade coverage groups identical signal windows without claiming independence', () => {
+  assert.deepEqual(summarizePaperSignalWindowCoverage([
+    { signalKey: '2026-09-24T09:35:00', coin: 'KRW-BTC' },
+    { signalKey: '2026-09-24T09:35:00', coin: 'KRW-ETH' },
+    { signalKey: '2026-09-24T09:50:00', coin: 'KRW-XRP' },
+    { signalTime: '2026-09-24T10:05:00', coin: 'KRW-SOL' },
+    { coin: 'KRW-DOGE' }
+  ]), {
+    tradeCount: 5,
+    uniqueSignalWindowCount: 3,
+    linkedTradeCount: 4,
+    signalKeyTradeCount: 3,
+    signalTimeFallbackTradeCount: 1,
+    unlinkedTradeCount: 1,
+    clusteredTradeCount: 1,
+    coverageComplete: false
+  });
 });
 
 test('paper exit evidence accepts diagnostic netProfit as the selected profit field', () => {

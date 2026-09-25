@@ -132,6 +132,93 @@ export function ensureMomentumShadowInitialBalance(ledger, fallbackInitialBalanc
   return fallback;
 }
 
+function updateObservedMomentumShadowDrawdown(ledger, equity, markedAt) {
+  if (!ledger || typeof ledger !== 'object') return;
+  const markedEquity = finiteNumber(equity?.markedEquity);
+  if (markedEquity === null || markedEquity < 0) return;
+
+  const markMs = timestampOf(markedAt);
+  const markedAtIso = markMs === null ? new Date().toISOString() : new Date(markMs).toISOString();
+  const hasTelemetry = Number.isFinite(Number(ledger.observedMddSampleCount)) &&
+    ledger.observedMddSampleCount !== null &&
+    Number.isFinite(Number(ledger.observedMddPeakEquity)) &&
+    ledger.observedMddPeakEquity !== null &&
+    Number.isFinite(Number(ledger.observedMddMaxDrawdownPercent)) &&
+    ledger.observedMddMaxDrawdownPercent !== null &&
+    typeof ledger.observedMddFullSessionCoverage === 'boolean';
+  const cycleCount = Math.max(0, Math.floor(Number(ledger.cycles) || 0));
+  const startedAtMs = timestampOf(ledger.startedAt);
+  const startsAtSessionBoundary = !hasTelemetry && cycleCount <= 1 && startedAtMs !== null;
+  const initialBalance = finiteNumber(equity.initialBalance) || 0;
+
+  if (!hasTelemetry) {
+    const startingObservedPeak = startsAtSessionBoundary
+      ? Math.max(initialBalance, markedEquity)
+      : markedEquity;
+    ledger.observedMddStartedAt = startsAtSessionBoundary
+      ? new Date(startedAtMs).toISOString()
+      : markedAtIso;
+    ledger.observedMddPeakEquity = startingObservedPeak;
+    ledger.observedMddSampleCount = 0;
+    ledger.observedMddCurrentDrawdownPercent = 0;
+    ledger.observedMddMaxDrawdownPercent = 0;
+    ledger.observedMddMaxDrawdownAt = null;
+    ledger.observedMddMaxDrawdownPeakEquity = startingObservedPeak;
+    ledger.observedMddMaxDrawdownTroughEquity = startingObservedPeak;
+    ledger.observedMddFullSessionCoverage = startsAtSessionBoundary;
+    ledger.observedMddCoverageReasons = startsAtSessionBoundary
+      ? []
+      : ['telemetry_started_after_session_start'];
+  }
+
+  const coverageReasons = new Set(Array.isArray(ledger.observedMddCoverageReasons)
+    ? ledger.observedMddCoverageReasons
+    : []);
+  if (ledger.configDrift) coverageReasons.add('config_drift');
+  if (Array.isArray(ledger.interruptions) && ledger.interruptions.length > 0) {
+    coverageReasons.add('continuity_interruption');
+  }
+  if (!ledger.dataQuality) coverageReasons.add('daily_data_quality_unverified');
+  else if (ledger.dataQuality.valid !== true) coverageReasons.add('daily_data_quality_invalid');
+  if (Number(ledger.dataQualityInvalidCycles) > 0) {
+    coverageReasons.add('daily_data_quality_gap_history');
+  }
+  if (ledger.networkFetchCircuitOpen === true || Number(ledger.networkFetchCircuitBreaks) > 0) {
+    coverageReasons.add('network_fetch_circuit_break');
+  }
+  if (Array.isArray(ledger.runnerEvents) &&
+    ledger.runnerEvents.filter(event => event?.type === 'started').length > 1) {
+    coverageReasons.add('runner_restarted');
+  }
+
+  const previousObservedPeak = Number(ledger.observedMddPeakEquity);
+  const previousPeak = Math.max(
+    Number.isFinite(previousObservedPeak) && previousObservedPeak > 0
+      ? previousObservedPeak
+      : markedEquity,
+    markedEquity
+  );
+  const currentDrawdownPercent = previousPeak > 0
+    ? Math.max(0, ((previousPeak - markedEquity) / previousPeak) * 100)
+    : null;
+  const previousMaximum = Math.max(0, Number(ledger.observedMddMaxDrawdownPercent) || 0);
+  ledger.observedMddPeakEquity = previousPeak;
+  ledger.observedMddCurrentDrawdownPercent = currentDrawdownPercent;
+  ledger.observedMddSampleCount = Math.max(0, Number(ledger.observedMddSampleCount) || 0) + 1;
+  ledger.observedMddLastAt = markedAtIso;
+  ledger.observedMddSamplingIntervalMs = Math.max(0, Number(ledger.config?.pollMs) || 0) || null;
+  ledger.observedMddCoverageReasons = [...coverageReasons];
+  ledger.observedMddFullSessionCoverage = ledger.observedMddFullSessionCoverage === true &&
+    coverageReasons.size === 0;
+
+  if (currentDrawdownPercent !== null && currentDrawdownPercent > previousMaximum + 1e-12) {
+    ledger.observedMddMaxDrawdownPercent = currentDrawdownPercent;
+    ledger.observedMddMaxDrawdownAt = markedAtIso;
+    ledger.observedMddMaxDrawdownPeakEquity = previousPeak;
+    ledger.observedMddMaxDrawdownTroughEquity = markedEquity;
+  }
+}
+
 /**
  * Persist the latest equity summary fields on a ledger after marking. The
  * fields are descriptive only and never participate in entry/exit decisions.
@@ -147,6 +234,7 @@ export function updateMomentumShadowEquity(ledger, fallbackInitialBalance = 100_
     ledger.investedOpen = equity.investedOpen;
     ledger.unrealizedProfit = equity.unrealizedProfit;
     ledger.markedReturnPercent = equity.markedReturnPercent;
+    updateObservedMomentumShadowDrawdown(ledger, equity, markedAt);
   }
   return equity;
 }

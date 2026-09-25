@@ -147,7 +147,19 @@ test('momentum shadow route projects the latest quote snapshot as read-only evid
       maxSpreadPercent: 0.5,
       overall: { median: 0.08, p95: 0.92, max: 0.92 },
       markets: {
-        'KRW-BTC': { sampleCount: 5, p95: 0.03, max: 0.03, overCeiling: 0 },
+        'KRW-BTC': {
+          sampleCount: 5,
+          p95: 0.03,
+          max: 0.03,
+          overCeiling: 0,
+          topOfBookDepth: {
+            requestedSampleCount: 5,
+            bidSampleCount: 5,
+            askSampleCount: 5,
+            minimumBidNotionalKrw: 13_000,
+            minimumAskNotionalKrw: 6_000_000
+          }
+        },
         'KRW-DOGE': { sampleCount: 5, p95: 0.92, max: 0.92, overCeiling: 5 }
       }
     }
@@ -157,13 +169,33 @@ test('momentum shadow route projects the latest quote snapshot as read-only evid
       generatedAt: new Date(Date.now() - 120_000).toISOString(),
       complete: true,
       errors: 0,
-      summary: { markets: { 'KRW-DOGE': { p95: 0.91, overCeiling: 5 } } }
+      summary: { markets: { 'KRW-DOGE': {
+        p95: 0.91,
+        overCeiling: 5,
+        topOfBookDepth: {
+          requestedSampleCount: 5,
+          bidSampleCount: 5,
+          askSampleCount: 5,
+          minimumBidNotionalKrw: 900_000,
+          minimumAskNotionalKrw: 800_000
+        }
+      } } }
     }),
     JSON.stringify({
       generatedAt: new Date(Date.now() - 60_000).toISOString(),
       complete: true,
       errors: 0,
-      summary: { markets: { 'KRW-DOGE': { p95: 0.92, overCeiling: 5 } } }
+      summary: { markets: { 'KRW-DOGE': {
+        p95: 0.92,
+        overCeiling: 5,
+        topOfBookDepth: {
+          requestedSampleCount: 5,
+          bidSampleCount: 5,
+          askSampleCount: 5,
+          minimumBidNotionalKrw: 850_000,
+          minimumAskNotionalKrw: 750_000
+        }
+      } } }
     })
   ].join('\n'), 'utf8');
   const trader = createMockTrader();
@@ -193,10 +225,21 @@ test('momentum shadow route projects the latest quote snapshot as read-only evid
     assert.equal(body.quoteQualitySnapshot.errorCount, 0);
     assert.equal(body.quoteQualitySnapshot.overall.p95, 0.92);
     assert.deepEqual(body.quoteQualitySnapshot.overCeilingMarkets, ['KRW-DOGE']);
+    assert.deepEqual(body.quoteQualitySnapshot.markets['KRW-BTC'].topOfBookDepth, {
+      requestedSampleCount: 5,
+      bidSampleCount: 5,
+      askSampleCount: 5,
+      minimumBidNotionalKrw: 13_000,
+      minimumAskNotionalKrw: 6_000_000
+    });
     assert.equal(body.quoteQualitySnapshot.history.available, true);
     assert.equal(body.quoteQualitySnapshot.history.reportCount, 2);
+    assert.equal(body.quoteQualitySnapshot.history.windowLimit, 48);
+    assert.equal(body.quoteQualitySnapshot.history.minimumDepthReports, 30);
     assert.deepEqual(body.quoteQualitySnapshot.history.repeatedOverCeilingMarkets, ['KRW-DOGE']);
     assert.equal(body.quoteQualitySnapshot.history.markets['KRW-DOGE'].overCeilingReports, 2);
+    assert.equal(body.quoteQualitySnapshot.history.markets['KRW-DOGE'].topOfBookDepth.twoSidedDepthReportCount, 2);
+    assert.equal(body.quoteQualitySnapshot.history.markets['KRW-DOGE'].topOfBookDepth.status, 'INSUFFICIENT_DEPTH_REPORT_HISTORY');
     assert.equal(body.quoteQualitySnapshot.promoted, false);
     assert.equal(body.quoteQualitySnapshot.researchOnly, true);
     assert.equal(body.quoteQualitySnapshot.costCompatibility.researchOnly, true);
@@ -204,6 +247,10 @@ test('momentum shadow route projects the latest quote snapshot as read-only evid
     assert.equal(body.quoteQualitySnapshot.costCompatibility.ready, false);
     assert.equal(body.quoteQualitySnapshot.costCompatibility.reason, 'quote_compatibility_market_samples_insufficient_or_missing');
     assert.equal(body.quoteQualitySnapshot.costCompatibility.rows.length, 4);
+    assert.equal(body.quoteQualitySnapshot.allObservedMarketCostCompatibility.researchOnly, true);
+    assert.equal(body.quoteQualitySnapshot.allObservedMarketCostCompatibility.promoted, false);
+    assert.equal(body.quoteQualitySnapshot.allObservedMarketCostCompatibility.rows.length, 2);
+    assert.equal(body.quoteQualitySnapshot.allObservedMarketCostCompatibility.rows.find(row => row.market === 'KRW-DOGE').status, 'P95_ABOVE_ADVERSE_SLIPPAGE_BUDGET');
   } finally {
     dashboard.stop();
     trader.stop();
@@ -253,8 +300,10 @@ test('momentum shadow quote snapshot marks stale and future reports as not curre
 test('momentum shadow route projects marked equity as read-only research evidence', async () => {
   const fixedDir = path.join(os.tmpdir(), `coinpilot-momentum-fixed-${process.pid}-${Date.now()}`);
   const regimeDir = path.join(os.tmpdir(), `coinpilot-momentum-regime-${process.pid}-${Date.now()}`);
+  const historyFile = path.join(os.tmpdir(), `coinpilot-momentum-cost-audit-${process.pid}-${Date.now()}.jsonl`);
   fs.mkdirSync(fixedDir, { recursive: true });
   fs.mkdirSync(regimeDir, { recursive: true });
+  fs.writeFileSync(historyFile, '', 'utf8');
   const fixedConfig = {
     markets: ['KRW-BTC'],
     costPercent: 0.2,
@@ -277,6 +326,9 @@ test('momentum shadow route projects marked equity as read-only research evidenc
     ownerPid: process.pid,
     runnerState: 'running',
     cycles: 4,
+    costFloorGuardVersion: 1,
+    costFloorBlockedEntries: 2,
+    costFloorBlockedPendingEntries: 3,
     configDrift: {
       previous: previousFixedConfig,
       changedAt: '2026-09-14T00:00:00.000Z'
@@ -328,6 +380,7 @@ test('momentum shadow route projects marked equity as read-only research evidenc
   trader.config.momentumShadowFixedDir = fixedDir;
   trader.config.momentumShadowRegimeDir = regimeDir;
   trader.config.momentumShadowBenchmarkDir = regimeDir;
+  trader.config.momentumShadowQuoteHistoryFile = historyFile;
   const dashboard = new DashboardServer(trader, 0, { env: { ...process.env, DASHBOARD_TOKEN: '' } });
   const httpServer = dashboard.start();
   await new Promise(resolve => httpServer.once('listening', resolve));
@@ -339,16 +392,16 @@ test('momentum shadow route projects marked equity as read-only research evidenc
     assert.equal(body.available, true);
     assert.equal(body.researchOnly, true);
     assert.equal(body.promoted, false);
-    assert.equal(body.books[0].label, '고정 72시간');
+    assert.equal(body.books[0].label, '진입 후 72시간 유지');
     assert.equal(body.books[0].description, '현재 진입계약 · 72시간 종료');
     assert.equal(body.books[0].benchmark.configured, false);
     assert.equal(body.books[0].executionModel, 'quote_cross');
-    assert.match(body.books[0].executionModelNote, /best ask entry/);
+    assert.match(body.books[0].executionModelNote, /가장 낮은 매도 호가/);
     assert.equal(body.books[0].executionModelBlockedCount, 1);
     assert.equal(typeof body.books[0].heartbeatAgeSeconds, 'number');
-    assert.equal(body.books[0].promotionStatus, '승격 보류');
-    assert.ok(body.books[0].promotionBlockers.some(blocker => blocker.includes('청산 표본')));
-    assert.ok(body.books[0].promotionBlockers.some(blocker => blocker.includes('관찰 시작/종료')));
+    assert.equal(body.books[0].promotionStatus, '실거래 적용 보류');
+    assert.ok(body.books[0].promotionBlockers.some(blocker => blocker.includes('종료된 거래가')));
+    assert.ok(body.books[0].promotionBlockers.some(blocker => blocker.includes('관찰 시작일이나 종료일을 확인할 수 없어')));
     assert.ok(body.books[0].promotionBlockers.includes('설정 변경 이력이 있어 동일 조건 비교를 할 수 없습니다.'));
     assert.equal(body.books[0].dataQuality.valid, false);
     assert.equal(body.books[0].dataQuality.blockedChecksAttribution, 'quality_history');
@@ -358,16 +411,16 @@ test('momentum shadow route projects marked equity as read-only research evidenc
     assert.equal(body.books[0].realizedReturnPercent, 0.1);
     assert.equal(body.books[0].realizedTradeConfidence.sampleCount, 1);
     assert.equal(body.books[0].realizedTradeConfidence.lowerBoundPercent, null);
-    assert.ok(body.books[0].promotionBlockers.some(blocker => blocker.includes('일봉 데이터')));
+    assert.ok(body.books[0].promotionBlockers.some(blocker => blocker.includes('일봉 시세 기록이 불완전해 신규 진입을 막았습니다')));
     assert.ok(body.books[0].promotionBlockers.some(blocker => blocker.includes('시장 검토 차단 4회')));
-    assert.ok(body.books[0].promotionBlockers.some(blocker => blocker.includes('동일 조건의 연속 관찰을 입증할 수 없습니다.')));
+    assert.ok(body.books[0].promotionBlockers.some(blocker => blocker.includes('같은 조건으로 관찰이 이어졌는지 확인할 수 없습니다')));
     assert.equal(body.books[0].promotionBlockers.some(blocker => blocker.includes('품질 실패 0/3 cycle')), false);
-    assert.ok(body.books[0].promotionBlockers.some(blocker => blocker.includes('미청산 포지션')));
-    assert.ok(body.books[0].promotionBlockers.some(blocker => blocker.includes('시세 수집 회로')));
-    assert.ok(body.books[0].promotionBlockers.some(blocker => blocker.includes('가격 실행 모델 차단')));
+    assert.ok(body.books[0].promotionBlockers.some(blocker => blocker.includes('아직 종료되지 않은 포지션')));
+    assert.ok(body.books[0].promotionBlockers.some(blocker => blocker.includes('시세 수집이 중단되어 관찰 기록이 이어지지 않았습니다')));
+    assert.ok(body.books[0].promotionBlockers.some(blocker => blocker.includes('가격 모델이 1회 진입을 막아')));
     assert.ok(body.books[0].promotionBlockers.some(blocker => blocker.includes('관찰 세션')));
-    assert.equal(body.books[0].status, '증거 보류');
-    assert.equal(body.books[0].statusReason, '설정 변경 이력으로 A/B·승격 증거 사용 불가');
+    assert.equal(body.books[0].status, '설정 변경 · 확인 필요');
+    assert.equal(body.books[0].statusReason, '설정이 바뀌어 이 기록은 다른 전략과 비교하거나 실제 거래를 검토하는 데 사용할 수 없습니다.');
     assert.deepEqual(body.books[0].configurationDriftChanges, [{
       key: 'requestIntervalMs',
       previousRecorded: false,
@@ -385,8 +438,31 @@ test('momentum shadow route projects marked equity as read-only research evidenc
     assert.equal(body.books[0].markedEquity, 1030);
     assert.ok(Math.abs(body.books[0].markedReturnPercent - 3) < 1e-12);
     assert.equal(body.books[0].unrealizedProfit, 30);
-    assert.match(body.books[0].configurationWarning, /설정 변경/);
+    assert.match(body.books[0].configurationWarning, /설정이 바뀌어 이 기록은 같은 조건의 전략 비교나 실제 거래 판단에 사용할 수 없습니다/);
     assert.equal(body.books[0].realizedProfit, 1);
+    assert.equal(body.books[0].entryCostFloor.ready, false);
+    assert.equal(body.books[0].entryCostFloor.configuredCostPercent, 0.2);
+    assert.equal(body.books[0].entryCostFloor.requiredCostPercent, 0.3);
+    assert.equal(body.books[0].entryCostFloor.runtimeGuardActive, true);
+    assert.equal(body.books[0].entryCostFloor.blockedEntrySignals, 2);
+    assert.equal(body.books[0].entryCostFloor.blockedPendingEntries, 3);
+    assert.ok(body.books[0].promotionBlockers.some(blocker => blocker.includes('왕복 거래 비용 가정')));
+    assert.equal(body.books[0].tradeCostAudit.available, true);
+    assert.equal(body.books[0].tradeCostAudit.researchOnly, true);
+    assert.equal(body.books[0].tradeCostAudit.promoted, false);
+    assert.equal(body.books[0].tradeCostAudit.actualFillsObserved, false);
+    assert.equal(body.books[0].tradeCostAudit.closedTradeCount, 1);
+    assert.equal(body.books[0].tradeCostAudit.quoteMatchedTradeCount, 0);
+    assert.equal(body.books[0].tradeCostAudit.unmatchedSpreadCostTradeCount, 1);
+    assert.equal(body.books[0].tradeCostAudit.fullCohort.quoteSpreadAdjustedMedianScenarioNetPnlKrw, null);
+    assert.equal(body.books[0].observedDrawdown.available, false);
+    assert.equal(body.books[0].observedDrawdown.fullSessionCoverage, false);
+    assert.equal(body.books[0].observedDrawdown.maxDrawdownPercent, null);
+    assert.ok(body.books[0].promotionBlockers.some(blocker => blocker.includes('최대 낙폭 기록이 없거나 관찰 기간의 기록이 빠져')));
+    assert.equal(body.books[0].observedDrawdown.available, false);
+    assert.equal(body.books[0].observedDrawdown.fullSessionCoverage, false);
+    assert.equal(body.books[0].observedDrawdown.maxDrawdownPercent, null);
+    assert.ok(body.books[0].promotionBlockers.some(blocker => blocker.includes('최대 낙폭 기록이 없거나 관찰 기간의 기록이 빠져')));
     assert.equal(body.books[0].contract.relativeTrendMinPercent, null);
     assert.equal(body.books[0].network.circuitOpen, true);
     assert.equal(body.books[0].network.fetchErrors, 4);
@@ -472,28 +548,29 @@ test('momentum shadow route projects marked equity as read-only research evidenc
     assert.equal(body.books[1].available, false);
     assert.equal(body.books[2].available, false);
     assert.equal(body.books[3].key, 'volatility');
-    assert.equal(body.books[3].label, '변동성 제한 A/B 후보');
+    assert.equal(body.books[3].label, '변동성에 따라 비중 조절');
     assert.equal(body.books[3].available, false);
     assert.equal(body.books[4].key, 'next_open');
     assert.equal(body.books[4].available, false);
     assert.equal(body.books[5].key, 'fixed_2d');
-    assert.equal(body.books[5].label, '2일 고정 종료 A/B 후보');
+    assert.equal(body.books[5].label, '2일 뒤 청산');
     assert.equal(body.books[5].available, false);
     assert.equal(body.books[6].key, 'fixed_2d_loss_cap');
-    assert.equal(body.books[6].label, '2일·종가 손실 상한 A/B 후보');
+    assert.equal(body.books[6].label, '2일 보유 · 종가 기준 손실 제한');
     assert.equal(body.books[6].available, false);
     assert.equal(body.books[7].key, 'fixed_2d_spread');
-    assert.equal(body.books[7].label, '2일·호가 제한 A/B 후보');
+    assert.equal(body.books[7].label, '2일 보유 · 호가 제한');
     assert.equal(body.books[7].available, false);
     assert.equal(body.books[8].key, 'fixed_2d_relative');
-    assert.equal(body.books[8].label, '2일·상대추세 A/B 후보');
+    assert.equal(body.books[8].label, '2일 보유 · 비트코인 대비 강한 추세');
     assert.equal(body.books[8].available, false);
     assert.equal(body.books[9].key, 'fixed_2d_quote_cross');
-    assert.equal(body.books[9].label, '2일·호가 경계 모델 A/B 후보');
+    assert.equal(body.books[9].label, '2일 보유 · 매수·매도 호가 기준');
     assert.equal(body.books[9].available, false);
   } finally {
     dashboard.stop();
     trader.stop();
+    if (fs.existsSync(historyFile)) fs.unlinkSync(historyFile);
     fs.rmSync(fixedDir, { recursive: true, force: true });
     fs.rmSync(regimeDir, { recursive: true, force: true });
   }
@@ -577,9 +654,15 @@ test('momentum shadow route blocks a negative trade-return confidence bound', as
     assert.equal(body.books[0].realizedByMarket['KRW-BTC'].realizedProfit, -20);
     assert.equal(body.books[0].realizedTradeConfidence.sampleCount, 20);
     assert.equal(body.books[0].realizedTradeConfidence.lowerBoundPercent, -1);
-    assert.ok(body.books[0].promotionBlockers.some(blocker => blocker.includes('거래수익 95% 하한')));
-    assert.ok(body.books[0].promotionBlockers.some(blocker => blocker.includes('실현 순수익률이 0% 이하')));
-    assert.ok(body.books[0].promotionBlockers.some(blocker => blocker.includes('owner process')));
+    assert.equal(body.books[0].profitConcentration.available, false);
+    assert.equal(body.books[0].profitConcentration.winningTradeCount, 0);
+    assert.equal(body.books[0].profitConcentration.topWinnerShareOfPositivePnlPercent, null);
+    assert.equal(body.books[0].profitConcentration.promoted, false);
+    assert.equal(body.books[0].entryCostFloor.ready, true);
+    assert.equal(body.books[0].entryCostFloor.runtimeGuardActive, false);
+    assert.ok(body.books[0].promotionBlockers.some(blocker => blocker.includes('수익률을 보수적으로 계산했을 때 0%를 밑돌아')));
+    assert.ok(body.books[0].promotionBlockers.some(blocker => blocker.includes('기록된 모의 거래 수익률이 0% 이하')));
+    assert.ok(body.books[0].promotionBlockers.some(blocker => blocker.includes('관찰을 실행하는 프로그램이 실행 중 상태가 아닙니다')));
   } finally {
     dashboard.stop();
     trader.stop();
@@ -638,7 +721,7 @@ test('momentum shadow route does not treat zero realized return as paper profit'
     assert.equal(body.books[0].realizedReturnPercent, 0);
     assert.equal(body.books[0].realizedTradeConfidence.sampleCount, 20);
     assert.equal(body.books[0].realizedTradeConfidence.lowerBoundPercent, 0);
-    assert.ok(body.books[0].promotionBlockers.some(blocker => blocker.includes('실현 순수익률이 0% 이하')));
+    assert.ok(body.books[0].promotionBlockers.some(blocker => blocker.includes('기록된 모의 거래 수익률이 0% 이하')));
   } finally {
     dashboard.stop();
     trader.stop();
@@ -712,7 +795,7 @@ test('momentum shadow route reports modeled quote boundary evidence separately f
     assert.equal(body.books[0].quoteExecution.missingCount, 1);
     assert.equal(body.books[0].quoteExecution.averageEstimatedCrossingDragPercent, 0.4);
     assert.equal(body.books[0].quoteExecution.maxEstimatedCrossingDragPercent, 0.4);
-    assert.ok(body.books[0].promotionBlockers.some(blocker => blocker.includes('호가 경계')));
+    assert.ok(body.books[0].promotionBlockers.some(blocker => blocker.includes('매수·매도 호가 기록이 1/2건뿐이라 예상 거래 비용을 계산할 자료가 부족')));
     assert.match(body.books[0].quoteExecution.note, /not an observed fill/);
   } finally {
     dashboard.stop();

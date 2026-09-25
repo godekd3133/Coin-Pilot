@@ -67,6 +67,46 @@ function summarizeGroup(reason, rows) {
 }
 
 /**
+ * Count completed paper trades by their originating signal window. Multiple
+ * markets entered from one completed-candle window are correlated observations,
+ * not independent trade samples. This metric is descriptive only and does not
+ * alter the existing promotion/confidence gates.
+ */
+export function summarizePaperSignalWindowCoverage(trades = []) {
+  const rows = Array.isArray(trades) ? trades : [];
+  const windows = new Map();
+  let signalKeyTradeCount = 0;
+  let signalTimeFallbackTradeCount = 0;
+  let unlinkedTradeCount = 0;
+
+  for (const trade of rows) {
+    const signalKey = String(trade?.signalKey ?? '').trim();
+    const signalTime = String(trade?.signalTime ?? '').trim();
+    const key = signalKey || signalTime;
+    if (!key) {
+      unlinkedTradeCount += 1;
+      continue;
+    }
+    if (signalKey) signalKeyTradeCount += 1;
+    else signalTimeFallbackTradeCount += 1;
+    windows.set(key, (windows.get(key) || 0) + 1);
+  }
+
+  const clusteredTradeCount = [...windows.values()]
+    .reduce((sum, count) => sum + Math.max(0, count - 1), 0);
+  return {
+    tradeCount: rows.length,
+    uniqueSignalWindowCount: windows.size,
+    linkedTradeCount: signalKeyTradeCount + signalTimeFallbackTradeCount,
+    signalKeyTradeCount,
+    signalTimeFallbackTradeCount,
+    unlinkedTradeCount,
+    clusteredTradeCount,
+    coverageComplete: unlinkedTradeCount === 0
+  };
+}
+
+/**
  * Summarize completed paper trades by the exit path that actually closed
  * them. This is an attribution report only: it does not replay prices,
  * infer an earlier exit, or authorize a new stop/take configuration.
@@ -112,6 +152,7 @@ export function summarizePaperExitEvidence(trades = [], { profitField = 'profit'
     invalidTradeCount,
     overall,
     byReason,
+    signalWindowCoverage: summarizePaperSignalWindowCoverage(rows),
     note: 'Exit attribution is read-only paper evidence. It does not infer an earlier fill, wallet settlement, realized live P&L, or a profitable replacement exit.'
   };
 }

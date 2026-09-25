@@ -97,6 +97,93 @@ test('momentum shadow equity separates cash, open marked value, and unrealized P
   assert.equal(ledger.markedAt, '2026-09-13T00:00:00.000Z');
 });
 
+test('observed MDD tracks sampled peak-to-trough separately from the risk-stop high watermark', () => {
+  const ledger = {
+    initialBalance: 1_000,
+    balance: 1_000,
+    positions: {},
+    startedAt: '2026-09-24T00:00:00.000Z',
+    cycles: 0,
+    config: { pollMs: 300_000 },
+    dataQuality: { valid: true },
+    dataQualityInvalidCycles: 0,
+    networkFetchCircuitBreaks: 0,
+    interruptions: [],
+    runnerEvents: [{ type: 'started', at: '2026-09-24T00:00:00.000Z' }],
+    peakEquity: 1_000,
+    drawdownPercent: 0,
+    drawdownStopTriggered: false
+  };
+
+  updateMomentumShadowEquity(ledger, 1_000, '2026-09-24T00:00:00.000Z');
+  ledger.cycles = 1;
+  ledger.balance = 1_200;
+  updateMomentumShadowEquity(ledger, 1_000, '2026-09-24T00:05:00.000Z');
+  ledger.cycles = 2;
+  ledger.balance = 900;
+  updateMomentumShadowEquity(ledger, 1_000, '2026-09-24T00:10:00.000Z');
+  ledger.cycles = 3;
+  ledger.balance = 1_100;
+  updateMomentumShadowEquity(ledger, 1_000, '2026-09-24T00:15:00.000Z');
+
+  assert.equal(ledger.observedMddSampleCount, 4);
+  assert.equal(ledger.observedMddFullSessionCoverage, true);
+  assert.equal(ledger.observedMddPeakEquity, 1_200);
+  assert.ok(Math.abs(ledger.observedMddCurrentDrawdownPercent - (100 / 12)) < 1e-12);
+  assert.equal(ledger.observedMddMaxDrawdownPercent, 25);
+  assert.equal(ledger.observedMddMaxDrawdownAt, '2026-09-24T00:10:00.000Z');
+  assert.equal(ledger.observedMddMaxDrawdownPeakEquity, 1_200);
+  assert.equal(ledger.observedMddMaxDrawdownTroughEquity, 900);
+  assert.equal(ledger.observedMddSamplingIntervalMs, 300_000);
+  assert.equal(ledger.peakEquity, 1_000);
+  assert.equal(ledger.drawdownPercent, 0);
+  assert.equal(ledger.drawdownStopTriggered, false);
+});
+
+test('legacy ledger starts partial MDD observation instead of reconstructing a false session maximum', () => {
+  const ledger = {
+    initialBalance: 1_000,
+    balance: 900,
+    positions: {},
+    startedAt: '2026-09-20T00:00:00.000Z',
+    cycles: 200,
+    config: { pollMs: 300_000 },
+    dataQuality: { valid: true },
+    dataQualityInvalidCycles: 0,
+    networkFetchCircuitBreaks: 0,
+    interruptions: []
+  };
+
+  updateMomentumShadowEquity(ledger, 1_000, '2026-09-24T00:00:00.000Z');
+
+  assert.equal(ledger.observedMddSampleCount, 1);
+  assert.equal(ledger.observedMddFullSessionCoverage, false);
+  assert.equal(ledger.observedMddCoverageReasons.includes('telemetry_started_after_session_start'), true);
+  assert.equal(ledger.observedMddPeakEquity, 900);
+  assert.equal(ledger.observedMddMaxDrawdownPercent, 0);
+});
+
+test('observed MDD coverage stays incomplete after interruption or invalid daily data', () => {
+  const ledger = {
+    initialBalance: 1_000,
+    balance: 950,
+    positions: {},
+    startedAt: '2026-09-24T00:00:00.000Z',
+    cycles: 0,
+    dataQuality: { valid: false },
+    dataQualityInvalidCycles: 1,
+    networkFetchCircuitBreaks: 1,
+    interruptions: [{ reason: 'heartbeat_gap' }]
+  };
+
+  updateMomentumShadowEquity(ledger, 1_000, '2026-09-24T00:00:00.000Z');
+
+  assert.equal(ledger.observedMddFullSessionCoverage, false);
+  assert.ok(ledger.observedMddCoverageReasons.includes('daily_data_quality_invalid'));
+  assert.ok(ledger.observedMddCoverageReasons.includes('continuity_interruption'));
+  assert.ok(ledger.observedMddCoverageReasons.includes('network_fetch_circuit_break'));
+});
+
 test('momentum shadow initial balance is backfilled without changing an existing value', () => {
   const ledger = {};
   assert.equal(ensureMomentumShadowInitialBalance(ledger, 1234), 1234);
