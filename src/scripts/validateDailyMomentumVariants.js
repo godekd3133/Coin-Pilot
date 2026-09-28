@@ -53,6 +53,7 @@ function main() {
       costPercent: number(process.env.DAILY_MOMENTUM_COST_PERCENT, 0.2),
       positionFraction: number(process.env.DAILY_MOMENTUM_POSITION_FRACTION, 0.25),
       maxPositions: Math.max(1, Math.floor(number(process.env.DAILY_MOMENTUM_MAX_POSITIONS, 4))),
+      entryWindowEndTimestamp: process.env.DAILY_MOMENTUM_ENTRY_WINDOW_END_TIMESTAMP?.trim() || null,
       benchmarkExposureMinPercent: process.env.DAILY_MOMENTUM_BENCHMARK_EXPOSURE_MIN_PERCENT === undefined
         ? null
         : number(process.env.DAILY_MOMENTUM_BENCHMARK_EXPOSURE_MIN_PERCENT, null),
@@ -66,7 +67,12 @@ function main() {
     inputFile,
     markets,
     promoted: false,
-    note: '이 sweep는 동일한 완료 일봉과 비용 가정의 research-only 비교입니다. 어떤 variant도 runtime/live gate를 변경하지 않습니다.'
+    note: [
+      '이 sweep는 동일한 완료 일봉과 비용 가정의 research-only 비교입니다. 어떤 variant도 runtime/live gate를 변경하지 않습니다.',
+      process.env.DAILY_MOMENTUM_ENTRY_WINDOW_END_TIMESTAMP
+        ? `신규 진입은 ${process.env.DAILY_MOMENTUM_ENTRY_WINDOW_END_TIMESTAMP}까지 허용하고 이후에는 기존 포지션의 청산만 추적합니다.`
+        : null
+    ].filter(Boolean).join(' ')
   };
   fs.mkdirSync(path.dirname(outputFile), { recursive: true });
   fs.writeFileSync(outputFile, JSON.stringify(output, null, 2));

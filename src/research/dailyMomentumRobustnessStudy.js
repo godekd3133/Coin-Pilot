@@ -357,9 +357,12 @@ function summarizeVariant(variant, criteria) {
       Number(segment.unknownBoundaryEntryCount) === 0 &&
       Number(segment.unknownBoundaryExitCount) === 0
     );
+  const maturityTailDiagnosticOnly = typeof variant.config?.entryWindowEndTimestamp === 'string' &&
+    variant.config.entryWindowEndTimestamp.trim().length > 0;
   const eligibilityBlockers = [];
   if (!allSegmentsAvailable) eligibilityBlockers.push('segment_data_unavailable');
   if (!noUnknownBoundary) eligibilityBlockers.push('unknown_boundary_position');
+  if (maturityTailDiagnosticOnly) eligibilityBlockers.push('maturity_tail_not_independent_holdout');
   if (finite(fullMetrics.totalReturnPercent, -Infinity) < criteria.minimumFullReturnPercent) {
     eligibilityBlockers.push('full_return_below_floor');
   }
@@ -384,6 +387,7 @@ function summarizeVariant(variant, criteria) {
     allSegmentsAvailable,
     allSegmentsNonNegative: variant.allSegmentsNonNegative === true,
     noUnknownBoundary,
+    maturityTailDiagnosticOnly,
     worstSegmentReturnPercent,
     positiveSegmentCount,
     segmentCount: segmentReturns.length,
@@ -434,6 +438,7 @@ export function evaluateDailyMomentumRobustness(rawCandlesByMarket, options = {}
           full: {
             available: continuous.full.available,
           metrics: continuous.full.metrics,
+          entryWindowBlockedSignalCount: continuous.full.entryWindowBlockedSignalCount,
           unknownBoundaryPositionCount: continuous.full.unknownBoundaryPositionCount,
           unknownBoundaryEntryCount: continuous.full.unknownBoundaryEntryCount,
           unknownBoundaryExitCount: continuous.full.unknownBoundaryExitCount,

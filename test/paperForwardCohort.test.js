@@ -5,6 +5,22 @@ import os from 'node:os';
 import path from 'node:path';
 import { summarizePaperForwardCohort } from '../src/research/paperForwardCohort.js';
 
+function modeledStrictTrade(profit, ledgerKey) {
+  return {
+    action: 'CLOSE',
+    type: 'CLOSE',
+    coin: 'KRW-BTC',
+    entryPrice: 100,
+    exitPrice: 100,
+    amount: 1,
+    profit,
+    ledgerKey,
+    paperExecutionCostModel: 'strict_paper_cost_model_v1',
+    paperExecutionSlippageRate: 0.001,
+    paperExecutionTradingFeeRate: 0.0005
+  };
+}
+
 test('paper forward cohort separates strict and diagnostic trades without promotion', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'coinpilot-paper-cohort-'));
   try {
@@ -16,8 +32,8 @@ test('paper forward cohort separates strict and diagnostic trades without promot
       startedAt: '2026-01-01T00:00:00.000Z',
       endedAt: '2026-01-01T01:00:00.000Z',
       configSnapshotComplete: true,
-      configSnapshot: { signalProfile: 'rsi_rebound', stopLossPercent: 1.2 },
-      strictTrades: [{ profit: 100 }, { profit: -40 }],
+      configSnapshot: { signalProfile: 'rsi_rebound', stopLossPercent: 1.2, slippage: 0.001, tradingFee: 0.0005 },
+      strictTrades: [modeledStrictTrade(100, 'a-close-1'), modeledStrictTrade(-40, 'a-close-2')],
       strictOpenPositions: {},
       shadow: { trades: [{ profit: 999 }], openPositions: {} },
       stopReason: 'stopped_cleanly',
@@ -26,7 +42,7 @@ test('paper forward cohort separates strict and diagnostic trades without promot
     fs.writeFileSync(path.join(root, '.paper-forward-b', 'paper_validation.json'), JSON.stringify({
       configSnapshotComplete: true,
       configSnapshot: { signalProfile: 'bb_reclaim', stopLossPercent: 0.8 },
-      strictTrades: [{ profit: -20 }],
+      strictTrades: [modeledStrictTrade(-20, 'b-close-1')],
       looseShadow: { trades: [{ profit: 1 }] },
       strictOpenPositions: {},
       stopReason: 'risk_data_gap'
@@ -35,8 +51,8 @@ test('paper forward cohort separates strict and diagnostic trades without promot
       startedAt: '2026-01-02T00:00:00.000Z',
       endedAt: '2026-01-02T01:00:00.000Z',
       configSnapshotComplete: true,
-      configSnapshot: { signalProfile: 'rsi_rebound', stopLossPercent: 1.2 },
-      strictTrades: [{ profit: 50 }],
+      configSnapshot: { signalProfile: 'rsi_rebound', stopLossPercent: 1.2, slippage: 0.001, tradingFee: 0.0005 },
+      strictTrades: [modeledStrictTrade(50, 'c-close-1')],
       strictOpenPositions: {},
       shadow: { trades: [], openPositions: {} },
       stopReason: 'stopped_cleanly',
@@ -47,7 +63,7 @@ test('paper forward cohort separates strict and diagnostic trades without promot
       endedAt: '2026-01-03T01:00:00.000Z',
       configSnapshotComplete: true,
       configSnapshot: { signalProfile: 'bb_reclaim', stopLossPercent: 0.8 },
-      strictTrades: [{ profit: -10 }],
+      strictTrades: [modeledStrictTrade(-10, 'd-close-1')],
       strictOpenPositions: {},
       shadow: { trades: [], openPositions: {} },
       stopReason: 'risk_data_gap',
@@ -75,6 +91,8 @@ test('paper forward cohort separates strict and diagnostic trades without promot
     assert.equal(report.profitabilityEvidenceConfigCount, 0);
     assert.equal(report.profitabilityEvidenceProfitAggregation, 'none');
     assert.equal(report.profitabilityEvidenceProfit, null);
+    assert.equal(report.profitabilityEvidenceProfitBasis, 'per_trade_cost_audit_adjusted_net_pnl');
+    assert.equal(report.actualFillsObserved, false);
     assert.deepEqual(report.eligibleStrictConfigGroups.map(group => ({
       configFingerprint: group.configFingerprint,
       sessionCount: group.sessionCount,
@@ -108,8 +126,8 @@ test('paper forward cohort does not aggregate eligible profit across configs', (
         startedAt: '2026-01-01T00:00:00.000Z',
         endedAt: '2026-01-01T01:00:00.000Z',
         configSnapshotComplete: true,
-        configSnapshot,
-        strictTrades: [{ profit }],
+        configSnapshot: { ...configSnapshot, slippage: 0.001, tradingFee: 0.0005 },
+        strictTrades: [modeledStrictTrade(profit, `${name}-close-1`)],
         strictOpenPositions: {},
         shadow: { trades: [], openPositions: {} },
         stopReason: 'stopped_cleanly',
@@ -141,9 +159,9 @@ test('paper forward cohort requires each config to meet its own observation and 
       startedAt: '2026-01-01T00:00:00.000Z',
       endedAt: '2026-01-08T00:00:00.000Z',
       configSnapshotComplete: true,
-      configSnapshot: { signalProfile: 'rsi_rebound', stopLossPercent: 1.2 },
+      configSnapshot: { signalProfile: 'rsi_rebound', stopLossPercent: 1.2, slippage: 0.001, tradingFee: 0.0005 },
       thresholds: { minDays: 7, minTrades: 20 },
-      strictTrades: Array.from({ length: 20 }, () => ({ profit: 2 })),
+      strictTrades: Array.from({ length: 20 }, (_, index) => modeledStrictTrade(2, `short-${index}`)),
       strictOpenPositions: {},
       shadow: { trades: [], openPositions: {} },
       stopReason: 'stopped_cleanly',
@@ -172,9 +190,9 @@ test('paper forward cohort reads the runtime shadow ledger shape and excludes di
       startedAt: '2026-01-01T00:00:00.000Z',
       endedAt: '2026-01-08T00:00:00.000Z',
       configSnapshotComplete: true,
-      configSnapshot: { signalProfile: 'rsi_rebound', stopLossPercent: 1.2 },
+      configSnapshot: { signalProfile: 'rsi_rebound', stopLossPercent: 1.2, slippage: 0.001, tradingFee: 0.0005 },
       thresholds: { minDays: 7, minTrades: 20 },
-      strictTrades: Array.from({ length: 20 }, () => ({ profit: 2 })),
+      strictTrades: Array.from({ length: 20 }, (_, index) => modeledStrictTrade(2, `runtime-${index}`)),
       strictOpenPositions: [],
       shadow: {
         positions: { 'KRW-XRP': { coin: 'KRW-XRP' } },
@@ -218,9 +236,9 @@ test('paper forward cohort fingerprints the same config independent of object ke
         startedAt: '2026-01-01T00:00:00.000Z',
         endedAt: '2026-01-08T00:00:00.000Z',
         configSnapshotComplete: true,
-        configSnapshot,
+        configSnapshot: { ...configSnapshot, slippage: 0.001, tradingFee: 0.0005 },
         thresholds: { minDays: 7, minTrades: 1 },
-        strictTrades: [{ profit }],
+        strictTrades: [modeledStrictTrade(profit, `${name}-close-1`)],
         strictOpenPositions: [],
         shadow: { closedTrades: [], positions: {} },
         looseShadow: { closedTrades: [], positions: {} },
@@ -259,6 +277,76 @@ test('paper forward cohort never treats an active ledger as an ended evidence se
     const report = summarizePaperForwardCohort({ rootDir: root });
     assert.equal(report.eligibleStrictSessionCount, 0);
     assert.equal(report.strictCohortExclusionCounts.session_still_active, 1);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('paper forward profitability uses slippage-adjusted legacy strict trades, not the raw fee-only ledger P&L', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'coinpilot-paper-cohort-cost-stress-'));
+  try {
+    fs.mkdirSync(path.join(root, '.paper-forward-legacy-cost'));
+    fs.writeFileSync(path.join(root, '.paper-forward-legacy-cost', 'paper_validation.json'), JSON.stringify({
+      active: false,
+      startedAt: '2026-01-01T00:00:00.000Z',
+      endedAt: '2026-01-08T00:00:00.000Z',
+      configSnapshotComplete: true,
+      configSnapshot: { signalProfile: 'rsi_rebound', slippage: 0.005, tradingFee: 0.0005 },
+      thresholds: { minDays: 7, minTrades: 1 },
+      strictTrades: [{
+        action: 'CLOSE',
+        coin: 'KRW-BTC',
+        entryPrice: 100,
+        exitPrice: 101,
+        amount: 1,
+        profit: 0.8
+      }],
+      strictOpenPositions: [],
+      shadow: { closedTrades: [], positions: {} },
+      looseShadow: { closedTrades: [], positions: {} },
+      stopReason: 'stopped_cleanly',
+      analysisDataHealth: { continuityEligible: true }
+    }));
+
+    const report = summarizePaperForwardCohort({ rootDir: root });
+    const session = report.sessions[0];
+    assert.equal(session.strictCohortEligible, true);
+    assert.equal(session.strictProfit, 0.8);
+    assert.ok(Math.abs(session.strictCostAdjustedProfit - (-0.205)) < 1e-12);
+    assert.equal(session.profitabilityEvidenceEligible, true);
+    assert.ok(Math.abs(report.eligibleStrictProfit - (-0.205)) < 1e-12);
+    assert.ok(Math.abs(report.profitabilityEvidenceProfit - (-0.205)) < 1e-12);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('paper forward cohort blocks profitability when a strict close cannot be cost-audited', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'coinpilot-paper-cohort-cost-missing-'));
+  try {
+    fs.mkdirSync(path.join(root, '.paper-forward-missing-cost'));
+    fs.writeFileSync(path.join(root, '.paper-forward-missing-cost', 'paper_validation.json'), JSON.stringify({
+      active: false,
+      startedAt: '2026-01-01T00:00:00.000Z',
+      endedAt: '2026-01-08T00:00:00.000Z',
+      configSnapshotComplete: true,
+      configSnapshot: { signalProfile: 'rsi_rebound' },
+      thresholds: { minDays: 7, minTrades: 1 },
+      strictTrades: [{ action: 'CLOSE', profit: 500 }],
+      strictOpenPositions: [],
+      shadow: { closedTrades: [], positions: {} },
+      looseShadow: { closedTrades: [], positions: {} },
+      stopReason: 'stopped_cleanly',
+      analysisDataHealth: { continuityEligible: true }
+    }));
+
+    const report = summarizePaperForwardCohort({ rootDir: root });
+    const session = report.sessions[0];
+    assert.equal(session.strictCohortEligible, false);
+    assert.equal(session.strictCohortExclusionReason, 'strict_execution_cost_unverified');
+    assert.equal(session.strictCostAdjustedProfit, null);
+    assert.equal(report.eligibleStrictSessionCount, 0);
+    assert.equal(report.profitabilityEvidenceSessionCount, 0);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

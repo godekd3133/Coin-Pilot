@@ -1,0 +1,42 @@
+- generic [ref=e79]:
+  - main [ref=e80]:
+    - region [ref=e254]:
+      - generic [ref=e255]:
+        - paragraph [ref=e256]: APP & CONNECTION
+        - heading "설정" [level=1] [ref=e257]
+        - paragraph [ref=e258]: 화면 연결과 서버 상태를 확인합니다.
+      - generic [ref=e259]:
+        - generic [ref=e261]:
+          - paragraph [ref=e262]: SERVER
+          - heading "연결된 서버" [level=2] [ref=e263]
+        - article [ref=e264]:
+          - generic [ref=e265]:
+            - generic [ref=e266]: 주소
+            - strong [ref=e267]: staging.example.invalid
+          - generic [ref=e268]:
+            - generic [ref=e269]: 서버 상태
+            - strong [ref=e270]: 연결됨
+          - generic [ref=e271]:
+            - generic [ref=e272]: 자동매매
+            - strong [ref=e273]: 실행 중
+          - generic [ref=e274]:
+            - generic [ref=e275]: 운용 방식
+            - strong [ref=e276]: 모의 운용
+        - button "서버 주소 변경" [ref=e277]
+        - button "저장된 서버 토큰 삭제" [ref=e278]
+      - generic [ref=e279]:
+        - generic [ref=e281]:
+          - paragraph [ref=e282]: ABOUT
+          - heading "CoinPilot" [level=2] [ref=e283]
+        - article [ref=e284]:
+          - paragraph [ref=e285]: 앱을 닫아도 자동매매 엔진은 서버에서 계속 동작합니다. iOS 앱은 계좌를 확인하는 화면이며 백그라운드에서 거래 엔진을 실행하지 않습니다.
+      - paragraph [ref=e286]: 개인 API 키와 자동매매 설정은 서버에 보관됩니다.
+  - navigation "주 메뉴" [ref=e137]:
+    - button "홈" [ref=e138]:
+      - generic [aria-hidden] [ref=e139]: ⌂
+    - button "자산" [ref=e141]:
+      - generic [aria-hidden] [ref=e142]: ◫
+    - button "기록" [ref=e144]:
+      - generic [aria-hidden] [ref=e145]: ↗
+    - button "설정" [active] [ref=e147]:
+      - generic [aria-hidden] [ref=e148]: •••

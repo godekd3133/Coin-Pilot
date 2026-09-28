@@ -441,8 +441,18 @@ class TradingStrategy {
 
     // 수수료 계산 (매수/매도 각 0.05%)
     const FEE_RATE = 0.0005;
-    const buyFee = this.currentPosition.entryPrice * this.currentPosition.amount * FEE_RATE;
-    const sellFee = price * this.currentPosition.amount * FEE_RATE;
+    const configuredFeeRate = Number(options.tradingFeeRate);
+    const feeRate = Number.isFinite(configuredFeeRate) && configuredFeeRate >= 0 && configuredFeeRate < 1
+      ? configuredFeeRate
+      : FEE_RATE;
+    const defaultBuyFee = this.currentPosition.entryPrice * this.currentPosition.amount * feeRate;
+    const providedBuyFee = options.buyFee === null || options.buyFee === undefined
+      ? NaN
+      : Number(options.buyFee);
+    const buyFee = Number.isFinite(providedBuyFee) && providedBuyFee >= 0
+      ? providedBuyFee
+      : defaultBuyFee;
+    const sellFee = price * this.currentPosition.amount * feeRate;
     const totalFee = buyFee + sellFee;
 
     // 실제 수익 = (매도가 - 매수가) * 수량 - 총수수료

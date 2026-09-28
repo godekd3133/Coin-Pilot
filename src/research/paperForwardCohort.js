@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { summarizePaperStrictTradeCostAudit } from './paperStrictTradeCostAudit.js';
 
 function fingerprint(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
@@ -63,13 +64,15 @@ function groupRowsByConfig(rows = []) {
       winningTrades: 0,
       losingTrades: 0,
       profit: 0,
+      recordedProfit: 0,
       directories: []
     };
     group.sessionCount += 1;
     group.tradeCount += row.strictTradeCount;
-    group.winningTrades += row.strictWinningTrades;
-    group.losingTrades += row.strictTradeCount - row.strictWinningTrades;
-    group.profit += row.strictProfit;
+    group.winningTrades += row.strictCostAdjustedWinningTrades;
+    group.losingTrades += row.strictTradeCount - row.strictCostAdjustedWinningTrades;
+    group.profit += row.strictCostAdjustedProfit;
+    group.recordedProfit += row.strictProfit;
     group.directories.push(row.directoryName);
     groups[key] = group;
     return groups;
@@ -124,7 +127,8 @@ function strictCohortEligibility({
   trades,
   strictOpenPositionCount,
   diagnosticOpenPositionCount,
-  configFingerprint
+  configFingerprint,
+  strictCostAuditEligible
 } = {}) {
   if (ledger?.configSnapshotComplete !== true) return { eligible: false, reason: 'config_snapshot_incomplete' };
   if (!configFingerprint) return { eligible: false, reason: 'config_snapshot_invalid' };
@@ -141,6 +145,7 @@ function strictCohortEligibility({
     .includes(ledger.stopReason)) {
     return { eligible: false, reason: `terminal_${ledger.stopReason}` };
   }
+  if (strictCostAuditEligible !== true) return { eligible: false, reason: 'strict_execution_cost_unverified' };
   return { eligible: true, reason: null };
 }
 
@@ -184,6 +189,8 @@ export function summarizePaperForwardCohort({ rootDir = '.', prefix = '.paper-fo
       profitabilityEvidenceConfigCount: 0,
       profitabilityEvidenceProfitAggregation: 'none',
       profitabilityEvidenceProfit: null,
+      profitabilityEvidenceProfitBasis: 'per_trade_cost_audit_adjusted_net_pnl',
+      actualFillsObserved: false,
       profitabilityEvidenceConfigGroups: [],
       profitabilityEvidenceExclusionCounts: {},
       note: '서로 다른 forward session을 자동 승격하거나 하나의 수익성 표본으로 합산하지 않습니다.'
@@ -200,6 +207,16 @@ export function summarizePaperForwardCohort({ rootDir = '.', prefix = '.paper-fo
     }
     const trades = tradeRows(ledger);
     const strictProfit = trades.strict.reduce((sum, trade) => sum + (Number(trade?.profit) || 0), 0);
+    const strictCostAudit = summarizePaperStrictTradeCostAudit(ledger);
+    const strictCostAuditEligible = strictCostAudit.available === true &&
+      strictCostAudit.evaluatedTradeCount === trades.strict.length;
+    const costAdjustedTrades = strictCostAuditEligible ? strictCostAudit.trades : [];
+    const strictCostAdjustedProfit = strictCostAuditEligible && costAdjustedTrades.length > 0
+      ? strictCostAudit.costStressedNetPnlKrw
+      : null;
+    const strictCostAdjustedWinningTrades = strictCostAuditEligible
+      ? costAdjustedTrades.filter(trade => trade.costStressedNetPnlKrw > 0).length
+      : null;
     const strictOpenPositionCount = Object.keys(ledger.strictOpenPositions || {}).length;
     const diagnosticOpenPositionCount = openPositionCount(ledger.shadow) +
       openPositionCount(ledger.looseShadow) +
@@ -212,7 +229,8 @@ export function summarizePaperForwardCohort({ rootDir = '.', prefix = '.paper-fo
       trades,
       strictOpenPositionCount,
       diagnosticOpenPositionCount,
-      configFingerprint
+      configFingerprint,
+      strictCostAuditEligible
     });
     const profitabilityEvidence = evaluateProfitabilityEvidence({
       strictCohortEligible: strictCohort.eligible,
@@ -234,6 +252,12 @@ export function summarizePaperForwardCohort({ rootDir = '.', prefix = '.paper-fo
       diagnosticTradeCount: trades.diagnostic.length,
       strictProfit,
       strictWinningTrades: trades.strict.filter(trade => Number(trade?.profit) > 0).length,
+      strictCostAuditAvailable: strictCostAuditEligible,
+      strictCostAuditReason: strictCostAudit.reason,
+      strictCostAdjustedProfit,
+      strictCostAdjustedWinningTrades,
+      strictCostAdjustedProfitEligible: strictCostAuditEligible && strictCostAdjustedProfit !== null,
+      strictCostUnverifiedTradeCount: trades.strict.length - strictCostAudit.evaluatedTradeCount,
       strictOpenPositionCount,
       diagnosticOpenPositionCount,
       shadowOpenPositionCount: openPositionCount(ledger.shadow),
@@ -262,6 +286,7 @@ export function summarizePaperForwardCohort({ rootDir = '.', prefix = '.paper-fo
   const strictTradeCount = rows.reduce((sum, row) => sum + row.strictTradeCount, 0);
   const diagnosticTradeCount = rows.reduce((sum, row) => sum + row.diagnosticTradeCount, 0);
   const totalStrictProfit = rows.reduce((sum, row) => sum + row.strictProfit, 0);
+  const strictCostUnverifiedTradeCount = rows.reduce((sum, row) => sum + row.strictCostUnverifiedTradeCount, 0);
   const strictWinningTrades = rows.reduce((sum, row) => sum + row.strictWinningTrades, 0);
   const eligibleStrictRows = rows.filter(row => row.strictCohortEligible === true);
   const strictCohortExclusionCounts = {};
@@ -294,6 +319,7 @@ export function summarizePaperForwardCohort({ rootDir = '.', prefix = '.paper-fo
     diagnosticTradeCount,
     strictWinningTrades,
     strictLosingTrades: strictTradeCount - strictWinningTrades,
+    strictCostUnverifiedTradeCount,
     strictWinRate: strictTradeCount > 0 ? strictWinningTrades / strictTradeCount : null,
     totalStrictProfit,
     totalStrictProfitComparable: false,
@@ -314,6 +340,8 @@ export function summarizePaperForwardCohort({ rootDir = '.', prefix = '.paper-fo
     profitabilityEvidenceConfigCount: profitabilityEvidenceSummary.configCount,
     profitabilityEvidenceProfitAggregation: profitabilityEvidenceSummary.aggregation,
     profitabilityEvidenceProfit: profitabilityEvidenceSummary.profit,
+    profitabilityEvidenceProfitBasis: 'per_trade_cost_audit_adjusted_net_pnl',
+    actualFillsObserved: false,
     profitabilityEvidenceConfigGroups,
     profitabilityEvidenceExclusionCounts,
     strictCohortExclusionCounts,

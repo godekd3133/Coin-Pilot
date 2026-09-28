@@ -56,6 +56,79 @@ test('daily momentum portfolio applies breadth, cost, and fixed-hold exits witho
   assert.equal(result.dataQuality.valid, true);
 });
 
+test('maturity-tail cutoff blocks later close entries while existing positions can exit', () => {
+  const prices = [100, 101, 102, 103, 104, 105, 106, 107];
+  const result = simulateDailyMomentumPortfolio({
+    'KRW-BTC': daily(prices),
+    'KRW-ETH': daily(prices)
+  }, {
+    ...DEFAULT_DAILY_MOMENTUM_CONFIG,
+    initialBalance: 1_000,
+    trendLookbackDays: 2,
+    maxHoldDays: 2,
+    positionFraction: 0.5,
+    breadthMin: 2,
+    maxPositions: 1,
+    mode: 'fixed',
+    costPercent: 0,
+    entryWindowEndTimestamp: '2026-01-04T00:00:00Z'
+  });
+
+  assert.equal(result.available, true);
+  assert.equal(result.config.entryWindowEndTimestamp, '2026-01-04T00:00:00.000Z');
+  assert.equal(result.trades.length, 1);
+  assert.equal(result.trades[0].entryTimestamp, '2026-01-03T00:00:00.000Z');
+  assert.equal(result.trades[0].exitTimestamp, '2026-01-05T00:00:00.000Z');
+  assert.equal(result.openPositions.length, 0);
+  assert.equal(result.unknownBoundaryPositionCount, 0);
+  assert.ok(result.entryWindowBlockedSignalCount > 0);
+});
+
+test('maturity-tail cutoff applies to next-open fill time rather than signal time', () => {
+  const prices = [100, 101, 102, 103, 104, 105, 106];
+  const result = simulateDailyMomentumPortfolio({
+    'KRW-BTC': dailyWithOpens(prices, prices),
+    'KRW-ETH': dailyWithOpens(prices, prices)
+  }, {
+    ...DEFAULT_DAILY_MOMENTUM_CONFIG,
+    initialBalance: 1_000,
+    trendLookbackDays: 2,
+    maxHoldDays: 1,
+    positionFraction: 0.5,
+    breadthMin: 2,
+    maxPositions: 1,
+    mode: 'fixed',
+    entryExecution: 'next_open',
+    exitExecution: 'next_open',
+    costPercent: 0,
+    entryWindowEndTimestamp: '2026-01-04T00:00:00Z'
+  });
+
+  assert.equal(result.available, true);
+  assert.equal(result.trades.length, 1);
+  assert.equal(result.trades[0].entryTimestamp, '2026-01-04T00:00:00.000Z');
+  assert.equal(result.trades[0].exitTimestamp, '2026-01-05T00:00:00.000Z');
+  assert.equal(result.openPositions.length, 0);
+  assert.equal(result.unknownBoundaryPositionCount, 0);
+  assert.ok(result.entryWindowBlockedSignalCount > 0);
+});
+
+test('invalid maturity-tail entry cutoff fails closed', () => {
+  const prices = [100, 101, 102, 103, 104];
+  const result = simulateDailyMomentumPortfolio({
+    'KRW-BTC': daily(prices),
+    'KRW-ETH': daily(prices)
+  }, {
+    ...DEFAULT_DAILY_MOMENTUM_CONFIG,
+    trendLookbackDays: 2,
+    entryWindowEndTimestamp: 'not-a-timestamp'
+  });
+
+  assert.equal(result.available, false);
+  assert.equal(result.dataQuality.reason, 'entry_window_end_timestamp_invalid');
+  assert.equal(result.entryCount, 0);
+});
+
 test('daily momentum next-open entry execution uses the following candle open', () => {
   const candles = {
     'KRW-BTC': dailyWithOpens([100, 101, 102, 103], [100, 101, 102, 110]),

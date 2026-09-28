@@ -1,0 +1,37 @@
+- generic [ref=e79]:
+  - main [ref=e80]:
+    - region [ref=e230]:
+      - generic [ref=e231]:
+        - paragraph [ref=e232]: ACCOUNT ACTIVITY
+        - heading "활동 기록" [level=1] [ref=e233]
+        - paragraph [ref=e234]: 서버에 저장된 최근 거래 기록을 확인합니다.
+      - generic [ref=e235]:
+        - generic [ref=e236]: 최근 업데이트
+        - strong [ref=e237]: 9. 28. 오후 06:29
+      - generic [ref=e238]:
+        - article [ref=e239]:
+          - generic [ref=e240]: −
+          - generic [ref=e241]:
+            - strong [ref=e242]: SOL · 매도 기록
+            - generic [ref=e243]: 9. 28. 오후 06:27
+          - strong [ref=e244]:
+            - text: +218원
+            - generic [ref=e245]: 기록 손익
+        - article [ref=e246]:
+          - generic [ref=e247]: ＋
+          - generic [ref=e248]:
+            - strong [ref=e249]: BTC · 매수 기록
+            - generic [ref=e250]: 9. 28. 오후 06:23
+          - strong [ref=e251]:
+            - text: 123,000원
+            - generic [ref=e252]: 기록 금액
+      - paragraph [ref=e253]: 이 화면은 서버의 거래 기록을 표시합니다. 거래소 체결·정산 내역을 대신하지 않습니다.
+  - navigation "주 메뉴" [ref=e137]:
+    - button "홈" [ref=e138]:
+      - generic [aria-hidden] [ref=e139]: ⌂
+    - button "자산" [ref=e141]:
+      - generic [aria-hidden] [ref=e142]: ◫
+    - button "기록" [active] [ref=e144]:
+      - generic [aria-hidden] [ref=e145]: ↗
+    - button "설정" [ref=e147]:
+      - generic [aria-hidden] [ref=e148]: •••

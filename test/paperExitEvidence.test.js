@@ -126,6 +126,35 @@ test('paper exit evidence accepts diagnostic netProfit as the selected profit fi
   assert.deepEqual(result.byReason.map(row => row.reason), ['TAKE_PROFIT', 'MAX_HOLD_TIME']);
 });
 
+test('momentum shadow exits derive paper KRW P&L from entry notional and recorded return percent', () => {
+  const result = summarizePaperExitEvidence([
+    {
+      exit: 'MAX_HOLD',
+      profitPercent: 10,
+      entry: { size: 2_500, entryTimeMs: Date.parse('2026-09-14T12:00:00Z') },
+      exitTs: '2026-09-15T00:00:00',
+      signalKey: '2026-09-14T00:00:00'
+    },
+    {
+      exit: 'REGIME_OFF',
+      profitPercent: -4,
+      entry: { size: 10_000, entryTimeMs: Date.parse('2026-09-15T00:00:00Z') },
+      exitTs: '2026-09-15T00:00:00',
+      signalKey: '2026-09-15T00:00:00'
+    }
+  ], { allowPositionReturnDerivation: true, candleUnitMinutes: 1_440 });
+
+  assert.equal(result.validTradeCount, 2);
+  assert.equal(result.overall.netProfit, -150);
+  assert.equal(result.overall.averageHoldMinutes, 30 * 60);
+  assert.deepEqual(result.profitBasisCounts, {
+    entry_size_times_paper_profit_percent: 2
+  });
+  assert.equal(result.actualFillsObserved, false);
+  assert.equal(result.promoted, false);
+  assert.deepEqual(result.byReason.map(row => row.reason), ['MAX_HOLD', 'REGIME_OFF']);
+});
+
 test('paper exit evidence CLI accepts an output directory and writes a read-only report', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'coinpilot-paper-exit-cli-'));
   const ledgerDir = path.join(root, 'ledger');
@@ -152,6 +181,47 @@ test('paper exit evidence CLI accepts an output directory and writes a read-only
     assert.equal(report.strict.overall.netProfit, 12);
     assert.equal(report.shadow.overall.netProfit, -5);
     assert.equal(report.promoted, false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('paper exit evidence CLI reads daily momentum ledger trades without changing the ledger', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'coinpilot-momentum-exit-cli-'));
+  const ledgerFile = path.join(root, 'ledger.json');
+  const outputFile = path.join(root, 'exit-evidence.json');
+  const ledger = {
+    runnerState: 'running',
+    configDrift: { changedAt: '2026-09-15T00:00:00Z' },
+    config: { candleUnitMinutes: 1_440 },
+    trades: [
+      {
+        exit: 'MAX_HOLD',
+        profitPercent: 2,
+        entry: { size: 50_000, entryTimeMs: Date.parse('2026-09-10T12:00:00Z') },
+        exitTs: '2026-09-11T00:00:00'
+      }
+    ],
+    positions: { 'KRW-BTC': { entryPrice: 100, size: 50_000 } }
+  };
+  fs.writeFileSync(ledgerFile, JSON.stringify(ledger), 'utf8');
+
+  try {
+    const result = spawnSync(process.execPath, [
+      'src/scripts/analyzePaperExitEvidence.js',
+      ledgerFile,
+      outputFile
+    ], { encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /momentum shadow 1/);
+    const report = JSON.parse(fs.readFileSync(outputFile, 'utf8'));
+    assert.equal(report.active, true);
+    assert.equal(report.configDriftDetected, true);
+    assert.equal(report.momentumShadow.overall.netProfit, 1_000);
+    assert.equal(report.momentumShadow.overall.averageHoldMinutes, 36 * 60);
+    assert.equal(report.momentumShadow.actualFillsObserved, false);
+    assert.equal(report.promoted, false);
+    assert.deepEqual(JSON.parse(fs.readFileSync(ledgerFile, 'utf8')), ledger);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

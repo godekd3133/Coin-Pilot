@@ -1,0 +1,47 @@
+- generic [ref=e79]:
+  - main [ref=e80]:
+    - region [ref=e193]:
+      - generic [ref=e194]:
+        - paragraph [ref=e195]: YOUR PORTFOLIO
+        - heading "보유 자산" [level=1] [ref=e196]
+        - paragraph [ref=e197]: 서버에서 받은 현재 계좌와 보유 내역입니다.
+      - article [ref=e198]:
+        - generic [ref=e199]: 총 평가 자산
+        - strong [ref=e200]: 1,000,218원
+        - generic [ref=e201]: 모의 운용 계좌
+      - generic [ref=e202]:
+        - generic [ref=e204]:
+          - paragraph [ref=e205]: CASH
+          - heading "원화 잔액" [level=2] [ref=e206]
+        - article [ref=e207]:
+          - generic [ref=e208]: ₩
+          - generic [ref=e209]:
+            - strong [ref=e210]: 원화
+            - generic [ref=e211]: KRW
+          - strong [ref=e212]: 5,000,000원
+      - generic [ref=e213]:
+        - generic [ref=e214]:
+          - generic [ref=e215]:
+            - paragraph [ref=e216]: OPEN POSITIONS
+            - heading "코인 보유" [level=2] [ref=e217]
+          - generic [ref=e218]: 1개
+        - article [ref=e220]:
+          - generic [ref=e221]: B
+          - generic [ref=e222]:
+            - strong [ref=e223]: BTC
+            - generic [ref=e224]: 보유 수량 0.00123456
+          - strong [ref=e225]:
+            - text: 123,000원
+            - generic [ref=e226]:
+              - generic [ref=e227]: +2,300원
+              - generic [ref=e228]: +1.91%
+      - paragraph [ref=e229]: 평가액과 손익은 서버가 제공한 값입니다. 일부 관찰 계좌에서는 평가 정보를 제공하지 않을 수 있습니다.
+  - navigation "주 메뉴" [ref=e137]:
+    - button "홈" [ref=e138]:
+      - generic [aria-hidden] [ref=e139]: ⌂
+    - button "자산" [active] [ref=e141]:
+      - generic [aria-hidden] [ref=e142]: ◫
+    - button "기록" [ref=e144]:
+      - generic [aria-hidden] [ref=e145]: ↗
+    - button "설정" [ref=e147]:
+      - generic [aria-hidden] [ref=e148]: •••

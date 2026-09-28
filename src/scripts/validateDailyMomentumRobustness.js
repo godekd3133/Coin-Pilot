@@ -68,6 +68,7 @@ const maxEntryGapPercent = process.env.DAILY_MOMENTUM_ROBUSTNESS_MAX_ENTRY_GAP_P
 const entryExecution = process.env.DAILY_MOMENTUM_ROBUSTNESS_ENTRY_EXECUTION === 'next_open'
   ? 'next_open'
   : null;
+const entryWindowEndTimestamp = process.env.DAILY_MOMENTUM_ENTRY_WINDOW_END_TIMESTAMP?.trim() || null;
 const exitExecution = process.env.DAILY_MOMENTUM_ROBUSTNESS_EXIT_EXECUTION === 'next_open'
   ? 'next_open'
   : null;
@@ -135,9 +136,10 @@ function main() {
     segmentMode: process.env.DAILY_MOMENTUM_ROBUSTNESS_SEGMENT_MODE === 'independent'
       ? 'independent'
       : DEFAULT_DAILY_MOMENTUM_ROBUSTNESS_CONFIG.segmentMode,
-    ...((entryExecution || exitExecution || costPercent !== null) ? {
+    ...((entryExecution || entryWindowEndTimestamp || exitExecution || costPercent !== null) ? {
       baseConfig: {
         ...(entryExecution ? { entryExecution } : {}),
+        ...(entryWindowEndTimestamp ? { entryWindowEndTimestamp } : {}),
         ...(exitExecution ? { exitExecution } : {}),
         ...(costPercent !== null ? { costPercent } : {})
       }
@@ -174,7 +176,12 @@ function main() {
     inputFile,
     markets,
     promoted: false,
-    note: `${report.note} 이 파일은 동일한 완료 일봉과 비용 가정의 historical 비교 결과입니다.`
+    note: [
+      `${report.note} 이 파일은 동일한 완료 일봉과 비용 가정의 historical 비교 결과입니다.`,
+      entryWindowEndTimestamp
+        ? `신규 진입은 ${entryWindowEndTimestamp}까지 허용하고 이후에는 기존 포지션의 청산만 추적합니다.`
+        : null
+    ].filter(Boolean).join(' ')
   };
   fs.mkdirSync(path.dirname(outputFile), { recursive: true });
   fs.writeFileSync(outputFile, JSON.stringify(output, null, 2));

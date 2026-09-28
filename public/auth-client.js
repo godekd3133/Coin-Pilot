@@ -115,6 +115,14 @@
     window.setTimeout(() => gate.querySelector('input')?.focus(), 50);
   }
 
+  function showAuthenticationFailure(message) {
+    const hadSavedToken = Boolean(getToken());
+    if (hadSavedToken) clearToken();
+    // A first connection has no token to reject. Keep the prompt, but reserve
+    // the red error state for a token that was actually sent and refused.
+    showLogin(hadSavedToken ? message : '');
+  }
+
   // ------------------------------------------------------------- fetch patch
   window.fetch = async function patchedFetch(input, init = {}) {
     const url = typeof input === 'string' ? input : (input && input.url) || '';
@@ -128,8 +136,7 @@
     }
     const response = await rawFetch(input, { ...init, headers });
     if (onApi && response.status === 401) {
-      clearToken();
-      showLogin('인증이 필요합니다. 대시보드 토큰을 다시 입력하세요.');
+      showAuthenticationFailure('인증에 실패했습니다. 서버 토큰을 확인하고 다시 입력하세요.');
     }
     return response;
   };
@@ -151,7 +158,7 @@
         : rawIo(url, { ...opts, auth: { ...(opts.auth || {}), token: getToken() } });
       socket.on('connect_error', error => {
         if (/unauthor/i.test(String(error && error.message))) {
-          showLogin('실시간 연결 인증에 실패했습니다. 토큰을 확인하세요.');
+          showAuthenticationFailure('실시간 연결 인증에 실패했습니다. 서버 토큰을 확인하세요.');
         }
       });
       return socket;

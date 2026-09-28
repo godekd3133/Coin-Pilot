@@ -48,7 +48,7 @@
     "ai:smoke": "node src/scripts/runAiAdvisorSmoke.js",
     "ai:replay": "node src/scripts/runAiHistoricalReplay.js",
     "ai:robustness": "node src/scripts/runAiReplayRobustness.js",
-    "test": "NODE_ENV=test node --test",
+    "test": "NODE_ENV=test node --test && npm --prefix mobile run test:auto-connect",
     "lint": "eslint ."
   },
   "keywords": [

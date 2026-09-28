@@ -1684,10 +1684,10 @@
             profitEl.textContent = totalProfit === null ? '미기록' : formatSignedWon(totalProfit);
             profitEl.className = totalProfit === null ? '' : classForValue(totalProfit);
             if (profitEl.previousElementSibling) {
-                profitEl.previousElementSibling.textContent = observer ? '평가 손익' : '누적 손익';
+                profitEl.previousElementSibling.textContent = observer ? '기록 평가손익' : '누적 손익';
             }
         }
-        setText('pilot-portfolio-profit-label', observer ? '평가 손익' : '누적 손익');
+        setText('pilot-portfolio-profit-label', observer ? '기록 평가손익' : '누적 손익');
         setText('pilot-portfolio-cash', observer ? '기록 없음' : formatWon(summary.krwBalance || state.account?.krwBalance));
         setText('pilot-portfolio-count', `${observer ? positionCount : summary.totalHoldings ?? positionCount}개`);
         const summaryTarget = byId('pilot-account-summary');
@@ -1697,7 +1697,7 @@
                     ['기록 기준', 'forward paper ledger'],
                     ['기준 자산', paperBaseline === null ? '미기록' : formatWon(paperBaseline)],
                     ['마지막 평가 시각', paper.lastSnapshotAt ? formatDateTime(paper.lastSnapshotAt) : '미기록'],
-                    ['실현 손익', hasFiniteValue(paper.realizedProfit) ? formatSignedWon(paper.realizedProfit) : '미기록'],
+                    ['수수료 반영 기록', hasFiniteValue(paper.realizedProfit) ? formatSignedWon(paper.realizedProfit) : '미기록'],
                     ['현금 잔액', '기록 없음']
                 ]
                 : [['모드', state.actualMode === 'LIVE' ? '실거래' : '모의투자'], ['현금 잔액', formatWon(state.account?.krwBalance)], ['총 자산 평가액', formatWon(state.account?.totalAssets)], ['시작 자산', formatWon(state.account?.initialSeedMoney || state.pnl?.initialSeedMoney)], ['누적 수익률', formatPercent(state.pnl?.profitPercent)]];
@@ -1883,6 +1883,7 @@
                     : ` · 고유 신호 시점 ${number(signalWindowCoverage.uniqueSignalWindowCount)}개${number(signalWindowCoverage.clusteredTradeCount) > 0 ? ` · 같은 시점 추가 ${number(signalWindowCoverage.clusteredTradeCount)}건` : ''}`
             : '';
         const riskMonitor = status.riskMonitor || {};
+        const recordedProfitLabel = readOnly ? '수수료 반영 기록' : '실현 손익';
         const watchdogTelemetryAvailable = number(riskMonitor.watchdogTelemetryVersion) >= 1 &&
             Number.isFinite(Number(riskMonitor.maxWatchdogTickGapMs));
         const watchdogGapMs = Number(riskMonitor.maxWatchdogTickGapMs);
@@ -1905,8 +1906,41 @@
         const openPositionMarkNote = openCount > 0
             ? '<div class="pilot-inline-note pilot-paper-mark-note">평가 자산·수익률에는 미청산 포지션 평가손익이 포함됩니다. 실현 손익은 청산된 거래만 반영합니다.</div>'
             : '';
+        const costAudit = status.strictExecutionCostAudit;
+        const costAuditFullyApplied = costAudit?.slippageAppliedToStrictPaperLedger === true;
+        const costAuditHeadline = costAuditFullyApplied
+            ? `설정 미끄러짐 반영 기록 ${formatSignedWon(costAudit?.recordedNetPnlKrw)}`
+            : `수수료 반영 기록 ${formatSignedWon(costAudit?.recordedNetPnlKrw)} · 미끄러짐 미반영 ${number(costAudit?.unmodeledExecutionTradeCount)}건의 양방향 ${number(costAudit?.configuredSlippagePercent).toFixed(2)}% 민감도 ${formatSignedWon(costAudit?.costStressedNetPnlKrw)}`;
+        const costAuditExplanation = costAuditFullyApplied
+            ? '설정 미끄러짐은 paper 기록에 반영되어 있습니다. 실제 체결·호가 교차 비용은 확인되지 않았습니다.'
+            : '기록 수량 기준의 단순 민감도이며 실제 체결·호가 교차 비용은 확인되지 않았습니다.';
+        const breakEvenSlippageRate = Number(costAudit?.breakEvenAdditionalSlippagePerSidePercent);
+        const breakEvenSlippageLine = costAudit?.breakEvenAdditionalSlippagePerSidePercent !== null &&
+            costAudit?.breakEvenAdditionalSlippagePerSidePercent !== undefined &&
+            Number.isFinite(breakEvenSlippageRate)
+            ? `<br>기록 손익 소진 임계 추가 미끄러짐 ${breakEvenSlippageRate.toFixed(3)}%/side`
+            : '';
+        const strictCostAuditNote = readOnly && closedTradeCount > 0
+            ? costAudit?.available === true && number(costAudit.evaluatedTradeCount) > 0
+                ? `<div class="pilot-inline-note pilot-paper-mark-note"><span><strong>${costAuditHeadline}</strong><br>${costAuditExplanation}${breakEvenSlippageLine}</span></div>`
+                : '<div class="pilot-inline-note pilot-paper-mark-note"><span>비용 민감도를 계산할 자료가 충분하지 않습니다. 기록 손익만으로 수익성을 판단하지 않습니다.</span></div>'
+            : '';
+        const forwardCohort = state.momentumShadow?.paperForwardCohort;
+        const cohortEligibleSessions = number(forwardCohort?.profitabilityEvidenceSessionCount);
+        const cohortConfigCount = number(forwardCohort?.profitabilityEvidenceConfigCount);
+        const cohortNetPnl = hasFiniteValue(forwardCohort?.profitabilityEvidenceProfit)
+            ? formatSignedWon(forwardCohort.profitabilityEvidenceProfit)
+            : cohortEligibleSessions === 0 ? '표본 기준 충족 없음'
+                : cohortConfigCount > 1 ? '설정별 분리 · 합산 보류' : '손익 판정 보류';
+        const cohortFillLabel = forwardCohort?.actualFillsObserved === true ? '관측됨' : '미관측';
+        const cohortUnverifiedTrades = hasFiniteValue(forwardCohort?.strictCostUnverifiedTradeCount)
+            ? `${number(forwardCohort.strictCostUnverifiedTradeCount)}건`
+            : '확인 불가';
+        const profitabilityCohortNote = readOnly && forwardCohort
+            ? `<div class="pilot-inline-note pilot-paper-mark-note"><span><strong>전체 모의투자 기록 ${number(forwardCohort.sessionCount)}세션 · strict 청산 ${number(forwardCohort.strictTradeCount)}건</strong><br>비용 조정 기준 충족 ${cohortEligibleSessions}세션 · 손익 ${cohortNetPnl}<br>실제 체결 ${cohortFillLabel} · 비용 산출 불가 ${cohortUnverifiedTrades}</span></div>`
+            : '';
         setText('pilot-paper-meta', `마지막 갱신 ${formatDateTime(status.updatedAt || status.heartbeatAt || status.lastHeartbeat)}`);
-        target.innerHTML = `<div class="pilot-paper-status"><div class="pilot-paper-status-head"><strong class="pilot-paper-state ${running ? '' : 'is-stopped'}">${stateLabel}</strong><span class="pilot-status-pill ${hasProblem ? 'is-danger' : running ? '' : 'is-warning'}">${hasProblem ? '상태 확인 필요' : running ? '진행 중' : '중지'}</span></div><div class="pilot-paper-meta">평가 자산 ${formatWon(status.currentAssets)} · 평가 수익률 ${formatPercent(status.returnPercent)}<br>실현 손익 ${formatSignedWon(status.realizedProfit)} · 청산 ${closedTradeCount}회${signalWindowCoverageText} · 보유 ${openCount}개<br>위험 점검 사이 최대 간격 ${watchdogGapLabel}</div>${openPositionMarkNote}${signalFunnelMarkup}${hasProblem ? '<div class="pilot-paper-orphan-alert">연결이나 시세에 문제가 있어 새 매매를 중지했습니다.</div>' : ''}${configChanged ? '<div class="pilot-inline-note">설정이 바뀌어 이 모의투자 기록은 현재 설정과 일치하지 않습니다.</div>' : ''}</div>`;
+        target.innerHTML = `<div class="pilot-paper-status"><div class="pilot-paper-status-head"><strong class="pilot-paper-state ${running ? '' : 'is-stopped'}">${stateLabel}</strong><span class="pilot-status-pill ${hasProblem ? 'is-danger' : running ? '' : 'is-warning'}">${hasProblem ? '상태 확인 필요' : running ? '진행 중' : '중지'}</span></div><div class="pilot-paper-meta">평가 자산 ${formatWon(status.currentAssets)} · 평가 수익률 ${formatPercent(status.returnPercent)}<br>${recordedProfitLabel} ${formatSignedWon(status.realizedProfit)} · 청산 ${closedTradeCount}회${signalWindowCoverageText} · 보유 ${openCount}개<br>위험 점검 사이 최대 간격 ${watchdogGapLabel}</div>${openPositionMarkNote}${strictCostAuditNote}${profitabilityCohortNote}${signalFunnelMarkup}${hasProblem ? '<div class="pilot-paper-orphan-alert">연결이나 시세에 문제가 있어 새 매매를 중지했습니다.</div>' : ''}${configChanged ? '<div class="pilot-inline-note">설정이 바뀌어 이 모의투자 기록은 현재 설정과 일치하지 않습니다.</div>' : ''}</div>`;
         syncObserverControls();
     }
 

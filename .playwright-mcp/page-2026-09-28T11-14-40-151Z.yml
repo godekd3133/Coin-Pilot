@@ -1,0 +1,191 @@
+- generic [active] [ref=f1e1]:
+  - generic [ref=f1e3]:
+    - complementary [ref=f1e4]:
+      - text: 
+      - navigation "주 메뉴" [ref=f1e5]:
+        - button "대시보드" [ref=f1e6] [cursor=pointer]:
+          - generic [aria-hidden] [ref=f1e7]: 
+        - button "거래" [ref=f1e9] [cursor=pointer]:
+          - generic [aria-hidden] [ref=f1e10]: 
+        - button "포트폴리오" [ref=f1e12] [cursor=pointer]:
+          - generic [aria-hidden] [ref=f1e13]: 
+        - button "시장 현황" [ref=f1e15] [cursor=pointer]:
+          - generic [aria-hidden] [ref=f1e16]: 
+        - button "전략 분석" [ref=f1e18] [cursor=pointer]:
+          - generic [aria-hidden] [ref=f1e19]: 
+        - button "AI 자문" [ref=f1e21] [cursor=pointer]:
+          - generic [aria-hidden] [ref=f1e22]: 
+        - button "뉴스" [ref=f1e24] [cursor=pointer]:
+          - generic [aria-hidden] [ref=f1e25]: 
+        - button "설정" [ref=f1e27] [cursor=pointer]:
+          - generic [aria-hidden] [ref=f1e28]: 
+        - button "주문 전 점검" [ref=f1e30] [cursor=pointer]:
+          - generic [aria-hidden] [ref=f1e31]: 
+      - text: 
+    - generic [ref=f1e33]:
+      - banner [ref=f1e34]:
+        - group "투자 모드" [ref=f1e35]:
+          - button "모의투자" [pressed] [ref=f1e36] [cursor=pointer]:
+            - generic [aria-hidden] [ref=f1e37]: 
+          - button "실거래" [ref=f1e39] [cursor=pointer]:
+            - generic [aria-hidden] [ref=f1e40]: 
+        - generic [ref=f1e42]:
+          - strong [ref=f1e43]: 연결 확인 중
+          - generic [ref=f1e44]: 서버 모드와 계좌, 선택한 시장의 시세를 확인할 때까지 주문할 수 없습니다.
+        - generic [ref=f1e45]:
+          - generic [ref=f1e46]: 연결됨
+          - generic [ref=f1e49]: 09. 28. 오후 08:14
+      - generic [ref=f1e50]:
+        - generic [ref=f1e51]:
+          - generic [aria-hidden] [ref=f1e52]: 
+          - generic [ref=f1e53]:
+            - strong [ref=f1e54]: 연결 확인 중 · 주문 잠금
+            - generic [ref=f1e55]: 서버 모드와 계좌, 선택한 시장의 시세를 확인할 때까지 주문할 수 없습니다.
+        - generic [ref=f1e56]:
+          - generic [ref=f1e57]: 설치 가능
+          - button "앱으로 설치" [ref=f1e58] [cursor=pointer]
+          - button "주문 전 점검 보기" [ref=f1e59] [cursor=pointer]:
+            - text: 주문 전 점검 보기
+            - generic [aria-hidden] [ref=f1e60]: 
+      - text:  
+      - main [ref=f1e61]:
+        - text:                                
+        - generic [ref=f1e62]:
+          - generic [ref=f1e63]:
+            - heading "실제 주문 전 점검" [level=1] [ref=f1e65]
+            - button "새로고침" [ref=f1e67] [cursor=pointer]:
+              - generic [aria-hidden] [ref=f1e68]: 
+              - text: 새로고침
+          - generic [ref=f1e69]:
+            - generic [ref=f1e70]:
+              - generic [ref=f1e71]:
+                - heading "전략 점검" [level=2] [ref=f1e72]
+                - paragraph [ref=f1e73]: 점검 작성 시각 확인 불가
+              - generic [ref=f1e74]: 보류
+            - generic [ref=f1e76]:
+              - generic [ref=f1e77]:
+                - generic [aria-hidden] [ref=f1e78]: "!"
+                - generic [ref=f1e79]: 실제 주문 조건을 충족하지 못했습니다.
+              - list [ref=f1e81]:
+                - listitem [ref=f1e82]: 전략 점검 결과가 없습니다.
+              - group [ref=f1e83]:
+                - generic "점검 결과와 실제 주문 조건 작성 시점과 적용 여부" [ref=f1e84] [cursor=pointer]:
+                  - generic [ref=f1e85]: 점검 결과와 실제 주문 조건
+                  - generic [ref=f1e86]: 작성 시점과 적용 여부
+          - generic [ref=f1e88]:
+            - generic [ref=f1e89]:
+              - generic [ref=f1e90]:
+                - heading "호가와 거래 비용" [level=2] [ref=f1e91]
+                - paragraph [ref=f1e92]: 2026. 09. 28. 오후 08:07 기준 · 자료를 받은 지 7분 전
+              - generic [ref=f1e93]: 최근 자료 확인됨
+            - generic [ref=f1e94]:
+              - generic [ref=f1e95]:
+                - generic [ref=f1e96]:
+                  - generic [ref=f1e97]: 최근 호가 자료
+                  - strong [ref=f1e98]: 5/5 · 12마켓
+                  - generic [ref=f1e99]: 최신 · 오류 0건
+                - generic [ref=f1e100]:
+                  - generic [ref=f1e101]: 전체 호가 차이
+                  - strong [ref=f1e102]: 상위 5% 0.791%
+                  - generic [ref=f1e103]: 최대 0.791%
+                - generic [ref=f1e104]:
+                  - generic [ref=f1e105]: 왕복 거래 비용 가정
+                  - strong [ref=f1e106]: 0.300%
+                  - generic [ref=f1e107]: 수수료 0.050% (매수·매도 각각) · 예상 가격 차이 0.100% (각각) · 왕복 비용 0.300% · 비교 기준 0.200%
+                - generic [ref=f1e108]:
+                  - generic [ref=f1e109]: 매수·매도 호가 잔량
+                  - strong [ref=f1e110]: 48/30건
+                  - generic [ref=f1e111]: 비율은 최소 30건 수집 후 표시
+                - generic [ref=f1e112]:
+                  - generic [ref=f1e113]: 자료 수집 상태
+                  - strong [ref=f1e114]: 수집 주기 10분 · 최근 자료 기준 15분
+                  - generic [ref=f1e115]: 48/48건 정상 수집 · 수집 간격 상위 5% 10분 · 기준 초과 0회
+              - generic [ref=f1e116]:
+                - generic [ref=f1e117]:
+                  - strong [ref=f1e118]: 모의투자 후보 시작 전 점검 · 시작 조건 미충족
+                  - generic [ref=f1e119]: 왕복 비용 가정 0.300% · 모델 기준 0.300%
+                - generic [ref=f1e120]: 같은 조건의 비교 작업 2개가 이미 실행 중입니다.
+              - group [ref=f1e121]:
+                - generic "모의투자 후보별 시작 전 점검 0/9개 조건 통과 · 참고용" [ref=f1e122] [cursor=pointer]:
+                  - generic [ref=f1e123]: 모의투자 후보별 시작 전 점검
+                  - generic [ref=f1e124]: 0/9개 조건 통과 · 참고용
+              - group [ref=f1e125]:
+                - generic "시장별 호가 차이와 잔량 12개 · 참고용" [ref=f1e126] [cursor=pointer]:
+                  - generic [ref=f1e127]: 시장별 호가 차이와 잔량
+                  - generic [ref=f1e128]: 12개 · 참고용
+              - paragraph [ref=f1e129]: 호가 차이와 1단계 잔량만으로 실제 체결이나 실현 손익을 알 수 없습니다. 계산에는 수수료와 예상 체결 가격 차이를 별도로 적용합니다. 이 자료만으로 주문을 허용하거나 막지 않습니다.
+          - generic [ref=f1e131]:
+            - generic [ref=f1e132]:
+              - generic [ref=f1e133]:
+                - heading "모의투자 실행" [level=2] [ref=f1e134]
+                - paragraph [ref=f1e135]: 마지막 갱신 2026. 09. 28. 오후 08:14
+              - generic [ref=f1e136]:
+                - button "모의투자 시작" [disabled] [ref=f1e137]
+                - button "모의투자 중지" [disabled] [ref=f1e138]
+            - generic [ref=f1e140]:
+              - generic [ref=f1e141]:
+                - strong [ref=f1e142]: 모의투자 실행 중
+                - generic [ref=f1e143]: 진행 중
+              - generic [ref=f1e144]: 평가 자산 10,000,267원 · 평가 수익률 +0.00%수수료 반영 기록 +268원 · 청산 3회 · 고유 신호 시점 3개 · 보유 0개위험 점검 사이 최대 간격 1.0초
+              - generic [ref=f1e146]:
+                - strong [ref=f1e147]: 수수료 반영 기록 +268원 · 미끄러짐 미반영 3건의 양방향 0.10% 민감도 -933원
+                - text: 기록 수량 기준의 단순 민감도이며 실제 체결·호가 교차 비용은 확인되지 않았습니다.기록 손익 소진 임계 추가 미끄러짐 0.022%/side
+              - generic [ref=f1e149]:
+                - strong [ref=f1e150]: 전체 모의투자 기록 94세션 · strict 청산 50건
+                - text: 비용 조정 기준 충족 0세션 · 손익 표본 기준 충족 없음실제 체결 미관측 · 비용 산출 불가 2건
+              - group "완료된 캔들별 매수 조건 점검" [ref=f1e151]:
+                - generic [ref=f1e152]:
+                  - strong [ref=f1e153]: 신호 흐름
+                  - generic [ref=f1e154]: 완료된 캔들 기준 집계 · 참고용
+                - generic [ref=f1e155]:
+                  - generic [ref=f1e156]:
+                    - generic [ref=f1e157]: 분석 완료
+                    - strong [ref=f1e158]: "1828"
+                  - generic [ref=f1e159]:
+                    - generic [ref=f1e160]: 과매도
+                    - strong [ref=f1e161]: "264"
+                  - generic [ref=f1e162]:
+                    - generic [ref=f1e163]: 양봉 확인
+                    - strong [ref=f1e164]: "69"
+                  - generic [ref=f1e165]:
+                    - generic [ref=f1e166]: 반등
+                    - strong [ref=f1e167]: "6"
+                  - generic [ref=f1e168]:
+                    - generic [ref=f1e169]: 확정
+                    - strong [ref=f1e170]: "3"
+                - paragraph [ref=f1e171]: 완료된 캔들 중 각 조건에 해당한 횟수입니다. 거래 횟수나 수익을 뜻하지 않으며, 이 수치에 따라 조건을 자동으로 낮추지 않습니다.
+      - contentinfo [ref=f1e172]:
+        - strong [ref=f1e174]: CoinPilot
+  - generic:
+    - generic: 코인명
+    - generic:
+      - generic: 평가금액
+      - generic: 0원
+    - generic:
+      - generic: 비중
+      - generic: 0%
+  - generic:
+    - generic: 2025-01-01 12:00:00
+    - generic:
+      - generic: 총 자산
+      - generic: 0원
+    - generic:
+      - generic: 시작대비
+      - generic: 0%
+  - generic:
+    - generic: 2025-01-01 12:00:00
+    - generic:
+      - generic: 시가
+      - generic: 0원
+    - generic:
+      - generic: 고가
+      - generic: 0원
+    - generic:
+      - generic: 저가
+      - generic: 0원
+    - generic:
+      - generic: 종가
+      - generic: 0원
+    - generic:
+      - generic: 변동률
+      - generic: 0%

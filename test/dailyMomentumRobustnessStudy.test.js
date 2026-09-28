@@ -210,6 +210,45 @@ test('robustness report keeps historical eligibility separate from promotion', (
   assert.match(report.promotionReason, /research_only/);
 });
 
+test('maturity-tail returns stay diagnostic and cannot create a shadow shortlist', () => {
+  const candles = {
+    'KRW-BTC': daily([100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111]),
+    'KRW-ETH': daily([100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111])
+  };
+  const report = evaluateDailyMomentumRobustness(candles, {
+    segmentCount: 3,
+    baseConfig: {
+      entryWindowEndTimestamp: '2026-01-06T00:00:00Z'
+    },
+    variants: [{
+      name: 'maturity-tail-test',
+      config: {
+        mode: 'fixed',
+        trendLookbackDays: 2,
+        trendMinPercent: 0,
+        breadthMin: 2,
+        maxHoldDays: 2,
+        positionFraction: 0.25,
+        maxPositions: 1,
+        benchmarkMarket: null,
+        exitOnBenchmarkOff: false
+      }
+    }],
+    minimumFullReturnPercent: -100,
+    maximumDrawdownPercent: 100,
+    minimumWorstSegmentReturnPercent: -100,
+    minimumTradeCount: 1
+  });
+
+  assert.equal(report.variants[0].maturityTailDiagnosticOnly, true);
+  assert.equal(report.variants[0].noUnknownBoundary, true);
+  assert.ok(report.variants[0].eligibilityBlockers.includes('maturity_tail_not_independent_holdout'));
+  assert.equal(report.variants[0].shadowEligible, false);
+  assert.equal(report.variants[0].status, 'HOLD');
+  assert.equal(report.shortlist.length, 0);
+  assert.equal(report.shadowCandidateCount, 0);
+});
+
 test('continuous robustness segments carry internal positions and only flag the real final boundary', () => {
   const candles = {
     'KRW-BTC': daily([100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111]),

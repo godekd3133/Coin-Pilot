@@ -23,7 +23,7 @@ function resolveLedgerFile(input) {
 
 function main() {
   if (!ledgerInput) {
-    console.error('usage: node src/scripts/analyzePaperExitEvidence.js <paper_validation.json> [output.json]');
+    console.error('usage: node src/scripts/analyzePaperExitEvidence.js <paper_validation.json|momentum-shadow/ledger.json> [output.json]');
     process.exitCode = 2;
     return;
   }
@@ -43,19 +43,26 @@ function main() {
     generatedAt: new Date().toISOString(),
     researchOnly: true,
     promoted: false,
+    actualFillsObserved: false,
     ledgerFile: path.basename(path.resolve(ledgerFile)),
     sessionId: ledger?.sessionId || null,
-    active: ledger?.active === true,
+    active: ledger?.active === true || ledger?.runnerState === 'running',
+    configDriftDetected: Boolean(ledger?.configDrift),
     strict: summarizePaperExitEvidence(ledger?.strictTrades, { profitField: 'profit' }),
+    momentumShadow: summarizePaperExitEvidence(ledger?.trades, {
+      profitField: 'profit',
+      allowPositionReturnDerivation: true,
+      candleUnitMinutes: ledger?.config?.candleUnitMinutes
+    }),
     shadow: summarizePaperExitEvidence(ledger?.shadow?.closedTrades, { profitField: 'netProfit' }),
     looseShadow: summarizePaperExitEvidence(ledger?.looseShadow?.closedTrades, { profitField: 'netProfit' }),
-    note: 'This report reads completed paper trades only. It does not modify the ledger, start/stop an owner, query a private API, place an order, or authorize promotion.'
+    note: 'This report reads completed paper trades only. Daily momentum returns are converted from entry notional times the recorded paper return percent. It does not modify the ledger, start/stop an owner, query a private API, place an order, or authorize promotion.'
   };
 
   const resolvedOutput = path.resolve(outputFile);
   fs.mkdirSync(path.dirname(resolvedOutput), { recursive: true });
   fs.writeFileSync(resolvedOutput, JSON.stringify(report, null, 2), 'utf8');
-  console.log(`paper exit evidence: strict ${report.strict.validTradeCount} trades · shadow ${report.shadow.validTradeCount} · loose ${report.looseShadow.validTradeCount}`);
+  console.log(`paper exit evidence: strict ${report.strict.validTradeCount} trades · momentum shadow ${report.momentumShadow.validTradeCount} · shadow ${report.shadow.validTradeCount} · loose ${report.looseShadow.validTradeCount}`);
   console.log(`saved: ${resolvedOutput}`);
   console.log('판정: exit attribution diagnostic only · live promotion 불가');
 }

@@ -7,6 +7,7 @@ const error = document.querySelector('#form-error');
 const saved = document.querySelector('#saved-server');
 const savedHost = document.querySelector('#saved-host');
 const forgetButton = document.querySelector('#forget-server');
+const nativeApi = window.webkit?.messageHandlers?.coinpilotApi;
 
 function savedUrl() {
   try {
@@ -92,3 +93,14 @@ window.addEventListener('coinpilot-native-server-config', event => {
 });
 
 renderSavedServer(savedUrl());
+
+if (nativeApi) {
+  nativeApi.postMessage({ action: 'server-config' }).then(result => {
+    if (!result?.ok || result.hasSavedServer !== true || typeof result.url !== 'string') return;
+    try {
+      renderSavedServer(normalizeDashboardUrl(result.url));
+    } catch {
+      renderSavedServer('');
+    }
+  }).catch(() => {});
+}

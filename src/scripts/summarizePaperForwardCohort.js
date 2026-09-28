@@ -29,6 +29,7 @@ console.log(`integrity eligible strict cohort: ${report.eligibleStrictSessionCou
 console.log(`strict cohort 제외 사유 (세션별 첫 차단, 상호 배타): ${formatCounts(report.strictCohortExclusionCounts)}`);
 console.log(`수익성 근거 미충족 사유 (중복 집계): ${formatCounts(report.profitabilityEvidenceExclusionCounts)}`);
 console.log(`세션 종료 사유: ${formatCounts(report.stopReasonCounts)}`);
+console.log(`수익성 손익 기준: ${report.profitabilityEvidenceProfitBasis} · 실제 체결 관측 ${report.actualFillsObserved === true ? '있음' : '없음'} · 비용 미검증 청산 ${report.strictCostUnverifiedTradeCount || 0}건`);
 const evidenceProfit = report.profitabilityEvidenceProfitAggregation === 'single_config'
   ? `${Number(report.profitabilityEvidenceProfit || 0).toFixed(2)} KRW`
   : `합산 보류 (${report.profitabilityEvidenceConfigCount || 0}개 config)`;

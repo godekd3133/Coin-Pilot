@@ -53,6 +53,10 @@ test('읽기 전용 paper dashboard는 최신 ledger를 표시하고 원본을 �
     assert.equal(first.currentAssets, 999_000);
     assert.equal(first.closedTradeCount, 1);
     assert.equal(first.realizedProfit, -100);
+    assert.equal(first.strictExecutionCostAudit.available, true);
+    assert.equal(first.strictExecutionCostAudit.closedTradeCount, 1);
+    assert.equal(first.strictExecutionCostAudit.evaluatedTradeCount, 0);
+    assert.equal(first.strictExecutionCostAudit.costStressedNetPnlKrw, null);
     assert.equal(first.configConsistent, true);
     assert.equal(first.executionOutcomeComparison.researchOnly, true);
     assert.equal(first.executionOutcomeComparison.promoted, false);

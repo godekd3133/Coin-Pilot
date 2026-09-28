@@ -3003,7 +3003,14 @@ class MultiCoinTrader {
           signalTrendSlopePercent: numericOrNull(position.signalTrendSlopePercent),
           signalRangePercent: numericOrNull(position.signalRangePercent),
           entryDelayMs: numericOrNull(position.entryDelayMs),
-          executionDriftPercent: numericOrNull(position.executionDriftPercent)
+          executionDriftPercent: numericOrNull(position.executionDriftPercent),
+          paperExecutionCostModel: position.paperExecutionCostModel || null,
+          paperExecutionSlippageRate: numericOrNull(position.paperExecutionSlippageRate),
+          paperExecutionTradingFeeRate: numericOrNull(position.paperExecutionTradingFeeRate),
+          paperObservedEntryPrice: numericOrNull(position.paperObservedEntryPrice),
+          paperObservedExitPrice: numericOrNull(position.paperObservedExitPrice),
+          paperEntryFee: numericOrNull(position.paperEntryFee),
+          paperInvestmentAmount: numericOrNull(position.paperInvestmentAmount)
         };
       })
       .sort((a, b) => a.coin.localeCompare(b.coin));
@@ -4581,6 +4588,29 @@ class MultiCoinTrader {
     this.analysisWatchdogTimer = null;
   }
 
+  getStrictPaperExecutionCostModel(position = null) {
+    if (!this.dryRun || this.paperValidation?.active !== true) return null;
+
+    const version = 'strict_paper_cost_model_v1';
+    if (position && position.paperExecutionCostModel !== version) return null;
+    if (position && (position.paperEntryFee === null || position.paperEntryFee === undefined ||
+      !Number.isFinite(Number(position.paperEntryFee)) || Number(position.paperEntryFee) < 0)) return null;
+    if (position && (position.paperExecutionTradingFeeRate === null || position.paperExecutionTradingFeeRate === undefined ||
+      !Number.isFinite(Number(position.paperExecutionTradingFeeRate)))) return null;
+    const configuredSlippageRate = position
+      ? position.paperExecutionSlippageRate
+      : this.config?.slippage;
+    const configuredTradingFeeRate = position
+      ? position.paperExecutionTradingFeeRate
+      : this.config?.tradingFee;
+    const slippageRate = Number(configuredSlippageRate);
+    const tradingFeeRate = Number(configuredTradingFeeRate);
+    if (!Number.isFinite(slippageRate) || slippageRate < 0 || slippageRate >= 1 ||
+      !Number.isFinite(tradingFeeRate) || tradingFeeRate < 0 || tradingFeeRate >= 1) return null;
+
+    return { version, slippageRate, tradingFeeRate };
+  }
+
   startPositionRiskMonitor() {
     if (this.positionRiskTimer || this.positionRiskCheckIntervalMs <= 0) return;
     this.positionRiskTimer = setInterval(() => {
@@ -5484,19 +5514,21 @@ class MultiCoinTrader {
         return;
       }
 
-      // 수수료 계산 (0.05%)
-      const FEE_RATE = 0.0005;
+      // A sealed paper session applies its configured adverse fill-cost model.
+      const paperEntryCostModel = this.getStrictPaperExecutionCostModel();
+      const FEE_RATE = paperEntryCostModel?.tradingFeeRate ?? 0.0005;
       const fee = investmentAmount * FEE_RATE;
       const actualInvestment = investmentAmount - fee;
-      const volume = actualInvestment / currentPrice;
+      const entryFillPrice = currentPrice * (1 + (paperEntryCostModel?.slippageRate || 0));
+      const volume = actualInvestment / entryFillPrice;
 
       if (this.dryRun) {
         console.log(`\n🧪 [모의투자] ${coin} 매수 주문`);
         console.log(`  금액: ${investmentAmount.toLocaleString()} 원`);
-        console.log(`  수수료: ${fee.toLocaleString()} 원 (0.05%)`);
+        console.log(`  수수료: ${fee.toLocaleString()} 원 (${(FEE_RATE * 100).toFixed(2)}%)`);
         console.log(`  실투자: ${actualInvestment.toLocaleString()} 원`);
         console.log(`  수량: ${volume.toFixed(8)}`);
-        console.log(`  가격: ${currentPrice.toLocaleString()} 원`);
+        console.log(`  가격: ${entryFillPrice.toLocaleString()} 원`);
 
         // 가상 포트폴리오 업데이트 - 마이너스 방지 체크
         const currentBalance = this.virtualPortfolio.krwBalance || 0;
@@ -5508,14 +5540,22 @@ class MultiCoinTrader {
         this.virtualPortfolio.krwBalance = Math.max(0, currentBalance - investmentAmount);
         const existing = this.virtualPortfolio.holdings.get(coin) || { amount: 0, avgPrice: 0, entryTime: null };
         const newAmount = existing.amount + volume;
-        const newAvgPrice = ((existing.amount * existing.avgPrice) + (volume * currentPrice)) / newAmount;
+        const newAvgPrice = ((existing.amount * existing.avgPrice) + (volume * entryFillPrice)) / newAmount;
         this.virtualPortfolio.holdings.set(coin, {
           amount: newAmount,
           avgPrice: newAvgPrice,
           entryTime: existing.entryTime || new Date().toISOString() // 최초 매수 시간 유지
         });
 
-        strategy.openPosition(currentPrice, volume, 'BUY');
+        strategy.openPosition(entryFillPrice, volume, 'BUY');
+        if (paperEntryCostModel && strategy.currentPosition) {
+          strategy.currentPosition.paperExecutionCostModel = paperEntryCostModel.version;
+          strategy.currentPosition.paperExecutionSlippageRate = paperEntryCostModel.slippageRate;
+          strategy.currentPosition.paperExecutionTradingFeeRate = paperEntryCostModel.tradingFeeRate;
+          strategy.currentPosition.paperObservedEntryPrice = currentPrice;
+          strategy.currentPosition.paperEntryFee = fee;
+          strategy.currentPosition.paperInvestmentAmount = investmentAmount;
+        }
         this.decorateEntryPosition(strategy, decision, {
           executionPrice: currentPrice,
           delayMs: entryDelayMs
@@ -5528,7 +5568,7 @@ class MultiCoinTrader {
         this.notifyTrade({
           type: 'BUY',
           coin,
-          price: currentPrice,
+          price: entryFillPrice,
           amount: investmentAmount,
           volume,
           reason: decision.reason,
@@ -5708,22 +5748,23 @@ class MultiCoinTrader {
         : coinBalance;
 
       // 최소 매도 금액 체크 (5000원)
-      const estimatedSellAmount = sellVolume * currentPrice;
+      const paperExitCostModel = this.getStrictPaperExecutionCostModel(strategy.currentPosition);
+      const exitFillPrice = currentPrice * (1 - (paperExitCostModel?.slippageRate || 0));
+      const estimatedSellAmount = sellVolume * exitFillPrice;
       if (estimatedSellAmount < 5000) {
         console.log(`\n⚠️  [${coin}] 매도 불가: 최소 매도금액(5,000원) 미만 (${estimatedSellAmount.toLocaleString()}원)`);
         return;
       }
 
       if (this.dryRun) {
-        // 수수료 계산 (0.05%)
-        const FEE_RATE = 0.0005;
+        const FEE_RATE = paperExitCostModel?.tradingFeeRate ?? 0.0005;
         const fee = estimatedSellAmount * FEE_RATE;
         const actualReceived = estimatedSellAmount - fee;
 
         console.log(`\n🧪 [모의투자] ${coin} 매도 주문`);
         console.log(`  수량: ${sellVolume.toFixed(8)}`);
         console.log(`  예상 금액: ${estimatedSellAmount.toLocaleString()} 원`);
-        console.log(`  수수료: ${fee.toLocaleString()} 원 (0.05%)`);
+        console.log(`  수수료: ${fee.toLocaleString()} 원 (${(FEE_RATE * 100).toFixed(2)}%)`);
         console.log(`  실수령: ${actualReceived.toLocaleString()} 원`);
 
         // 가상 포트폴리오 업데이트 (수수료 차감)
@@ -5740,10 +5781,17 @@ class MultiCoinTrader {
         }
 
         // 수익률 계산
-        const entryPrice = strategy.currentPosition?.entryPrice || holding?.avgPrice || currentPrice;
-        const profitPercent = ((currentPrice - entryPrice) / entryPrice * 100).toFixed(2);
-
-        const closedTrade = strategy.closePosition(currentPrice, decision.reason);
+        const paperEntryFee = paperExitCostModel ? Number(strategy.currentPosition?.paperEntryFee) : null;
+        const closeOptions = paperEntryFee !== null && Number.isFinite(paperEntryFee) && paperEntryFee >= 0
+          ? { buyFee: paperEntryFee, tradingFeeRate: paperExitCostModel.tradingFeeRate }
+          : {};
+        if (paperExitCostModel && strategy.currentPosition) {
+          strategy.currentPosition.paperObservedExitPrice = currentPrice;
+        }
+        const closedTrade = strategy.closePosition(exitFillPrice, decision.reason, closeOptions);
+        const profitPercent = Number.isFinite(Number(closedTrade?.profitPercent))
+          ? Number(closedTrade.profitPercent).toFixed(2)
+          : '0.00';
         this.recordPaperStrictTrade(coin, closedTrade, 'CLOSE');
         this.saveVirtualPortfolio();
         console.log(`  잔여 KRW: ${this.virtualPortfolio.krwBalance.toLocaleString()} 원`);
@@ -5752,7 +5800,7 @@ class MultiCoinTrader {
         this.notifyTrade({
           type: 'SELL',
           coin,
-          price: currentPrice,
+          price: exitFillPrice,
           amount: estimatedSellAmount,
           volume: sellVolume,
           reason: decision.reason,

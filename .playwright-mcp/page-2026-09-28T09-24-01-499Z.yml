@@ -1,0 +1,66 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - main [ref=e3]:
+      - region [ref=e4]:
+        - generic [ref=e5]:
+          - generic [ref=e6]:
+            - paragraph [ref=e7]: COINPILOT · 자산 브리핑
+            - heading "자산 흐름을 차분히 살펴보세요." [level=1] [ref=e8]: 자산 흐름을차분히 살펴보세요.
+          - img "CoinPilot 나침반 오브제"
+        - article "총 자산" [ref=e9]:
+          - generic [ref=e10]:
+            - generic [ref=e11]: 총 자산
+            - generic [ref=e12]: 연결 중
+          - strong [ref=e13]: —
+          - generic [ref=e14]: 서버에서 정보를 불러오고 있어요
+          - generic "자산 흐름" [ref=e16]:
+            - img "자산 추이 차트" [ref=e17]
+          - generic [ref=e18]:
+            - generic [ref=e19]: 최근 24시간
+            - group "차트 기간" [ref=e20]:
+              - button "24시간" [ref=e21]
+              - button "7일" [ref=e22]
+              - button "30일" [ref=e23]
+        - generic "요약" [ref=e24]:
+          - article [ref=e25]:
+            - generic [ref=e26]: 보유 코인
+            - strong [ref=e27]: —
+          - article [ref=e28]:
+            - generic [ref=e29]: 오늘 실현 손익
+            - strong [ref=e30]: —
+        - region [ref=e31]:
+          - generic [ref=e32]:
+            - generic [ref=e33]:
+              - paragraph [ref=e34]: MARKET WATCH
+              - heading "시장 흐름" [level=2] [ref=e35]
+            - generic [ref=e36]: 시세 연결 중
+        - region [ref=e41]:
+          - generic [ref=e43]:
+            - paragraph [ref=e44]: ENGINE STATUS
+            - heading "자동매매 상태" [level=2] [ref=e45]
+          - article [ref=e46]:
+            - generic [ref=e48]:
+              - strong [ref=e49]: 상태 확인 중
+              - generic [ref=e50]: 앱 화면과 자동매매 엔진은 별도로 동작합니다.
+            - generic [ref=e51]: —
+        - region [ref=e52]:
+          - generic [ref=e53]:
+            - generic [ref=e54]:
+              - paragraph [ref=e55]: RECENT ACTIVITY
+              - heading "최근 기록" [level=2] [ref=e56]
+            - button "전체 보기" [ref=e57]
+          - paragraph [ref=e59]: 서버 기록을 불러오고 있어요.
+    - navigation "주 메뉴" [ref=e60]:
+      - button "홈" [ref=e61]:
+        - generic [aria-hidden] [ref=e62]: ⌂
+      - button "자산" [ref=e64]:
+        - generic [aria-hidden] [ref=e65]: ◫
+      - button "기록" [ref=e67]:
+        - generic [aria-hidden] [ref=e68]: ↗
+      - button "설정" [ref=e70]:
+        - generic [aria-hidden] [ref=e71]: •••
+  - status [ref=e73]:
+    - generic [ref=e74]:
+      - strong [ref=e75]: 서버에 연결할 수 없어요
+      - generic [ref=e76]: iOS 앱 연결이 필요합니다.
+    - button "다시 시도" [ref=e77]

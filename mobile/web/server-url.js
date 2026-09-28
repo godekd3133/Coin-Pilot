@@ -1,4 +1,6 @@
 (function exposeCoinPilotServerUrlPolicy(global) {
+  const DEFAULT_DASHBOARD_URL = 'https://52.78.156.161';
+
   function parseIPv4(hostname) {
     const normalized = hostname.endsWith('.') ? hostname.slice(0, -1) : hostname;
     const octets = normalized.split('.').map(Number);
@@ -72,5 +74,8 @@
     return url.origin;
   }
 
-  global.CoinPilotServerUrlPolicy = Object.freeze({ normalizeDashboardUrl });
+  global.CoinPilotServerUrlPolicy = Object.freeze({
+    DEFAULT_DASHBOARD_URL,
+    normalizeDashboardUrl
+  });
 })(globalThis);

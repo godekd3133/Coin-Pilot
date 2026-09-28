@@ -43,6 +43,9 @@ export const DEFAULT_DAILY_MOMENTUM_CONFIG = Object.freeze({
   // Research-only ceiling for adverse overnight gaps on next-open entries.
   // Zero disables the guard and preserves the original execution contract.
   maxEntryGapPercent: 0,
+  // Optional research-only entry cutoff. Existing positions continue to exit
+  // after this time, enabling a maturity tail without opening new positions.
+  entryWindowEndTimestamp: null,
   excludeCurrentUtcDay: true
 });
 
@@ -98,6 +101,23 @@ function timestampOf(candle) {
     ? text
     : `${text}Z`;
   const timestamp = raw instanceof Date ? raw.getTime() : Date.parse(utcText);
+  return Number.isFinite(timestamp) ? timestamp : null;
+}
+
+function timestampValueOf(value) {
+  if (value instanceof Date) {
+    const timestamp = value.getTime();
+    return Number.isFinite(timestamp) ? timestamp : null;
+  }
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  const text = String(value ?? '').trim();
+  if (!text) return null;
+  if (/^\d+(?:\.\d+)?$/.test(text)) {
+    const timestamp = Number(text);
+    return Number.isFinite(timestamp) ? timestamp : null;
+  }
+  const hasTimezone = /(?:z|[+-]\d{2}:?\d{2})$/i.test(text);
+  const timestamp = Date.parse(hasTimezone ? text : `${text}Z`);
   return Number.isFinite(timestamp) ? timestamp : null;
 }
 
@@ -265,6 +285,7 @@ function failureResult(options, dataQuality) {
     unknownBoundaryExitCount: 0,
     entryCount: 0,
     blockedSignalCount: 0,
+    entryWindowBlockedSignalCount: 0,
     entryGapBlockedCount: 0,
     signals: 0,
     promotion: 'research_only_never_authorizes_live_orders'
@@ -314,6 +335,10 @@ export function simulateDailyMomentumPortfolio(rawCandlesByMarket, config = {}) 
   const entryExecution = options.entryExecution === 'next_open' ? 'next_open' : 'close';
   const exitExecution = options.exitExecution === 'next_open' ? 'next_open' : 'close';
   const maxEntryGapPercent = Math.max(0, finite(options.maxEntryGapPercent, 0));
+  const entryWindowEndRaw = options.entryWindowEndTimestamp;
+  const entryWindowEndTimestamp = entryWindowEndRaw === null || entryWindowEndRaw === undefined || entryWindowEndRaw === ''
+    ? null
+    : timestampValueOf(entryWindowEndRaw);
   // The forward runner enforces Upbit's 5,000 KRW minimum order. Zero keeps
   // the research simulator floor-free; forward-parity runs should set 5000.
   const minOrderAmount = Math.max(0, finite(options.minOrderAmount, 0));
@@ -325,6 +350,14 @@ export function simulateDailyMomentumPortfolio(rawCandlesByMarket, config = {}) 
   });
   const { normalized, dataQuality } = prepared;
   if (!dataQuality.valid) return failureResult({ ...options, initialBalance }, dataQuality);
+  if (entryWindowEndRaw !== null && entryWindowEndRaw !== undefined && entryWindowEndRaw !== '' &&
+    entryWindowEndTimestamp === null) {
+    return failureResult({ ...options, initialBalance }, {
+      ...dataQuality,
+      valid: false,
+      reason: 'entry_window_end_timestamp_invalid'
+    });
+  }
   if (benchmarkMarket && !normalized[benchmarkMarket]) {
     return failureResult({ ...options, initialBalance }, {
       ...dataQuality,
@@ -372,6 +405,7 @@ export function simulateDailyMomentumPortfolio(rawCandlesByMarket, config = {}) 
   const equityCurve = [];
   let signals = 0;
   let blockedSignalCount = 0;
+  let entryWindowBlockedSignalCount = 0;
   let exposureDays = 0;
   let peakEquity = initialBalance;
   let drawdownStopTriggered = false;
@@ -475,6 +509,10 @@ export function simulateDailyMomentumPortfolio(rawCandlesByMarket, config = {}) 
       const openingEntries = pendingEntries;
       pendingEntries = [];
       for (const pending of openingEntries) {
+        if (entryWindowEndTimestamp !== null && timestamp > entryWindowEndTimestamp) {
+          entryWindowBlockedSignalCount += 1;
+          continue;
+        }
         if (positions.has(pending.market) || positions.size >= maxPositions) {
           blockedSignalCount += 1;
           continue;
@@ -598,6 +636,13 @@ export function simulateDailyMomentumPortfolio(rawCandlesByMarket, config = {}) 
       )) continue;
       const volatilityScale = volatilityScaleAt(market, index);
       if (volatilityScale === null) continue;
+      const plannedEntryTimestamp = entryExecution === 'next_open'
+        ? timestamp + DAY_MS
+        : timestamp;
+      if (entryWindowEndTimestamp !== null && plannedEntryTimestamp > entryWindowEndTimestamp) {
+        entryWindowBlockedSignalCount += 1;
+        continue;
+      }
       signals += 1;
       candidates.push({ market, candle, trendPercent, breadth, volatilityScale });
     }
@@ -735,6 +780,9 @@ export function simulateDailyMomentumPortfolio(rawCandlesByMarket, config = {}) 
       entryExecution,
       exitExecution,
       maxEntryGapPercent,
+      entryWindowEndTimestamp: entryWindowEndTimestamp === null
+        ? null
+        : new Date(entryWindowEndTimestamp).toISOString(),
       minOrderAmount
     },
     dataQuality,
@@ -761,6 +809,7 @@ export function simulateDailyMomentumPortfolio(rawCandlesByMarket, config = {}) 
     unknownBoundaryExitCount: pendingExits.length,
     entryCount: trades.length + openPositions.length,
     blockedSignalCount,
+    entryWindowBlockedSignalCount,
     entryGapBlockedCount,
     signals,
     drawdownStopTriggered,
@@ -825,6 +874,7 @@ export function evaluateDailyMomentumVariants(rawCandlesByMarket, {
       full: {
         available: full.available,
         metrics: full.metrics,
+        entryWindowBlockedSignalCount: full.entryWindowBlockedSignalCount,
         unknownBoundaryPositionCount: full.unknownBoundaryPositionCount,
         unknownBoundaryEntryCount: full.unknownBoundaryEntryCount,
         unknownBoundaryExitCount: full.unknownBoundaryExitCount,

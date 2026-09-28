@@ -5,6 +5,7 @@ import path from 'path';
 import MultiCoinTrader from '../trader/multiCoinTrader.js';
 import DashboardServer from '../api/dashboardServer.js';
 import { createLossCircuitBreakerState } from '../risk/lossCircuitBreaker.js';
+import { summarizePaperStrictTradeCostAudit } from '../research/paperStrictTradeCostAudit.js';
 
 dotenv.config();
 
@@ -119,9 +120,11 @@ export function attachReadOnlyPaperLedger(trader, ledgerFile) {
     if (trader.paperValidation.analysisDataHealth) {
       trader.analysisDataHealthState = trader.paperValidation.analysisDataHealth;
     }
+    const status = await originalGetPaperValidationStatus();
     return {
-      ...(await originalGetPaperValidationStatus()),
-      readOnlyObserver: true
+      ...status,
+      readOnlyObserver: true,
+      strictExecutionCostAudit: summarizePaperStrictTradeCostAudit(trader.paperValidation)
     };
   };
   trader.startPaperValidationSession = async () => {

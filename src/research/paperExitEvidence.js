@@ -15,22 +15,46 @@ function timestamp(value) {
   }
   const text = String(value ?? '').trim();
   if (!text) return null;
-  const result = Date.parse(text);
+  const hasTimezone = /(?:z|[+-]\d{2}:?\d{2})$/i.test(text);
+  const result = Date.parse(hasTimezone ? text : `${text}Z`);
   return Number.isFinite(result) ? result : null;
 }
 
 function exitReasonOf(trade) {
-  const reason = trade?.reason || trade?.exitReason || trade?.closeReason;
+  const reason = trade?.reason || trade?.exitReason || trade?.closeReason || trade?.exit;
   return reason === null || reason === undefined || String(reason).trim() === ''
     ? 'unknown_exit_reason'
     : String(reason);
 }
 
-function holdMinutesOf(trade) {
-  const entry = timestamp(trade?.entryTime || trade?.entryTimestamp);
-  const exit = timestamp(trade?.exitTime || trade?.exitTimestamp);
+function holdMinutesOf(trade, { candleUnitMinutes = 0 } = {}) {
+  const entry = timestamp(
+    trade?.entryTime || trade?.entryTimestamp || trade?.entry?.entryTimeMs || trade?.entry?.entryTs
+  );
+  let exit = timestamp(trade?.exitTime || trade?.exitTimestamp);
+  const candleUnit = finiteNumber(candleUnitMinutes);
+  if (exit === null && candleUnit !== null && candleUnit > 0) {
+    const exitCandleStart = timestamp(trade?.exitTs);
+    if (exitCandleStart !== null) exit = exitCandleStart + candleUnit * 60_000;
+  }
   if (entry === null || exit === null || exit < entry) return null;
   return (exit - entry) / 60_000;
+}
+
+function resolvePaperProfit(trade, { profitField, allowPositionReturnDerivation }) {
+  const recordedProfit = finiteNumber(trade?.[profitField]);
+  if (recordedProfit !== null) {
+    return { profit: recordedProfit, basis: `recorded_${profitField}` };
+  }
+  if (!allowPositionReturnDerivation) return null;
+
+  const entrySize = finiteNumber(trade?.entry?.size);
+  const profitPercent = finiteNumber(trade?.profitPercent);
+  if (entrySize === null || entrySize <= 0 || profitPercent === null) return null;
+  const derivedProfit = entrySize * profitPercent / 100;
+  return Number.isFinite(derivedProfit)
+    ? { profit: derivedProfit, basis: 'entry_size_times_paper_profit_percent' }
+    : null;
 }
 
 function average(values) {
@@ -111,21 +135,31 @@ export function summarizePaperSignalWindowCoverage(trades = []) {
  * them. This is an attribution report only: it does not replay prices,
  * infer an earlier exit, or authorize a new stop/take configuration.
  */
-export function summarizePaperExitEvidence(trades = [], { profitField = 'profit' } = {}) {
+export function summarizePaperExitEvidence(trades = [], {
+  profitField = 'profit',
+  allowPositionReturnDerivation = false,
+  candleUnitMinutes = 0
+} = {}) {
   const rows = Array.isArray(trades) ? trades : [];
   const validRows = [];
+  const profitBasisCounts = {};
   let invalidTradeCount = 0;
   for (const trade of rows) {
-    const profit = finiteNumber(trade?.[profitField]);
-    if (profit === null) {
+    const resolvedProfit = resolvePaperProfit(trade, {
+      profitField,
+      allowPositionReturnDerivation
+    });
+    if (!resolvedProfit) {
       invalidTradeCount += 1;
       continue;
     }
+    profitBasisCounts[resolvedProfit.basis] = (profitBasisCounts[resolvedProfit.basis] || 0) + 1;
     validRows.push({
       reason: exitReasonOf(trade),
-      profit,
+      profit: resolvedProfit.profit,
+      profitBasis: resolvedProfit.basis,
       profitPercent: finiteNumber(trade?.profitPercent),
-      holdMinutes: holdMinutesOf(trade),
+      holdMinutes: holdMinutesOf(trade, { candleUnitMinutes }),
       maxFavorableExcursionPercent: finiteNumber(trade?.maxFavorableExcursionPercent),
       maxAdverseExcursionPercent: finiteNumber(trade?.maxAdverseExcursionPercent)
     });
@@ -147,12 +181,15 @@ export function summarizePaperExitEvidence(trades = [], { profitField = 'profit'
     researchOnly: true,
     promoted: false,
     profitField,
+    allowPositionReturnDerivation: allowPositionReturnDerivation === true,
+    profitBasisCounts,
+    actualFillsObserved: false,
     tradeCount: rows.length,
     validTradeCount: validRows.length,
     invalidTradeCount,
     overall,
     byReason,
     signalWindowCoverage: summarizePaperSignalWindowCoverage(rows),
-    note: 'Exit attribution is read-only paper evidence. It does not infer an earlier fill, wallet settlement, realized live P&L, or a profitable replacement exit.'
+    note: 'Exit attribution is read-only paper evidence. Derived position-size P&L uses recorded paper return percent; it does not infer an earlier fill, wallet settlement, realized live P&L, or a profitable replacement exit.'
   };
 }

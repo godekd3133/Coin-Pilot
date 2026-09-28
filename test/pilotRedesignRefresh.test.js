@@ -58,9 +58,9 @@ test('redesign은 백그라운드 탭이 다시 보일 때 paper 상태를 즉�
 
 test('PWA shell은 redesign asset version과 service worker cache version을 함께 갱신한다', () => {
   const scriptAsset = indexSource.match(/<script\s+src=["'](\/pilot-redesign\.js\?v=[^"']+)["']/)?.[1];
-  assert.equal(scriptAsset, '/pilot-redesign.js?v=observer-readonly-124');
+  assert.equal(scriptAsset, '/pilot-redesign.js?v=observer-readonly-128');
   assert.match(indexSource, /<link\s+rel=["']stylesheet["']\s+href=["']\/pilot-redesign\.css\?v=20260928-01["']/);
-  assert.match(serviceWorkerSource, /const CACHE_NAME = ['"]coinpilot-shell-v138['"]/);
+  assert.match(serviceWorkerSource, /const CACHE_NAME = ['"]coinpilot-shell-v143['"]/);
   assert.match(serviceWorkerSource, new RegExp(`['"]${scriptAsset.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}['"]`));
   assert.match(serviceWorkerSource, /['"]\/pilot-redesign\.css\?v=20260928-01['"]/);
   assert.match(serviceWorkerSource, /NETWORK_FIRST_SHELL_PATHS/);
@@ -118,7 +118,7 @@ test('PWA manifest icon과 service worker app shell의 모든 정적 자산이 �
     '/apple-touch-icon.png',
     '/auth-client.js',
     '/pilot-redesign.css?v=20260928-01',
-    '/pilot-redesign.js?v=observer-readonly-124'
+    '/pilot-redesign.js?v=observer-readonly-128'
   ];
   for (const asset of shellAssets) {
     assert.match(
@@ -623,6 +623,12 @@ test('준비 현황은 실전 상태와 별도로 read-only quote-cost evidence�
   assert.ok(redesignStyleSource.includes('.pilot-paper-signal-step {'));
   assert.ok(redesignStyleSource.includes('min-width: 0;'));
   assert.match(paper, /analysisDataHealth\?\.failClosed/);
+  assert.match(paper, /strictExecutionCostAudit/);
+  assert.match(paper, /실제 체결·호가 교차 비용은 확인되지 않았습니다/);
+  assert.match(paper, /breakEvenAdditionalSlippagePerSidePercent/);
+  assert.match(paper, /기록 손익 소진 임계 추가 미끄러짐/);
+  assert.match(paper, /paperForwardCohort/);
+  assert.match(paper, /profitabilityEvidenceProfit/);
   assert.match(paper, /초기화하면 가상 잔액과 보유 코인, 전략별 포지션·매매 기록이 삭제됩니다/);
   assert.doesNotMatch(paper, /MFE|MAE|counterfactual|signal evidence|wallet settlement/);
 });
