@@ -1,4 +1,5 @@
 const STORAGE_KEY = 'coinpilot.ios.dashboardUrl';
+const { normalizeDashboardUrl } = window.CoinPilotServerUrlPolicy;
 
 const form = document.querySelector('#server-form');
 const input = document.querySelector('#server-url');
@@ -13,56 +14,6 @@ function savedUrl() {
   } catch {
     return '';
   }
-}
-
-function isPrivateIPv4(hostname) {
-  const octets = hostname.split('.').map(Number);
-  if (octets.length !== 4 || octets.some(value => !Number.isInteger(value) || value < 0 || value > 255)) {
-    return false;
-  }
-  return octets[0] === 10 ||
-    octets[0] === 127 ||
-    (octets[0] === 192 && octets[1] === 168) ||
-    (octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31) ||
-    (octets[0] === 169 && octets[1] === 254);
-}
-
-function normalizeDashboardUrl(value) {
-  const candidate = value.trim();
-  if (!candidate) throw new Error('대시보드 주소를 입력하세요.');
-
-  let url;
-  try {
-    url = new URL(candidate.includes('://') ? candidate : `https://${candidate}`);
-  } catch {
-    throw new Error('주소 형식을 확인하세요. 예: https://example.com');
-  }
-
-  if (url.protocol !== 'https:' && url.protocol !== 'http:') {
-    throw new Error('주소는 HTTPS 또는 같은 Wi-Fi의 로컬 HTTP 주소여야 합니다.');
-  }
-  if (url.username || url.password) {
-    throw new Error('주소에 사용자 이름이나 비밀번호를 넣지 마세요.');
-  }
-  if (url.pathname !== '/' || url.search || url.hash) {
-    throw new Error('서버 루트 주소를 입력하세요. 경로·쿼리는 제외합니다.');
-  }
-
-  const localHost = url.hostname === 'localhost' ||
-    url.hostname.endsWith('.local') ||
-    isPrivateIPv4(url.hostname) ||
-    url.hostname.startsWith('fc') ||
-    url.hostname.startsWith('fd') ||
-    url.hostname.startsWith('fe80:');
-
-  if (url.protocol === 'http:' && !localHost) {
-    throw new Error('인터넷 주소는 HTTPS를 사용해야 합니다. HTTP는 로컬 네트워크에서만 허용됩니다.');
-  }
-  if (url.hostname === 'localhost' || url.hostname === '127.0.0.1') {
-    throw new Error('iPhone의 localhost는 iPhone 자신입니다. 서버가 실행 중인 Mac의 로컬 IP를 입력하세요.');
-  }
-
-  return url.origin;
 }
 
 function renderSavedServer(value) {
@@ -82,16 +33,19 @@ function renderSavedServer(value) {
 function openDashboard(value) {
   const url = normalizeDashboardUrl(value);
   const nativeConnect = window.webkit?.messageHandlers?.coinpilotConnect;
+  if (nativeConnect) {
+    // UserDefaults is authoritative in the native app. Avoid a second,
+    // potentially stale copy in WKWebView's file-origin localStorage.
+    nativeConnect.postMessage(url);
+    return;
+  }
+
   try {
     localStorage.setItem(STORAGE_KEY, url);
   } catch {
-    // Native builds also persist this URL in iOS UserDefaults.
+    // Browser storage may be disabled; navigation can still proceed.
   }
-  if (nativeConnect) {
-    nativeConnect.postMessage(url);
-  } else {
-    window.location.assign(url);
-  }
+  window.location.assign(url);
 }
 
 form.addEventListener('submit', event => {
@@ -115,6 +69,26 @@ forgetButton.addEventListener('click', () => {
   error.textContent = '';
   renderSavedServer('');
   input.focus();
+});
+
+window.addEventListener('coinpilot-native-server-config', event => {
+  const detail = event.detail || {};
+  if (!detail.hasSavedServer) return;
+
+  if (typeof detail.url === 'string' && detail.url) {
+    try {
+      localStorage.setItem(STORAGE_KEY, detail.url);
+    } catch {
+      // The native preference remains authoritative in WKWebView.
+    }
+    renderSavedServer(detail.url);
+    return;
+  }
+
+  input.value = '';
+  savedHost.textContent = '저장된 주소를 사용할 수 없습니다. 지우고 다시 등록하세요.';
+  saved.hidden = false;
+  forgetButton.hidden = false;
 });
 
 renderSavedServer(savedUrl());

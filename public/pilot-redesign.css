@@ -3031,6 +3031,34 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
     margin: 7px 0 0;
 }
 
+@media (max-width: 480px) {
+    .pilot-paper-signal-funnel-head {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 3px;
+    }
+
+    .pilot-paper-signal-funnel-head span {
+        text-align: left;
+    }
+
+    .pilot-paper-signal-funnel-steps {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 6px;
+    }
+
+    .pilot-paper-signal-step {
+        padding: 7px 9px;
+    }
+
+    .pilot-paper-signal-step span {
+        overflow: visible;
+        font-size: 10px;
+        text-overflow: clip;
+        white-space: normal;
+    }
+}
+
 .pilot-paper-diagnostics {
     margin-top: 15px;
     padding-top: 14px;
@@ -4322,15 +4350,16 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
     }
 
     .pilot-paper-signal-funnel-steps {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: 4px;
     }
 
     .pilot-paper-signal-step {
-        padding: 6px 2px;
+        padding: 6px 5px;
     }
 
     .pilot-paper-signal-step span {
-        font-size: 8px;
+        font-size: 9px;
     }
 
     .pilot-mode-banner {

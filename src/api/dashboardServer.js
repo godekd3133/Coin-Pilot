@@ -10,6 +10,7 @@ import Logger, { resolveLogDirectory } from '../utils/logger.js';
 // Route modules
 import createAccountRoutes from './routes/account.js';
 import createPortfolioRoutes from './routes/portfolio.js';
+import { projectReadOnlyPaperPortfolioAnalysis } from './readOnlyPaperPortfolio.js';
 import createNewsRoutes from './routes/news.js';
 import createMarketRoutes from './routes/market.js';
 import createOptimizationRoutes from './routes/optimization.js';
@@ -502,6 +503,14 @@ class DashboardServer {
     // 포트폴리오 상세 분석
     this.app.get('/api/portfolio-analysis', async (req, res) => {
       try {
+        if (this.tradingSystem.readOnlyObserver === true) {
+          if (typeof this.tradingSystem.getPaperValidationStatus !== 'function') {
+            return res.status(503).json({ readOnlyObserver: true, error: 'paper ledger status unavailable' });
+          }
+          const paperStatus = await this.tradingSystem.getPaperValidationStatus();
+          return res.json(projectReadOnlyPaperPortfolioAnalysis(paperStatus));
+        }
+
         const holdings = [];
         let totalValue = 0;
         let totalCost = 0;

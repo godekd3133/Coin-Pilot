@@ -108,25 +108,7 @@ final class CoinPilotViewController: UIViewController, WKNavigationDelegate, WKS
     }
 
     private func isAllowedServerURL(_ url: URL) -> Bool {
-        guard let scheme = url.scheme?.lowercased(),
-              let host = url.host?.lowercased(),
-              url.user == nil,
-              url.password == nil,
-              url.path.isEmpty || url.path == "/",
-              url.query == nil,
-              url.fragment == nil else { return false }
-        if scheme == "https" { return true }
-        guard scheme == "http" else { return false }
-        return host.hasSuffix(".local") || isPrivateIPv4(host)
-    }
-
-    private func isPrivateIPv4(_ host: String) -> Bool {
-        let parts = host.split(separator: ".").compactMap { UInt8($0) }
-        guard parts.count == 4 else { return false }
-        return parts[0] == 10 || parts[0] == 127 ||
-            (parts[0] == 192 && parts[1] == 168) ||
-            (parts[0] == 172 && (16...31).contains(parts[1])) ||
-            (parts[0] == 169 && parts[1] == 254)
+        ServerAddressPolicy.allows(url)
     }
 
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
@@ -168,9 +150,28 @@ final class CoinPilotViewController: UIViewController, WKNavigationDelegate, WKS
         decisionHandler(.cancel)
     }
 
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        guard webView.url?.isFileURL == true,
+              UserDefaults.standard.object(forKey: serverKey) != nil else { return }
+
+        var detail: [String: Any] = ["hasSavedServer": true]
+        if let server = configuredServer, ServerAddressPolicy.allows(server) {
+            detail["url"] = server.absoluteString
+        }
+        guard let data = try? JSONSerialization.data(withJSONObject: detail, options: [.fragmentsAllowed, .sortedKeys]),
+              let json = String(data: data, encoding: .utf8) else { return }
+
+        webView.evaluateJavaScript(
+            "window.dispatchEvent(new CustomEvent('coinpilot-native-server-config', { detail: \(json) }));"
+        )
+    }
+
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
         let nsError = error as NSError
         guard nsError.code != NSURLErrorCancelled else { return }
+        if webView.url?.isFileURL != true {
+            loadServerSettings()
+        }
         showError("서버에 연결할 수 없습니다. 서버 주소, 실행 상태, 같은 Wi-Fi 연결을 확인하세요.")
     }
 

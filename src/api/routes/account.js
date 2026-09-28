@@ -1,4 +1,5 @@
 import express from 'express';
+import { projectReadOnlyPaperAccount, projectReadOnlyPaperPositions } from '../readOnlyPaperPortfolio.js';
 
 /**
  * 계좌/포지션/통계 관련 라우트
@@ -33,6 +34,14 @@ export default function createAccountRoutes(server) {
   // 계좌 정보 조회
   router.get('/account', async (req, res) => {
     try {
+      if (server.tradingSystem.readOnlyObserver === true) {
+        if (typeof server.tradingSystem.getPaperValidationStatus !== 'function') {
+          return res.status(503).json({ readOnlyObserver: true, error: 'paper ledger status unavailable' });
+        }
+        const paperStatus = await server.tradingSystem.getPaperValidationStatus();
+        return res.json(projectReadOnlyPaperAccount(paperStatus));
+      }
+
       const accounts = await server.tradingSystem.getAccountInfo();
       const krwBalance = server.tradingSystem.getKRWBalance(accounts);
 
@@ -158,6 +167,23 @@ export default function createAccountRoutes(server) {
   // 보유 포지션 조회 (수동 매매용)
   router.get('/positions', async (req, res) => {
     try {
+      if (server.tradingSystem.readOnlyObserver === true) {
+        if (typeof server.tradingSystem.getPaperValidationStatus !== 'function') {
+          return res.status(503).json({ readOnlyObserver: true, error: 'paper ledger status unavailable' });
+        }
+        const paperStatus = await server.tradingSystem.getPaperValidationStatus();
+        return res.json({
+          readOnlyObserver: true,
+          valuationBasis: 'paper_ledger_snapshot',
+          holdings: projectReadOnlyPaperPositions(paperStatus),
+          totalValue: null,
+          count: Array.isArray(paperStatus?.strictEvaluation?.positions)
+            ? paperStatus.strictEvaluation.positions.length
+            : 0,
+          mode: 'DRY_RUN'
+        });
+      }
+
       const holdings = [];
       let totalValue = 0;
       const isDryRun = server.tradingSystem.dryRun;

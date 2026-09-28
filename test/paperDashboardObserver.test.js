@@ -116,7 +116,14 @@ test('읽기 전용 paper dashboard는 최신 ledger를 표시하고 원본을 �
       const snapshotBody = await snapshotResponse.json();
       assert.equal(snapshotResponse.status, 200);
       assert.equal(snapshotBody.success, true);
-      assert.equal(fs.existsSync(trader.portfolioHistoryFile), true);
+      assert.equal(snapshotBody.readOnlyObserver, true);
+      assert.equal(snapshotBody.recorded, false);
+      assert.equal(fs.existsSync(trader.portfolioHistoryFile), false);
+      assert.equal(fs.readFileSync(ledgerFile, 'utf8'), JSON.stringify(updated, null, 2));
+      await assert.rejects(
+        () => trader.recordPaperValidationSnapshot('test'),
+        /읽기 전용/
+      );
       assert.notEqual(
         path.resolve(trader.portfolioHistoryFile),
         path.resolve('portfolio_history.json')
@@ -220,5 +227,92 @@ test('읽기 전용 paper dashboard는 ledger baseline으로 수익률을 계산
   } finally {
     trader.stop();
     if (fs.existsSync(ledgerFile)) fs.unlinkSync(ledgerFile);
+  }
+});
+
+test('읽기 전용 observer의 계좌·보유·구성 API는 paper ledger를 따르고 미기록 현금·시세를 만들지 않는다', async () => {
+  const suffix = `coinpilot-dashboard-portfolio-observer-${Date.now()}`;
+  const ledgerFile = path.join(os.tmpdir(), `${suffix}.json`);
+  const trader = createMockTrader();
+  const now = new Date().toISOString();
+  const position = {
+    coin: 'KRW-SOL',
+    entryPrice: 162_000,
+    amount: 1.2339506172839507,
+    entryTime: now
+  };
+  const ledger = {
+    ...trader.paperValidation,
+    sessionId: 'paper-portfolio-observer-fixture',
+    active: true,
+    processId: process.pid,
+    heartbeatAt: now,
+    baselineAssets: 10_000_000,
+    snapshots: [{ timestamp: now, totalAssets: 10_000_640 }],
+    strictTrades: [],
+    strictOpenPositions: [position]
+  };
+
+  try {
+    fs.writeFileSync(ledgerFile, JSON.stringify(ledger), 'utf8');
+    attachReadOnlyPaperLedger(trader, ledgerFile);
+    const originalGetAccountInfo = trader.getAccountInfo.bind(trader);
+    let mockAccountReads = 0;
+    trader.getAccountInfo = async (...args) => {
+      mockAccountReads += 1;
+      return originalGetAccountInfo(...args);
+    };
+
+    const dashboard = new DashboardServer(trader, 0, { env: { ...process.env, DASHBOARD_TOKEN: '' } });
+    const httpServer = dashboard.start();
+    await new Promise(resolve => httpServer.once('listening', resolve));
+    const port = httpServer.address().port;
+    const ledgerBytes = fs.readFileSync(ledgerFile, 'utf8');
+    try {
+      const accountResponse = await fetch(`http://127.0.0.1:${port}/api/account`);
+      const account = await accountResponse.json();
+      assert.equal(accountResponse.status, 200);
+      assert.equal(account.readOnlyObserver, true);
+      assert.equal(account.valuationBasis, 'paper_ledger_snapshot');
+      assert.equal(account.krwBalance, null);
+      assert.equal(account.totalAssets, 10_000_640);
+      assert.equal(account.initialSeedMoney, 10_000_000);
+      assert.deepEqual(account.positions.map(item => item.coin), ['KRW-SOL']);
+      assert.equal(account.positions[0].currentPrice, null);
+      assert.equal(account.positions[0].currentValue, null);
+      assert.equal(account.positions[0].profit, null);
+
+      const positionsResponse = await fetch(`http://127.0.0.1:${port}/api/positions`);
+      const positions = await positionsResponse.json();
+      assert.equal(positions.readOnlyObserver, true);
+      assert.deepEqual(positions.holdings.map(item => item.coin), ['KRW-SOL']);
+      assert.equal(positions.holdings[0].currentPrice, null);
+
+      const analysisResponse = await fetch(`http://127.0.0.1:${port}/api/portfolio-analysis`);
+      const analysis = await analysisResponse.json();
+      assert.equal(analysis.readOnlyObserver, true);
+      assert.equal(analysis.allocationAvailable, false);
+      assert.deepEqual(analysis.holdings.map(item => item.coin), ['KRW-SOL']);
+      assert.equal(analysis.holdings[0].currentValue, null);
+      assert.equal(analysis.summary.krwBalance, null);
+      assert.equal(analysis.summary.totalAssets, 10_000_640);
+      assert.equal(analysis.summary.totalProfit, 640);
+
+      const historyResponse = await fetch(`http://127.0.0.1:${port}/api/portfolio/history?period=24h`);
+      const history = await historyResponse.json();
+      assert.equal(historyResponse.status, 200);
+      assert.equal(history.readOnlyObserver, true);
+      assert.equal(history.count, 1);
+      assert.equal(history.data[0].totalAssets, 10_000_640);
+      assert.equal(mockAccountReads, 0);
+      assert.equal(fs.readFileSync(ledgerFile, 'utf8'), ledgerBytes);
+    } finally {
+      dashboard.stop();
+    }
+  } finally {
+    trader.stop();
+    for (const file of [ledgerFile, trader.portfolioHistoryFile]) {
+      if (fs.existsSync(file)) fs.unlinkSync(file);
+    }
   }
 });

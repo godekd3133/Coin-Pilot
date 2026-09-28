@@ -11,7 +11,9 @@ the server.
 2. Set `DASHBOARD_TOKEN` and `DASHBOARD_HOST=0.0.0.0` in the server's `.env`.
    Without a token the server deliberately binds to loopback only.
 3. Put the Mac and iPhone on the same Wi-Fi. In CoinPilot iOS, enter the Mac's
-   LAN address, for example `http://192.168.0.12:3000`.
+   private IPv4, unique-local IPv6 (`fc00::/7`), or `.local` address, for
+   example `http://192.168.0.12:3000`. Scoped link-local IPv6 addresses are not
+   supported because their interface scope is device-specific.
 4. For access outside that Wi-Fi, use a public HTTPS endpoint protected by the
    dashboard token. Do not expose the server without authentication or place
    Upbit secrets in the iOS app.
@@ -26,6 +28,9 @@ server that remains available.
 npm run ios:sync
 open ios/App/App.xcodeproj
 ```
+
+Run the native URL allowlist regression cases on macOS with
+`npm run test:server-policy` before staging an iOS build.
 
 The default bundle identifier is `com.godekd3133.coinpilot`. Register that
 identifier in the Apple Developer account used for signing. Xcode signing and

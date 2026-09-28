@@ -76,6 +76,10 @@
         return Number.isFinite(parsed) ? parsed : fallback;
     }
 
+    function hasFiniteValue(value) {
+        return value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value));
+    }
+
     function escapeHtml(value) {
         return String(value ?? '')
             .replace(/&/g, '&amp;')
@@ -1176,7 +1180,7 @@
                                 ${tradePanelMarkup('overview')}
                             </div>
                             <div class="pilot-section-spacer"></div>
-                            <section class="pilot-panel"><div class="pilot-panel-header"><div><h2 class="pilot-panel-title">보유 포지션</h2></div><button type="button" class="pilot-link-button" data-pilot-view="portfolio">전체 포트폴리오 보기 <i class="ph ph-arrow-right" aria-hidden="true"></i></button></div><div class="pilot-table-wrap"><table class="pilot-table"><thead><tr><th>자산</th><th class="pilot-table-number">수량</th><th class="pilot-table-number">평균 진입가</th><th class="pilot-table-number">현재가</th><th class="pilot-table-number">평가손익</th><th class="pilot-table-number">수익률</th><th>관리</th></tr></thead><tbody id="pilot-overview-positions"></tbody></table></div></section>
+                            <section class="pilot-panel"><div class="pilot-panel-header"><div><h2 class="pilot-panel-title">보유 포지션</h2></div><button type="button" class="pilot-link-button" data-pilot-view="portfolio">전체 포트폴리오 보기 <i class="ph ph-arrow-right" aria-hidden="true"></i></button></div><div class="pilot-table-wrap"><table class="pilot-table"><thead><tr><th>자산</th><th class="pilot-table-number">수량</th><th class="pilot-table-number">평균 진입가</th><th class="pilot-table-number">현재가</th><th class="pilot-table-number">평가액</th><th class="pilot-table-number">평가손익</th><th>상태</th></tr></thead><tbody id="pilot-overview-positions"></tbody></table></div></section>
                             <div class="pilot-section-spacer"></div>
                             <div class="pilot-split-grid"><section class="pilot-panel"><div class="pilot-panel-header"><div><h2 class="pilot-panel-title">최근 활동</h2><p class="pilot-panel-subtitle">최근 주문과 신호</p></div><button type="button" class="pilot-link-button" data-pilot-view="history">전체 기록 <i class="ph ph-arrow-right" aria-hidden="true"></i></button></div><div class="pilot-panel-body"><div class="pilot-evidence-list" id="pilot-activity-list"></div></div></section><section class="pilot-panel"><div class="pilot-panel-header"><div><h2 class="pilot-panel-title">리스크 상태</h2></div><i class="ph ph-shield-check" style="color: var(--sl-green); font-size: 21px;" aria-hidden="true"></i></div><div class="pilot-panel-body" id="pilot-risk-summary"></div></section></div>
                         </section>
@@ -1396,6 +1400,9 @@
     }
 
     function positions() {
+        if (isReadOnlyObserver() && Array.isArray(state.paper?.strictEvaluation?.positions)) {
+            return state.paper.strictEvaluation.positions;
+        }
         if (Array.isArray(state.account?.positions)) return state.account.positions;
         if (Array.isArray(state.portfolioAnalysis?.holdings)) return state.portfolioAnalysis.holdings;
         return [];
@@ -1419,11 +1426,29 @@
         }
         target.innerHTML = rows.map((position, index) => {
             const coin = position.coin || position.market || '';
-            const profit = number(position.profit);
-            const profitPercent = number(position.profitPercent);
+            const hasCurrentPrice = hasFiniteValue(position.currentPrice);
+            const hasCurrentValue = hasFiniteValue(position.currentValue);
+            const hasProfit = hasFiniteValue(position.profit);
+            const profit = hasProfit ? Number(position.profit) : null;
             const color = index % 3 === 1 ? 'green' : index % 3 === 2 ? 'amber' : '';
-            return `<tr><td><span class="pilot-asset-name"><i class="pilot-asset-dot" data-color="${color}" aria-hidden="true"></i>${escapeHtml(symbolOf(coin))}</span></td><td class="pilot-table-number">${formatQuantity(position.amount)}</td><td class="pilot-table-number">${formatPrice(position.avgPrice || position.entryPrice)}원</td><td class="pilot-table-number">${formatPrice(position.currentPrice)}원</td><td class="pilot-table-number ${classForValue(profit)}">${formatSignedWon(profit)}</td><td class="pilot-table-number ${classForValue(profitPercent)}">${formatPercent(profitPercent)}</td><td><button type="button" class="pilot-table-action" data-pilot-position-action="sell" data-pilot-coin="${escapeHtml(coin)}">매도 검토</button></td></tr>`;
+            const profitText = hasProfit
+                ? `${formatSignedWon(profit)} · ${formatOptionalPercent(position.profitPercent)}`
+                : '미기록';
+            const stateCell = isReadOnlyObserver()
+                ? '관찰 중'
+                : `<button type="button" class="pilot-table-action" data-pilot-position-action="sell" data-pilot-coin="${escapeHtml(coin)}">매도 검토</button>`;
+            return `<tr><td><span class="pilot-asset-name"><i class="pilot-asset-dot" data-color="${color}" aria-hidden="true"></i>${escapeHtml(symbolOf(coin))}</span></td><td class="pilot-table-number">${formatQuantity(position.amount)}</td><td class="pilot-table-number">${hasFiniteValue(position.avgPrice || position.entryPrice) ? `${formatPrice(position.avgPrice || position.entryPrice)}원` : '미기록'}</td><td class="pilot-table-number">${hasCurrentPrice ? `${formatPrice(position.currentPrice)}원` : '미기록'}</td><td class="pilot-table-number">${hasCurrentValue ? formatWon(position.currentValue) : '미기록'}</td><td class="pilot-table-number ${hasProfit ? classForValue(profit) : ''}">${profitText}</td><td>${stateCell}</td></tr>`;
         }).join('');
+    }
+
+    function renderPositionHeaders() {
+        const labels = ['자산', '수량', '평균 진입가', '현재가', '평가액', '평가손익', '상태'];
+        ['pilot-overview-positions', 'pilot-portfolio-positions'].forEach(targetId => {
+            const headers = byId(targetId)?.closest('table')?.querySelectorAll('thead th');
+            if (headers?.length === labels.length) {
+                headers.forEach((header, index) => { header.textContent = labels[index]; });
+            }
+        });
     }
 
     function renderActivity() {
@@ -1572,6 +1597,15 @@
 
     function drawAllocationChart() {
         const canvas = byId('pilot-allocation-chart');
+        const legend = byId('pilot-allocation-legend');
+        if (isReadOnlyObserver()) {
+            if (canvas) canvas.hidden = true;
+            if (canvas?.parentElement) canvas.parentElement.style.gridTemplateColumns = 'minmax(0, 1fr)';
+            if (legend) legend.innerHTML = '<div class="pilot-inline-empty">이 기록에는 현금 잔액과 종목별 현재 평가액이 없어 자산 구성을 계산하지 않습니다.</div>';
+            return;
+        }
+        if (canvas) canvas.hidden = false;
+        if (canvas?.parentElement) canvas.parentElement.style.gridTemplateColumns = '170px minmax(0, 1fr)';
         const holdings = state.portfolioAnalysis?.holdings || positions();
         const cash = number(state.portfolioAnalysis?.summary?.krwBalance || state.account?.krwBalance);
         const items = [...holdings.map(item => ({ name: symbolOf(item.coin), value: number(item.currentValue) })), { name: 'KRW', value: cash }].filter(item => item.value > 0);
@@ -1582,7 +1616,6 @@
             items.forEach((item, index) => { const sweep = (item.value / total) * Math.PI * 2; ctx.beginPath(); ctx.moveTo(center, center); ctx.arc(center, center, radius, start, start + sweep); ctx.closePath(); ctx.fillStyle = index === 0 ? '#1268d6' : index === 1 ? '#0a7a58' : index === 2 ? '#e6a12d' : '#b9c0c9'; ctx.fill(); start += sweep; });
             ctx.fillStyle = '#142949'; ctx.font = '700 15px Manrope, "Noto Sans KR", sans-serif'; ctx.textAlign = 'center'; ctx.fillText(total ? formatWon(total, '') : '0', center, center + 5); ctx.textAlign = 'left';
         });
-        const legend = byId('pilot-allocation-legend');
         if (!legend) return;
         legend.innerHTML = items.length ? items.slice(0, 6).map((item, index) => `<div class="pilot-control-row"><div class="pilot-control-copy"><strong><i class="pilot-asset-dot" data-color="${index === 1 ? 'green' : index === 2 ? 'amber' : ''}" aria-hidden="true"></i> ${escapeHtml(item.name)}</strong><span>${formatWon(item.value)}</span></div><span class="pilot-status-pill">${total ? ((item.value / total) * 100).toFixed(1) : '0.0'}%</span></div>`).join('') : '<div class="pilot-inline-empty">구성 데이터가 없습니다.</div>';
     }
@@ -1608,7 +1641,10 @@
         setText('pilot-market-symbol', `${symbol}/KRW`); setText('pilot-market-name', market ? '업비트 원화 시장 · 실시간 시세' : '선택한 시장'); setText('pilot-market-price', market.price ? `${formatPrice(market.price)}원` : '-');
         const change = number(market.change); const changeElement = byId('pilot-market-change');
         if (changeElement) { changeElement.textContent = market.price ? formatPercent(change) : '-'; changeElement.className = `pilot-market-change ${classForValue(change)}`; }
-        setText('pilot-market-high', market.high ? `${formatPrice(market.high)}원` : '-'); setText('pilot-market-low', market.low ? `${formatPrice(market.low)}원` : '-'); setText('pilot-market-volume', market.volumeKrw ? formatWon(market.volumeKrw) : '-'); setText('pilot-market-holding', position.currentValue ? formatWon(position.currentValue) : '없음');
+        setText('pilot-market-high', market.high ? `${formatPrice(market.high)}원` : '-'); setText('pilot-market-low', market.low ? `${formatPrice(market.low)}원` : '-'); setText('pilot-market-volume', market.volumeKrw ? formatWon(market.volumeKrw) : '-');
+        setText('pilot-market-holding', !position ? '없음' : hasFiniteValue(position.currentValue)
+            ? formatWon(position.currentValue)
+            : isReadOnlyObserver() ? '보유 · 평가액 미기록' : '보유');
         $$('[data-pilot-candle-interval]').forEach(button => button.classList.toggle('is-active', number(button.dataset.pilotCandleInterval) === state.candleInterval));
     }
 
@@ -1628,15 +1664,53 @@
     }
 
     function renderPortfolio() {
+        const observer = isReadOnlyObserver();
+        const paper = state.paper || {};
         const summary = state.portfolioAnalysis?.summary || {};
-        setText('pilot-portfolio-assets', formatWon(summary.totalAssets || state.account?.totalAssets));
-        const totalProfit = number(summary.totalProfit || state.pnl?.profit); const profitEl = byId('pilot-portfolio-profit');
-        if (profitEl) { profitEl.textContent = formatSignedWon(totalProfit); profitEl.className = classForValue(totalProfit); }
-        setText('pilot-portfolio-cash', formatWon(summary.krwBalance || state.account?.krwBalance)); setText('pilot-portfolio-count', `${summary.totalHoldings ?? positions().length}개`);
+        const paperAssets = hasFiniteValue(paper.currentAssets) ? Number(paper.currentAssets) : null;
+        const paperBaseline = hasFiniteValue(paper.baselineAssets)
+            ? Number(paper.baselineAssets)
+            : hasFiniteValue(state.account?.initialSeedMoney) ? Number(state.account.initialSeedMoney) : null;
+        const currentAssets = observer
+            ? (paperAssets ?? state.account?.totalAssets)
+            : (summary.totalAssets || state.account?.totalAssets);
+        const totalProfit = observer && paperAssets !== null && paperBaseline !== null
+            ? paperAssets - paperBaseline
+            : observer ? null : number(summary.totalProfit || state.pnl?.profit);
+        const positionCount = positions().length;
+        setText('pilot-portfolio-assets', currentAssets === null || currentAssets === undefined ? '미기록' : formatWon(currentAssets));
+        const profitEl = byId('pilot-portfolio-profit');
+        if (profitEl) {
+            profitEl.textContent = totalProfit === null ? '미기록' : formatSignedWon(totalProfit);
+            profitEl.className = totalProfit === null ? '' : classForValue(totalProfit);
+            if (profitEl.previousElementSibling) {
+                profitEl.previousElementSibling.textContent = observer ? '평가 손익' : '누적 손익';
+            }
+        }
+        setText('pilot-portfolio-profit-label', observer ? '평가 손익' : '누적 손익');
+        setText('pilot-portfolio-cash', observer ? '기록 없음' : formatWon(summary.krwBalance || state.account?.krwBalance));
+        setText('pilot-portfolio-count', `${observer ? positionCount : summary.totalHoldings ?? positionCount}개`);
         const summaryTarget = byId('pilot-account-summary');
-        if (summaryTarget) summaryTarget.innerHTML = [['모드', state.actualMode === 'LIVE' ? '실거래' : '모의투자'], ['현금 잔액', formatWon(state.account?.krwBalance)], ['총 자산 평가액', formatWon(state.account?.totalAssets)], ['시작 자산', formatWon(state.account?.initialSeedMoney || state.pnl?.initialSeedMoney)], ['누적 수익률', formatPercent(state.pnl?.profitPercent)]].map(([label, value]) => `<div class="pilot-control-row"><div class="pilot-control-copy"><strong>${escapeHtml(label)}</strong></div><span style="font-size:12px;font-weight:700;color:var(--sl-ink)">${escapeHtml(value)}</span></div>`).join('');
-        renderPositionRows('pilot-portfolio-positions'); drawAllocationChart(); drawEquityChart('pilot-portfolio-chart', 'pilot-portfolio-empty', state.portfolioHistory); renderChartPeriodButtons();
-        const walletMode = byId('pilot-wallet-mode'); if (walletMode) { walletMode.textContent = isPaperMode() ? '모의투자 전용' : '실거래 잠금'; walletMode.className = `pilot-status-pill${isPaperMode() ? '' : ' is-warning'}`; }
+        if (summaryTarget) {
+            const summaryRows = observer
+                ? [
+                    ['기록 기준', 'forward paper ledger'],
+                    ['기준 자산', paperBaseline === null ? '미기록' : formatWon(paperBaseline)],
+                    ['마지막 평가 시각', paper.lastSnapshotAt ? formatDateTime(paper.lastSnapshotAt) : '미기록'],
+                    ['실현 손익', hasFiniteValue(paper.realizedProfit) ? formatSignedWon(paper.realizedProfit) : '미기록'],
+                    ['현금 잔액', '기록 없음']
+                ]
+                : [['모드', state.actualMode === 'LIVE' ? '실거래' : '모의투자'], ['현금 잔액', formatWon(state.account?.krwBalance)], ['총 자산 평가액', formatWon(state.account?.totalAssets)], ['시작 자산', formatWon(state.account?.initialSeedMoney || state.pnl?.initialSeedMoney)], ['누적 수익률', formatPercent(state.pnl?.profitPercent)]];
+            summaryTarget.innerHTML = summaryRows.map(([label, value]) => `<div class="pilot-control-row"><div class="pilot-control-copy"><strong>${escapeHtml(label)}</strong></div><span style="font-size:12px;font-weight:700;color:var(--sl-ink)">${escapeHtml(value)}</span></div>`).join('');
+        }
+        renderPositionHeaders(); renderPositionRows('pilot-portfolio-positions'); drawAllocationChart(); drawEquityChart('pilot-portfolio-chart', 'pilot-portfolio-empty', state.portfolioHistory); renderChartPeriodButtons();
+        const walletMode = byId('pilot-wallet-mode');
+        if (walletMode) {
+            walletMode.textContent = observer ? '조회 전용' : isPaperMode() ? '모의투자 전용' : '실거래 잠금';
+            walletMode.className = `pilot-status-pill${!observer && !isPaperMode() ? ' is-warning' : ''}`;
+            const walletPanel = walletMode.closest('.pilot-panel');
+            if (walletPanel) walletPanel.hidden = observer;
+        }
     }
 
     function renderAnalysis() {

@@ -155,6 +155,21 @@ export default function createPortfolioRoutes(server) {
   // 자산 추이 저장 (자동 호출)
   router.post('/portfolio/snapshot', async (req, res) => {
     try {
+      if (server.tradingSystem.readOnlyObserver === true) {
+        if (typeof server.tradingSystem.readPaperValidationLedger !== 'function') {
+          return res.status(503).json({ success: false, readOnlyObserver: true, error: 'paper ledger unavailable' });
+        }
+        const ledger = server.tradingSystem.readPaperValidationLedger();
+        const snapshots = Array.isArray(ledger.snapshots) ? ledger.snapshots : [];
+        return res.json({
+          success: true,
+          readOnlyObserver: true,
+          recorded: false,
+          message: '원본 paper ledger 관찰 모드에서는 새 평가 기록을 추가하지 않습니다.',
+          dataPoints: snapshots.length
+        });
+      }
+
       if (!server.tradingSystem || !server.tradingSystem.upbit) {
         return res.json({ success: false, message: '거래 시스템 미초기화', dataPoints: 0 });
       }
@@ -229,15 +244,24 @@ export default function createPortfolioRoutes(server) {
   // 자산 추이 조회
   router.get('/portfolio/history', (req, res) => {
     try {
-      const historyFile = server.tradingSystem.portfolioHistoryFile ||
-        path.join(PROJECT_ROOT, 'portfolio_history.json');
       const period = req.query.period || '24h';
-
-      if (!fs.existsSync(historyFile)) {
-        return res.json({ data: [], period, count: 0 });
+      let history;
+      if (server.tradingSystem.readOnlyObserver === true) {
+        if (typeof server.tradingSystem.readPaperValidationLedger !== 'function') {
+          return res.status(503).json({ data: [], period, count: 0, readOnlyObserver: true });
+        }
+        const ledger = server.tradingSystem.readPaperValidationLedger();
+        history = (Array.isArray(ledger.snapshots) ? ledger.snapshots : [])
+          .map(snapshot => ({ timestamp: snapshot.timestamp, totalAssets: snapshot.totalAssets }))
+          .filter(snapshot => snapshot.timestamp && Number.isFinite(Number(snapshot.totalAssets)));
+      } else {
+        const historyFile = server.tradingSystem.portfolioHistoryFile ||
+          path.join(PROJECT_ROOT, 'portfolio_history.json');
+        if (!fs.existsSync(historyFile)) {
+          return res.json({ data: [], period, count: 0 });
+        }
+        history = JSON.parse(fs.readFileSync(historyFile, 'utf8'));
       }
-
-      let history = JSON.parse(fs.readFileSync(historyFile, 'utf8'));
 
       const now = Date.now();
       let cutoff;
@@ -268,7 +292,12 @@ export default function createPortfolioRoutes(server) {
         history = history.filter((_, idx) => idx % step === 0);
       }
 
-      res.json({ data: history, period, count: history.length });
+      res.json({
+        data: history,
+        period,
+        count: history.length,
+        ...(server.tradingSystem.readOnlyObserver === true ? { readOnlyObserver: true } : {})
+      });
     } catch (error) {
       res.json({ data: [], error: error.message });
     }

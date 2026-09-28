@@ -58,11 +58,11 @@ test('redesign은 백그라운드 탭이 다시 보일 때 paper 상태를 즉�
 
 test('PWA shell은 redesign asset version과 service worker cache version을 함께 갱신한다', () => {
   const scriptAsset = indexSource.match(/<script\s+src=["'](\/pilot-redesign\.js\?v=[^"']+)["']/)?.[1];
-  assert.equal(scriptAsset, '/pilot-redesign.js?v=observer-readonly-123');
-  assert.match(indexSource, /<link\s+rel=["']stylesheet["']\s+href=["']\/pilot-redesign\.css\?v=20260924-07["']/);
-  assert.match(serviceWorkerSource, /const CACHE_NAME = ['"]coinpilot-shell-v136['"]/);
+  assert.equal(scriptAsset, '/pilot-redesign.js?v=observer-readonly-124');
+  assert.match(indexSource, /<link\s+rel=["']stylesheet["']\s+href=["']\/pilot-redesign\.css\?v=20260928-01["']/);
+  assert.match(serviceWorkerSource, /const CACHE_NAME = ['"]coinpilot-shell-v138['"]/);
   assert.match(serviceWorkerSource, new RegExp(`['"]${scriptAsset.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}['"]`));
-  assert.match(serviceWorkerSource, /['"]\/pilot-redesign\.css\?v=20260924-07['"]/);
+  assert.match(serviceWorkerSource, /['"]\/pilot-redesign\.css\?v=20260928-01['"]/);
   assert.match(serviceWorkerSource, /NETWORK_FIRST_SHELL_PATHS/);
   assert.match(serviceWorkerSource, /fetch\(request\)[\s\S]*ignoreSearch: true/);
 });
@@ -117,8 +117,8 @@ test('PWA manifest icon과 service worker app shell의 모든 정적 자산이 �
     '/icon-512.png',
     '/apple-touch-icon.png',
     '/auth-client.js',
-    '/pilot-redesign.css?v=20260924-07',
-    '/pilot-redesign.js?v=observer-readonly-123'
+    '/pilot-redesign.css?v=20260928-01',
+    '/pilot-redesign.js?v=observer-readonly-124'
   ];
   for (const asset of shellAssets) {
     assert.match(
@@ -619,6 +619,7 @@ test('준비 현황은 실전 상태와 별도로 read-only quote-cost evidence�
   assert.match(paper, /이 수치에 따라 조건을 자동으로 낮추지 않습니다/);
   assert.ok(redesignStyleSource.includes('.pilot-paper-signal-funnel-steps {'));
   assert.ok(redesignStyleSource.includes('grid-template-columns: repeat(5, minmax(0, 1fr));'));
+  assert.match(redesignStyleSource, /@media \(max-width: 480px\) \{[\s\S]*?\.pilot-paper-signal-funnel-steps \{[\s\S]*?grid-template-columns: repeat\(2, minmax\(0, 1fr\)\);/);
   assert.ok(redesignStyleSource.includes('.pilot-paper-signal-step {'));
   assert.ok(redesignStyleSource.includes('min-width: 0;'));
   assert.match(paper, /analysisDataHealth\?\.failClosed/);

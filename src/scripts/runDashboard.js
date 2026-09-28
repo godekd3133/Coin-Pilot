@@ -98,8 +98,11 @@ export function attachReadOnlyPaperLedger(trader, ledgerFile) {
 
   trader.paperValidationFile = resolvedLedgerFile;
   trader.readOnlyObserver = true;
-  trader.portfolioHistoryFile = `${resolvedLedgerFile}.dashboard-history.json`;
+  trader.readPaperValidationLedger = readLedger;
   trader.savePaperValidation = () => {};
+  trader.recordPaperValidationSnapshot = async () => {
+    throw new Error('읽기 전용 paper observer는 원본 forward ledger에 snapshot을 추가할 수 없습니다.');
+  };
   trader.calculateTotalAssets = async () => {
     const ledger = readLedger();
     const snapshots = Array.isArray(ledger.snapshots) ? ledger.snapshots : [];

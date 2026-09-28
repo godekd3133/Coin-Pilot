@@ -6,6 +6,7 @@
   "scripts": {
     "stage:web": "node scripts/stage-web.mjs",
     "ios:sync": "npm run stage:web && node scripts/stage-ios.mjs",
-    "ios:open": "open ios/App/App.xcodeproj"
+    "ios:open": "open ios/App/App.xcodeproj",
+    "test:server-policy": "swiftc ios/App/App/ServerAddressPolicy.swift tests/ServerAddressPolicyTests.swift -o /tmp/coinpilot-ios-server-policy-tests && /tmp/coinpilot-ios-server-policy-tests"
   }
 }
