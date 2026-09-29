@@ -692,6 +692,23 @@ const UNCERTAIN_LIVE_CODES = new Set([
   'order_uuid_missing',
   'live_execution_evidence_write_failed'
 ]);
+const IDEMPOTENCY_STATUS_HEADER = 'Idempotency-Status';
+const IDEMPOTENCY_STATUSES = new Set(['completed', 'pending', 'unknown', 'conflict', 'rejected']);
+
+function setIdempotencyStatus(res, status) {
+  if (!IDEMPOTENCY_STATUSES.has(status)) return;
+  if (typeof res?.setHeader === 'function') {
+    res.setHeader(IDEMPOTENCY_STATUS_HEADER, status);
+  } else if (typeof res?.set === 'function') {
+    res.set(IDEMPOTENCY_STATUS_HEADER, status);
+  }
+}
+
+function respondWithIdempotencyStatus(res, statusCode, body, idempotencyStatus) {
+  setIdempotencyStatus(res, idempotencyStatus);
+  return res.status(statusCode).json(body);
+}
+
 const DEFINITIVE_LIVE_NO_SUBMIT_CODES = new Set([
   'live_order_in_progress',
   'protective_only',
@@ -737,15 +754,16 @@ function requestResponsePromise(req, res, next, reservation, store, tradingSyste
       const finalize = async () => {
         if (hasUncertainLiveResult(reservation.record.mode, responseStatus, body)) {
           await store.markUnknown(reservation.record.recordId, 'live_order_outcome_unknown');
-          return { status: 202, body: unknownResponse() };
+          return { status: 202, body: unknownResponse(), idempotencyStatus: 'unknown' };
         }
         await store.complete(reservation.record.recordId, { status: responseStatus, body });
         transaction?.commit?.();
-        return { status: responseStatus, body };
+        return { status: responseStatus, body, idempotencyStatus: 'completed' };
       };
 
       finalize()
         .then(result => {
+          setIdempotencyStatus(this, result.idempotencyStatus);
           originalJson.call(this.status(result.status), result.body);
           if (res.destroyed) finish();
         })
@@ -756,6 +774,7 @@ function requestResponsePromise(req, res, next, reservation, store, tradingSyste
           } catch {
             // Keep the reservation pending in memory/disk and fail closed.
           }
+          setIdempotencyStatus(this, 'unknown');
           originalJson.call(this.status(202), unknownResponse());
           if (res.destroyed) finish();
         })
@@ -773,7 +792,7 @@ export function createManualOrderIdempotencyMiddleware(server, { paths } = {}) {
 
     const tradingSystem = server?.tradingSystem;
     if (tradingSystem?.readOnlyObserver === true) {
-      return res.status(403).json({
+      return respondWithIdempotencyStatus(res, 403, {
         success: false,
         pending: false,
         readOnlyObserver: true,
@@ -781,25 +800,25 @@ export function createManualOrderIdempotencyMiddleware(server, { paths } = {}) {
           code: 'read_only_observer',
           message: '읽기 전용 연결에서는 계정 파일을 변경할 수 없습니다.'
         }
-      });
+      }, 'rejected');
     }
 
     const idempotencyKey = String(req.get?.('Idempotency-Key') || req.headers?.['idempotency-key'] || '').trim();
-    if (!idempotencyKey) return res.status(428).json(missingKeyResponse());
+    if (!idempotencyKey) return respondWithIdempotencyStatus(res, 428, missingKeyResponse(), 'rejected');
     if (idempotencyKey.length > 256) {
-      return res.status(400).json({
+      return respondWithIdempotencyStatus(res, 400, {
         success: false,
         pending: false,
         error: { code: 'idempotency_key_invalid', message: '요청 키 형식이 올바르지 않습니다.' }
-      });
+      }, 'rejected');
     }
 
     const store = server?.manualOrderIdempotencyStore;
     if (!store || typeof store.reserve !== 'function') {
-      return res.status(503).json({
+      return respondWithIdempotencyStatus(res, 503, {
         ...pendingResponse('unavailable'),
         error: { code: 'idempotency_store_unavailable', message: '요청을 안전하게 기록할 수 없어 변경을 시작하지 않았습니다.' }
-      });
+      }, 'unknown');
     }
 
     const mode = tradingSystem?.dryRun === true ? 'DRY_RUN' : 'LIVE';
@@ -815,22 +834,23 @@ export function createManualOrderIdempotencyMiddleware(server, { paths } = {}) {
       });
     } catch (error) {
       if (String(error?.code || '').startsWith('MANUAL_ORDER_WRITER_LOCK_')) {
-        return res.status(503).json(writerLockResponse(error));
+        return respondWithIdempotencyStatus(res, 503, writerLockResponse(error), 'rejected');
       }
-      return res.status(503).json(unknownResponse());
+      return respondWithIdempotencyStatus(res, 503, unknownResponse(), 'unknown');
     }
 
     if (reservation.kind === 'conflict') {
-      return res.status(409).json(conflictResponse(reservation.pending, reservation.state));
+      return respondWithIdempotencyStatus(res, 409, conflictResponse(reservation.pending, reservation.state), 'conflict');
     }
     if (reservation.kind === 'replay') {
-      return res.status(reservation.responseStatus).json(reservation.responseBody);
+      return respondWithIdempotencyStatus(res, reservation.responseStatus, reservation.responseBody, 'completed');
     }
     if (reservation.kind === 'pending') {
-      return res.status(202).json(pendingResponse(reservation.state));
+      const status = reservation.state === 'unknown' ? 'unknown' : 'pending';
+      return respondWithIdempotencyStatus(res, 202, pendingResponse(reservation.state), status);
     }
     if (reservation.kind !== 'reserved' || reservation.record.mode !== mode) {
-      return res.status(202).json(unknownResponse());
+      return respondWithIdempotencyStatus(res, 202, unknownResponse(), 'unknown');
     }
 
     const execute = transaction => requestResponsePromise(req, res, next, reservation, store, tradingSystem, transaction);
@@ -841,7 +861,7 @@ export function createManualOrderIdempotencyMiddleware(server, { paths } = {}) {
         } catch {
           // The pending reservation remains durable.
         }
-        return res.status(202).json(unknownResponse());
+        return respondWithIdempotencyStatus(res, 202, unknownResponse(), 'unknown');
       }
       try {
         return await tradingSystem.withManualPortfolioTransaction(transaction => execute(transaction));
@@ -851,7 +871,7 @@ export function createManualOrderIdempotencyMiddleware(server, { paths } = {}) {
         } catch {
           // Keep the durable reservation unresolved when rollback persistence also fails.
         }
-        if (!res.headersSent) return res.status(202).json(unknownResponse());
+        if (!res.headersSent) return respondWithIdempotencyStatus(res, 202, unknownResponse(), 'unknown');
         return undefined;
       }
     }

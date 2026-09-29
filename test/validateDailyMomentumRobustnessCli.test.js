@@ -53,6 +53,7 @@ test('robustness CLI maps allocation and protection axes into one reproducible v
       DAILY_MOMENTUM_ROBUSTNESS_REGIME_EXIT_CONFIRMATION_BARS: '1',
       DAILY_MOMENTUM_ROBUSTNESS_VOLATILITY_LOOKBACK_DAYS: '14',
       DAILY_MOMENTUM_ROBUSTNESS_STOP_LOSS_PERCENT: '0',
+      DAILY_MOMENTUM_ROBUSTNESS_COST_PERCENT: '0.3',
       DAILY_MOMENTUM_ENTRY_WINDOW_END_TIMESTAMP: '2020-01-10T00:00:00.000Z'
     }
   });
@@ -68,6 +69,7 @@ test('robustness CLI maps allocation and protection axes into one reproducible v
   assert.equal(report.variants[0].config.maxPortfolioDrawdownPercent, 15);
   assert.equal(report.variants[0].config.mode, 'fixed');
   assert.equal(report.variants[0].config.maxHoldDays, 1);
+  assert.equal(report.variants[0].config.costPercent, 0.3);
   assert.equal(report.variants[0].config.entryWindowEndTimestamp, '2020-01-10T00:00:00.000Z');
   assert.ok(report.variants[0].full.entryWindowBlockedSignalCount > 0);
   assert.ok(report.variants[0].eligibilityBlockers.includes('maturity_tail_not_independent_holdout'));
