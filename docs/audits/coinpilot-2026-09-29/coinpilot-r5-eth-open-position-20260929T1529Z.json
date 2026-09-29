@@ -1,0 +1,62 @@
+{
+  "schema": "coinpilot.paper-forward-position-observation.v1",
+  "observedAt": "2026-09-29T15:29:50.716Z",
+  "researchOnly": true,
+  "promoted": false,
+  "source": {
+    "ledger": ".paper-forward-sealed-rsi-20260928-r5/paper_validation.json",
+    "processId": 11906,
+    "active": true,
+    "heartbeatAt": "2026-09-29T15:29:50.716Z",
+    "cycles": 16411,
+    "configSnapshotComplete": true,
+    "analysisContinuity": true,
+    "riskContinuity": true,
+    "stopReason": null,
+    "configDrift": null
+  },
+  "position": {
+    "market": "KRW-ETH",
+    "signalTime": "2026-09-29T15:28:00",
+    "entryTime": "2026-09-29T15:29:10.198Z",
+    "entryPriceKrw": 3628000,
+    "amount": 0.05507911700661521,
+    "paperPathMfePercent": 0,
+    "paperPathMaePercent": -0.027563395810363836,
+    "signalReboundPercent": 0.24855012427506215,
+    "signalRsi": 38.741055620204975,
+    "signalOversoldRsi": 25.604542380454703,
+    "signalRsiRecovery": 13.136513239750272,
+    "signalVolumeRatio": 1.112852673338508,
+    "signalCloseStrength": 1,
+    "signalTrendSlopePercent": -0.12605848017319338,
+    "entryDelayMs": 4338,
+    "executionDriftPercent": -0.055096418732782364
+  },
+  "costAndExecutionBoundary": {
+    "configuredSlippageRate": 0.001,
+    "configuredTradingFeeRate": 0.0005,
+    "paperExecutionCostModel": null,
+    "paperExecutionSlippageRate": null,
+    "paperExecutionTradingFeeRate": null,
+    "paperObservedEntryPrice": null,
+    "paperObservedExitPrice": null,
+    "actualExchangeFillObserved": false,
+    "interpretation": "This is a simulated position. No exchange order, observed fill, or realized result is recorded; audit configured slippage sensitivity if and when it closes."
+  },
+  "session": {
+    "strictClosedTrades": 10,
+    "strictOpenPositions": 1,
+    "strictRecordedNetProfitKrw": -3638.994884541925,
+    "shadowCandidates": 0,
+    "shadowClosedTrades": 0,
+    "shadowOpenPositions": 0
+  },
+  "decision": {
+    "restart": false,
+    "configurationChanged": false,
+    "marketSetChanged": false,
+    "candidateLaunched": false,
+    "interpretation": "Keep the active owner, parameter snapshot, and market set unchanged while this position is open. Negative trend slope is observed here but does not by itself justify a threshold change or claim that the feature caused the outcome."
+  }
+}

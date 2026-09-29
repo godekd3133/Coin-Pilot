@@ -67,7 +67,7 @@ test('UI live buy does not open a strategy position when the order is not filled
   const strategy = trader.getStrategy('KRW-BTC');
   trader.upbit = {
     async getTicker() {
-      return [{ market: 'KRW-BTC', trade_price: 100_000_000 }];
+      return [{ market: 'KRW-BTC', trade_price: 100_000_000, trade_timestamp: Date.now() }];
     },
     async order() {
       return { success: true, data: { uuid: 'ui-route-order-1' } };
@@ -112,7 +112,7 @@ test('UI live buy does not open a strategy position when the order is not filled
     assert.deepEqual(events.map(event => event.eventType), ['ORDER_INTENT', 'ORDER_SUBMITTED', 'FILL_NOT_OBSERVED']);
     assert.deepEqual(cancellations, ['ui-route-order-1']);
   } finally {
-    dashboard.stop();
+    await dashboard.stop();
     trader.stop();
     fs.rmSync(tempDir, { recursive: true, force: true });
   }

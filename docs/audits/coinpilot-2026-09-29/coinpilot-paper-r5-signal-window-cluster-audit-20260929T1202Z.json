@@ -1,0 +1,94 @@
+{
+  "schema": "coinpilot.paper.strict-signal-window-cluster-audit.v1",
+  "generatedAt": "2026-09-29T12:02:18Z",
+  "researchOnly": true,
+  "promoted": false,
+  "source": {
+    "file": ".paper-forward-sealed-rsi-20260928-r5/paper_validation.json",
+    "sessionId": "paper-1790604243722",
+    "processId": 11906,
+    "activeAtRead": true,
+    "heartbeatAt": "2026-09-29T12:01:43.360Z",
+    "configSnapshotComplete": true,
+    "configSlippagePerSide": 0.001
+  },
+  "method": {
+    "groupKey": "strict trade signalTime, falling back to signalKey",
+    "tradeRowsIncluded": "type=CLOSE only",
+    "pnlField": "profit, which already includes the recorded totalFee",
+    "additionalFeeDeduction": false,
+    "actualFillsObserved": false,
+    "paperExecutionCostModelRecorded": false,
+    "independenceCaveat": "A shared signalTime is treated as one cluster; distinct minute keys are not proof of statistical independence because nearby market signals can remain correlated."
+  },
+  "summary": {
+    "strictClosedTrades": 8,
+    "uniqueSignalWindows": 7,
+    "profitableTradeRows": 3,
+    "losingTradeRows": 5,
+    "profitableSignalWindows": 3,
+    "losingSignalWindows": 4,
+    "maximumTradesInOneSignalWindow": 2,
+    "grossProfitKrw": 889.714396,
+    "recordedFeesKrw": 1599.400979,
+    "recordedNetProfitKrw": -709.686583,
+    "realizedProfitPromotionalEvidence": false
+  },
+  "signalWindows": [
+    {
+      "signalTime": "2026-09-28T14:17:00",
+      "markets": ["KRW-SOL"],
+      "tradeCount": 1,
+      "recordedNetProfitKrw": -1682.646197,
+      "recordedFeesKrw": 199.158256
+    },
+    {
+      "signalTime": "2026-09-28T14:30:00",
+      "markets": ["KRW-ETH"],
+      "tradeCount": 1,
+      "recordedNetProfitKrw": -419.923111,
+      "recordedFeesKrw": 199.779933
+    },
+    {
+      "signalTime": "2026-09-28T14:53:00",
+      "markets": ["KRW-BTC", "KRW-XRP"],
+      "tradeCount": 2,
+      "recordedNetProfitKrw": -953.845307,
+      "recordedFeesKrw": 399.432839
+    },
+    {
+      "signalTime": "2026-09-28T17:02:00",
+      "markets": ["KRW-XRP"],
+      "tradeCount": 1,
+      "recordedNetProfitKrw": 878.767385,
+      "recordedFeesKrw": 200.377603
+    },
+    {
+      "signalTime": "2026-09-28T19:41:00",
+      "markets": ["KRW-ETH"],
+      "tradeCount": 1,
+      "recordedNetProfitKrw": 1010.453553,
+      "recordedFeesKrw": 200.46148
+    },
+    {
+      "signalTime": "2026-09-29T04:51:00",
+      "markets": ["KRW-XRP"],
+      "tradeCount": 1,
+      "recordedNetProfitKrw": 494.479757,
+      "recordedFeesKrw": 200.223364
+    },
+    {
+      "signalTime": "2026-09-29T10:51:00",
+      "markets": ["KRW-ETH"],
+      "tradeCount": 1,
+      "recordedNetProfitKrw": -36.972663,
+      "recordedFeesKrw": 199.967504
+    }
+  ],
+  "decision": {
+    "promotion": "not_allowed",
+    "runtimeConfigChanged": false,
+    "candidateLaunched": false,
+    "reason": "Eight strict closes collapse to seven signal-time clusters and remain negative after recorded fees; actual fills are unobserved and this is not an independent holdout."
+  }
+}

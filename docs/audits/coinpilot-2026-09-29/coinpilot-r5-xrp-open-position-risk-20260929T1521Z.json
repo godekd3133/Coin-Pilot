@@ -1,0 +1,56 @@
+{
+  "schema": "coinpilot.paper-forward-position-observation.v1",
+  "observedAt": "2026-09-29T15:21:37.769Z",
+  "researchOnly": true,
+  "promoted": false,
+  "source": {
+    "ledger": ".paper-forward-sealed-rsi-20260928-r5/paper_validation.json",
+    "processId": 11906,
+    "active": true,
+    "heartbeatAt": "2026-09-29T15:21:37.769Z",
+    "cycles": 16325,
+    "analysisContinuity": true,
+    "riskContinuity": true,
+    "stopReason": null,
+    "configDrift": null
+  },
+  "position": {
+    "market": "KRW-XRP",
+    "signalTime": "2026-09-29T15:09:00",
+    "entryTime": "2026-09-29T15:10:04.310Z",
+    "entryPriceKrw": 2075,
+    "amount": 96.32723397590361,
+    "lowestPriceSinceEntryKrw": 2055,
+    "highestPriceSinceEntryKrw": 2080,
+    "paperPathMaePercent": -0.9638554216867471,
+    "paperPathMfePercent": 0.24096385542168677,
+    "ageAtObservationSeconds": 693.459,
+    "configuredStopLossPercent": 1.2,
+    "nominalStopPriceKrw": 2050.1,
+    "observedLowAboveNominalStopKrw": 4.9,
+    "configuredMaximumHoldMinutes": 30,
+    "paperExecutionCostModel": null,
+    "paperExecutionSlippageRate": null,
+    "paperExecutionTradingFeeRate": null,
+    "paperObservedEntryPrice": null,
+    "paperObservedExitPrice": null,
+    "actualExchangeFillObserved": false
+  },
+  "session": {
+    "strictClosedTrades": 9,
+    "strictRecordedNetProfitKrw": -1032.1391150690336,
+    "strictOpenPositions": 1,
+    "shadowCandidates": 0,
+    "shadowCloses": 0,
+    "shadowOpenPositions": 0,
+    "configuredSlippageRatePerSide": 0.001,
+    "configuredTradingFeeRate": 0.0005
+  },
+  "decision": {
+    "restart": false,
+    "parametersChanged": false,
+    "marketSetChanged": false,
+    "candidateLaunched": false,
+    "interpretation": "The paper candle-path adverse excursion increased from -0.819% at 15:20:39Z to -0.964%, with the recorded low 4.9 KRW above the nominal 1.2% stop price. The ledger still shows the position open and both monitors continuous; this is not an actual exchange holding or a realized loss. Keep the owner and configuration unchanged and inspect the close when it occurs."
+  }
+}

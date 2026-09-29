@@ -210,6 +210,84 @@ test('robustness report keeps historical eligibility separate from promotion', (
   assert.match(report.promotionReason, /research_only/);
 });
 
+test('robustness report exposes cost-adjusted market concentration without changing HOLD or promotion', () => {
+  const candles = {
+    'KRW-BTC': daily([100, 110, 121, 133, 146, 161, 177, 194]),
+    'KRW-ETH': daily([100, 101, 102, 103, 104, 105, 106, 107])
+  };
+  const report = evaluateDailyMomentumRobustness(candles, {
+    segmentCount: 2,
+    segmentMode: 'continuous',
+    variants: [{
+      name: 'market-concentration-test',
+      config: {
+        mode: 'fixed',
+        trendLookbackDays: 2,
+        trendMinPercent: 0,
+        breadthMin: 2,
+        minUpBars: 1,
+        maxHoldDays: 1,
+        positionFraction: 0.2,
+        maxPositions: 2,
+        benchmarkMarket: null,
+        exitOnBenchmarkOff: false,
+        costPercent: 0.3
+      }
+    }],
+    minimumFullReturnPercent: -100,
+    maximumDrawdownPercent: 100,
+    minimumWorstSegmentReturnPercent: -100,
+    minimumTradeCount: 1
+  });
+
+  const variant = report.variants[0];
+  const attribution = variant.marketAttribution;
+  assert.equal(attribution.available, true);
+  assert.equal(attribution.basis, 'simulated_closed_trade_pnl_after_configured_round_trip_cost');
+  assert.equal(attribution.closedTradeCount, variant.full.metrics.tradeCount);
+  assert.equal(attribution.marketCount, 2);
+  assert.equal(attribution.profitableMarketCount, 2);
+  assert.ok(attribution.topOneGrossProfitSharePercent > 90);
+  assert.ok(Math.abs(attribution.totalNetProfit - variant.full.metrics.realizedProfit) < 1e-6);
+  assert.equal(variant.status, 'HOLD', 'boundary blockers retain their existing priority');
+  assert.equal(report.promoted, false);
+});
+
+test('robustness market attribution stays unavailable when no valid closed trades exist', () => {
+  const candles = {
+    'KRW-BTC': daily([100, 100, 100, 100, 100, 100, 100, 100]),
+    'KRW-ETH': daily([100, 100, 100, 100, 100, 100, 100, 100])
+  };
+  const report = evaluateDailyMomentumRobustness(candles, {
+    segmentCount: 2,
+    variants: [{
+      name: 'no-trades-market-attribution',
+      config: {
+        mode: 'fixed',
+        trendLookbackDays: 2,
+        trendMinPercent: 0,
+        breadthMin: 2,
+        maxHoldDays: 1,
+        benchmarkMarket: null,
+        exitOnBenchmarkOff: false
+      }
+    }],
+    minimumFullReturnPercent: -100,
+    maximumDrawdownPercent: 100,
+    minimumWorstSegmentReturnPercent: -100,
+    minimumTradeCount: 1
+  });
+
+  const attribution = report.variants[0].marketAttribution;
+  assert.equal(attribution.available, false);
+  assert.equal(attribution.closedTradeCount, 0);
+  assert.equal(attribution.marketCount, 0);
+  assert.equal(attribution.totalNetProfit, 0);
+  assert.equal(attribution.topOneGrossProfitSharePercent, null);
+  assert.equal(report.variants[0].status, 'HOLD');
+  assert.equal(report.promoted, false);
+});
+
 test('maturity-tail returns stay diagnostic and cannot create a shadow shortlist', () => {
   const candles = {
     'KRW-BTC': daily([100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111]),

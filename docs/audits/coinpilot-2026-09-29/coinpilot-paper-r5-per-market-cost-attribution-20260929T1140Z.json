@@ -1,0 +1,54 @@
+{
+  "schema": "coinpilot.paper-strict-per-market-cost-attribution.v1",
+  "generatedAt": "2026-09-29T11:40:08.023Z",
+  "sessionId": "paper-1790604243722",
+  "sessionActive": true,
+  "cycles": 13942,
+  "researchOnly": true,
+  "promoted": false,
+  "actualFillsObserved": false,
+  "executionCostModelMarkedTradeCount": 0,
+  "configuredSlippagePerSidePercent": 0.1,
+  "additionalFeesDeducted": false,
+  "quoteCrossingCostAvailable": false,
+  "strictClosedTrades": 8,
+  "strictOpenPositions": 0,
+  "recordedNetAfterFeesKrw": -709.6865830314568,
+  "totalSlippageDragKrw": 3198.8019583961664,
+  "totalCostStressedNetKrw": -3908.488541427623,
+  "perMarket": [
+    {
+      "market": "KRW-BTC",
+      "closedTrades": 1,
+      "recordedNetAfterFeesKrw": -359.22034337832304,
+      "twoSidedNotionalKrw": 399552.5999566,
+      "slippageDragKrw": 399.5525999566,
+      "costStressedNetKrw": -758.772943334923
+    },
+    {
+      "market": "KRW-ETH",
+      "closedTrades": 3,
+      "recordedNetAfterFeesKrw": 553.5577793734169,
+      "twoSidedNotionalKrw": 1200417.8346967218,
+      "slippageDragKrw": 1200.417834696722,
+      "costStressedNetKrw": -646.860055323305
+    },
+    {
+      "market": "KRW-SOL",
+      "closedTrades": 1,
+      "recordedNetAfterFeesKrw": -1682.6461966604825,
+      "twoSidedNotionalKrw": 398316.5120593691,
+      "slippageDragKrw": 398.31651205936913,
+      "costStressedNetKrw": -2080.9627087198514
+    },
+    {
+      "market": "KRW-XRP",
+      "closedTrades": 3,
+      "recordedNetAfterFeesKrw": 778.6221776339316,
+      "twoSidedNotionalKrw": 1200515.0116834757,
+      "slippageDragKrw": 1200.5150116834757,
+      "costStressedNetKrw": -421.8928340495439
+    }
+  ],
+  "interpretation": "All four current target markets are negative under this configured slippage sensitivity, but each has only 1-3 closed trades. This does not support excluding a market or changing parameters. The audit uses recorded paper net after fees and adds the 0.1%/side fixed-quantity slippage sensitivity once; no exchange fill or time-matched quote-cross cost was observed."
+}

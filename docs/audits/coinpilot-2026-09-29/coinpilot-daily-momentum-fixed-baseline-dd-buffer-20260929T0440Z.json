@@ -1,0 +1,4202 @@
+{
+  "generatedAt": "2026-09-29T04:40:59.909Z",
+  "study": "daily_momentum_robustness_grid",
+  "researchOnly": true,
+  "promoted": false,
+  "criteria": {
+    "minimumFullReturnPercent": 0,
+    "maximumDrawdownPercent": 15,
+    "minimumWorstSegmentReturnPercent": -2,
+    "minimumTradeCount": 30
+  },
+  "segmentMode": "independent",
+  "grid": {
+    "mode": [
+      "fixed"
+    ],
+    "maxHoldDays": [
+      3
+    ],
+    "trendMinPercent": [
+      0
+    ],
+    "breadthMin": [
+      1
+    ],
+    "positionFraction": [
+      0.25
+    ],
+    "maxPositions": [
+      4
+    ],
+    "cooldownAfterLossDays": [
+      0
+    ],
+    "maxPortfolioDrawdownPercent": [
+      5,
+      10,
+      12
+    ],
+    "benchmarkTrendMinPercent": [
+      -100
+    ],
+    "minUpBars": [
+      1
+    ],
+    "benchmarkExitConfirmationBars": [
+      1
+    ],
+    "regimeExitConfirmationBars": [
+      1
+    ]
+  },
+  "variants": [
+    {
+      "name": "fixed_h3_gm100_u1_t0_b1_f0p25_p4_c0_dd5",
+      "config": {
+        "initialBalance": 100000000,
+        "trendLookbackDays": 7,
+        "trendMinPercent": 0,
+        "breadthMin": 1,
+        "requireUpBar": true,
+        "minUpBars": 1,
+        "costPercent": 0.3,
+        "positionFraction": 0.25,
+        "maxPositions": 4,
+        "maxHoldDays": 3,
+        "cooldownAfterLossDays": 0,
+        "benchmarkMarket": "KRW-BTC",
+        "benchmarkTrendMinPercent": -100,
+        "benchmarkMinUpBars": 1,
+        "benchmarkExitConfirmationBars": 1,
+        "regimeExitConfirmationBars": 1,
+        "relativeTrendMinPercent": null,
+        "volatilityLookbackDays": 14,
+        "volatilityTargetPercent": null,
+        "excludeBenchmarkFromEntries": false,
+        "excludeBenchmarkFromBreadth": false,
+        "benchmarkExposureMinPercent": null,
+        "benchmarkExposureMaxPercent": null,
+        "exitOnBenchmarkOff": true,
+        "stopLossPercent": 0,
+        "maxPortfolioDrawdownPercent": 5,
+        "mode": "fixed",
+        "entryExecution": "close",
+        "exitExecution": "close",
+        "maxEntryGapPercent": 0,
+        "entryWindowEndTimestamp": null,
+        "excludeCurrentUtcDay": true
+      },
+      "full": {
+        "available": true,
+        "metrics": {
+          "initialBalance": 100000000,
+          "finalEquity": 95651218.88217865,
+          "netProfit": -4348781.117821351,
+          "totalReturnPercent": -4.348781117821354,
+          "realizedProfit": -4348781.117821359,
+          "realizedReturnPercent": -4.348781117821359,
+          "tradeCount": 12,
+          "winningTrades": 4,
+          "losingTrades": 8,
+          "winRate": 33.33333333333333,
+          "profitFactor": 0.29876239978760977,
+          "grossProfit": 1852798.94078389,
+          "grossLoss": 6201580.058605249,
+          "maxDrawdownPercent": 6.165188077304511,
+          "exposurePercent": 0.906344410876133
+        },
+        "entryWindowBlockedSignalCount": 0,
+        "unknownBoundaryPositionCount": 0,
+        "unknownBoundaryPositionMarkets": [],
+        "unknownBoundaryEntryCount": 0,
+        "unknownBoundaryEntryMarkets": [],
+        "unknownBoundaryExitCount": 0,
+        "unknownBoundaryExitMarkets": [],
+        "dataQuality": {
+          "valid": true,
+          "reason": "daily_candle_grid_contiguous",
+          "marketCount": 12,
+          "minimumBars": 9,
+          "candleCount": 1000,
+          "firstTimestamp": "2024-01-03T00:00:00.000Z",
+          "lastTimestamp": "2026-09-28T00:00:00.000Z",
+          "byMarket": {
+            "KRW-BTC": {
+              "candleCount": 1000,
+              "gapCount": 0,
+              "largestGapDays": 0,
+              "firstTimestamp": "2024-01-03T00:00:00.000Z",
+              "lastTimestamp": "2026-09-28T00:00:00.000Z",
+              "valid": true
+            },
+            "KRW-ETH": {
+              "candleCount": 1000,
+              "gapCount": 0,
+              "largestGapDays": 0,
+              "firstTimestamp": "2024-01-03T00:00:00.000Z",
+              "lastTimestamp": "2026-09-28T00:00:00.000Z",
+              "valid": true
+            },
+            "KRW-XRP": {
+              "candleCount": 1000,
+              "gapCount": 0,
+              "largestGapDays": 0,
+              "firstTimestamp": "2024-01-03T00:00:00.000Z",
+              "lastTimestamp": "2026-09-28T00:00:00.000Z",
+              "valid": true
+            },
+            "KRW-SOL": {
+              "candleCount": 1000,
+              "gapCount": 0,
+              "largestGapDays": 0,
+              "firstTimestamp": "2024-01-03T00:00:00.000Z",
+              "lastTimestamp": "2026-09-28T00:00:00.000Z",
+              "valid": true
+            },
+            "KRW-DOGE": {
+              "candleCount": 1000,
+              "gapCount": 0,
+              "largestGapDays": 0,
+              "firstTimestamp": "2024-01-03T00:00:00.000Z",
+              "lastTimestamp": "2026-09-28T00:00:00.000Z",
+              "valid": true
+            },
+            "KRW-ADA": {
+              "candleCount": 1000,
+              "gapCount": 0,
+              "largestGapDays": 0,
+              "firstTimestamp": "2024-01-03T00:00:00.000Z",
+              "lastTimestamp": "2026-09-28T00:00:00.000Z",
+              "valid": true
+            },
+            "KRW-DOT": {
+              "candleCount": 1000,
+              "gapCount": 0,
+              "largestGapDays": 0,
+              "firstTimestamp": "2024-01-03T00:00:00.000Z",
+              "lastTimestamp": "2026-09-28T00:00:00.000Z",
+              "valid": true
+            },
+            "KRW-LINK": {
+              "candleCount": 1000,
+              "gapCount": 0,
+              "largestGapDays": 0,
+              "firstTimestamp": "2024-01-03T00:00:00.000Z",
+              "lastTimestamp": "2026-09-28T00:00:00.000Z",
+              "valid": true
+            },
+            "KRW-ATOM": {
+              "candleCount": 1000,
+              "gapCount": 0,
+              "largestGapDays": 0,
+              "firstTimestamp": "2024-01-03T00:00:00.000Z",
+              "lastTimestamp": "2026-09-28T00:00:00.000Z",
+              "valid": true
+            },
+            "KRW-NEAR": {
+              "candleCount": 1000,
+              "gapCount": 0,
+              "largestGapDays": 0,
+              "firstTimestamp": "2024-01-03T00:00:00.000Z",
+              "lastTimestamp": "2026-09-28T00:00:00.000Z",
+              "valid": true
+            },
+            "KRW-ETC": {
+              "candleCount": 1000,
+              "gapCount": 0,
+              "largestGapDays": 0,
+              "firstTimestamp": "2024-01-03T00:00:00.000Z",
+              "lastTimestamp": "2026-09-28T00:00:00.000Z",
+              "valid": true
+            },
+            "KRW-SUI": {
+              "candleCount": 1000,
+              "gapCount": 0,
+              "largestGapDays": 0,
+              "firstTimestamp": "2024-01-03T00:00:00.000Z",
+              "lastTimestamp": "2026-09-28T00:00:00.000Z",
+              "valid": true
+            }
+          }
+        },
+        "drawdownStopTriggered": true,
+        "drawdownStopAt": "2024-01-18T00:00:00.000Z"
+      },
+      "segments": [
+        {
+          "segment": 0,
+          "range": {
+            "start": 0,
+            "end": 125
+          },
+          "available": true,
+          "metrics": {
+            "initialBalance": 100000000,
+            "finalEquity": 95651218.88217865,
+            "netProfit": -4348781.117821351,
+            "totalReturnPercent": -4.348781117821354,
+            "realizedProfit": -4348781.117821359,
+            "realizedReturnPercent": -4.348781117821359,
+            "tradeCount": 12,
+            "winningTrades": 4,
+            "losingTrades": 8,
+            "winRate": 33.33333333333333,
+            "profitFactor": 0.29876239978760977,
+            "grossProfit": 1852798.94078389,
+            "grossLoss": 6201580.058605249,
+            "maxDrawdownPercent": 6.165188077304511,
+            "exposurePercent": 7.627118644067797
+          },
+          "unknownBoundaryPositionCount": 0,
+          "unknownBoundaryPositionMarkets": [],
+          "unknownBoundaryEntryCount": 0,
+          "unknownBoundaryEntryMarkets": [],
+          "unknownBoundaryExitCount": 0,
+          "unknownBoundaryExitMarkets": [],
+          "dataQuality": {
+            "valid": true,
+            "reason": "daily_candle_grid_contiguous",
+            "marketCount": 12,
+            "minimumBars": 9,
+            "candleCount": 125,
+            "firstTimestamp": "2024-01-03T00:00:00.000Z",
+            "lastTimestamp": "2024-05-06T00:00:00.000Z",
+            "byMarket": {
+              "KRW-BTC": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-01-03T00:00:00.000Z",
+                "lastTimestamp": "2024-05-06T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ETH": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-01-03T00:00:00.000Z",
+                "lastTimestamp": "2024-05-06T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-XRP": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-01-03T00:00:00.000Z",
+                "lastTimestamp": "2024-05-06T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-SOL": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-01-03T00:00:00.000Z",
+                "lastTimestamp": "2024-05-06T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-DOGE": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-01-03T00:00:00.000Z",
+                "lastTimestamp": "2024-05-06T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ADA": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-01-03T00:00:00.000Z",
+                "lastTimestamp": "2024-05-06T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-DOT": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-01-03T00:00:00.000Z",
+                "lastTimestamp": "2024-05-06T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-LINK": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-01-03T00:00:00.000Z",
+                "lastTimestamp": "2024-05-06T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ATOM": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-01-03T00:00:00.000Z",
+                "lastTimestamp": "2024-05-06T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-NEAR": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-01-03T00:00:00.000Z",
+                "lastTimestamp": "2024-05-06T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ETC": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-01-03T00:00:00.000Z",
+                "lastTimestamp": "2024-05-06T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-SUI": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-01-03T00:00:00.000Z",
+                "lastTimestamp": "2024-05-06T00:00:00.000Z",
+                "valid": true
+              }
+            }
+          }
+        },
+        {
+          "segment": 1,
+          "range": {
+            "start": 125,
+            "end": 250
+          },
+          "available": true,
+          "metrics": {
+            "initialBalance": 100000000,
+            "finalEquity": 97608896.63717173,
+            "netProfit": -2391103.3628282696,
+            "totalReturnPercent": -2.391103362828273,
+            "realizedProfit": -2391103.3628282975,
+            "realizedReturnPercent": -2.3911033628282974,
+            "tradeCount": 27,
+            "winningTrades": 9,
+            "losingTrades": 18,
+            "winRate": 33.33333333333333,
+            "profitFactor": 0.7010784051425805,
+            "grossProfit": 5607995.410777575,
+            "grossLoss": 7999098.773605871,
+            "maxDrawdownPercent": 5.7765518793048445,
+            "exposurePercent": 16.94915254237288
+          },
+          "unknownBoundaryPositionCount": 0,
+          "unknownBoundaryPositionMarkets": [],
+          "unknownBoundaryEntryCount": 0,
+          "unknownBoundaryEntryMarkets": [],
+          "unknownBoundaryExitCount": 0,
+          "unknownBoundaryExitMarkets": [],
+          "dataQuality": {
+            "valid": true,
+            "reason": "daily_candle_grid_contiguous",
+            "marketCount": 12,
+            "minimumBars": 9,
+            "candleCount": 125,
+            "firstTimestamp": "2024-05-07T00:00:00.000Z",
+            "lastTimestamp": "2024-09-08T00:00:00.000Z",
+            "byMarket": {
+              "KRW-BTC": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-05-07T00:00:00.000Z",
+                "lastTimestamp": "2024-09-08T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ETH": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-05-07T00:00:00.000Z",
+                "lastTimestamp": "2024-09-08T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-XRP": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-05-07T00:00:00.000Z",
+                "lastTimestamp": "2024-09-08T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-SOL": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-05-07T00:00:00.000Z",
+                "lastTimestamp": "2024-09-08T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-DOGE": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-05-07T00:00:00.000Z",
+                "lastTimestamp": "2024-09-08T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ADA": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-05-07T00:00:00.000Z",
+                "lastTimestamp": "2024-09-08T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-DOT": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-05-07T00:00:00.000Z",
+                "lastTimestamp": "2024-09-08T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-LINK": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-05-07T00:00:00.000Z",
+                "lastTimestamp": "2024-09-08T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ATOM": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-05-07T00:00:00.000Z",
+                "lastTimestamp": "2024-09-08T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-NEAR": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-05-07T00:00:00.000Z",
+                "lastTimestamp": "2024-09-08T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ETC": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-05-07T00:00:00.000Z",
+                "lastTimestamp": "2024-09-08T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-SUI": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-05-07T00:00:00.000Z",
+                "lastTimestamp": "2024-09-08T00:00:00.000Z",
+                "valid": true
+              }
+            }
+          }
+        },
+        {
+          "segment": 2,
+          "range": {
+            "start": 250,
+            "end": 375
+          },
+          "available": true,
+          "metrics": {
+            "initialBalance": 100000000,
+            "finalEquity": 102401909.13752858,
+            "netProfit": 2401909.1375285834,
+            "totalReturnPercent": 2.4019091375285795,
+            "realizedProfit": 2401909.1375285806,
+            "realizedReturnPercent": 2.4019091375285804,
+            "tradeCount": 21,
+            "winningTrades": 10,
+            "losingTrades": 11,
+            "winRate": 47.61904761904761,
+            "profitFactor": 1.2344291789080186,
+            "grossProfit": 12647686.34289516,
+            "grossLoss": 10245777.205366578,
+            "maxDrawdownPercent": 6.2343871040998415,
+            "exposurePercent": 15.254237288135593
+          },
+          "unknownBoundaryPositionCount": 0,
+          "unknownBoundaryPositionMarkets": [],
+          "unknownBoundaryEntryCount": 0,
+          "unknownBoundaryEntryMarkets": [],
+          "unknownBoundaryExitCount": 0,
+          "unknownBoundaryExitMarkets": [],
+          "dataQuality": {
+            "valid": true,
+            "reason": "daily_candle_grid_contiguous",
+            "marketCount": 12,
+            "minimumBars": 9,
+            "candleCount": 125,
+            "firstTimestamp": "2024-09-09T00:00:00.000Z",
+            "lastTimestamp": "2025-01-11T00:00:00.000Z",
+            "byMarket": {
+              "KRW-BTC": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-09-09T00:00:00.000Z",
+                "lastTimestamp": "2025-01-11T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ETH": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-09-09T00:00:00.000Z",
+                "lastTimestamp": "2025-01-11T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-XRP": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-09-09T00:00:00.000Z",
+                "lastTimestamp": "2025-01-11T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-SOL": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-09-09T00:00:00.000Z",
+                "lastTimestamp": "2025-01-11T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-DOGE": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-09-09T00:00:00.000Z",
+                "lastTimestamp": "2025-01-11T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ADA": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-09-09T00:00:00.000Z",
+                "lastTimestamp": "2025-01-11T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-DOT": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-09-09T00:00:00.000Z",
+                "lastTimestamp": "2025-01-11T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-LINK": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-09-09T00:00:00.000Z",
+                "lastTimestamp": "2025-01-11T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ATOM": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-09-09T00:00:00.000Z",
+                "lastTimestamp": "2025-01-11T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-NEAR": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-09-09T00:00:00.000Z",
+                "lastTimestamp": "2025-01-11T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ETC": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-09-09T00:00:00.000Z",
+                "lastTimestamp": "2025-01-11T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-SUI": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-09-09T00:00:00.000Z",
+                "lastTimestamp": "2025-01-11T00:00:00.000Z",
+                "valid": true
+              }
+            }
+          }
+        },
+        {
+          "segment": 3,
+          "range": {
+            "start": 375,
+            "end": 500
+          },
+          "available": true,
+          "metrics": {
+            "initialBalance": 100000000,
+            "finalEquity": 95932372.45098521,
+            "netProfit": -4067627.549014792,
+            "totalReturnPercent": -4.067627549014796,
+            "realizedProfit": -4067627.549014788,
+            "realizedReturnPercent": -4.067627549014788,
+            "tradeCount": 11,
+            "winningTrades": 3,
+            "losingTrades": 8,
+            "winRate": 27.27272727272727,
+            "profitFactor": 0.11982346546104292,
+            "grossProfit": 553749.4014005524,
+            "grossLoss": 4621376.95041534,
+            "maxDrawdownPercent": 5.973287840421648,
+            "exposurePercent": 8.47457627118644
+          },
+          "unknownBoundaryPositionCount": 0,
+          "unknownBoundaryPositionMarkets": [],
+          "unknownBoundaryEntryCount": 0,
+          "unknownBoundaryEntryMarkets": [],
+          "unknownBoundaryExitCount": 0,
+          "unknownBoundaryExitMarkets": [],
+          "dataQuality": {
+            "valid": true,
+            "reason": "daily_candle_grid_contiguous",
+            "marketCount": 12,
+            "minimumBars": 9,
+            "candleCount": 125,
+            "firstTimestamp": "2025-01-12T00:00:00.000Z",
+            "lastTimestamp": "2025-05-16T00:00:00.000Z",
+            "byMarket": {
+              "KRW-BTC": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-01-12T00:00:00.000Z",
+                "lastTimestamp": "2025-05-16T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ETH": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-01-12T00:00:00.000Z",
+                "lastTimestamp": "2025-05-16T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-XRP": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-01-12T00:00:00.000Z",
+                "lastTimestamp": "2025-05-16T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-SOL": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-01-12T00:00:00.000Z",
+                "lastTimestamp": "2025-05-16T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-DOGE": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-01-12T00:00:00.000Z",
+                "lastTimestamp": "2025-05-16T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ADA": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-01-12T00:00:00.000Z",
+                "lastTimestamp": "2025-05-16T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-DOT": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-01-12T00:00:00.000Z",
+                "lastTimestamp": "2025-05-16T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-LINK": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-01-12T00:00:00.000Z",
+                "lastTimestamp": "2025-05-16T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ATOM": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-01-12T00:00:00.000Z",
+                "lastTimestamp": "2025-05-16T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-NEAR": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-01-12T00:00:00.000Z",
+                "lastTimestamp": "2025-05-16T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ETC": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-01-12T00:00:00.000Z",
+                "lastTimestamp": "2025-05-16T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-SUI": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-01-12T00:00:00.000Z",
+                "lastTimestamp": "2025-05-16T00:00:00.000Z",
+                "valid": true
+              }
+            }
+          }
+        },
+        {
+          "segment": 4,
+          "range": {
+            "start": 500,
+            "end": 625
+          },
+          "available": true,
+          "metrics": {
+            "initialBalance": 100000000,
+            "finalEquity": 94215561.56636007,
+            "netProfit": -5784438.433639929,
+            "totalReturnPercent": -5.784438433639927,
+            "realizedProfit": -5784438.433639912,
+            "realizedReturnPercent": -5.784438433639912,
+            "tradeCount": 13,
+            "winningTrades": 3,
+            "losingTrades": 10,
+            "winRate": 23.076923076923077,
+            "profitFactor": 0.12121130537916895,
+            "grossProfit": 797847.4663120786,
+            "grossLoss": 6582285.899951991,
+            "maxDrawdownPercent": 6.082930916842906,
+            "exposurePercent": 12.711864406779661
+          },
+          "unknownBoundaryPositionCount": 0,
+          "unknownBoundaryPositionMarkets": [],
+          "unknownBoundaryEntryCount": 0,
+          "unknownBoundaryEntryMarkets": [],
+          "unknownBoundaryExitCount": 0,
+          "unknownBoundaryExitMarkets": [],
+          "dataQuality": {
+            "valid": true,
+            "reason": "daily_candle_grid_contiguous",
+            "marketCount": 12,
+            "minimumBars": 9,
+            "candleCount": 125,
+            "firstTimestamp": "2025-05-17T00:00:00.000Z",
+            "lastTimestamp": "2025-09-18T00:00:00.000Z",
+            "byMarket": {
+              "KRW-BTC": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-05-17T00:00:00.000Z",
+                "lastTimestamp": "2025-09-18T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ETH": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-05-17T00:00:00.000Z",
+                "lastTimestamp": "2025-09-18T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-XRP": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-05-17T00:00:00.000Z",
+                "lastTimestamp": "2025-09-18T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-SOL": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-05-17T00:00:00.000Z",
+                "lastTimestamp": "2025-09-18T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-DOGE": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-05-17T00:00:00.000Z",
+                "lastTimestamp": "2025-09-18T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ADA": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-05-17T00:00:00.000Z",
+                "lastTimestamp": "2025-09-18T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-DOT": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-05-17T00:00:00.000Z",
+                "lastTimestamp": "2025-09-18T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-LINK": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-05-17T00:00:00.000Z",
+                "lastTimestamp": "2025-09-18T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ATOM": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-05-17T00:00:00.000Z",
+                "lastTimestamp": "2025-09-18T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-NEAR": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-05-17T00:00:00.000Z",
+                "lastTimestamp": "2025-09-18T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ETC": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-05-17T00:00:00.000Z",
+                "lastTimestamp": "2025-09-18T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-SUI": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-05-17T00:00:00.000Z",
+                "lastTimestamp": "2025-09-18T00:00:00.000Z",
+                "valid": true
+              }
+            }
+          }
+        },
+        {
+          "segment": 5,
+          "range": {
+            "start": 625,
+            "end": 750
+          },
+          "available": true,
+          "metrics": {
+            "initialBalance": 100000000,
+            "finalEquity": 97711620.4258203,
+            "netProfit": -2288379.574179694,
+            "totalReturnPercent": -2.2883795741796886,
+            "realizedProfit": -2288379.5741796643,
+            "realizedReturnPercent": -2.288379574179664,
+            "tradeCount": 15,
+            "winningTrades": 9,
+            "losingTrades": 6,
+            "winRate": 60,
+            "profitFactor": 0.6493072643328048,
+            "grossProfit": 4236932.590687418,
+            "grossLoss": 6525312.164867084,
+            "maxDrawdownPercent": 6.299545419136576,
+            "exposurePercent": 10.16949152542373
+          },
+          "unknownBoundaryPositionCount": 0,
+          "unknownBoundaryPositionMarkets": [],
+          "unknownBoundaryEntryCount": 0,
+          "unknownBoundaryEntryMarkets": [],
+          "unknownBoundaryExitCount": 0,
+          "unknownBoundaryExitMarkets": [],
+          "dataQuality": {
+            "valid": true,
+            "reason": "daily_candle_grid_contiguous",
+            "marketCount": 12,
+            "minimumBars": 9,
+            "candleCount": 125,
+            "firstTimestamp": "2025-09-19T00:00:00.000Z",
+            "lastTimestamp": "2026-01-21T00:00:00.000Z",
+            "byMarket": {
+              "KRW-BTC": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-09-19T00:00:00.000Z",
+                "lastTimestamp": "2026-01-21T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ETH": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-09-19T00:00:00.000Z",
+                "lastTimestamp": "2026-01-21T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-XRP": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-09-19T00:00:00.000Z",
+                "lastTimestamp": "2026-01-21T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-SOL": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-09-19T00:00:00.000Z",
+                "lastTimestamp": "2026-01-21T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-DOGE": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-09-19T00:00:00.000Z",
+                "lastTimestamp": "2026-01-21T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ADA": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-09-19T00:00:00.000Z",
+                "lastTimestamp": "2026-01-21T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-DOT": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-09-19T00:00:00.000Z",
+                "lastTimestamp": "2026-01-21T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-LINK": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-09-19T00:00:00.000Z",
+                "lastTimestamp": "2026-01-21T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ATOM": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-09-19T00:00:00.000Z",
+                "lastTimestamp": "2026-01-21T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-NEAR": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-09-19T00:00:00.000Z",
+                "lastTimestamp": "2026-01-21T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ETC": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-09-19T00:00:00.000Z",
+                "lastTimestamp": "2026-01-21T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-SUI": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-09-19T00:00:00.000Z",
+                "lastTimestamp": "2026-01-21T00:00:00.000Z",
+                "valid": true
+              }
+            }
+          }
+        },
+        {
+          "segment": 6,
+          "range": {
+            "start": 750,
+            "end": 875
+          },
+          "available": true,
+          "metrics": {
+            "initialBalance": 100000000,
+            "finalEquity": 101691943.56915519,
+            "netProfit": 1691943.5691551864,
+            "totalReturnPercent": 1.6919435691551854,
+            "realizedProfit": 1691943.5691552006,
+            "realizedReturnPercent": 1.6919435691552007,
+            "tradeCount": 12,
+            "winningTrades": 5,
+            "losingTrades": 7,
+            "winRate": 41.66666666666667,
+            "profitFactor": 1.3992432166798634,
+            "grossProfit": 5929820.378247989,
+            "grossLoss": 4237876.809092789,
+            "maxDrawdownPercent": 5.932264960634497,
+            "exposurePercent": 8.47457627118644
+          },
+          "unknownBoundaryPositionCount": 0,
+          "unknownBoundaryPositionMarkets": [],
+          "unknownBoundaryEntryCount": 0,
+          "unknownBoundaryEntryMarkets": [],
+          "unknownBoundaryExitCount": 0,
+          "unknownBoundaryExitMarkets": [],
+          "dataQuality": {
+            "valid": true,
+            "reason": "daily_candle_grid_contiguous",
+            "marketCount": 12,
+            "minimumBars": 9,
+            "candleCount": 125,
+            "firstTimestamp": "2026-01-22T00:00:00.000Z",
+            "lastTimestamp": "2026-05-26T00:00:00.000Z",
+            "byMarket": {
+              "KRW-BTC": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2026-01-22T00:00:00.000Z",
+                "lastTimestamp": "2026-05-26T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ETH": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2026-01-22T00:00:00.000Z",
+                "lastTimestamp": "2026-05-26T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-XRP": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2026-01-22T00:00:00.000Z",
+                "lastTimestamp": "2026-05-26T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-SOL": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2026-01-22T00:00:00.000Z",
+                "lastTimestamp": "2026-05-26T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-DOGE": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2026-01-22T00:00:00.000Z",
+                "lastTimestamp": "2026-05-26T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ADA": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2026-01-22T00:00:00.000Z",
+                "lastTimestamp": "2026-05-26T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-DOT": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2026-01-22T00:00:00.000Z",
+                "lastTimestamp": "2026-05-26T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-LINK": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2026-01-22T00:00:00.000Z",
+                "lastTimestamp": "2026-05-26T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ATOM": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2026-01-22T00:00:00.000Z",
+                "lastTimestamp": "2026-05-26T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-NEAR": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2026-01-22T00:00:00.000Z",
+                "lastTimestamp": "2026-05-26T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ETC": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2026-01-22T00:00:00.000Z",
+                "lastTimestamp": "2026-05-26T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-SUI": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2026-01-22T00:00:00.000Z",
+                "lastTimestamp": "2026-05-26T00:00:00.000Z",
+                "valid": true
+              }
+            }
+          }
+        },
+        {
+          "segment": 7,
+          "range": {
+            "start": 875,
+            "end": 1000
+          },
+          "available": true,
+          "metrics": {
+            "initialBalance": 100000000,
+            "finalEquity": 94632854.40613027,
+            "netProfit": -5367145.593869731,
+            "totalReturnPercent": -5.367145593869727,
+            "realizedProfit": -5367145.593869732,
+            "realizedReturnPercent": -5.367145593869731,
+            "tradeCount": 1,
+            "winningTrades": 0,
+            "losingTrades": 1,
+            "winRate": 0,
+            "profitFactor": 0,
+            "grossProfit": 0,
+            "grossLoss": 5367145.593869732,
+            "maxDrawdownPercent": 5.367145593869731,
+            "exposurePercent": 1.694915254237288
+          },
+          "unknownBoundaryPositionCount": 0,
+          "unknownBoundaryPositionMarkets": [],
+          "unknownBoundaryEntryCount": 0,
+          "unknownBoundaryEntryMarkets": [],
+          "unknownBoundaryExitCount": 0,
+          "unknownBoundaryExitMarkets": [],
+          "dataQuality": {
+            "valid": true,
+            "reason": "daily_candle_grid_contiguous",
+            "marketCount": 12,
+            "minimumBars": 9,
+            "candleCount": 125,
+            "firstTimestamp": "2026-05-27T00:00:00.000Z",
+            "lastTimestamp": "2026-09-28T00:00:00.000Z",
+            "byMarket": {
+              "KRW-BTC": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2026-05-27T00:00:00.000Z",
+                "lastTimestamp": "2026-09-28T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ETH": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2026-05-27T00:00:00.000Z",
+                "lastTimestamp": "2026-09-28T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-XRP": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2026-05-27T00:00:00.000Z",
+                "lastTimestamp": "2026-09-28T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-SOL": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2026-05-27T00:00:00.000Z",
+                "lastTimestamp": "2026-09-28T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-DOGE": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2026-05-27T00:00:00.000Z",
+                "lastTimestamp": "2026-09-28T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ADA": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2026-05-27T00:00:00.000Z",
+                "lastTimestamp": "2026-09-28T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-DOT": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2026-05-27T00:00:00.000Z",
+                "lastTimestamp": "2026-09-28T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-LINK": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2026-05-27T00:00:00.000Z",
+                "lastTimestamp": "2026-09-28T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ATOM": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2026-05-27T00:00:00.000Z",
+                "lastTimestamp": "2026-09-28T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-NEAR": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2026-05-27T00:00:00.000Z",
+                "lastTimestamp": "2026-09-28T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ETC": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2026-05-27T00:00:00.000Z",
+                "lastTimestamp": "2026-09-28T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-SUI": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2026-05-27T00:00:00.000Z",
+                "lastTimestamp": "2026-09-28T00:00:00.000Z",
+                "valid": true
+              }
+            }
+          }
+        }
+      ],
+      "allSegmentsAvailable": true,
+      "allSegmentsNonNegative": false,
+      "noUnknownBoundary": true,
+      "unknownBoundaryPositionMarkets": [],
+      "unknownBoundaryEntryMarkets": [],
+      "unknownBoundaryExitMarkets": [],
+      "maturityTailDiagnosticOnly": false,
+      "worstSegmentReturnPercent": -5.784438433639927,
+      "positiveSegmentCount": 2,
+      "segmentCount": 8,
+      "eligibilityBlockers": [
+        "full_return_below_floor",
+        "worst_segment_below_floor",
+        "trade_sample_below_minimum"
+      ],
+      "drawdownStopTriggered": true,
+      "drawdownStopAt": "2024-01-18T00:00:00.000Z",
+      "riskFlags": [
+        "drawdown_stop_triggered"
+      ],
+      "shadowEligible": false,
+      "status": "HOLD"
+    },
+    {
+      "name": "fixed_h3_gm100_u1_t0_b1_f0p25_p4_c0_dd10",
+      "config": {
+        "initialBalance": 100000000,
+        "trendLookbackDays": 7,
+        "trendMinPercent": 0,
+        "breadthMin": 1,
+        "requireUpBar": true,
+        "minUpBars": 1,
+        "costPercent": 0.3,
+        "positionFraction": 0.25,
+        "maxPositions": 4,
+        "maxHoldDays": 3,
+        "cooldownAfterLossDays": 0,
+        "benchmarkMarket": "KRW-BTC",
+        "benchmarkTrendMinPercent": -100,
+        "benchmarkMinUpBars": 1,
+        "benchmarkExitConfirmationBars": 1,
+        "regimeExitConfirmationBars": 1,
+        "relativeTrendMinPercent": null,
+        "volatilityLookbackDays": 14,
+        "volatilityTargetPercent": null,
+        "excludeBenchmarkFromEntries": false,
+        "excludeBenchmarkFromBreadth": false,
+        "benchmarkExposureMinPercent": null,
+        "benchmarkExposureMaxPercent": null,
+        "exitOnBenchmarkOff": true,
+        "stopLossPercent": 0,
+        "maxPortfolioDrawdownPercent": 10,
+        "mode": "fixed",
+        "entryExecution": "close",
+        "exitExecution": "close",
+        "maxEntryGapPercent": 0,
+        "entryWindowEndTimestamp": null,
+        "excludeCurrentUtcDay": true
+      },
+      "full": {
+        "available": true,
+        "metrics": {
+          "initialBalance": 100000000,
+          "finalEquity": 128004396.02032423,
+          "netProfit": 28004396.02032423,
+          "totalReturnPercent": 28.00439602032423,
+          "realizedProfit": 28004396.020324215,
+          "realizedReturnPercent": 28.00439602032421,
+          "tradeCount": 102,
+          "winningTrades": 52,
+          "losingTrades": 50,
+          "winRate": 50.98039215686274,
+          "profitFactor": 1.542187370572968,
+          "grossProfit": 79655167.5805875,
+          "grossLoss": 51650771.560263306,
+          "maxDrawdownPercent": 11.02588046128352,
+          "exposurePercent": 8.862034239677746
+        },
+        "entryWindowBlockedSignalCount": 0,
+        "unknownBoundaryPositionCount": 0,
+        "unknownBoundaryPositionMarkets": [],
+        "unknownBoundaryEntryCount": 0,
+        "unknownBoundaryEntryMarkets": [],
+        "unknownBoundaryExitCount": 0,
+        "unknownBoundaryExitMarkets": [],
+        "dataQuality": {
+          "valid": true,
+          "reason": "daily_candle_grid_contiguous",
+          "marketCount": 12,
+          "minimumBars": 9,
+          "candleCount": 1000,
+          "firstTimestamp": "2024-01-03T00:00:00.000Z",
+          "lastTimestamp": "2026-09-28T00:00:00.000Z",
+          "byMarket": {
+            "KRW-BTC": {
+              "candleCount": 1000,
+              "gapCount": 0,
+              "largestGapDays": 0,
+              "firstTimestamp": "2024-01-03T00:00:00.000Z",
+              "lastTimestamp": "2026-09-28T00:00:00.000Z",
+              "valid": true
+            },
+            "KRW-ETH": {
+              "candleCount": 1000,
+              "gapCount": 0,
+              "largestGapDays": 0,
+              "firstTimestamp": "2024-01-03T00:00:00.000Z",
+              "lastTimestamp": "2026-09-28T00:00:00.000Z",
+              "valid": true
+            },
+            "KRW-XRP": {
+              "candleCount": 1000,
+              "gapCount": 0,
+              "largestGapDays": 0,
+              "firstTimestamp": "2024-01-03T00:00:00.000Z",
+              "lastTimestamp": "2026-09-28T00:00:00.000Z",
+              "valid": true
+            },
+            "KRW-SOL": {
+              "candleCount": 1000,
+              "gapCount": 0,
+              "largestGapDays": 0,
+              "firstTimestamp": "2024-01-03T00:00:00.000Z",
+              "lastTimestamp": "2026-09-28T00:00:00.000Z",
+              "valid": true
+            },
+            "KRW-DOGE": {
+              "candleCount": 1000,
+              "gapCount": 0,
+              "largestGapDays": 0,
+              "firstTimestamp": "2024-01-03T00:00:00.000Z",
+              "lastTimestamp": "2026-09-28T00:00:00.000Z",
+              "valid": true
+            },
+            "KRW-ADA": {
+              "candleCount": 1000,
+              "gapCount": 0,
+              "largestGapDays": 0,
+              "firstTimestamp": "2024-01-03T00:00:00.000Z",
+              "lastTimestamp": "2026-09-28T00:00:00.000Z",
+              "valid": true
+            },
+            "KRW-DOT": {
+              "candleCount": 1000,
+              "gapCount": 0,
+              "largestGapDays": 0,
+              "firstTimestamp": "2024-01-03T00:00:00.000Z",
+              "lastTimestamp": "2026-09-28T00:00:00.000Z",
+              "valid": true
+            },
+            "KRW-LINK": {
+              "candleCount": 1000,
+              "gapCount": 0,
+              "largestGapDays": 0,
+              "firstTimestamp": "2024-01-03T00:00:00.000Z",
+              "lastTimestamp": "2026-09-28T00:00:00.000Z",
+              "valid": true
+            },
+            "KRW-ATOM": {
+              "candleCount": 1000,
+              "gapCount": 0,
+              "largestGapDays": 0,
+              "firstTimestamp": "2024-01-03T00:00:00.000Z",
+              "lastTimestamp": "2026-09-28T00:00:00.000Z",
+              "valid": true
+            },
+            "KRW-NEAR": {
+              "candleCount": 1000,
+              "gapCount": 0,
+              "largestGapDays": 0,
+              "firstTimestamp": "2024-01-03T00:00:00.000Z",
+              "lastTimestamp": "2026-09-28T00:00:00.000Z",
+              "valid": true
+            },
+            "KRW-ETC": {
+              "candleCount": 1000,
+              "gapCount": 0,
+              "largestGapDays": 0,
+              "firstTimestamp": "2024-01-03T00:00:00.000Z",
+              "lastTimestamp": "2026-09-28T00:00:00.000Z",
+              "valid": true
+            },
+            "KRW-SUI": {
+              "candleCount": 1000,
+              "gapCount": 0,
+              "largestGapDays": 0,
+              "firstTimestamp": "2024-01-03T00:00:00.000Z",
+              "lastTimestamp": "2026-09-28T00:00:00.000Z",
+              "valid": true
+            }
+          }
+        },
+        "drawdownStopTriggered": true,
+        "drawdownStopAt": "2024-04-09T00:00:00.000Z"
+      },
+      "segments": [
+        {
+          "segment": 0,
+          "range": {
+            "start": 0,
+            "end": 125
+          },
+          "available": true,
+          "metrics": {
+            "initialBalance": 100000000,
+            "finalEquity": 128004396.02032423,
+            "netProfit": 28004396.02032423,
+            "totalReturnPercent": 28.00439602032423,
+            "realizedProfit": 28004396.020324215,
+            "realizedReturnPercent": 28.00439602032421,
+            "tradeCount": 102,
+            "winningTrades": 52,
+            "losingTrades": 50,
+            "winRate": 50.98039215686274,
+            "profitFactor": 1.542187370572968,
+            "grossProfit": 79655167.5805875,
+            "grossLoss": 51650771.560263306,
+            "maxDrawdownPercent": 11.02588046128352,
+            "exposurePercent": 74.57627118644068
+          },
+          "unknownBoundaryPositionCount": 0,
+          "unknownBoundaryPositionMarkets": [],
+          "unknownBoundaryEntryCount": 0,
+          "unknownBoundaryEntryMarkets": [],
+          "unknownBoundaryExitCount": 0,
+          "unknownBoundaryExitMarkets": [],
+          "dataQuality": {
+            "valid": true,
+            "reason": "daily_candle_grid_contiguous",
+            "marketCount": 12,
+            "minimumBars": 9,
+            "candleCount": 125,
+            "firstTimestamp": "2024-01-03T00:00:00.000Z",
+            "lastTimestamp": "2024-05-06T00:00:00.000Z",
+            "byMarket": {
+              "KRW-BTC": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-01-03T00:00:00.000Z",
+                "lastTimestamp": "2024-05-06T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ETH": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-01-03T00:00:00.000Z",
+                "lastTimestamp": "2024-05-06T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-XRP": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-01-03T00:00:00.000Z",
+                "lastTimestamp": "2024-05-06T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-SOL": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-01-03T00:00:00.000Z",
+                "lastTimestamp": "2024-05-06T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-DOGE": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-01-03T00:00:00.000Z",
+                "lastTimestamp": "2024-05-06T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ADA": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-01-03T00:00:00.000Z",
+                "lastTimestamp": "2024-05-06T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-DOT": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-01-03T00:00:00.000Z",
+                "lastTimestamp": "2024-05-06T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-LINK": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-01-03T00:00:00.000Z",
+                "lastTimestamp": "2024-05-06T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ATOM": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-01-03T00:00:00.000Z",
+                "lastTimestamp": "2024-05-06T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-NEAR": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-01-03T00:00:00.000Z",
+                "lastTimestamp": "2024-05-06T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ETC": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-01-03T00:00:00.000Z",
+                "lastTimestamp": "2024-05-06T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-SUI": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-01-03T00:00:00.000Z",
+                "lastTimestamp": "2024-05-06T00:00:00.000Z",
+                "valid": true
+              }
+            }
+          }
+        },
+        {
+          "segment": 1,
+          "range": {
+            "start": 125,
+            "end": 250
+          },
+          "available": true,
+          "metrics": {
+            "initialBalance": 100000000,
+            "finalEquity": 90972317.06898372,
+            "netProfit": -9027682.931016281,
+            "totalReturnPercent": -9.02768293101628,
+            "realizedProfit": -9027682.931016307,
+            "realizedReturnPercent": -9.027682931016308,
+            "tradeCount": 35,
+            "winningTrades": 11,
+            "losingTrades": 24,
+            "winRate": 31.428571428571427,
+            "profitFactor": 0.4163310690360132,
+            "grossProfit": 6439446.552998196,
+            "grossLoss": 15467129.484014502,
+            "maxDrawdownPercent": 12.18294957649889,
+            "exposurePercent": 27.966101694915253
+          },
+          "unknownBoundaryPositionCount": 0,
+          "unknownBoundaryPositionMarkets": [],
+          "unknownBoundaryEntryCount": 0,
+          "unknownBoundaryEntryMarkets": [],
+          "unknownBoundaryExitCount": 0,
+          "unknownBoundaryExitMarkets": [],
+          "dataQuality": {
+            "valid": true,
+            "reason": "daily_candle_grid_contiguous",
+            "marketCount": 12,
+            "minimumBars": 9,
+            "candleCount": 125,
+            "firstTimestamp": "2024-05-07T00:00:00.000Z",
+            "lastTimestamp": "2024-09-08T00:00:00.000Z",
+            "byMarket": {
+              "KRW-BTC": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-05-07T00:00:00.000Z",
+                "lastTimestamp": "2024-09-08T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ETH": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-05-07T00:00:00.000Z",
+                "lastTimestamp": "2024-09-08T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-XRP": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-05-07T00:00:00.000Z",
+                "lastTimestamp": "2024-09-08T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-SOL": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-05-07T00:00:00.000Z",
+                "lastTimestamp": "2024-09-08T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-DOGE": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-05-07T00:00:00.000Z",
+                "lastTimestamp": "2024-09-08T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ADA": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-05-07T00:00:00.000Z",
+                "lastTimestamp": "2024-09-08T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-DOT": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-05-07T00:00:00.000Z",
+                "lastTimestamp": "2024-09-08T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-LINK": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-05-07T00:00:00.000Z",
+                "lastTimestamp": "2024-09-08T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ATOM": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-05-07T00:00:00.000Z",
+                "lastTimestamp": "2024-09-08T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-NEAR": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-05-07T00:00:00.000Z",
+                "lastTimestamp": "2024-09-08T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ETC": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-05-07T00:00:00.000Z",
+                "lastTimestamp": "2024-09-08T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-SUI": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-05-07T00:00:00.000Z",
+                "lastTimestamp": "2024-09-08T00:00:00.000Z",
+                "valid": true
+              }
+            }
+          }
+        },
+        {
+          "segment": 2,
+          "range": {
+            "start": 250,
+            "end": 375
+          },
+          "available": true,
+          "metrics": {
+            "initialBalance": 100000000,
+            "finalEquity": 192708245.11333737,
+            "netProfit": 92708245.11333737,
+            "totalReturnPercent": 92.70824511333737,
+            "realizedProfit": 92708245.11333734,
+            "realizedReturnPercent": 92.70824511333734,
+            "tradeCount": 115,
+            "winningTrades": 65,
+            "losingTrades": 50,
+            "winRate": 56.52173913043478,
+            "profitFactor": 2.4331705092837117,
+            "grossProfit": 157395764.50673607,
+            "grossLoss": 64687519.39339877,
+            "maxDrawdownPercent": 11.032683990223592,
+            "exposurePercent": 83.89830508474576
+          },
+          "unknownBoundaryPositionCount": 0,
+          "unknownBoundaryPositionMarkets": [],
+          "unknownBoundaryEntryCount": 0,
+          "unknownBoundaryEntryMarkets": [],
+          "unknownBoundaryExitCount": 0,
+          "unknownBoundaryExitMarkets": [],
+          "dataQuality": {
+            "valid": true,
+            "reason": "daily_candle_grid_contiguous",
+            "marketCount": 12,
+            "minimumBars": 9,
+            "candleCount": 125,
+            "firstTimestamp": "2024-09-09T00:00:00.000Z",
+            "lastTimestamp": "2025-01-11T00:00:00.000Z",
+            "byMarket": {
+              "KRW-BTC": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-09-09T00:00:00.000Z",
+                "lastTimestamp": "2025-01-11T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ETH": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-09-09T00:00:00.000Z",
+                "lastTimestamp": "2025-01-11T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-XRP": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-09-09T00:00:00.000Z",
+                "lastTimestamp": "2025-01-11T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-SOL": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-09-09T00:00:00.000Z",
+                "lastTimestamp": "2025-01-11T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-DOGE": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-09-09T00:00:00.000Z",
+                "lastTimestamp": "2025-01-11T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ADA": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-09-09T00:00:00.000Z",
+                "lastTimestamp": "2025-01-11T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-DOT": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-09-09T00:00:00.000Z",
+                "lastTimestamp": "2025-01-11T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-LINK": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-09-09T00:00:00.000Z",
+                "lastTimestamp": "2025-01-11T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ATOM": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-09-09T00:00:00.000Z",
+                "lastTimestamp": "2025-01-11T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-NEAR": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-09-09T00:00:00.000Z",
+                "lastTimestamp": "2025-01-11T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ETC": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-09-09T00:00:00.000Z",
+                "lastTimestamp": "2025-01-11T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-SUI": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-09-09T00:00:00.000Z",
+                "lastTimestamp": "2025-01-11T00:00:00.000Z",
+                "valid": true
+              }
+            }
+          }
+        },
+        {
+          "segment": 3,
+          "range": {
+            "start": 375,
+            "end": 500
+          },
+          "available": true,
+          "metrics": {
+            "initialBalance": 100000000,
+            "finalEquity": 88818160.9302572,
+            "netProfit": -11181839.069742799,
+            "totalReturnPercent": -11.181839069742793,
+            "realizedProfit": -11181839.069742799,
+            "realizedReturnPercent": -11.1818390697428,
+            "tradeCount": 16,
+            "winningTrades": 3,
+            "losingTrades": 13,
+            "winRate": 18.75,
+            "profitFactor": 0.04718548224165897,
+            "grossProfit": 553749.4014005524,
+            "grossLoss": 11735588.471143352,
+            "maxDrawdownPercent": 12.946178240308539,
+            "exposurePercent": 12.711864406779661
+          },
+          "unknownBoundaryPositionCount": 0,
+          "unknownBoundaryPositionMarkets": [],
+          "unknownBoundaryEntryCount": 0,
+          "unknownBoundaryEntryMarkets": [],
+          "unknownBoundaryExitCount": 0,
+          "unknownBoundaryExitMarkets": [],
+          "dataQuality": {
+            "valid": true,
+            "reason": "daily_candle_grid_contiguous",
+            "marketCount": 12,
+            "minimumBars": 9,
+            "candleCount": 125,
+            "firstTimestamp": "2025-01-12T00:00:00.000Z",
+            "lastTimestamp": "2025-05-16T00:00:00.000Z",
+            "byMarket": {
+              "KRW-BTC": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-01-12T00:00:00.000Z",
+                "lastTimestamp": "2025-05-16T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ETH": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-01-12T00:00:00.000Z",
+                "lastTimestamp": "2025-05-16T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-XRP": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-01-12T00:00:00.000Z",
+                "lastTimestamp": "2025-05-16T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-SOL": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-01-12T00:00:00.000Z",
+                "lastTimestamp": "2025-05-16T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-DOGE": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-01-12T00:00:00.000Z",
+                "lastTimestamp": "2025-05-16T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ADA": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-01-12T00:00:00.000Z",
+                "lastTimestamp": "2025-05-16T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-DOT": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-01-12T00:00:00.000Z",
+                "lastTimestamp": "2025-05-16T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-LINK": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-01-12T00:00:00.000Z",
+                "lastTimestamp": "2025-05-16T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ATOM": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-01-12T00:00:00.000Z",
+                "lastTimestamp": "2025-05-16T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-NEAR": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-01-12T00:00:00.000Z",
+                "lastTimestamp": "2025-05-16T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ETC": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-01-12T00:00:00.000Z",
+                "lastTimestamp": "2025-05-16T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-SUI": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-01-12T00:00:00.000Z",
+                "lastTimestamp": "2025-05-16T00:00:00.000Z",
+                "valid": true
+              }
+            }
+          }
+        },
+        {
+          "segment": 4,
+          "range": {
+            "start": 500,
+            "end": 625
+          },
+          "available": true,
+          "metrics": {
+            "initialBalance": 100000000,
+            "finalEquity": 89995312.63647549,
+            "netProfit": -10004687.363524511,
+            "totalReturnPercent": -10.00468736352451,
+            "realizedProfit": -10004687.363524511,
+            "realizedReturnPercent": -10.00468736352451,
+            "tradeCount": 19,
+            "winningTrades": 3,
+            "losingTrades": 16,
+            "winRate": 15.789473684210526,
+            "profitFactor": 0.07385743058272069,
+            "grossProfit": 797847.4663120786,
+            "grossLoss": 10802534.829836592,
+            "maxDrawdownPercent": 10.28980931046073,
+            "exposurePercent": 18.64406779661017
+          },
+          "unknownBoundaryPositionCount": 0,
+          "unknownBoundaryPositionMarkets": [],
+          "unknownBoundaryEntryCount": 0,
+          "unknownBoundaryEntryMarkets": [],
+          "unknownBoundaryExitCount": 0,
+          "unknownBoundaryExitMarkets": [],
+          "dataQuality": {
+            "valid": true,
+            "reason": "daily_candle_grid_contiguous",
+            "marketCount": 12,
+            "minimumBars": 9,
+            "candleCount": 125,
+            "firstTimestamp": "2025-05-17T00:00:00.000Z",
+            "lastTimestamp": "2025-09-18T00:00:00.000Z",
+            "byMarket": {
+              "KRW-BTC": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-05-17T00:00:00.000Z",
+                "lastTimestamp": "2025-09-18T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ETH": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-05-17T00:00:00.000Z",
+                "lastTimestamp": "2025-09-18T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-XRP": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-05-17T00:00:00.000Z",
+                "lastTimestamp": "2025-09-18T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-SOL": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-05-17T00:00:00.000Z",
+                "lastTimestamp": "2025-09-18T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-DOGE": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-05-17T00:00:00.000Z",
+                "lastTimestamp": "2025-09-18T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ADA": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-05-17T00:00:00.000Z",
+                "lastTimestamp": "2025-09-18T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-DOT": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-05-17T00:00:00.000Z",
+                "lastTimestamp": "2025-09-18T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-LINK": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-05-17T00:00:00.000Z",
+                "lastTimestamp": "2025-09-18T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ATOM": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-05-17T00:00:00.000Z",
+                "lastTimestamp": "2025-09-18T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-NEAR": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-05-17T00:00:00.000Z",
+                "lastTimestamp": "2025-09-18T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ETC": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-05-17T00:00:00.000Z",
+                "lastTimestamp": "2025-09-18T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-SUI": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-05-17T00:00:00.000Z",
+                "lastTimestamp": "2025-09-18T00:00:00.000Z",
+                "valid": true
+              }
+            }
+          }
+        },
+        {
+          "segment": 5,
+          "range": {
+            "start": 625,
+            "end": 750
+          },
+          "available": true,
+          "metrics": {
+            "initialBalance": 100000000,
+            "finalEquity": 92727275.57750678,
+            "netProfit": -7272724.422493219,
+            "totalReturnPercent": -7.272724422493216,
+            "realizedProfit": -7272724.422493176,
+            "realizedReturnPercent": -7.272724422493175,
+            "tradeCount": 31,
+            "winningTrades": 14,
+            "losingTrades": 17,
+            "winRate": 45.16129032258064,
+            "profitFactor": 0.48925220754817333,
+            "grossProfit": 6966640.935467005,
+            "grossLoss": 14239365.357960183,
+            "maxDrawdownPercent": 11.079277615158452,
+            "exposurePercent": 19.491525423728813
+          },
+          "unknownBoundaryPositionCount": 0,
+          "unknownBoundaryPositionMarkets": [],
+          "unknownBoundaryEntryCount": 0,
+          "unknownBoundaryEntryMarkets": [],
+          "unknownBoundaryExitCount": 0,
+          "unknownBoundaryExitMarkets": [],
+          "dataQuality": {
+            "valid": true,
+            "reason": "daily_candle_grid_contiguous",
+            "marketCount": 12,
+            "minimumBars": 9,
+            "candleCount": 125,
+            "firstTimestamp": "2025-09-19T00:00:00.000Z",
+            "lastTimestamp": "2026-01-21T00:00:00.000Z",
+            "byMarket": {
+              "KRW-BTC": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-09-19T00:00:00.000Z",
+                "lastTimestamp": "2026-01-21T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ETH": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-09-19T00:00:00.000Z",
+                "lastTimestamp": "2026-01-21T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-XRP": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-09-19T00:00:00.000Z",
+                "lastTimestamp": "2026-01-21T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-SOL": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-09-19T00:00:00.000Z",
+                "lastTimestamp": "2026-01-21T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-DOGE": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-09-19T00:00:00.000Z",
+                "lastTimestamp": "2026-01-21T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ADA": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-09-19T00:00:00.000Z",
+                "lastTimestamp": "2026-01-21T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-DOT": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-09-19T00:00:00.000Z",
+                "lastTimestamp": "2026-01-21T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-LINK": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-09-19T00:00:00.000Z",
+                "lastTimestamp": "2026-01-21T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ATOM": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-09-19T00:00:00.000Z",
+                "lastTimestamp": "2026-01-21T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-NEAR": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-09-19T00:00:00.000Z",
+                "lastTimestamp": "2026-01-21T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ETC": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-09-19T00:00:00.000Z",
+                "lastTimestamp": "2026-01-21T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-SUI": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-09-19T00:00:00.000Z",
+                "lastTimestamp": "2026-01-21T00:00:00.000Z",
+                "valid": true
+              }
+            }
+          }
+        },
+        {
+          "segment": 6,
+          "range": {
+            "start": 750,
+            "end": 875
+          },
+          "available": true,
+          "metrics": {
+            "initialBalance": 100000000,
+            "finalEquity": 97157993.30818214,
+            "netProfit": -2842006.691817865,
+            "totalReturnPercent": -2.8420066918178666,
+            "realizedProfit": -2842006.6918178406,
+            "realizedReturnPercent": -2.8420066918178404,
+            "tradeCount": 43,
+            "winningTrades": 18,
+            "losingTrades": 25,
+            "winRate": 41.86046511627907,
+            "profitFactor": 0.8517631108121793,
+            "grossProfit": 16330054.374688588,
+            "grossLoss": 19172061.066506434,
+            "maxDrawdownPercent": 10.126288762931447,
+            "exposurePercent": 31.35593220338983
+          },
+          "unknownBoundaryPositionCount": 0,
+          "unknownBoundaryPositionMarkets": [],
+          "unknownBoundaryEntryCount": 0,
+          "unknownBoundaryEntryMarkets": [],
+          "unknownBoundaryExitCount": 0,
+          "unknownBoundaryExitMarkets": [],
+          "dataQuality": {
+            "valid": true,
+            "reason": "daily_candle_grid_contiguous",
+            "marketCount": 12,
+            "minimumBars": 9,
+            "candleCount": 125,
+            "firstTimestamp": "2026-01-22T00:00:00.000Z",
+            "lastTimestamp": "2026-05-26T00:00:00.000Z",
+            "byMarket": {
+              "KRW-BTC": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2026-01-22T00:00:00.000Z",
+                "lastTimestamp": "2026-05-26T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ETH": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2026-01-22T00:00:00.000Z",
+                "lastTimestamp": "2026-05-26T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-XRP": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2026-01-22T00:00:00.000Z",
+                "lastTimestamp": "2026-05-26T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-SOL": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2026-01-22T00:00:00.000Z",
+                "lastTimestamp": "2026-05-26T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-DOGE": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2026-01-22T00:00:00.000Z",
+                "lastTimestamp": "2026-05-26T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ADA": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2026-01-22T00:00:00.000Z",
+                "lastTimestamp": "2026-05-26T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-DOT": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2026-01-22T00:00:00.000Z",
+                "lastTimestamp": "2026-05-26T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-LINK": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2026-01-22T00:00:00.000Z",
+                "lastTimestamp": "2026-05-26T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ATOM": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2026-01-22T00:00:00.000Z",
+                "lastTimestamp": "2026-05-26T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-NEAR": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2026-01-22T00:00:00.000Z",
+                "lastTimestamp": "2026-05-26T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ETC": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2026-01-22T00:00:00.000Z",
+                "lastTimestamp": "2026-05-26T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-SUI": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2026-01-22T00:00:00.000Z",
+                "lastTimestamp": "2026-05-26T00:00:00.000Z",
+                "valid": true
+              }
+            }
+          }
+        },
+        {
+          "segment": 7,
+          "range": {
+            "start": 875,
+            "end": 1000
+          },
+          "available": true,
+          "metrics": {
+            "initialBalance": 100000000,
+            "finalEquity": 89385516.34664333,
+            "netProfit": -10614483.653356671,
+            "totalReturnPercent": -10.614483653356677,
+            "realizedProfit": -10614483.653356683,
+            "realizedReturnPercent": -10.614483653356682,
+            "tradeCount": 9,
+            "winningTrades": 2,
+            "losingTrades": 7,
+            "winRate": 22.22222222222222,
+            "profitFactor": 0.07778848711258812,
+            "grossProfit": 895331.0746367977,
+            "grossLoss": 11509814.727993479,
+            "maxDrawdownPercent": 10.614483653356672,
+            "exposurePercent": 8.47457627118644
+          },
+          "unknownBoundaryPositionCount": 0,
+          "unknownBoundaryPositionMarkets": [],
+          "unknownBoundaryEntryCount": 0,
+          "unknownBoundaryEntryMarkets": [],
+          "unknownBoundaryExitCount": 0,
+          "unknownBoundaryExitMarkets": [],
+          "dataQuality": {
+            "valid": true,
+            "reason": "daily_candle_grid_contiguous",
+            "marketCount": 12,
+            "minimumBars": 9,
+            "candleCount": 125,
+            "firstTimestamp": "2026-05-27T00:00:00.000Z",
+            "lastTimestamp": "2026-09-28T00:00:00.000Z",
+            "byMarket": {
+              "KRW-BTC": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2026-05-27T00:00:00.000Z",
+                "lastTimestamp": "2026-09-28T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ETH": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2026-05-27T00:00:00.000Z",
+                "lastTimestamp": "2026-09-28T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-XRP": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2026-05-27T00:00:00.000Z",
+                "lastTimestamp": "2026-09-28T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-SOL": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2026-05-27T00:00:00.000Z",
+                "lastTimestamp": "2026-09-28T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-DOGE": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2026-05-27T00:00:00.000Z",
+                "lastTimestamp": "2026-09-28T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ADA": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2026-05-27T00:00:00.000Z",
+                "lastTimestamp": "2026-09-28T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-DOT": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2026-05-27T00:00:00.000Z",
+                "lastTimestamp": "2026-09-28T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-LINK": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2026-05-27T00:00:00.000Z",
+                "lastTimestamp": "2026-09-28T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ATOM": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2026-05-27T00:00:00.000Z",
+                "lastTimestamp": "2026-09-28T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-NEAR": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2026-05-27T00:00:00.000Z",
+                "lastTimestamp": "2026-09-28T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ETC": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2026-05-27T00:00:00.000Z",
+                "lastTimestamp": "2026-09-28T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-SUI": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2026-05-27T00:00:00.000Z",
+                "lastTimestamp": "2026-09-28T00:00:00.000Z",
+                "valid": true
+              }
+            }
+          }
+        }
+      ],
+      "allSegmentsAvailable": true,
+      "allSegmentsNonNegative": false,
+      "noUnknownBoundary": true,
+      "unknownBoundaryPositionMarkets": [],
+      "unknownBoundaryEntryMarkets": [],
+      "unknownBoundaryExitMarkets": [],
+      "maturityTailDiagnosticOnly": false,
+      "worstSegmentReturnPercent": -11.181839069742793,
+      "positiveSegmentCount": 2,
+      "segmentCount": 8,
+      "eligibilityBlockers": [
+        "worst_segment_below_floor"
+      ],
+      "drawdownStopTriggered": true,
+      "drawdownStopAt": "2024-04-09T00:00:00.000Z",
+      "riskFlags": [
+        "drawdown_stop_triggered"
+      ],
+      "shadowEligible": false,
+      "status": "HOLD"
+    },
+    {
+      "name": "fixed_h3_gm100_u1_t0_b1_f0p25_p4_c0_dd12",
+      "config": {
+        "initialBalance": 100000000,
+        "trendLookbackDays": 7,
+        "trendMinPercent": 0,
+        "breadthMin": 1,
+        "requireUpBar": true,
+        "minUpBars": 1,
+        "costPercent": 0.3,
+        "positionFraction": 0.25,
+        "maxPositions": 4,
+        "maxHoldDays": 3,
+        "cooldownAfterLossDays": 0,
+        "benchmarkMarket": "KRW-BTC",
+        "benchmarkTrendMinPercent": -100,
+        "benchmarkMinUpBars": 1,
+        "benchmarkExitConfirmationBars": 1,
+        "regimeExitConfirmationBars": 1,
+        "relativeTrendMinPercent": null,
+        "volatilityLookbackDays": 14,
+        "volatilityTargetPercent": null,
+        "excludeBenchmarkFromEntries": false,
+        "excludeBenchmarkFromBreadth": false,
+        "benchmarkExposureMinPercent": null,
+        "benchmarkExposureMaxPercent": null,
+        "exitOnBenchmarkOff": true,
+        "stopLossPercent": 0,
+        "maxPortfolioDrawdownPercent": 12,
+        "mode": "fixed",
+        "entryExecution": "close",
+        "exitExecution": "close",
+        "maxEntryGapPercent": 0,
+        "entryWindowEndTimestamp": null,
+        "excludeCurrentUtcDay": true
+      },
+      "full": {
+        "available": true,
+        "metrics": {
+          "initialBalance": 100000000,
+          "finalEquity": 126526326.87829575,
+          "netProfit": 26526326.87829575,
+          "totalReturnPercent": 26.526326878295748,
+          "realizedProfit": 26526326.87829577,
+          "realizedReturnPercent": 26.52632687829577,
+          "tradeCount": 103,
+          "winningTrades": 52,
+          "losingTrades": 51,
+          "winRate": 50.48543689320388,
+          "profitFactor": 1.4992829982294633,
+          "grossProfit": 79655167.5805875,
+          "grossLoss": 53128840.70229174,
+          "maxDrawdownPercent": 12.053266274724251,
+          "exposurePercent": 9.06344410876133
+        },
+        "entryWindowBlockedSignalCount": 0,
+        "unknownBoundaryPositionCount": 0,
+        "unknownBoundaryPositionMarkets": [],
+        "unknownBoundaryEntryCount": 0,
+        "unknownBoundaryEntryMarkets": [],
+        "unknownBoundaryExitCount": 0,
+        "unknownBoundaryExitMarkets": [],
+        "dataQuality": {
+          "valid": true,
+          "reason": "daily_candle_grid_contiguous",
+          "marketCount": 12,
+          "minimumBars": 9,
+          "candleCount": 1000,
+          "firstTimestamp": "2024-01-03T00:00:00.000Z",
+          "lastTimestamp": "2026-09-28T00:00:00.000Z",
+          "byMarket": {
+            "KRW-BTC": {
+              "candleCount": 1000,
+              "gapCount": 0,
+              "largestGapDays": 0,
+              "firstTimestamp": "2024-01-03T00:00:00.000Z",
+              "lastTimestamp": "2026-09-28T00:00:00.000Z",
+              "valid": true
+            },
+            "KRW-ETH": {
+              "candleCount": 1000,
+              "gapCount": 0,
+              "largestGapDays": 0,
+              "firstTimestamp": "2024-01-03T00:00:00.000Z",
+              "lastTimestamp": "2026-09-28T00:00:00.000Z",
+              "valid": true
+            },
+            "KRW-XRP": {
+              "candleCount": 1000,
+              "gapCount": 0,
+              "largestGapDays": 0,
+              "firstTimestamp": "2024-01-03T00:00:00.000Z",
+              "lastTimestamp": "2026-09-28T00:00:00.000Z",
+              "valid": true
+            },
+            "KRW-SOL": {
+              "candleCount": 1000,
+              "gapCount": 0,
+              "largestGapDays": 0,
+              "firstTimestamp": "2024-01-03T00:00:00.000Z",
+              "lastTimestamp": "2026-09-28T00:00:00.000Z",
+              "valid": true
+            },
+            "KRW-DOGE": {
+              "candleCount": 1000,
+              "gapCount": 0,
+              "largestGapDays": 0,
+              "firstTimestamp": "2024-01-03T00:00:00.000Z",
+              "lastTimestamp": "2026-09-28T00:00:00.000Z",
+              "valid": true
+            },
+            "KRW-ADA": {
+              "candleCount": 1000,
+              "gapCount": 0,
+              "largestGapDays": 0,
+              "firstTimestamp": "2024-01-03T00:00:00.000Z",
+              "lastTimestamp": "2026-09-28T00:00:00.000Z",
+              "valid": true
+            },
+            "KRW-DOT": {
+              "candleCount": 1000,
+              "gapCount": 0,
+              "largestGapDays": 0,
+              "firstTimestamp": "2024-01-03T00:00:00.000Z",
+              "lastTimestamp": "2026-09-28T00:00:00.000Z",
+              "valid": true
+            },
+            "KRW-LINK": {
+              "candleCount": 1000,
+              "gapCount": 0,
+              "largestGapDays": 0,
+              "firstTimestamp": "2024-01-03T00:00:00.000Z",
+              "lastTimestamp": "2026-09-28T00:00:00.000Z",
+              "valid": true
+            },
+            "KRW-ATOM": {
+              "candleCount": 1000,
+              "gapCount": 0,
+              "largestGapDays": 0,
+              "firstTimestamp": "2024-01-03T00:00:00.000Z",
+              "lastTimestamp": "2026-09-28T00:00:00.000Z",
+              "valid": true
+            },
+            "KRW-NEAR": {
+              "candleCount": 1000,
+              "gapCount": 0,
+              "largestGapDays": 0,
+              "firstTimestamp": "2024-01-03T00:00:00.000Z",
+              "lastTimestamp": "2026-09-28T00:00:00.000Z",
+              "valid": true
+            },
+            "KRW-ETC": {
+              "candleCount": 1000,
+              "gapCount": 0,
+              "largestGapDays": 0,
+              "firstTimestamp": "2024-01-03T00:00:00.000Z",
+              "lastTimestamp": "2026-09-28T00:00:00.000Z",
+              "valid": true
+            },
+            "KRW-SUI": {
+              "candleCount": 1000,
+              "gapCount": 0,
+              "largestGapDays": 0,
+              "firstTimestamp": "2024-01-03T00:00:00.000Z",
+              "lastTimestamp": "2026-09-28T00:00:00.000Z",
+              "valid": true
+            }
+          }
+        },
+        "drawdownStopTriggered": true,
+        "drawdownStopAt": "2024-04-11T00:00:00.000Z"
+      },
+      "segments": [
+        {
+          "segment": 0,
+          "range": {
+            "start": 0,
+            "end": 125
+          },
+          "available": true,
+          "metrics": {
+            "initialBalance": 100000000,
+            "finalEquity": 126526326.87829575,
+            "netProfit": 26526326.87829575,
+            "totalReturnPercent": 26.526326878295748,
+            "realizedProfit": 26526326.87829577,
+            "realizedReturnPercent": 26.52632687829577,
+            "tradeCount": 103,
+            "winningTrades": 52,
+            "losingTrades": 51,
+            "winRate": 50.48543689320388,
+            "profitFactor": 1.4992829982294633,
+            "grossProfit": 79655167.5805875,
+            "grossLoss": 53128840.70229174,
+            "maxDrawdownPercent": 12.053266274724251,
+            "exposurePercent": 76.27118644067797
+          },
+          "unknownBoundaryPositionCount": 0,
+          "unknownBoundaryPositionMarkets": [],
+          "unknownBoundaryEntryCount": 0,
+          "unknownBoundaryEntryMarkets": [],
+          "unknownBoundaryExitCount": 0,
+          "unknownBoundaryExitMarkets": [],
+          "dataQuality": {
+            "valid": true,
+            "reason": "daily_candle_grid_contiguous",
+            "marketCount": 12,
+            "minimumBars": 9,
+            "candleCount": 125,
+            "firstTimestamp": "2024-01-03T00:00:00.000Z",
+            "lastTimestamp": "2024-05-06T00:00:00.000Z",
+            "byMarket": {
+              "KRW-BTC": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-01-03T00:00:00.000Z",
+                "lastTimestamp": "2024-05-06T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ETH": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-01-03T00:00:00.000Z",
+                "lastTimestamp": "2024-05-06T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-XRP": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-01-03T00:00:00.000Z",
+                "lastTimestamp": "2024-05-06T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-SOL": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-01-03T00:00:00.000Z",
+                "lastTimestamp": "2024-05-06T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-DOGE": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-01-03T00:00:00.000Z",
+                "lastTimestamp": "2024-05-06T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ADA": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-01-03T00:00:00.000Z",
+                "lastTimestamp": "2024-05-06T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-DOT": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-01-03T00:00:00.000Z",
+                "lastTimestamp": "2024-05-06T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-LINK": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-01-03T00:00:00.000Z",
+                "lastTimestamp": "2024-05-06T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ATOM": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-01-03T00:00:00.000Z",
+                "lastTimestamp": "2024-05-06T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-NEAR": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-01-03T00:00:00.000Z",
+                "lastTimestamp": "2024-05-06T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ETC": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-01-03T00:00:00.000Z",
+                "lastTimestamp": "2024-05-06T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-SUI": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-01-03T00:00:00.000Z",
+                "lastTimestamp": "2024-05-06T00:00:00.000Z",
+                "valid": true
+              }
+            }
+          }
+        },
+        {
+          "segment": 1,
+          "range": {
+            "start": 125,
+            "end": 250
+          },
+          "available": true,
+          "metrics": {
+            "initialBalance": 100000000,
+            "finalEquity": 90972317.06898372,
+            "netProfit": -9027682.931016281,
+            "totalReturnPercent": -9.02768293101628,
+            "realizedProfit": -9027682.931016307,
+            "realizedReturnPercent": -9.027682931016308,
+            "tradeCount": 35,
+            "winningTrades": 11,
+            "losingTrades": 24,
+            "winRate": 31.428571428571427,
+            "profitFactor": 0.4163310690360132,
+            "grossProfit": 6439446.552998196,
+            "grossLoss": 15467129.484014502,
+            "maxDrawdownPercent": 12.18294957649889,
+            "exposurePercent": 27.966101694915253
+          },
+          "unknownBoundaryPositionCount": 0,
+          "unknownBoundaryPositionMarkets": [],
+          "unknownBoundaryEntryCount": 0,
+          "unknownBoundaryEntryMarkets": [],
+          "unknownBoundaryExitCount": 0,
+          "unknownBoundaryExitMarkets": [],
+          "dataQuality": {
+            "valid": true,
+            "reason": "daily_candle_grid_contiguous",
+            "marketCount": 12,
+            "minimumBars": 9,
+            "candleCount": 125,
+            "firstTimestamp": "2024-05-07T00:00:00.000Z",
+            "lastTimestamp": "2024-09-08T00:00:00.000Z",
+            "byMarket": {
+              "KRW-BTC": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-05-07T00:00:00.000Z",
+                "lastTimestamp": "2024-09-08T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ETH": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-05-07T00:00:00.000Z",
+                "lastTimestamp": "2024-09-08T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-XRP": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-05-07T00:00:00.000Z",
+                "lastTimestamp": "2024-09-08T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-SOL": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-05-07T00:00:00.000Z",
+                "lastTimestamp": "2024-09-08T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-DOGE": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-05-07T00:00:00.000Z",
+                "lastTimestamp": "2024-09-08T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ADA": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-05-07T00:00:00.000Z",
+                "lastTimestamp": "2024-09-08T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-DOT": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-05-07T00:00:00.000Z",
+                "lastTimestamp": "2024-09-08T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-LINK": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-05-07T00:00:00.000Z",
+                "lastTimestamp": "2024-09-08T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ATOM": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-05-07T00:00:00.000Z",
+                "lastTimestamp": "2024-09-08T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-NEAR": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-05-07T00:00:00.000Z",
+                "lastTimestamp": "2024-09-08T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ETC": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-05-07T00:00:00.000Z",
+                "lastTimestamp": "2024-09-08T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-SUI": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-05-07T00:00:00.000Z",
+                "lastTimestamp": "2024-09-08T00:00:00.000Z",
+                "valid": true
+              }
+            }
+          }
+        },
+        {
+          "segment": 2,
+          "range": {
+            "start": 250,
+            "end": 375
+          },
+          "available": true,
+          "metrics": {
+            "initialBalance": 100000000,
+            "finalEquity": 187406839.31117842,
+            "netProfit": 87406839.31117842,
+            "totalReturnPercent": 87.4068393111784,
+            "realizedProfit": 87406839.3111784,
+            "realizedReturnPercent": 87.4068393111784,
+            "tradeCount": 119,
+            "winningTrades": 65,
+            "losingTrades": 54,
+            "winRate": 54.621848739495796,
+            "profitFactor": 2.2488667180836517,
+            "grossProfit": 157395764.50673607,
+            "grossLoss": 69988925.19555771,
+            "maxDrawdownPercent": 13.480175767336428,
+            "exposurePercent": 86.4406779661017
+          },
+          "unknownBoundaryPositionCount": 0,
+          "unknownBoundaryPositionMarkets": [],
+          "unknownBoundaryEntryCount": 0,
+          "unknownBoundaryEntryMarkets": [],
+          "unknownBoundaryExitCount": 0,
+          "unknownBoundaryExitMarkets": [],
+          "dataQuality": {
+            "valid": true,
+            "reason": "daily_candle_grid_contiguous",
+            "marketCount": 12,
+            "minimumBars": 9,
+            "candleCount": 125,
+            "firstTimestamp": "2024-09-09T00:00:00.000Z",
+            "lastTimestamp": "2025-01-11T00:00:00.000Z",
+            "byMarket": {
+              "KRW-BTC": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-09-09T00:00:00.000Z",
+                "lastTimestamp": "2025-01-11T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ETH": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-09-09T00:00:00.000Z",
+                "lastTimestamp": "2025-01-11T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-XRP": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-09-09T00:00:00.000Z",
+                "lastTimestamp": "2025-01-11T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-SOL": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-09-09T00:00:00.000Z",
+                "lastTimestamp": "2025-01-11T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-DOGE": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-09-09T00:00:00.000Z",
+                "lastTimestamp": "2025-01-11T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ADA": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-09-09T00:00:00.000Z",
+                "lastTimestamp": "2025-01-11T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-DOT": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-09-09T00:00:00.000Z",
+                "lastTimestamp": "2025-01-11T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-LINK": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-09-09T00:00:00.000Z",
+                "lastTimestamp": "2025-01-11T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ATOM": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-09-09T00:00:00.000Z",
+                "lastTimestamp": "2025-01-11T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-NEAR": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-09-09T00:00:00.000Z",
+                "lastTimestamp": "2025-01-11T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ETC": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-09-09T00:00:00.000Z",
+                "lastTimestamp": "2025-01-11T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-SUI": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2024-09-09T00:00:00.000Z",
+                "lastTimestamp": "2025-01-11T00:00:00.000Z",
+                "valid": true
+              }
+            }
+          }
+        },
+        {
+          "segment": 3,
+          "range": {
+            "start": 375,
+            "end": 500
+          },
+          "available": true,
+          "metrics": {
+            "initialBalance": 100000000,
+            "finalEquity": 88818160.9302572,
+            "netProfit": -11181839.069742799,
+            "totalReturnPercent": -11.181839069742793,
+            "realizedProfit": -11181839.069742799,
+            "realizedReturnPercent": -11.1818390697428,
+            "tradeCount": 16,
+            "winningTrades": 3,
+            "losingTrades": 13,
+            "winRate": 18.75,
+            "profitFactor": 0.04718548224165897,
+            "grossProfit": 553749.4014005524,
+            "grossLoss": 11735588.471143352,
+            "maxDrawdownPercent": 12.946178240308539,
+            "exposurePercent": 12.711864406779661
+          },
+          "unknownBoundaryPositionCount": 0,
+          "unknownBoundaryPositionMarkets": [],
+          "unknownBoundaryEntryCount": 0,
+          "unknownBoundaryEntryMarkets": [],
+          "unknownBoundaryExitCount": 0,
+          "unknownBoundaryExitMarkets": [],
+          "dataQuality": {
+            "valid": true,
+            "reason": "daily_candle_grid_contiguous",
+            "marketCount": 12,
+            "minimumBars": 9,
+            "candleCount": 125,
+            "firstTimestamp": "2025-01-12T00:00:00.000Z",
+            "lastTimestamp": "2025-05-16T00:00:00.000Z",
+            "byMarket": {
+              "KRW-BTC": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-01-12T00:00:00.000Z",
+                "lastTimestamp": "2025-05-16T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ETH": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-01-12T00:00:00.000Z",
+                "lastTimestamp": "2025-05-16T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-XRP": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-01-12T00:00:00.000Z",
+                "lastTimestamp": "2025-05-16T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-SOL": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-01-12T00:00:00.000Z",
+                "lastTimestamp": "2025-05-16T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-DOGE": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-01-12T00:00:00.000Z",
+                "lastTimestamp": "2025-05-16T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ADA": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-01-12T00:00:00.000Z",
+                "lastTimestamp": "2025-05-16T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-DOT": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-01-12T00:00:00.000Z",
+                "lastTimestamp": "2025-05-16T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-LINK": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-01-12T00:00:00.000Z",
+                "lastTimestamp": "2025-05-16T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ATOM": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-01-12T00:00:00.000Z",
+                "lastTimestamp": "2025-05-16T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-NEAR": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-01-12T00:00:00.000Z",
+                "lastTimestamp": "2025-05-16T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ETC": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-01-12T00:00:00.000Z",
+                "lastTimestamp": "2025-05-16T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-SUI": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-01-12T00:00:00.000Z",
+                "lastTimestamp": "2025-05-16T00:00:00.000Z",
+                "valid": true
+              }
+            }
+          }
+        },
+        {
+          "segment": 4,
+          "range": {
+            "start": 500,
+            "end": 625
+          },
+          "available": true,
+          "metrics": {
+            "initialBalance": 100000000,
+            "finalEquity": 107222175.24063556,
+            "netProfit": 7222175.240635559,
+            "totalReturnPercent": 7.222175240635553,
+            "realizedProfit": 5244408.725451518,
+            "realizedReturnPercent": 5.244408725451518,
+            "tradeCount": 97,
+            "winningTrades": 46,
+            "losingTrades": 51,
+            "winRate": 47.42268041237113,
+            "profitFactor": 1.149713926462074,
+            "grossProfit": 40273940.37546848,
+            "grossLoss": 35029531.65001695,
+            "maxDrawdownPercent": 11.455210478211955,
+            "exposurePercent": 81.35593220338984
+          },
+          "unknownBoundaryPositionCount": 4,
+          "unknownBoundaryPositionMarkets": [
+            "KRW-DOGE",
+            "KRW-NEAR",
+            "KRW-SOL",
+            "KRW-SUI"
+          ],
+          "unknownBoundaryEntryCount": 0,
+          "unknownBoundaryEntryMarkets": [],
+          "unknownBoundaryExitCount": 0,
+          "unknownBoundaryExitMarkets": [],
+          "dataQuality": {
+            "valid": true,
+            "reason": "daily_candle_grid_contiguous",
+            "marketCount": 12,
+            "minimumBars": 9,
+            "candleCount": 125,
+            "firstTimestamp": "2025-05-17T00:00:00.000Z",
+            "lastTimestamp": "2025-09-18T00:00:00.000Z",
+            "byMarket": {
+              "KRW-BTC": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-05-17T00:00:00.000Z",
+                "lastTimestamp": "2025-09-18T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ETH": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-05-17T00:00:00.000Z",
+                "lastTimestamp": "2025-09-18T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-XRP": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-05-17T00:00:00.000Z",
+                "lastTimestamp": "2025-09-18T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-SOL": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-05-17T00:00:00.000Z",
+                "lastTimestamp": "2025-09-18T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-DOGE": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-05-17T00:00:00.000Z",
+                "lastTimestamp": "2025-09-18T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ADA": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-05-17T00:00:00.000Z",
+                "lastTimestamp": "2025-09-18T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-DOT": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-05-17T00:00:00.000Z",
+                "lastTimestamp": "2025-09-18T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-LINK": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-05-17T00:00:00.000Z",
+                "lastTimestamp": "2025-09-18T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ATOM": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-05-17T00:00:00.000Z",
+                "lastTimestamp": "2025-09-18T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-NEAR": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-05-17T00:00:00.000Z",
+                "lastTimestamp": "2025-09-18T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ETC": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-05-17T00:00:00.000Z",
+                "lastTimestamp": "2025-09-18T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-SUI": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-05-17T00:00:00.000Z",
+                "lastTimestamp": "2025-09-18T00:00:00.000Z",
+                "valid": true
+              }
+            }
+          }
+        },
+        {
+          "segment": 5,
+          "range": {
+            "start": 625,
+            "end": 750
+          },
+          "available": true,
+          "metrics": {
+            "initialBalance": 100000000,
+            "finalEquity": 91047248.4610904,
+            "netProfit": -8952751.5389096,
+            "totalReturnPercent": -8.952751538909599,
+            "realizedProfit": -8952751.538909566,
+            "realizedReturnPercent": -8.952751538909567,
+            "tradeCount": 32,
+            "winningTrades": 14,
+            "losingTrades": 18,
+            "winRate": 43.75,
+            "profitFactor": 0.4376197739128753,
+            "grossProfit": 6966640.935467005,
+            "grossLoss": 15919392.474376572,
+            "maxDrawdownPercent": 12.690337833281637,
+            "exposurePercent": 22.88135593220339
+          },
+          "unknownBoundaryPositionCount": 0,
+          "unknownBoundaryPositionMarkets": [],
+          "unknownBoundaryEntryCount": 0,
+          "unknownBoundaryEntryMarkets": [],
+          "unknownBoundaryExitCount": 0,
+          "unknownBoundaryExitMarkets": [],
+          "dataQuality": {
+            "valid": true,
+            "reason": "daily_candle_grid_contiguous",
+            "marketCount": 12,
+            "minimumBars": 9,
+            "candleCount": 125,
+            "firstTimestamp": "2025-09-19T00:00:00.000Z",
+            "lastTimestamp": "2026-01-21T00:00:00.000Z",
+            "byMarket": {
+              "KRW-BTC": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-09-19T00:00:00.000Z",
+                "lastTimestamp": "2026-01-21T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ETH": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-09-19T00:00:00.000Z",
+                "lastTimestamp": "2026-01-21T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-XRP": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-09-19T00:00:00.000Z",
+                "lastTimestamp": "2026-01-21T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-SOL": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-09-19T00:00:00.000Z",
+                "lastTimestamp": "2026-01-21T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-DOGE": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-09-19T00:00:00.000Z",
+                "lastTimestamp": "2026-01-21T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ADA": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-09-19T00:00:00.000Z",
+                "lastTimestamp": "2026-01-21T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-DOT": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-09-19T00:00:00.000Z",
+                "lastTimestamp": "2026-01-21T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-LINK": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-09-19T00:00:00.000Z",
+                "lastTimestamp": "2026-01-21T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ATOM": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-09-19T00:00:00.000Z",
+                "lastTimestamp": "2026-01-21T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-NEAR": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-09-19T00:00:00.000Z",
+                "lastTimestamp": "2026-01-21T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ETC": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-09-19T00:00:00.000Z",
+                "lastTimestamp": "2026-01-21T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-SUI": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2025-09-19T00:00:00.000Z",
+                "lastTimestamp": "2026-01-21T00:00:00.000Z",
+                "valid": true
+              }
+            }
+          }
+        },
+        {
+          "segment": 6,
+          "range": {
+            "start": 750,
+            "end": 875
+          },
+          "available": true,
+          "metrics": {
+            "initialBalance": 100000000,
+            "finalEquity": 94929408.73732705,
+            "netProfit": -5070591.262672946,
+            "totalReturnPercent": -5.0705912626729415,
+            "realizedProfit": -5070591.262672926,
+            "realizedReturnPercent": -5.070591262672926,
+            "tradeCount": 46,
+            "winningTrades": 18,
+            "losingTrades": 28,
+            "winRate": 39.130434782608695,
+            "profitFactor": 0.7630636314158381,
+            "grossProfit": 16330054.374688588,
+            "grossLoss": 21400645.63736151,
+            "maxDrawdownPercent": 12.187788381939619,
+            "exposurePercent": 33.05084745762712
+          },
+          "unknownBoundaryPositionCount": 0,
+          "unknownBoundaryPositionMarkets": [],
+          "unknownBoundaryEntryCount": 0,
+          "unknownBoundaryEntryMarkets": [],
+          "unknownBoundaryExitCount": 0,
+          "unknownBoundaryExitMarkets": [],
+          "dataQuality": {
+            "valid": true,
+            "reason": "daily_candle_grid_contiguous",
+            "marketCount": 12,
+            "minimumBars": 9,
+            "candleCount": 125,
+            "firstTimestamp": "2026-01-22T00:00:00.000Z",
+            "lastTimestamp": "2026-05-26T00:00:00.000Z",
+            "byMarket": {
+              "KRW-BTC": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2026-01-22T00:00:00.000Z",
+                "lastTimestamp": "2026-05-26T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ETH": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2026-01-22T00:00:00.000Z",
+                "lastTimestamp": "2026-05-26T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-XRP": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2026-01-22T00:00:00.000Z",
+                "lastTimestamp": "2026-05-26T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-SOL": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2026-01-22T00:00:00.000Z",
+                "lastTimestamp": "2026-05-26T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-DOGE": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2026-01-22T00:00:00.000Z",
+                "lastTimestamp": "2026-05-26T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ADA": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2026-01-22T00:00:00.000Z",
+                "lastTimestamp": "2026-05-26T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-DOT": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2026-01-22T00:00:00.000Z",
+                "lastTimestamp": "2026-05-26T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-LINK": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2026-01-22T00:00:00.000Z",
+                "lastTimestamp": "2026-05-26T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ATOM": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2026-01-22T00:00:00.000Z",
+                "lastTimestamp": "2026-05-26T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-NEAR": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2026-01-22T00:00:00.000Z",
+                "lastTimestamp": "2026-05-26T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ETC": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2026-01-22T00:00:00.000Z",
+                "lastTimestamp": "2026-05-26T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-SUI": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2026-01-22T00:00:00.000Z",
+                "lastTimestamp": "2026-05-26T00:00:00.000Z",
+                "valid": true
+              }
+            }
+          }
+        },
+        {
+          "segment": 7,
+          "range": {
+            "start": 875,
+            "end": 1000
+          },
+          "available": true,
+          "metrics": {
+            "initialBalance": 100000000,
+            "finalEquity": 86579387.69383137,
+            "netProfit": -13420612.30616863,
+            "totalReturnPercent": -13.420612306168634,
+            "realizedProfit": -13420612.306168647,
+            "realizedReturnPercent": -13.420612306168648,
+            "tradeCount": 13,
+            "winningTrades": 2,
+            "losingTrades": 11,
+            "winRate": 15.384615384615385,
+            "profitFactor": 0.0625408365219746,
+            "grossProfit": 895331.0746367977,
+            "grossLoss": 14315943.380805444,
+            "maxDrawdownPercent": 13.42061230616863,
+            "exposurePercent": 11.864406779661017
+          },
+          "unknownBoundaryPositionCount": 0,
+          "unknownBoundaryPositionMarkets": [],
+          "unknownBoundaryEntryCount": 0,
+          "unknownBoundaryEntryMarkets": [],
+          "unknownBoundaryExitCount": 0,
+          "unknownBoundaryExitMarkets": [],
+          "dataQuality": {
+            "valid": true,
+            "reason": "daily_candle_grid_contiguous",
+            "marketCount": 12,
+            "minimumBars": 9,
+            "candleCount": 125,
+            "firstTimestamp": "2026-05-27T00:00:00.000Z",
+            "lastTimestamp": "2026-09-28T00:00:00.000Z",
+            "byMarket": {
+              "KRW-BTC": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2026-05-27T00:00:00.000Z",
+                "lastTimestamp": "2026-09-28T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ETH": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2026-05-27T00:00:00.000Z",
+                "lastTimestamp": "2026-09-28T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-XRP": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2026-05-27T00:00:00.000Z",
+                "lastTimestamp": "2026-09-28T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-SOL": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2026-05-27T00:00:00.000Z",
+                "lastTimestamp": "2026-09-28T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-DOGE": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2026-05-27T00:00:00.000Z",
+                "lastTimestamp": "2026-09-28T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ADA": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2026-05-27T00:00:00.000Z",
+                "lastTimestamp": "2026-09-28T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-DOT": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2026-05-27T00:00:00.000Z",
+                "lastTimestamp": "2026-09-28T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-LINK": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2026-05-27T00:00:00.000Z",
+                "lastTimestamp": "2026-09-28T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ATOM": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2026-05-27T00:00:00.000Z",
+                "lastTimestamp": "2026-09-28T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-NEAR": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2026-05-27T00:00:00.000Z",
+                "lastTimestamp": "2026-09-28T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-ETC": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2026-05-27T00:00:00.000Z",
+                "lastTimestamp": "2026-09-28T00:00:00.000Z",
+                "valid": true
+              },
+              "KRW-SUI": {
+                "candleCount": 125,
+                "gapCount": 0,
+                "largestGapDays": 0,
+                "firstTimestamp": "2026-05-27T00:00:00.000Z",
+                "lastTimestamp": "2026-09-28T00:00:00.000Z",
+                "valid": true
+              }
+            }
+          }
+        }
+      ],
+      "allSegmentsAvailable": true,
+      "allSegmentsNonNegative": false,
+      "noUnknownBoundary": false,
+      "unknownBoundaryPositionMarkets": [],
+      "unknownBoundaryEntryMarkets": [],
+      "unknownBoundaryExitMarkets": [],
+      "maturityTailDiagnosticOnly": false,
+      "worstSegmentReturnPercent": -13.420612306168634,
+      "positiveSegmentCount": 3,
+      "segmentCount": 8,
+      "eligibilityBlockers": [
+        "unknown_boundary_position",
+        "worst_segment_below_floor"
+      ],
+      "drawdownStopTriggered": true,
+      "drawdownStopAt": "2024-04-11T00:00:00.000Z",
+      "riskFlags": [
+        "drawdown_stop_triggered"
+      ],
+      "shadowEligible": false,
+      "status": "HOLD"
+    }
+  ],
+  "shortlist": [],
+  "nearMisses": [
+    {
+      "name": "fixed_h3_gm100_u1_t0_b1_f0p25_p4_c0_dd5",
+      "config": {
+        "initialBalance": 100000000,
+        "trendLookbackDays": 7,
+        "trendMinPercent": 0,
+        "breadthMin": 1,
+        "requireUpBar": true,
+        "minUpBars": 1,
+        "costPercent": 0.3,
+        "positionFraction": 0.25,
+        "maxPositions": 4,
+        "maxHoldDays": 3,
+        "cooldownAfterLossDays": 0,
+        "benchmarkMarket": "KRW-BTC",
+        "benchmarkTrendMinPercent": -100,
+        "benchmarkMinUpBars": 1,
+        "benchmarkExitConfirmationBars": 1,
+        "regimeExitConfirmationBars": 1,
+        "relativeTrendMinPercent": null,
+        "volatilityLookbackDays": 14,
+        "volatilityTargetPercent": null,
+        "excludeBenchmarkFromEntries": false,
+        "excludeBenchmarkFromBreadth": false,
+        "benchmarkExposureMinPercent": null,
+        "benchmarkExposureMaxPercent": null,
+        "exitOnBenchmarkOff": true,
+        "stopLossPercent": 0,
+        "maxPortfolioDrawdownPercent": 5,
+        "mode": "fixed",
+        "entryExecution": "close",
+        "exitExecution": "close",
+        "maxEntryGapPercent": 0,
+        "entryWindowEndTimestamp": null,
+        "excludeCurrentUtcDay": true
+      },
+      "status": "HOLD",
+      "fullMetrics": {
+        "initialBalance": 100000000,
+        "finalEquity": 95651218.88217865,
+        "netProfit": -4348781.117821351,
+        "totalReturnPercent": -4.348781117821354,
+        "realizedProfit": -4348781.117821359,
+        "realizedReturnPercent": -4.348781117821359,
+        "tradeCount": 12,
+        "winningTrades": 4,
+        "losingTrades": 8,
+        "winRate": 33.33333333333333,
+        "profitFactor": 0.29876239978760977,
+        "grossProfit": 1852798.94078389,
+        "grossLoss": 6201580.058605249,
+        "maxDrawdownPercent": 6.165188077304511,
+        "exposurePercent": 0.906344410876133
+      },
+      "worstSegmentReturnPercent": -5.784438433639927,
+      "positiveSegmentCount": 2,
+      "segmentCount": 8,
+      "noUnknownBoundary": true,
+      "unknownBoundaryPositionMarkets": [],
+      "unknownBoundaryEntryMarkets": [],
+      "unknownBoundaryExitMarkets": [],
+      "eligibilityBlockers": [
+        "full_return_below_floor",
+        "worst_segment_below_floor",
+        "trade_sample_below_minimum"
+      ],
+      "drawdownStopTriggered": true,
+      "drawdownStopAt": "2024-01-18T00:00:00.000Z",
+      "riskFlags": [
+        "drawdown_stop_triggered"
+      ]
+    },
+    {
+      "name": "fixed_h3_gm100_u1_t0_b1_f0p25_p4_c0_dd10",
+      "config": {
+        "initialBalance": 100000000,
+        "trendLookbackDays": 7,
+        "trendMinPercent": 0,
+        "breadthMin": 1,
+        "requireUpBar": true,
+        "minUpBars": 1,
+        "costPercent": 0.3,
+        "positionFraction": 0.25,
+        "maxPositions": 4,
+        "maxHoldDays": 3,
+        "cooldownAfterLossDays": 0,
+        "benchmarkMarket": "KRW-BTC",
+        "benchmarkTrendMinPercent": -100,
+        "benchmarkMinUpBars": 1,
+        "benchmarkExitConfirmationBars": 1,
+        "regimeExitConfirmationBars": 1,
+        "relativeTrendMinPercent": null,
+        "volatilityLookbackDays": 14,
+        "volatilityTargetPercent": null,
+        "excludeBenchmarkFromEntries": false,
+        "excludeBenchmarkFromBreadth": false,
+        "benchmarkExposureMinPercent": null,
+        "benchmarkExposureMaxPercent": null,
+        "exitOnBenchmarkOff": true,
+        "stopLossPercent": 0,
+        "maxPortfolioDrawdownPercent": 10,
+        "mode": "fixed",
+        "entryExecution": "close",
+        "exitExecution": "close",
+        "maxEntryGapPercent": 0,
+        "entryWindowEndTimestamp": null,
+        "excludeCurrentUtcDay": true
+      },
+      "status": "HOLD",
+      "fullMetrics": {
+        "initialBalance": 100000000,
+        "finalEquity": 128004396.02032423,
+        "netProfit": 28004396.02032423,
+        "totalReturnPercent": 28.00439602032423,
+        "realizedProfit": 28004396.020324215,
+        "realizedReturnPercent": 28.00439602032421,
+        "tradeCount": 102,
+        "winningTrades": 52,
+        "losingTrades": 50,
+        "winRate": 50.98039215686274,
+        "profitFactor": 1.542187370572968,
+        "grossProfit": 79655167.5805875,
+        "grossLoss": 51650771.560263306,
+        "maxDrawdownPercent": 11.02588046128352,
+        "exposurePercent": 8.862034239677746
+      },
+      "worstSegmentReturnPercent": -11.181839069742793,
+      "positiveSegmentCount": 2,
+      "segmentCount": 8,
+      "noUnknownBoundary": true,
+      "unknownBoundaryPositionMarkets": [],
+      "unknownBoundaryEntryMarkets": [],
+      "unknownBoundaryExitMarkets": [],
+      "eligibilityBlockers": [
+        "worst_segment_below_floor"
+      ],
+      "drawdownStopTriggered": true,
+      "drawdownStopAt": "2024-04-09T00:00:00.000Z",
+      "riskFlags": [
+        "drawdown_stop_triggered"
+      ]
+    },
+    {
+      "name": "fixed_h3_gm100_u1_t0_b1_f0p25_p4_c0_dd12",
+      "config": {
+        "initialBalance": 100000000,
+        "trendLookbackDays": 7,
+        "trendMinPercent": 0,
+        "breadthMin": 1,
+        "requireUpBar": true,
+        "minUpBars": 1,
+        "costPercent": 0.3,
+        "positionFraction": 0.25,
+        "maxPositions": 4,
+        "maxHoldDays": 3,
+        "cooldownAfterLossDays": 0,
+        "benchmarkMarket": "KRW-BTC",
+        "benchmarkTrendMinPercent": -100,
+        "benchmarkMinUpBars": 1,
+        "benchmarkExitConfirmationBars": 1,
+        "regimeExitConfirmationBars": 1,
+        "relativeTrendMinPercent": null,
+        "volatilityLookbackDays": 14,
+        "volatilityTargetPercent": null,
+        "excludeBenchmarkFromEntries": false,
+        "excludeBenchmarkFromBreadth": false,
+        "benchmarkExposureMinPercent": null,
+        "benchmarkExposureMaxPercent": null,
+        "exitOnBenchmarkOff": true,
+        "stopLossPercent": 0,
+        "maxPortfolioDrawdownPercent": 12,
+        "mode": "fixed",
+        "entryExecution": "close",
+        "exitExecution": "close",
+        "maxEntryGapPercent": 0,
+        "entryWindowEndTimestamp": null,
+        "excludeCurrentUtcDay": true
+      },
+      "status": "HOLD",
+      "fullMetrics": {
+        "initialBalance": 100000000,
+        "finalEquity": 126526326.87829575,
+        "netProfit": 26526326.87829575,
+        "totalReturnPercent": 26.526326878295748,
+        "realizedProfit": 26526326.87829577,
+        "realizedReturnPercent": 26.52632687829577,
+        "tradeCount": 103,
+        "winningTrades": 52,
+        "losingTrades": 51,
+        "winRate": 50.48543689320388,
+        "profitFactor": 1.4992829982294633,
+        "grossProfit": 79655167.5805875,
+        "grossLoss": 53128840.70229174,
+        "maxDrawdownPercent": 12.053266274724251,
+        "exposurePercent": 9.06344410876133
+      },
+      "worstSegmentReturnPercent": -13.420612306168634,
+      "positiveSegmentCount": 3,
+      "segmentCount": 8,
+      "noUnknownBoundary": false,
+      "unknownBoundaryPositionMarkets": [],
+      "unknownBoundaryEntryMarkets": [],
+      "unknownBoundaryExitMarkets": [],
+      "eligibilityBlockers": [
+        "unknown_boundary_position",
+        "worst_segment_below_floor"
+      ],
+      "drawdownStopTriggered": true,
+      "drawdownStopAt": "2024-04-11T00:00:00.000Z",
+      "riskFlags": [
+        "drawdown_stop_triggered"
+      ]
+    }
+  ],
+  "statusCounts": {
+    "HOLD": 3
+  },
+  "benchmarkThresholdSummary": {
+    "-100": {
+      "HOLD": 3
+    }
+  },
+  "shadowCandidateCount": 0,
+  "promotionReason": "daily_momentum_robustness_is_research_only_and_requires_a_separate_forward_owner",
+  "note": "SHADOW_CANDIDATE는 historical risk-envelope 통과 표시일 뿐 runtime 설정이나 live 주문을 변경하지 않습니다. 이 파일은 동일한 완료 일봉과 비용 가정의 historical 비교 결과입니다.",
+  "inputFile": "docs/audits/coinpilot-2026-09-29/coinpilot-daily-momentum-candles-1000d-20260928T0733Z.json",
+  "markets": [
+    "KRW-BTC",
+    "KRW-ETH",
+    "KRW-XRP",
+    "KRW-SOL",
+    "KRW-DOGE",
+    "KRW-ADA",
+    "KRW-DOT",
+    "KRW-LINK",
+    "KRW-ATOM",
+    "KRW-NEAR",
+    "KRW-ETC",
+    "KRW-SUI"
+  ]
+}

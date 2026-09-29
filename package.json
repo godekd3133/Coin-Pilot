@@ -32,10 +32,12 @@
     "research:live-execution-evidence": "node src/scripts/reconcileLiveExecutionEvidence.js",
     "research:paper:cohort": "node src/scripts/summarizePaperForwardCohort.js",
     "research:paper:exit-evidence": "node src/scripts/analyzePaperExitEvidence.js",
+    "research:paper:exit-path-replay": "node src/scripts/analyzePaperExitPathReplay.js",
     "research:paper:strict-only-preflight": "node src/scripts/preflightStrictOnlyForward.js",
     "research:momentum-shadow:start-if-ready": "node src/scripts/startMomentumShadowCandidateIfReady.js",
     "research:momentum-shadow:start-quote-cross-if-ready": "MOMO_SHADOW_CANDIDATE_PROFILE=quote_cross node src/scripts/startMomentumShadowCandidateIfReady.js",
     "benchmark:portfolio-history": "node src/scripts/benchmarkPortfolioHistory.js",
+    "benchmark:dashboard-read-capacity": "node src/scripts/benchmarkDashboardReadCapacity.js",
     "verify:pwa": "node src/scripts/verifyPwaShell.js",
     "validate:scalping:portfolio": "node src/scripts/validatePortfolio.js",
     "compare:scalping": "node src/scripts/compareScalpingVariants.js",
@@ -47,6 +49,7 @@
     "dashboard": "node src/scripts/runDashboard.js",
     "dashboard:paper": "node src/scripts/runPaperDashboard.js",
     "dashboard:staging": "node src/scripts/runStagingDashboard.js",
+    "inspect:runtime-storage-plan": "node src/scripts/inspectRuntimeStoragePlan.js",
     "ai:smoke": "node src/scripts/runAiAdvisorSmoke.js",
     "ai:replay": "node src/scripts/runAiHistoricalReplay.js",
     "ai:robustness": "node src/scripts/runAiReplayRobustness.js",
@@ -85,10 +88,9 @@
     "dotenv": "^16.3.1",
     "express": "^4.18.2",
     "jsonwebtoken": "^9.0.2",
-    "node-cron": "^3.0.3",
     "sentiment": "^5.0.2",
     "socket.io": "^4.8.3",
-    "uuid": "^9.0.1"
+    "uuid": "^14.0.2"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

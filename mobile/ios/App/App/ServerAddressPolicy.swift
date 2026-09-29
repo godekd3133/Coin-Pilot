@@ -3,13 +3,14 @@ import Foundation
 
 enum ServerAddressPolicy {
     static func allows(_ url: URL) -> Bool {
+        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return false }
         guard let scheme = url.scheme?.lowercased(),
               let rawHost = url.host?.lowercased(),
               url.user == nil,
               url.password == nil,
-              url.path.isEmpty || url.path == "/",
-              url.query == nil,
-              url.fragment == nil else {
+              components.path.isEmpty || components.path == "/" || components.path == "/live",
+              components.query == nil,
+              components.fragment == nil else {
             return false
         }
 

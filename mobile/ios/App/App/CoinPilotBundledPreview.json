@@ -133,6 +133,33 @@
     }
   },
   "history": {
+    "1h": {
+      "data": [
+        {
+          "timestamp": "2026-09-28T23:00:00.000Z",
+          "totalAssets": 4695000
+        },
+        {
+          "timestamp": "2026-09-28T23:15:00.000Z",
+          "totalAssets": 4697000
+        },
+        {
+          "timestamp": "2026-09-28T23:30:00.000Z",
+          "totalAssets": 4696000
+        },
+        {
+          "timestamp": "2026-09-28T23:45:00.000Z",
+          "totalAssets": 4699000
+        },
+        {
+          "timestamp": "2026-09-29T00:00:00.000Z",
+          "totalAssets": 4700000
+        }
+      ],
+      "period": "1h",
+      "count": 5,
+      "readOnlyObserver": true
+    },
     "24h": {
       "data": [
         { "timestamp": "2026-09-28T01:00:00.000Z", "totalAssets": 4660000 },

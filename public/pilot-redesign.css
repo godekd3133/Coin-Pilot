@@ -7,7 +7,8 @@
  */
 
 :root {
-    /* Neutral and accent values map to Toss Design System foundation colors.
+    /* Pinned snapshot of Toss Design System foundation colors (2026-09-29).
+       Values match documented color tokens; they are not runtime-imported.
        Status colors stay darker where small text needs stronger contrast. */
     --sl-font-body: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", "Segoe UI", sans-serif;
     --sl-font-display: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", "Segoe UI", sans-serif;
@@ -45,6 +46,9 @@
    mounted so the existing server-backed functions do not lose their anchors. */
 body.pilot-redesign-shell {
     margin: 0;
+    height: 100vh;
+    height: 100dvh;
+    overflow: hidden;
     /* Do not force a desktop-width canvas on narrow mobile webviews. */
     min-width: 0;
     background: var(--sl-paper);
@@ -89,11 +93,15 @@ body.pilot-redesign-shell .pilot-mobile-nav {
 
 #pilot-redesign-root {
     display: block;
-    min-height: 100vh;
+    height: 100vh;
+    height: 100dvh;
+    min-height: 0;
 }
 
 .pilot-app {
-    min-height: 100vh;
+    height: 100vh;
+    height: 100dvh;
+    min-height: 0;
     display: grid;
     grid-template-columns: var(--sl-sidebar) minmax(0, 1fr);
     background:
@@ -106,8 +114,11 @@ body.pilot-redesign-shell .pilot-mobile-nav {
     top: 0;
     z-index: 20;
     display: flex;
-    min-height: 100vh;
+    height: 100%;
+    min-height: 0;
     flex-direction: column;
+    overflow-y: auto;
+    overscroll-behavior: contain;
     border-right: 1px solid var(--sl-line);
     background: rgba(255, 255, 255, 0.88);
 }
@@ -224,7 +235,20 @@ body.pilot-redesign-shell .pilot-mobile-nav {
 }
 
 .pilot-main {
+    display: flex;
+    height: 100%;
     min-width: 0;
+    min-height: 0;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.pilot-topbar,
+.pilot-mode-banner,
+.pilot-pwa-update,
+.pilot-offline-banner,
+.pilot-pending-mutation {
+    flex: 0 0 auto;
 }
 
 .pilot-topbar {
@@ -236,7 +260,7 @@ body.pilot-redesign-shell .pilot-mobile-nav {
     min-height: 84px;
     align-items: center;
     gap: 22px;
-    padding: 16px 32px;
+    padding: calc(16px + env(safe-area-inset-top, 0px)) 32px 16px;
     border-bottom: 1px solid rgba(209, 214, 219, 0.72);
     background: rgba(249, 250, 251, 0.9);
     -webkit-backdrop-filter: blur(18px);
@@ -292,6 +316,7 @@ body.pilot-redesign-shell .pilot-mobile-nav {
 .pilot-top-meta {
     display: flex;
     align-items: center;
+    min-height: 44px;
     gap: 16px;
     color: var(--sl-muted);
     font-size: 12px;
@@ -324,8 +349,13 @@ body.pilot-redesign-shell .pilot-mobile-nav {
 
 .pilot-content {
     width: min(1500px, 100%);
+    min-height: 0;
+    flex: 1 1 auto;
     margin: 0 auto;
     padding: 30px 32px 50px;
+    overflow-y: auto;
+    overscroll-behavior-y: contain;
+    -webkit-overflow-scrolling: touch;
 }
 
 .pilot-page {
@@ -549,49 +579,24 @@ body.pilot-redesign-shell .pilot-mobile-nav {
 
 .pilot-pwa-update {
     display: flex;
-    min-height: 52px;
     align-items: center;
-    gap: 12px;
-    padding: 11px 32px;
-    border-bottom: 1px solid #b9d3fb;
-    background: var(--sl-blue-soft);
-    color: #24558e;
+    flex: 0 0 auto;
+    margin: 0;
 }
 
 .pilot-pwa-update[hidden] {
     display: none !important;
 }
 
-.pilot-pwa-update > i {
-    flex: 0 0 auto;
-    font-size: 22px;
-}
-
-.pilot-pwa-update > div {
-    min-width: 0;
-    flex: 1;
-}
-
-.pilot-pwa-update strong,
-.pilot-pwa-update span {
-    display: block;
-}
-
-.pilot-pwa-update strong {
-    font-size: 13px;
-}
-
-.pilot-pwa-update span {
-    margin-top: 2px;
-    font-size: 12px;
-    opacity: 0.82;
-}
-
 .pilot-pwa-update .pilot-button {
     flex: 0 0 auto;
-    border-color: currentColor;
-    background: rgba(255, 255, 255, 0.5);
-    color: inherit;
+    min-height: 44px;
+    gap: 6px;
+    padding: 0 9px;
+    border-color: #b9d3fb;
+    background: var(--sl-blue-soft);
+    color: #24558e;
+    font-size: 11px;
 }
 
 .pilot-offline-banner {
@@ -777,6 +782,11 @@ body.pilot-redesign-shell .pilot-mobile-nav {
 .pilot-gate-icon.is-blocked {
     background: var(--sl-red-soft);
     color: var(--sl-red);
+}
+
+.pilot-gate-icon.is-neutral {
+    background: var(--sl-surface-2);
+    color: var(--sl-muted);
 }
 
 .pilot-gate-title {
@@ -974,7 +984,9 @@ body.pilot-redesign-shell .pilot-mobile-nav {
     }
 
     .pilot-chart-empty .pilot-button {
-        width: 100%;
+        width: calc(100% - 56px);
+        max-width: calc(100% - 56px);
+        min-height: 44px;
         margin-left: 56px;
     }
 }
@@ -1630,6 +1642,10 @@ body.pilot-redesign-shell .pilot-mobile-nav {
     min-width: 660px;
 }
 
+.pilot-table.is-position-empty {
+    min-width: 0;
+}
+
 .pilot-table th,
 .pilot-table td {
     padding: 12px 14px;
@@ -1803,6 +1819,24 @@ body.pilot-redesign-shell .pilot-mobile-nav {
     font-size: 11px;
 }
 
+.pilot-market-status {
+    display: block;
+    margin-top: 4px;
+    color: var(--sl-green);
+    font-size: 12px;
+    line-height: 1.35;
+}
+
+.pilot-market-status[data-market-state="complete"] {
+    color: var(--sl-green);
+}
+
+.pilot-market-status[data-market-state="stale"],
+.pilot-market-status[data-market-state="partial"],
+.pilot-market-status[data-market-state="unavailable"] {
+    color: var(--sl-amber);
+}
+
 .pilot-market-price {
     display: block;
     color: var(--sl-ink);
@@ -1844,8 +1878,10 @@ body.pilot-redesign-shell .pilot-mobile-nav {
 }
 
 .pilot-market-chart-wrap {
+    --pilot-market-chart-height: 398px;
     position: relative;
-    min-height: 398px;
+    min-height: var(--pilot-market-chart-height);
+    overflow: hidden;
     background:
         linear-gradient(rgba(27, 100, 218, 0.05) 1px, transparent 1px),
         linear-gradient(90deg, rgba(27, 100, 218, 0.05) 1px, transparent 1px),
@@ -1856,7 +1892,49 @@ body.pilot-redesign-shell .pilot-mobile-nav {
 .pilot-market-chart {
     display: block;
     width: 100%;
-    height: 398px;
+    height: var(--pilot-market-chart-height);
+}
+
+.pilot-market-candle-data {
+    padding: 12px 20px 18px;
+    border-top: 1px solid var(--sl-line);
+}
+
+.pilot-market-candle-status {
+    padding: 8px 20px;
+    border-top: 1px solid var(--sl-line);
+    background: var(--sl-amber-soft);
+    color: var(--sl-amber);
+    font-size: 12px;
+    line-height: 1.4;
+}
+
+.pilot-market-candle-data summary {
+    color: var(--sl-ink-soft);
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.pilot-market-candle-data summary:focus-visible {
+    outline: 3px solid var(--sl-blue);
+    outline-offset: 3px;
+}
+
+.pilot-market-candle-data-note {
+    margin: 9px 0;
+    color: var(--sl-muted);
+    font-size: 12px;
+}
+
+.pilot-market-data-table-wrap {
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch;
+}
+
+.pilot-market-data-table {
+    min-width: 700px;
 }
 
 .pilot-market-toolbar {
@@ -4439,14 +4517,31 @@ body.pilot-redesign-shell .pilot-mobile-nav {
     .pilot-market-list {
         max-height: none;
     }
+
+    .pilot-market-candle-data {
+        padding-right: 14px;
+        padding-left: 14px;
+    }
+
+    .pilot-market-candle-status {
+        padding-right: 14px;
+        padding-left: 14px;
+    }
 }
 
 @media (max-width: 760px) {
     :root { --sl-sidebar: 0px; }
 
     .pilot-app {
+        height: 100vh;
+        height: 100dvh;
+        min-height: 0;
         display: block;
-        padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px));
+        padding-bottom: 0;
+    }
+
+    .pilot-main {
+        height: 100%;
     }
 
     .pilot-sidebar {
@@ -4530,7 +4625,7 @@ body.pilot-redesign-shell .pilot-mobile-nav {
         flex-direction: column;
         align-items: stretch;
         gap: 11px;
-        padding: 13px 14px;
+        padding: calc(13px + env(safe-area-inset-top, 0px)) 14px 13px;
     }
 
     .pilot-mode-switch {
@@ -4579,13 +4674,7 @@ body.pilot-redesign-shell .pilot-mobile-nav {
     }
 
     .pilot-pwa-update {
-        align-items: flex-start;
-        padding: 12px 14px;
-        flex-wrap: wrap;
-    }
-
-    .pilot-pwa-update .pilot-button {
-        margin-left: 34px;
+        align-self: center;
     }
 
     .pilot-offline-banner .pilot-button {
@@ -4593,7 +4682,7 @@ body.pilot-redesign-shell .pilot-mobile-nav {
     }
 
     .pilot-content {
-        padding: 22px 14px 30px;
+        padding: 22px 14px calc(126px + env(safe-area-inset-bottom, 0px));
     }
 
     .pilot-page-heading {
@@ -4736,10 +4825,15 @@ body.pilot-redesign-shell .pilot-mobile-nav {
         padding: 13px 15px;
     }
 
-    .pilot-market-chart-wrap,
+    .pilot-market-chart-wrap {
+        --pilot-market-chart-height: 300px;
+        min-height: var(--pilot-market-chart-height);
+        height: var(--pilot-market-chart-height);
+    }
+
     .pilot-market-chart {
-        min-height: 300px;
-        height: 300px;
+        min-height: var(--pilot-market-chart-height);
+        height: var(--pilot-market-chart-height);
     }
 
     .pilot-market-row {
@@ -4905,33 +4999,12 @@ body.pilot-redesign-shell .pilot-mobile-nav {
     }
 
     .pilot-pwa-update {
-        display: grid;
-        grid-template-columns: auto minmax(0, 1fr);
-        align-items: start;
-        gap: 7px;
-        min-height: 0;
-        padding: 8px 10px;
-    }
-
-    .pilot-pwa-update > i {
-        font-size: 18px;
-    }
-
-    .pilot-pwa-update strong {
-        font-size: 11px;
-    }
-
-    .pilot-pwa-update span {
-        font-size: 10px;
-        line-height: 1.25;
+        align-self: center;
     }
 
     .pilot-pwa-update .pilot-button {
-        grid-column: 2;
-        justify-self: start;
-        margin-left: 0;
-        min-height: 32px;
-        padding: 0 6px;
+        min-height: 44px;
+        padding: 0 7px;
         font-size: 10px;
     }
 
@@ -4997,6 +5070,47 @@ body.pilot-redesign-shell .pilot-mobile-nav {
 }
 
 @media (max-width: 480px) {
+    .pilot-gate-grid {
+        grid-template-columns: 1fr;
+        gap: 8px;
+    }
+
+    .pilot-gate-card {
+        grid-template-columns: auto minmax(0, 1fr) auto;
+        align-items: center;
+        min-height: 64px;
+        height: auto;
+        padding: 10px 12px;
+        gap: 12px;
+        text-align: left;
+    }
+
+    .pilot-gate-icon {
+        width: 30px;
+        height: 30px;
+        font-size: 16px;
+    }
+
+    .pilot-gate-title {
+        font-size: 14px;
+        line-height: 1.35;
+    }
+
+    .pilot-gate-detail {
+        margin-top: 2px;
+        overflow: visible;
+        font-size: 12px;
+        line-height: 1.35;
+        text-overflow: clip;
+        white-space: normal;
+        overflow-wrap: anywhere;
+    }
+
+    .pilot-gate-arrow {
+        justify-self: end;
+        font-size: 16px;
+    }
+
     .pilot-optimization-run-row {
         align-items: flex-start;
         gap: 8px;
@@ -5005,6 +5119,36 @@ body.pilot-redesign-shell .pilot-mobile-nav {
     .pilot-optimization-run-row > .pilot-button {
         min-height: 36px;
         padding: 0 8px;
+    }
+}
+
+@media (max-height: 640px) {
+    body.pilot-redesign-shell {
+        height: auto;
+        min-height: 100vh;
+        min-height: 100dvh;
+        overflow-x: hidden;
+        overflow-y: auto;
+    }
+
+    #pilot-redesign-root,
+    .pilot-app {
+        height: auto;
+        min-height: 100vh;
+        min-height: 100dvh;
+    }
+
+    .pilot-main {
+        height: auto;
+        min-height: 0;
+        overflow: visible;
+    }
+
+    .pilot-content {
+        min-height: 0;
+        flex: 0 0 auto;
+        overflow: visible;
+        overscroll-behavior-y: auto;
     }
 }
 

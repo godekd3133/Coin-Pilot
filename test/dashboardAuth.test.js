@@ -30,7 +30,7 @@ async function stopDashboard({ dashboard, trader }) {
   const closed = dashboard.httpServer?.listening
     ? once(dashboard.httpServer, 'close')
     : Promise.resolve();
-  dashboard.stop();
+  await dashboard.stop();
   trader.stop();
   await closed;
 }
@@ -112,6 +112,52 @@ test('로그인 성공은 실패 카운터를 리셋한다', () => {
   assert.equal(limiter.blockedUntil('ip'), 0);
 });
 
+test('로그인 실패 상태는 IP 수에 상한을 두고 만료된 항목을 회수한다', () => {
+  let at = 1_000;
+  const limiter = createLoginRateLimiter({
+    maxFailures: 10,
+    windowMs: 100,
+    blockMs: 100,
+    maxTrackedIps: 2,
+    now: () => at
+  });
+
+  assert.equal(limiter.blockedUntil('unseen'), 0, 'read-only status checks must not allocate an address entry');
+  assert.equal(limiter.recordFailure('ip-a'), true);
+  assert.equal(limiter.recordFailure('ip-b'), true);
+  assert.equal(limiter.recordFailure('ip-c'), false, 'a full limiter must reject a new address instead of growing memory');
+
+  at += 101;
+  assert.equal(limiter.recordFailure('ip-c'), true, 'expired address entries must be reclaimed before admitting a new one');
+  assert.equal(limiter.capacityRetryAfterSeconds(), 1);
+});
+
+test('loopback reverse proxy login failures are isolated by client address and ignore older forwarded hops', async () => {
+  const context = await startDashboard({ DASHBOARD_TOKEN: 'operator-secret' }, {
+    loginRateLimiter: { maxFailures: 1, windowMs: 60_000, blockMs: 60_000 }
+  });
+  try {
+    assert.equal(context.dashboard.app.get('trust proxy'), 'loopback');
+    const login = xForwardedFor => fetch(`${context.baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        // Mirrors Nginx appending $remote_addr to an untrusted incoming XFF.
+        'x-forwarded-for': xForwardedFor
+      },
+      body: JSON.stringify({ token: 'invalid-token' })
+    });
+
+    assert.equal((await login('198.51.100.99, 203.0.113.10')).status, 401);
+    assert.equal((await login('198.51.100.99, 203.0.113.11')).status, 401,
+      'another proxied client does not inherit the first client’s lockout');
+    assert.equal((await login('198.51.100.88, 203.0.113.10')).status, 429,
+      'only the same appended client address hits its lockout');
+  } finally {
+    await stopDashboard(context);
+  }
+});
+
 // -------------------------------------------------------------- origin guard
 test('origin guard는 same-origin과 allowlist만 허용한다', () => {
   const guard = createOriginGuard(['https://allowed.example']);
@@ -170,6 +216,7 @@ test('읽기 전용 토큰은 정확한 경로, 메서드, 쿼리만 허용한�
     '/api/cumulative-pnl',
     '/api/today-summary',
     '/api/market/prices',
+    '/api/market/prices/snapshot',
     '/api/paper-validation/summary',
     '/api/portfolio/history?period=24h',
     '/api/portfolio/history?period=7d',
@@ -184,6 +231,7 @@ test('읽기 전용 토큰은 정확한 경로, 메서드, 쿼리만 허용한�
     ['GET', '/api/positions'],
     ['GET', '/api/paper-validation'],
     ['GET', '/api/paper-validation/summary?extra=1'],
+    ['GET', '/api/market/prices/snapshot?extra=1'],
     ['GET', '/api/status?extra=1'],
     ['GET', '/api/portfolio/history?period=1h'],
     ['GET', '/api/portfolio/history?period=24h&period=7d'],
@@ -202,6 +250,25 @@ test('읽기 전용 토큰은 정확한 경로, 메서드, 쿼리만 허용한�
   }
 
   assert.equal(invoke('POST', '/api/control/start', 'full-token').nextCalled, true);
+});
+
+test('모바일 운영 토큰은 공개 시세 snapshot 읽기를 허용한다', () => {
+  const auth = createDashboardAuth({ DASHBOARD_TOKEN: 'full-token', DASHBOARD_MOBILE_TOKEN: 'mobile-token' });
+  const invoke = url => {
+    let status;
+    let nextCalled = false;
+    const response = {
+      status(value) { status = value; return this; },
+      json() { return this; }
+    };
+    auth.middleware({ method: 'GET', originalUrl: url, headers: { authorization: 'Bearer mobile-token' } }, response, () => {
+      nextCalled = true;
+    });
+    return { status, nextCalled };
+  };
+
+  assert.equal(invoke('/api/market/prices/snapshot').nextCalled, true);
+  assert.deepEqual(invoke('/api/market/prices/snapshot?extra=1'), { status: 403, nextCalled: false });
 });
 
 // --------------------------------------------------- integration: auth enabled
@@ -278,6 +345,7 @@ test('읽기 전용 토큰은 네이티브 모니터 경로만 조회하고 전�
       '/api/cumulative-pnl',
       '/api/today-summary',
       '/api/market/prices',
+      '/api/market/prices/snapshot',
       '/api/paper-validation/summary',
       '/api/portfolio/history?period=24h',
       '/api/portfolio/history?period=7d',
@@ -337,14 +405,17 @@ test('읽기 전용 토큰은 네이티브 모니터 경로만 조회하고 전�
     });
     assert.equal(adminPreflight.status, 204);
 
-    for (const token of ['full-secret', 'monitor-secret']) {
+    for (const { token, tokenScope } of [
+      { token: 'full-secret', tokenScope: 'operator' },
+      { token: 'monitor-secret', tokenScope: 'read_only' }
+    ]) {
       const login = await fetch(`${ctx.baseUrl}/api/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ token })
       });
       assert.equal(login.status, 200);
-      assert.deepEqual(await login.json(), { success: true });
+      assert.deepEqual(await login.json(), { success: true, tokenScope });
     }
   } finally {
     await stopDashboard(ctx);

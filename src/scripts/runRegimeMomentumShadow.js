@@ -1,7 +1,7 @@
 import dotenv from 'dotenv';
 import fs from 'node:fs';
 import path from 'node:path';
-import axios from 'axios';
+import { pathToFileURL } from 'node:url';
 import UpbitAPI from '../api/upbit.js';
 import RegimeMomentumStrategy from '../strategy/regimeMomentumStrategy.js';
 import { createNotifier } from '../utils/notify.js';
@@ -332,51 +332,47 @@ function startHeartbeatWatchdog(ledger) {
   heartbeatWatchdogTimer.unref?.();
 }
 
-process.on('SIGTERM', () => {
-  stopRunner('signal:SIGTERM');
-  process.exit(0);
-});
-process.on('SIGINT', () => {
-  stopRunner('signal:SIGINT');
-  process.exit(0);
-});
-process.on('uncaughtException', (error) => {
-  console.error('uncaught runner exception:', error);
-  stopRunner('uncaught_exception', error);
-  process.exitCode = 1;
-});
-process.on('unhandledRejection', (reason) => {
-  console.error('unhandled runner rejection:', reason);
-  stopRunner('unhandled_rejection', reason);
-  process.exitCode = 1;
-});
-process.on('beforeExit', () => {
-  if (activeLedger && !shutdownStarted) stopRunner('before_exit');
-});
-process.on('exit', () => {
-  if (CANDIDATE_SLOT_FILE && candidateSlotOwned) {
-    try { releaseMomentumShadowCandidateSlot({ file: CANDIDATE_SLOT_FILE, pid: process.pid }); }
-    catch { /* best-effort during process teardown */ }
-  }
-  releaseLock();
-});
-
-async function fetchDailyCandles(market) {
-  return upbit.requestWithRetry(async () => {
-    const res = await axios.get('https://api.upbit.com/v1/candles/days',
-      upbit.getRequestConfig({ params: { market, count: HISTORY_DAYS } }));
-    return res.data;
+const invokedAsScript = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+if (invokedAsScript) {
+  process.on('SIGTERM', () => {
+    stopRunner('signal:SIGTERM');
+    process.exit(0);
+  });
+  process.on('SIGINT', () => {
+    stopRunner('signal:SIGINT');
+    process.exit(0);
+  });
+  process.on('uncaughtException', (error) => {
+    console.error('uncaught runner exception:', error);
+    stopRunner('uncaught_exception', error);
+    process.exitCode = 1;
+  });
+  process.on('unhandledRejection', (reason) => {
+    console.error('unhandled runner rejection:', reason);
+    stopRunner('unhandled_rejection', reason);
+    process.exitCode = 1;
+  });
+  process.on('beforeExit', () => {
+    if (activeLedger && !shutdownStarted) stopRunner('before_exit');
+  });
+  process.on('exit', () => {
+    if (CANDIDATE_SLOT_FILE && candidateSlotOwned) {
+      try { releaseMomentumShadowCandidateSlot({ file: CANDIDATE_SLOT_FILE, pid: process.pid }); }
+      catch { /* best-effort during process teardown */ }
+    }
+    releaseLock();
   });
 }
 
-async function fetchOrderbookQuotes() {
-  return upbit.requestWithRetry(async () => {
-    const res = await axios.get('https://api.upbit.com/v1/orderbook',
-      upbit.getRequestConfig({ params: { markets: MARKETS.join(',') } }));
-    return Object.fromEntries((res.data || [])
-      .filter(book => book?.market)
-      .map(book => [book.market, projectMomentumShadowQuote(book.market, book)]));
-  });
+export async function fetchDailyCandles(market, api = upbit) {
+  return api.getDayCandles(market, HISTORY_DAYS);
+}
+
+export async function fetchOrderbookQuotes(api = upbit, markets = MARKETS) {
+  const orderbooks = await api.getOrderbook(markets.join(','));
+  return Object.fromEntries((orderbooks || [])
+    .filter(book => book?.market)
+    .map(book => [book.market, projectMomentumShadowQuote(book.market, book)]));
 }
 
 function toBars(candles, now = new Date()) {
@@ -1256,8 +1252,10 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  console.error('runner startup failure:', error);
-  stopRunner('startup_failure', error);
-  process.exitCode = 1;
-});
+if (invokedAsScript) {
+  main().catch((error) => {
+    console.error('runner startup failure:', error);
+    stopRunner('startup_failure', error);
+    process.exitCode = 1;
+  });
+}

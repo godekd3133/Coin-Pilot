@@ -93,6 +93,7 @@ export const ENV_SCHEMA = {
   PAPER_COHORT_ROOT: { type: 'string' },
   PAPER_COHORT_OUTPUT_FILE: { type: 'string' },
   PAPER_EXIT_EVIDENCE_OUTPUT_FILE: { type: 'string' },
+  PAPER_EXIT_PATH_REPLAY_OUTPUT_FILE: { type: 'string' },
   PAPER_SMOKE_MARKETS: { type: 'list' },
   PAPER_SMOKE_FRESHNESS_LEDGER: { type: 'string' },
   PAPER_SMOKE_MIN_FRESHNESS_OBSERVATIONS: { type: 'number', min: 0 },
@@ -131,6 +132,10 @@ export const ENV_SCHEMA = {
   SCALP_QUOTE_COMPATIBILITY_MAX_AGE_SECONDS: { type: 'number', min: 0 },
   SCALP_QUOTE_COMPATIBILITY_OUTPUT_FILE: { type: 'string' },
   LIVE_EXECUTION_EVIDENCE_FILE: { type: 'string' },
+  COINPILOT_STATE_DIR: { type: 'string' },
+  COINPILOT_OPTIMIZATION_STATE_FILE: { type: 'string' },
+  COINPILOT_OPTIMIZATION_HISTORY_FILE: { type: 'string' },
+  COINPILOT_OPTIMAL_CONFIG_FILE: { type: 'string' },
   SCALP_VALIDATION_TRAIN_RATIO: { type: 'number', min: 0, max: 1 },
   SCALP_VALIDATION_MIN_CANDLES: { type: 'number', min: 0 },
   SCALP_VALIDATION_OUTPUT_FILE: { type: 'string' },
@@ -208,6 +213,12 @@ export const ENV_SCHEMA = {
   DASHBOARD_PORT: { type: 'int', min: 0, max: 65535 },
   DASHBOARD_TOKEN: { type: 'string', secret: true },
   DASHBOARD_READ_ONLY_TOKEN: { type: 'string', secret: true },
+  DASHBOARD_MOBILE_TOKEN: { type: 'string', secret: true },
+  DASHBOARD_START_TRADER_ON_BOOT: { type: 'bool' },
+  DASHBOARD_LIVE_CREDENTIAL_SETUP_MODE: { type: 'bool' },
+  DASHBOARD_LIVE_MANUAL_PREPARE_ON_BOOT: { type: 'bool' },
+  COINPILOT_LIVE_CREDENTIALS_FILE: { type: 'string' },
+  COINPILOT_LIVE_CREDENTIALS_KEY_FILE: { type: 'string' },
   DASHBOARD_ALLOW_INSECURE: { type: 'bool' },
   DASHBOARD_HOST: { type: 'string' },
   DASHBOARD_CORS_ORIGINS: { type: 'string' },
@@ -313,6 +324,7 @@ export const ENV_SCHEMA = {
   DAILY_MOMENTUM_ROBUSTNESS_REGIME_EXIT_CONFIRMATION_BARS: { type: 'int', min: 0 },
   DAILY_MOMENTUM_ROBUSTNESS_RELATIVE_TREND_MIN_PERCENT: { type: 'number' },
   DAILY_MOMENTUM_ROBUSTNESS_COST_PERCENT: { type: 'number' },
+  DAILY_MOMENTUM_ROBUSTNESS_COST_PERCENT_GRID: { type: 'string' },
   DAILY_MOMENTUM_ROBUSTNESS_MIN_RETURN_PERCENT: { type: 'number' },
   DAILY_MOMENTUM_ROBUSTNESS_MAX_DRAWDOWN_PERCENT: { type: 'number' },
   DAILY_MOMENTUM_ROBUSTNESS_MIN_WORST_SEGMENT_PERCENT: { type: 'number' },
@@ -455,7 +467,12 @@ export const ENV_SCHEMA = {
 export const ENV_REQUIRED_RULES = [
   {
     keys: ['UPBIT_ACCESS_KEY', 'UPBIT_SECRET_KEY'],
-    when: values => values.DRY_RUN === false,
+    when: values => values.DRY_RUN === false && values.DASHBOARD_LIVE_CREDENTIAL_SETUP_MODE !== true,
     reason: 'DRY_RUN=false (실전투자)에서는 업비트 API 키가 필수입니다'
+  },
+  {
+    keys: ['DASHBOARD_MOBILE_TOKEN'],
+    when: values => values.DASHBOARD_LIVE_CREDENTIAL_SETUP_MODE === true,
+    reason: '앱에서 LIVE 키를 등록하려면 DASHBOARD_MOBILE_TOKEN 인증이 필요합니다'
   }
 ];

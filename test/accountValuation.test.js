@@ -53,6 +53,7 @@ test('account status exposes protective-only runtime state for read-only clients
     strategyMode: 'oversold_reaction_scalping',
     isScalpingMode: true,
     maxPositions: 3,
+    maxCandleAgeSeconds: 90,
     entryDelayMinMs: 1000,
     entryDelayMaxMs: 5000,
     targetCoins: ['KRW-BTC'],
@@ -69,6 +70,7 @@ test('account status exposes protective-only runtime state for read-only clients
     assert.equal(body.protectiveMonitorActive, true);
     assert.equal(body.stopReason, 'risk_data_gap');
     assert.equal(body.exchangeStateKnown, true);
+    assert.equal(body.maxCandleAgeSeconds, 90);
   } finally {
     await stopReadServer(ctx);
   }
@@ -143,6 +145,31 @@ function createSnapshotWriterTrader({ dryRun, accounts, holdings = [], historyFi
   trader.virtualPortfolio.holdings = new Map(holdings);
   return trader;
 }
+
+test('/positions keeps current value unavailable when the market quote is missing', async () => {
+  const { tradingSystem } = createDryRunTrader();
+  const ctx = await startReadServer(tradingSystem, async markets => {
+    assert.deepEqual(markets, ['KRW-BTC']);
+    return [];
+  });
+
+  try {
+    const response = await fetch(`${ctx.baseUrl}/api/positions`);
+    assert.equal(response.status, 200);
+    const positions = await response.json();
+
+    assert.equal(positions.count, 1);
+    assert.equal(positions.valuationAvailable, false);
+    assert.equal(positions.totalValue, null);
+    assert.equal(positions.holdings[0].currentPrice, null);
+    assert.equal(positions.holdings[0].currentValue, null);
+    assert.equal(positions.holdings[0].profit, null);
+    assert.equal(positions.holdings[0].profitPercent, null);
+    assert.equal(positions.holdings[0].valuationAvailable, false);
+  } finally {
+    await stopReadServer(ctx);
+  }
+});
 
 test('account and cumulative P&L routes use one valid ticker snapshot and report its timestamp', async () => {
   const { tradingSystem } = createDryRunTrader();

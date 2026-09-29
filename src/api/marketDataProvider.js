@@ -1,3 +1,5 @@
+import { getMarketDataAdapterKind } from '../market-data/marketDataAdapters.js';
+
 function timestampMilliseconds(value) {
   if (typeof value === 'string' && !/^\d+(\.\d+)?$/.test(value)) {
     const parsed = Date.parse(value);
@@ -20,6 +22,18 @@ function normalizeMarkets(markets) {
   return [...new Set((markets || []).filter(market => typeof market === 'string' && market))];
 }
 
+export const MARKET_DATA_FRESHNESS = Object.freeze({
+  CACHED: 'cached',
+  FRESH: 'fresh'
+});
+
+function normalizeFreshness(freshness) {
+  if (freshness === MARKET_DATA_FRESHNESS.CACHED || freshness === MARKET_DATA_FRESHNESS.FRESH) {
+    return freshness;
+  }
+  throw new TypeError(`Unsupported market-data freshness policy: ${freshness}`);
+}
+
 function emptySnapshot() {
   return {
     tickers: [],
@@ -38,24 +52,54 @@ function emptySnapshot() {
  * `readTickers` may return an array for legacy readers or `{ tickers, fetchedAt }`.
  */
 export class MarketDataProvider {
-  constructor({ readTickers }) {
+  constructor({ readMarkets, readTickers, readCandles }) {
     if (typeof readTickers !== 'function') {
       throw new TypeError('MarketDataProvider requires a readTickers function.');
     }
+    if (readMarkets !== undefined && typeof readMarkets !== 'function') {
+      throw new TypeError('MarketDataProvider readMarkets must be a function when provided.');
+    }
     this.readTickers = readTickers;
+    this.readMarkets = readMarkets;
+    this.readCandles = readCandles;
     this.inFlightReads = new Map();
   }
 
-  async getSnapshot(markets) {
+  async getMarkets() {
+    if (typeof this.readMarkets !== 'function') {
+      throw new Error('MarketDataProvider has no market-list reader.');
+    }
+    return this.readMarkets();
+  }
+
+  /** Returns the reader's raw ticker payload without cloning its rows or array. */
+  async getTickers(markets, { freshness } = {}) {
+    const policy = normalizeFreshness(freshness);
+    return this.readTickers(markets, { freshness: policy });
+  }
+
+  async getMinuteCandles(market, unit, count) {
+    if (typeof this.readCandles !== 'function') {
+      throw new Error('MarketDataProvider has no candle reader.');
+    }
+    return this.readCandles(market, unit, count);
+  }
+
+  async getSnapshot(markets, { freshness = MARKET_DATA_FRESHNESS.CACHED } = {}) {
+    const policy = normalizeFreshness(freshness);
     const requestedMarkets = normalizeMarkets(markets);
     if (requestedMarkets.length === 0) return emptySnapshot();
 
-    const requestKey = [...requestedMarkets].sort().join(',');
+    const requestKey = `${policy}:${[...requestedMarkets].sort().join(',')}`;
+    if (policy === MARKET_DATA_FRESHNESS.FRESH) {
+      return this.readSnapshot(requestedMarkets, policy);
+    }
+
     const inFlight = this.inFlightReads.get(requestKey);
     if (inFlight) return inFlight;
 
     let request;
-    request = this.readSnapshot(requestedMarkets).finally(() => {
+    request = this.readSnapshot(requestedMarkets, policy).finally(() => {
       if (this.inFlightReads.get(requestKey) === request) {
         this.inFlightReads.delete(requestKey);
       }
@@ -64,8 +108,8 @@ export class MarketDataProvider {
     return request;
   }
 
-  async readSnapshot(requestedMarkets) {
-    const result = await this.readTickers(requestedMarkets);
+  async readSnapshot(requestedMarkets, freshness) {
+    const result = await this.getTickers(requestedMarkets, { freshness });
     const tickers = Array.isArray(result) ? result : result?.tickers;
     if (!Array.isArray(tickers)) {
       throw new TypeError('MarketDataProvider returned an invalid ticker snapshot.');
@@ -109,11 +153,47 @@ export class MarketDataProvider {
   }
 }
 
-/** Production adapter backed by DashboardServer's existing Upbit ticker cache. */
+/** Cached snapshots use DashboardServer's cache; fresh reads delegate to the same Upbit client. */
 export class UpbitCacheMarketDataProvider extends MarketDataProvider {
   constructor(server) {
     super({
-      readTickers: async markets => {
+      readMarkets: async () => {
+        const publicMarketDataSource = server?.publicMarketDataSource;
+        if (publicMarketDataSource) return publicMarketDataSource.getMarkets();
+        const adapter = server?.tradingSystem?.marketDataAdapter;
+        if (typeof adapter?.getMarkets === 'function') return adapter.getMarkets();
+        const upbit = server?.tradingSystem?.upbit;
+        if (typeof upbit?.getMarkets !== 'function') {
+          throw new Error('MarketDataProvider has no market-list reader.');
+        }
+        return upbit.getMarkets();
+      },
+      readTickers: async (markets, { freshness = MARKET_DATA_FRESHNESS.CACHED } = {}) => {
+        const publicMarketDataSource = server?.publicMarketDataSource;
+        if (publicMarketDataSource) {
+          if (freshness === MARKET_DATA_FRESHNESS.FRESH) {
+            return publicMarketDataSource.getTicker(markets);
+          }
+          if (typeof server?.getCachedTickerWithMetadata === 'function') {
+            return server.getCachedTickerWithMetadata(markets);
+          }
+          if (typeof server?.getCachedTicker === 'function') {
+            return server.getCachedTicker(markets);
+          }
+          return publicMarketDataSource.getTicker(markets);
+        }
+        const adapter = server?.tradingSystem?.marketDataAdapter;
+        if (freshness === MARKET_DATA_FRESHNESS.FRESH) {
+          const upbit = server?.tradingSystem?.upbit;
+          const readTickers = adapter?.getTickers || upbit?.getTicker;
+          if (typeof readTickers !== 'function') {
+            throw new Error('MarketDataProvider has no fresh ticker reader.');
+          }
+          return readTickers.call(adapter?.getTickers ? adapter : upbit, markets);
+        }
+        if (getMarketDataAdapterKind(adapter) === 'fixture') {
+          return adapter.getTickers(markets);
+        }
         if (typeof server?.getCachedTickerWithMetadata === 'function') {
           return server.getCachedTickerWithMetadata(markets);
         }
@@ -121,6 +201,19 @@ export class UpbitCacheMarketDataProvider extends MarketDataProvider {
           return server.getCachedTicker(markets);
         }
         throw new Error('MarketDataProvider has no ticker reader.');
+      },
+      readCandles: async (market, unit, count) => {
+        const publicMarketDataSource = server?.publicMarketDataSource;
+        if (publicMarketDataSource) {
+          return publicMarketDataSource.getMinuteCandles(market, unit, count);
+        }
+        const adapter = server?.tradingSystem?.marketDataAdapter;
+        const upbit = server?.tradingSystem?.upbit;
+        const readCandles = adapter?.getMinuteCandles || upbit?.getMinuteCandles;
+        if (typeof readCandles !== 'function') {
+          throw new Error('MarketDataProvider has no candle reader.');
+        }
+        return readCandles.call(adapter?.getMinuteCandles ? adapter : upbit, market, unit, count);
       }
     });
   }

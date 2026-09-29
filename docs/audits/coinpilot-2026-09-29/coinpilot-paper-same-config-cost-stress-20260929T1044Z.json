@@ -1,0 +1,134 @@
+{
+  "schema": "coinpilot.paper-strict-same-config-pool-stress.v1",
+  "generatedAt": "2026-09-29T10:46:06Z",
+  "researchOnly": true,
+  "promoted": false,
+  "actualFillsObserved": false,
+  "sourceSnapshot": {
+    "exportedAt": "2026-09-29T10:44:57.653Z",
+    "sha256": "dfa32280c70a67460fba6392b44bb6f79bc893ca02e298961b8f5e3cb15eea83",
+    "valid": true,
+    "fresh": true,
+    "maxAgeSeconds": 900
+  },
+  "grouping": {
+    "configFingerprint": "fc3f8e46b011cc91",
+    "fullConfigSnapshotsEqual": true,
+    "markets": [
+      "KRW-BTC",
+      "KRW-ETH",
+      "KRW-SOL",
+      "KRW-XRP"
+    ],
+    "baselineAssetsKrw": 10000000,
+    "investmentRatio": 0.02,
+    "completeConfigSessions": 7,
+    "sessionWindowsNonOverlapping": true,
+    "strictTradeSessions": 5,
+    "strictClosedTradeCount": 18,
+    "strictOpenPositionCount": 0
+  },
+  "descriptiveAggregate": {
+    "recordedNetAfterFeesKrw": 1780.1490347500892,
+    "recordedNetIncludesLedgerFees": true,
+    "executionCostModelMarkedTradeCount": 0,
+    "configuredSlippageSensitivityPerSidePercent": 0.1,
+    "unmarkedTradeCountEvaluatedBySensitivity": 18,
+    "fixedQuantityTwoSidedNotionalKrw": 7201557.039554527,
+    "additionalSlippageDragKrw": 7201.557039554527,
+    "costStressedNetPnlKrw": -5421.408004804438,
+    "additionalFeesDeducted": false,
+    "actualFillsObserved": false,
+    "eligibleStrictSessionCount": 0,
+    "eligibleStrictTradeCount": 0,
+    "promotionAllowed": false
+  },
+  "sessions": [
+    {
+      "directoryName": ".paper-forward-sealed-rsi-20260917",
+      "startedAt": "2026-09-17T10:09:27.661Z",
+      "endedAt": "2026-09-17T10:25:30.757Z",
+      "active": false,
+      "continuityEligible": false,
+      "stopReason": "analysis_data_gap",
+      "strictClosedTrades": 0,
+      "strictCohortExclusionReason": "no_strict_trades"
+    },
+    {
+      "directoryName": ".paper-forward-sealed-rsi-20260917-r2",
+      "startedAt": "2026-09-17T12:22:28.803Z",
+      "endedAt": "2026-09-18T00:33:58.627Z",
+      "active": false,
+      "continuityEligible": true,
+      "stopReason": "risk_data_gap",
+      "strictClosedTrades": 4,
+      "recordedNetAfterFeesKrw": 4715.382105188574,
+      "slippageDragKrw": 1605.0077409756766,
+      "costStressedNetPnlKrw": 3110.3743642128984,
+      "strictCohortExclusionReason": "diagnostic_trades_present"
+    },
+    {
+      "directoryName": ".paper-forward-sealed-rsi-strict-only-r1",
+      "startedAt": "2026-09-18T02:09:22.244Z",
+      "endedAt": "2026-09-18T02:32:04.479Z",
+      "active": false,
+      "continuityEligible": false,
+      "stopReason": "analysis_data_gap",
+      "strictClosedTrades": 0,
+      "strictCohortExclusionReason": "no_strict_trades"
+    },
+    {
+      "directoryName": ".paper-forward-sealed-rsi-strict-only-r2",
+      "startedAt": "2026-09-18T02:37:00.487Z",
+      "endedAt": "2026-09-18T06:56:52.869Z",
+      "active": false,
+      "continuityEligible": false,
+      "stopReason": "analysis_data_gap",
+      "strictClosedTrades": 1,
+      "recordedNetAfterFeesKrw": -639.7460099064392,
+      "slippageDragKrw": 399.3599339570721,
+      "costStressedNetPnlKrw": -1039.1059438635114,
+      "strictCohortExclusionReason": "continuity_ineligible"
+    },
+    {
+      "directoryName": ".paper-forward-sealed-rsi-20260924-r3",
+      "startedAt": "2026-09-24T08:51:27.099Z",
+      "endedAt": "2026-09-24T11:22:31.864Z",
+      "active": false,
+      "continuityEligible": false,
+      "stopReason": "analysis_data_gap",
+      "strictClosedTrades": 3,
+      "recordedNetAfterFeesKrw": -1890.409528233253,
+      "slippageDragKrw": 1198.036644794164,
+      "costStressedNetPnlKrw": -3088.446173027417,
+      "strictCohortExclusionReason": "continuity_ineligible"
+    },
+    {
+      "directoryName": ".paper-forward-sealed-rsi-20260928-r4",
+      "startedAt": "2026-09-28T03:37:05.785Z",
+      "endedAt": "2026-09-28T11:40:40.256Z",
+      "active": false,
+      "continuityEligible": false,
+      "stopReason": "analysis_data_gap",
+      "strictClosedTrades": 3,
+      "recordedNetAfterFeesKrw": 267.6363875732453,
+      "slippageDragKrw": 1200.2857702727097,
+      "costStressedNetPnlKrw": -932.6493826994642,
+      "strictCohortExclusionReason": "continuity_ineligible"
+    },
+    {
+      "directoryName": ".paper-forward-sealed-rsi-20260928-r5",
+      "startedAt": "2026-09-28T14:04:03.722Z",
+      "endedAt": null,
+      "active": true,
+      "continuityEligible": true,
+      "stopReason": null,
+      "strictClosedTrades": 7,
+      "recordedNetAfterFeesKrw": -672.7139198720386,
+      "slippageDragKrw": 2798.866949554905,
+      "costStressedNetPnlKrw": -3471.5808694269435,
+      "strictCohortExclusionReason": "session_still_active"
+    }
+  ],
+  "interpretation": "This pool is descriptive only. Four of five trade-bearing sessions are continuity-ineligible or contain diagnostic state, one remains active, each window is below its per-session minimum evidence duration/trade count, and there are no observed exchange fills. The negative configured-slippage sensitivity is a warning, not a profitability estimate or promotion result."
+}

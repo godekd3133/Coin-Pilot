@@ -1,0 +1,75 @@
+{
+  "schema": "coinpilot.paper-forward-strict-close-cost-audit.v1",
+  "observedAt": "2026-09-29T14:46:35Z",
+  "researchOnly": true,
+  "promoted": false,
+  "source": {
+    "ledger": ".paper-forward-sealed-rsi-20260928-r5/paper_validation.json",
+    "processId": 11906,
+    "active": true,
+    "heartbeatAt": "2026-09-29T14:45:54.382Z",
+    "configSnapshotComplete": true,
+    "configDrift": null,
+    "analysisContinuity": true,
+    "riskContinuity": true,
+    "stopReason": null,
+    "auditFunction": "src/research/paperStrictTradeCostAudit.js"
+  },
+  "closedStrictTrade": {
+    "id": 1790690948280,
+    "market": "KRW-SOL",
+    "signalTime": "2026-09-29T14:08:00",
+    "entryTime": "2026-09-29T14:09:08.280Z",
+    "exitTime": "2026-09-29T14:39:09.166Z",
+    "exitReason": "스캘핑 최대 보유시간 초과 (30분)",
+    "entryPriceKrw": 163000,
+    "exitPriceKrw": 162900,
+    "amount": 1.226288389570552,
+    "grossProfitKrw": -122.62883895705521,
+    "recordedFeesKrw": 199.82369308052145,
+    "recordedNetProfitKrw": -322.45253203757665,
+    "recordedProfitPercent": -0.16131901840490798,
+    "paperExecutionCostModel": null,
+    "paperExecutionSlippageRate": null,
+    "paperExecutionTradingFeeRate": null,
+    "paperObservedEntryPrice": null,
+    "paperObservedExitPrice": null,
+    "actualExchangeFillObserved": false
+  },
+  "configuredCostSnapshot": {
+    "slippageRatePerSide": 0.001,
+    "tradingFeeRate": 0.0005
+  },
+  "strictExecutionCostAudit": {
+    "available": true,
+    "closedTradeCount": 9,
+    "evaluatedTradeCount": 9,
+    "unevaluableTradeCount": 0,
+    "modeledExecutionTradeCount": 0,
+    "unmodeledExecutionTradeCount": 9,
+    "slippageAlreadyAppliedToPaperLedger": false,
+    "configuredSlippagePercentPerSide": 0.1,
+    "recordedNetPnlKrw": -1032.1391150690336,
+    "twoSidedFixedQuantityNotionalKrw": 3598449.3445572094,
+    "additionalSlippageDragKrw": 3598.4493445572093,
+    "additionalFeesDeducted": false,
+    "costStressedNetPnlKrw": -4630.588459626243,
+    "quoteCrossingCostAvailable": false,
+    "actualFillsObserved": false,
+    "method": "configured slippage applied once to fixed recorded quantity at both entry and exit; existing ledger fees remain untouched"
+  },
+  "newTradeSensitivity": {
+    "twoSidedFixedQuantityNotionalKrw": 399647.3861610429,
+    "configuredSlippageDragKrw": 399.6473861610429,
+    "costStressedNetPnlKrw": -722.0999181986195
+  },
+  "sessionAfterClose": {
+    "strictCloseCount": 9,
+    "strictOpenPositionCount": 0,
+    "recordedRealizedNetPnlKrw": -1032.1391150690336,
+    "shadowCandidates": 0,
+    "shadowCloseCount": 0,
+    "shadowOpenPositionCount": 0
+  },
+  "interpretation": "The new SOL close is negative in the simulated ledger and under configured two-sided slippage sensitivity. The audit does not subtract fees a second time. This is not actual fill, quote-cross, or wallet-settlement evidence; do not promote or change parameters based on this trade."
+}

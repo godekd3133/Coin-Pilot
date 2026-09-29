@@ -9,6 +9,7 @@ import { projectPaperValidationMobileSummary } from '../paperValidationMobileSum
 import { summarizePaperStrictTradeCostAudit } from '../../research/paperStrictTradeCostAudit.js';
 import { summarizePaperForwardCohort } from '../../research/paperForwardCohort.js';
 import { respondIfPaperEvidenceMutationBlocked } from '../../research/paperEvidenceMutationGuard.js';
+import { API_READ_QUERY_LIMITS, parseBoundedIntegerQuery } from '../queryLimits.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -63,7 +64,7 @@ export default function createPortfolioRoutes(server) {
   // 거래 이력 조회
   router.get('/trades', (req, res) => {
     try {
-      const limit = parseInt(req.query.limit) || 50;
+      const limit = parseBoundedIntegerQuery(req.query.limit, API_READ_QUERY_LIMITS.trades);
       let allTrades = [];
 
       // 1. 전략 기반 거래 이력 (자동매매)

@@ -2,6 +2,7 @@ import dotenv from 'dotenv';
 import UpbitAPI from '../api/upbit.js';
 import BacktestEngine from '../backtest/backtestEngine.js';
 import fs from 'fs';
+import { pathToFileURL } from 'node:url';
 
 dotenv.config();
 
@@ -13,7 +14,7 @@ dotenv.config();
  * @param {number} totalCount - 총 수집할 캔들 수
  * @returns {Array} 캔들 데이터 배열 (최신순)
  */
-async function getMultipleMinuteCandles(upbit, market, unit, totalCount) {
+export async function getMultipleMinuteCandles(upbit, market, unit, totalCount) {
   const maxPerRequest = 200; // Upbit API 제한
   const allCandles = [];
   let to = null; // 처음에는 현재 시간부터
@@ -22,20 +23,9 @@ async function getMultipleMinuteCandles(upbit, market, unit, totalCount) {
     const count = Math.min(maxPerRequest, totalCount - allCandles.length);
 
     try {
-      let candles;
-      if (to) {
-        // to 파라미터를 사용하여 이전 데이터 요청
-        candles = await upbit.requestWithRetry(async () => {
-          const axios = (await import('axios')).default;
-          const response = await axios.get(
-            `https://api.upbit.com/v1/candles/minutes/${unit}`,
-            upbit.getRequestConfig({ params: { market, count, to } })
-          );
-          return response.data;
-        });
-      } else {
-        candles = await upbit.getMinuteCandles(market, unit, count);
-      }
+      const candles = to
+        ? await upbit.getMinuteCandles(market, unit, count, { to })
+        : await upbit.getMinuteCandles(market, unit, count);
 
       if (!candles || candles.length === 0) break;
 
@@ -118,7 +108,9 @@ async function runBacktest() {
   console.log(`\n💾 결과 저장: ${resultsFile}`);
 }
 
-runBacktest().catch(error => {
-  console.error('백테스팅 오류:', error);
-  process.exit(1);
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  runBacktest().catch(error => {
+    console.error('백테스팅 오류:', error);
+    process.exit(1);
+  });
+}

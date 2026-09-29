@@ -39,8 +39,45 @@ function minimumEvidenceThresholds(ledger) {
   };
 }
 
+function interruptionContinuityEligibility(ledger) {
+  const thresholds = ledger?.thresholds && typeof ledger.thresholds === 'object'
+    ? ledger.thresholds
+    : {};
+  const hasRecordedLimit = Object.prototype.hasOwnProperty.call(thresholds, 'maxHeartbeatGapMinutes');
+  const recordedLimit = thresholds.maxHeartbeatGapMinutes;
+  const maximumGapMinutes = hasRecordedLimit
+    ? recordedLimit
+    : 15;
+  if (typeof maximumGapMinutes !== 'number' || !Number.isFinite(maximumGapMinutes) || maximumGapMinutes <= 0) {
+    return null;
+  }
+  const maximumGapMs = maximumGapMinutes * 60 * 1000;
+  if (!Number.isFinite(maximumGapMs)) return null;
+
+  if (!Object.prototype.hasOwnProperty.call(ledger || {}, 'interruptions')) return true;
+  if (!Array.isArray(ledger.interruptions)) return null;
+
+  let hasUnknownGap = false;
+  let hasOverLimitGap = false;
+  for (const interruption of ledger.interruptions) {
+    const gapMs = interruption && typeof interruption === 'object' && !Array.isArray(interruption)
+      ? interruption.gapMs
+      : null;
+    if (typeof gapMs !== 'number' || !Number.isFinite(gapMs) || gapMs < 0) {
+      hasUnknownGap = true;
+      continue;
+    }
+    if (gapMs > maximumGapMs) hasOverLimitGap = true;
+  }
+
+  if (hasOverLimitGap) return false;
+  if (hasUnknownGap) return null;
+  return true;
+}
+
 function evaluateProfitabilityEvidence({
   strictCohortEligible,
+  continuityEligible,
   strictTradeCount,
   observedDays,
   minimumDays,
@@ -48,6 +85,8 @@ function evaluateProfitabilityEvidence({
 } = {}) {
   const reasons = [];
   if (strictCohortEligible !== true) reasons.push('strict_cohort_ineligible');
+  if (continuityEligible === false) reasons.push('continuity_ineligible');
+  else if (continuityEligible !== true) reasons.push('continuity_unverified');
   if (observedDays === null) reasons.push('observation_window_unverifiable');
   else if (observedDays < minimumDays) reasons.push('observation_days_below_minimum');
   if (strictTradeCount < minimumTrades) reasons.push('trade_count_below_minimum');
@@ -127,6 +166,7 @@ function strictCohortEligibility({
   trades,
   strictOpenPositionCount,
   diagnosticOpenPositionCount,
+  interruptionContinuityEligible,
   configFingerprint,
   strictCostAuditEligible
 } = {}) {
@@ -138,7 +178,9 @@ function strictCohortEligibility({
   if (trades.diagnostic.length > 0) return { eligible: false, reason: 'diagnostic_trades_present' };
   if (strictOpenPositionCount > 0) return { eligible: false, reason: 'strict_positions_open' };
   if (diagnosticOpenPositionCount > 0) return { eligible: false, reason: 'diagnostic_positions_open' };
-  if (ledger.analysisDataHealth?.continuityEligible === false) {
+  if (ledger.analysisDataHealth?.continuityEligible === false ||
+    ledger.riskMonitor?.continuityEligible === false ||
+    interruptionContinuityEligible === false) {
     return { eligible: false, reason: 'continuity_ineligible' };
   }
   if (['risk_data_gap', 'owner_process_missing', 'stopped_with_unsettled_diagnostic_positions']
@@ -224,16 +266,28 @@ export function summarizePaperForwardCohort({ rootDir = '.', prefix = '.paper-fo
     const configFingerprint = fingerprint(ledger.configSnapshot);
     const observedDays = observationDays(ledger.startedAt, ledger.endedAt);
     const evidenceThresholds = minimumEvidenceThresholds(ledger);
+    const analysisContinuityEligible = ledger.analysisDataHealth?.continuityEligible ?? null;
+    const riskContinuityEligible = ledger.riskMonitor?.continuityEligible ?? null;
+    const interruptionContinuity = interruptionContinuityEligibility(ledger);
+    const continuityEligible = analysisContinuityEligible === false ||
+      riskContinuityEligible === false ||
+      interruptionContinuity === false
+      ? false
+      : analysisContinuityEligible === true && riskContinuityEligible === true && interruptionContinuity === true
+        ? true
+        : null;
     const strictCohort = strictCohortEligibility({
       ledger,
       trades,
       strictOpenPositionCount,
       diagnosticOpenPositionCount,
+      interruptionContinuityEligible: interruptionContinuity,
       configFingerprint,
       strictCostAuditEligible
     });
     const profitabilityEvidence = evaluateProfitabilityEvidence({
       strictCohortEligible: strictCohort.eligible,
+      continuityEligible,
       strictTradeCount: trades.strict.length,
       observedDays,
       minimumDays: evidenceThresholds.minimumDays,
@@ -270,7 +324,10 @@ export function summarizePaperForwardCohort({ rootDir = '.', prefix = '.paper-fo
       minimumEvidenceTrades: evidenceThresholds.minimumTrades,
       profitabilityEvidenceEligible: profitabilityEvidence.eligible,
       profitabilityEvidenceExclusionReasons: profitabilityEvidence.reasons,
-      continuityEligible: ledger.analysisDataHealth?.continuityEligible ?? null
+      analysisContinuityEligible,
+      riskContinuityEligible,
+      interruptionContinuityEligible: interruptionContinuity,
+      continuityEligible
     });
   }
 

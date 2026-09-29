@@ -1,0 +1,79 @@
+{
+  "schema": "coinpilot.paper-exit-stop-loss-sensitivity.v1",
+  "observedAt": "2026-09-29T15:35:19Z",
+  "researchOnly": true,
+  "promoted": false,
+  "actualFillsObserved": false,
+  "thresholdSelectionBasis": "exploratory post-hoc sensitivity; not an independent holdout or forward A/B",
+  "source": {
+    "ledger": ".paper-forward-sealed-rsi-20260928-r5/paper_validation.json",
+    "ledgerClosedStrictTrades": 10,
+    "publicCandleProvider": "Upbit public minute-candle API",
+    "minuteCandlesFetchedPerTrade": 80,
+    "requestSpacingMs": 1200,
+    "fetchErrors": 0,
+    "completeTradePaths": 10,
+    "incompleteTradePaths": 0,
+    "baselineCostParityChecks": 10,
+    "maximumAbsoluteBaselineCostParityDeltaKrw": 2.2737367544323206e-13
+  },
+  "fixedAssumptions": {
+    "marketSetChanged": false,
+    "takeProfitPercent": 1.8,
+    "feeRatePerSide": 0.0005,
+    "configuredSlippageRatePerSide": 0.001,
+    "costBasis": "config_snapshot_sensitivity",
+    "additionalFeesDoubleDeducted": false,
+    "entryAndExitBoundaryCandlesExcluded": true
+  },
+  "scenarios": [
+    {
+      "stopLossPercent": 0.9,
+      "tradeCount": 10,
+      "takeProfitExits": 0,
+      "stopLossExits": 1,
+      "maxHoldExits": 9,
+      "costAdjustedNetPnlKrw": -7026.438218984511,
+      "profitableTrades": 3,
+      "xrpStopTrade": {
+        "entryTime": "2026-09-29T15:10:04.310Z",
+        "recordedExitTime": "2026-09-29T15:25:06.993Z",
+        "modeledExitReason": "stop_loss",
+        "modeledExitPriceKrw": 2056.325,
+        "costAdjustedNetPnlKrw": -2395.8497593582674,
+        "interiorBars": 14,
+        "coverageComplete": true
+      }
+    },
+    {
+      "stopLossPercent": 1.2,
+      "tradeCount": 10,
+      "takeProfitExits": 0,
+      "stopLossExits": 0,
+      "maxHoldExits": 10,
+      "costAdjustedNetPnlKrw": -7634.794069249737,
+      "profitableTrades": 3,
+      "xrpStopTrade": {
+        "entryTime": "2026-09-29T15:10:04.310Z",
+        "recordedExitTime": "2026-09-29T15:25:06.993Z",
+        "modeledExitReason": "max_hold_recorded_exit",
+        "modeledExitPriceKrw": 2050,
+        "costAdjustedNetPnlKrw": -3004.2056096234937,
+        "interiorBars": 14,
+        "coverageComplete": true
+      }
+    }
+  ],
+  "comparison": {
+    "modeledAggregateImprovementAtStopLoss0p9Krw": 608.355850265226,
+    "xrpTradeImprovementAtStopLoss0p9Krw": 608.355850265226,
+    "strategyProfitableInEitherScenario": false,
+    "interpretation": "The tighter 0.9% stop changes only the new XRP path in this 10-trade replay and reduces its modeled loss, but the whole selected sample remains strongly negative. This is post-hoc and uses configured cost sensitivities, not exchange fills. It does not authorize a stop-loss change, A/B launch, or promotion."
+  },
+  "decision": {
+    "runtimeStopLossChanged": false,
+    "candidateLaunched": false,
+    "promotionAllowed": false,
+    "currentCandidatePreflightRemainsAuthoritative": true
+  }
+}

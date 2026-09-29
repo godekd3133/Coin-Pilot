@@ -43,7 +43,7 @@ test('scalping validation API uses the configured staging path without falling b
     assert.equal(missingBody.available, false);
     assert.deepEqual(missingBody.results, []);
   } finally {
-    dashboard.stop();
+    await dashboard.stop();
     trader.stop();
     fs.rmSync(root, { recursive: true, force: true });
   }

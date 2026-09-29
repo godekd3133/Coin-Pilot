@@ -14,6 +14,7 @@ import {
   compactLiveOrder,
   createLiveExecutionEvidenceEvent,
   inspectLiveExecutionEvidenceFile,
+  readLiveOrderIntentEvidence,
   reconcileLiveExecutionEvidence,
   projectLiveAccountReadback
 } from '../src/research/liveExecutionEvidence.js';
@@ -162,6 +163,60 @@ test('reconciliation does not infer settlement from submission or fill alone', (
   assert.equal(result.readyForSettlementComparison, false);
   assert.deepEqual(result.unresolvedSubmittedOrderIds, []);
   assert.equal(result.promoted, false);
+});
+
+test('manual LIVE intent retry lookup uses the verified startup index without rereading evidence', t => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'coinpilot-live-intent-index-'));
+  t.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
+  const evidenceFile = path.join(tempDir, 'evidence.jsonl');
+  const clientIntentId = '123e4567-e89b-42d3-a456-426614174000';
+  const intent = createLiveExecutionEvidenceEvent({
+    eventType: 'ORDER_INTENT',
+    clientIntentId,
+    market: 'KRW-BTC',
+    side: 'bid',
+    orderType: 'price',
+    requested: { amount: 5000 }
+  });
+  fs.writeFileSync(evidenceFile, `${JSON.stringify(intent)}\n`, 'utf8');
+  const inspection = inspectLiveExecutionEvidenceFile(evidenceFile);
+  assert.equal(inspection.orderIntentEvidenceIndex.available, true);
+
+  // If the request helper touched the file, it would now encounter this
+  // malformed stream. It must use only the already-validated in-memory entry.
+  fs.writeFileSync(evidenceFile, 'not-json\n', 'utf8');
+  const result = readLiveOrderIntentEvidence(inspection.orderIntentEvidenceIndex, clientIntentId);
+  assert.equal(result.available, true);
+  assert.equal(result.intent.identifier, clientIntentId);
+  assert.equal(result.intent.market, 'KRW-BTC');
+});
+
+test('duplicate or invalid ORDER_INTENT entries make the retry index unavailable', t => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'coinpilot-live-intent-index-invalid-'));
+  t.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
+  const evidenceFile = path.join(tempDir, 'evidence.jsonl');
+  const clientIntentId = '123e4567-e89b-42d3-a456-426614174000';
+  const intent = createLiveExecutionEvidenceEvent({
+    eventType: 'ORDER_INTENT',
+    clientIntentId,
+    market: 'KRW-BTC',
+    side: 'bid',
+    orderType: 'price',
+    requested: { amount: 5000 }
+  });
+
+  fs.writeFileSync(evidenceFile, `${JSON.stringify(intent)}\n${JSON.stringify(intent)}\n`, 'utf8');
+  const duplicateInspection = inspectLiveExecutionEvidenceFile(evidenceFile);
+  assert.equal(duplicateInspection.orderIntentEvidenceIndex.available, false);
+  assert.equal(duplicateInspection.orderIntentEvidenceIndex.reason, 'live_order_intent_ambiguous');
+  assert.equal(readLiveOrderIntentEvidence(duplicateInspection.orderIntentEvidenceIndex, clientIntentId).available, false);
+
+  const mismatchedIntent = { ...intent, identifier: '123e4567-e89b-42d3-a456-426614174001' };
+  fs.writeFileSync(evidenceFile, `${JSON.stringify(mismatchedIntent)}\n`, 'utf8');
+  const invalidInspection = inspectLiveExecutionEvidenceFile(evidenceFile);
+  assert.equal(invalidInspection.orderIntentEvidenceIndex.available, false);
+  assert.equal(invalidInspection.orderIntentEvidenceIndex.reason, 'live_order_intent_invalid');
+  assert.equal(readLiveOrderIntentEvidence(invalidInspection.orderIntentEvidenceIndex, clientIntentId).available, false);
 });
 
 test('reconciliation does not treat an incomplete fill as settlement-ready evidence', () => {
@@ -447,7 +502,7 @@ test('live evidence append restricts permissions on a pre-existing file', t => {
   t.after(() => trader.stop());
   const event = trader.createLiveExecutionEvidence({
     eventType: 'ORDER_INTENT',
-    clientIntentId: 'restricted-mode-intent',
+    clientIntentId: '123e4567-e89b-42d3-a456-426614174001',
     market: 'KRW-BTC',
     side: 'bid',
     orderType: 'price',

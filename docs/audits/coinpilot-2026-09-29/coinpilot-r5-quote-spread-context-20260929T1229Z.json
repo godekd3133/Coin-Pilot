@@ -1,0 +1,69 @@
+{
+  "schema": "coinpilot.paper.quote-spread-context.v1",
+  "generatedAt": "2026-09-29T12:29:39.722Z",
+  "researchOnly": true,
+  "promoted": false,
+  "paperSessionId": "paper-1790604243722",
+  "paperProcessId": 11906,
+  "paperActualFillsObserved": false,
+  "paperConfiguredFeeRatePerSide": 0.0005,
+  "paperConfiguredSlippageRatePerSide": 0.001,
+  "modeledRoundTripCostPercentBeforeSpread": 0.3,
+  "quoteHistory": {
+    "file": ".coinpilot-runtime/momentum-shadow/quote-history.jsonl",
+    "windowHours": 24,
+    "reportCount": 136,
+    "completeReportCount": 136,
+    "reportsWithErrors": 0,
+    "latestReportAt": "2026-09-29T12:28:53.916Z",
+    "latestReportAgeSecondsAtAnalysis": 46,
+    "gapsOver900Seconds": 3,
+    "maximumGapSeconds": 5286.929,
+    "rawTradeTimeBidAskRetained": false
+  },
+  "markets": {
+    "KRW-BTC": {
+      "reportCount": 136,
+      "medianOfPerReportMedianSpreadPercent": 0.01057,
+      "p95OfPerReportP95SpreadPercent": 0.06688,
+      "maximumPerReportMaximumSpreadPercent": 0.10873,
+      "reportsWithPerReportP95Above0p1Percent": 2,
+      "reportsWithPerReportP95Above0p3Percent": 0
+    },
+    "KRW-ETH": {
+      "reportCount": 136,
+      "medianOfPerReportMedianSpreadPercent": 0.02765,
+      "p95OfPerReportP95SpreadPercent": 0.08288,
+      "maximumPerReportMaximumSpreadPercent": 0.13701,
+      "reportsWithPerReportP95Above0p1Percent": 7,
+      "reportsWithPerReportP95Above0p3Percent": 0
+    },
+    "KRW-XRP": {
+      "reportCount": 136,
+      "medianOfPerReportMedianSpreadPercent": 0.04925,
+      "p95OfPerReportP95SpreadPercent": 0.09935,
+      "maximumPerReportMaximumSpreadPercent": 0.14775,
+      "reportsWithPerReportP95Above0p1Percent": 2,
+      "reportsWithPerReportP95Above0p3Percent": 0
+    },
+    "KRW-SOL": {
+      "reportCount": 136,
+      "medianOfPerReportMedianSpreadPercent": 0.06225,
+      "p95OfPerReportP95SpreadPercent": 0.17204,
+      "maximumPerReportMaximumSpreadPercent": 0.18874,
+      "reportsWithPerReportP95Above0p1Percent": 57,
+      "reportsWithPerReportP95Above0p3Percent": 0
+    }
+  },
+  "interpretation": {
+    "statisticsAre": "Repeated best-quote spread summaries across sampler reports, not matched to strict entry/exit timestamps or order sizes.",
+    "cannotEstablish": [
+      "actual order-book cross cost at a trade time",
+      "depth available at the intended order size",
+      "market impact or execution latency",
+      "exchange fills or wallet-settled net P&L"
+    ],
+    "conclusion": "Observed typical spreads are below the configured 0.30% round-trip fee/slippage model floor in these reports, but the missing event-time raw books prevent substituting these summaries into strict trade costs. No parameter or market-set change is justified.",
+    "candidateLaunched": false
+  }
+}

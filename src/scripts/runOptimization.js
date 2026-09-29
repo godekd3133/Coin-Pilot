@@ -1,51 +1,28 @@
 import dotenv from 'dotenv';
 import UpbitAPI from '../api/upbit.js';
 import ParameterOptimizer from '../optimization/parameterOptimizer.js';
+import { fetchCompleteUpbitCandleHistory } from '../market-data/completeUpbitCandleHistory.js';
+import { resolveOptimizationStoragePaths } from '../runtime/optimizationStorage.js';
+import { appendOptimizerHistory } from '../runtime/optimizerHistoryStore.js';
 import fs from 'fs';
-import axios from 'axios';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 dotenv.config();
 
 /**
  * 여러 번의 API 호출로 충분한 분봉 데이터 수집
  */
-async function getMultipleMinuteCandles(upbit, market, unit, totalCount) {
-  const maxPerRequest = 200;
-  const allCandles = [];
-  let to = null;
-
-  while (allCandles.length < totalCount) {
-    const count = Math.min(maxPerRequest, totalCount - allCandles.length);
-
-    try {
-      let candles;
-      if (to) {
-        candles = await upbit.requestWithRetry(async () => {
-            const response = await axios.get(
-              `https://api.upbit.com/v1/candles/minutes/${unit}`,
-              upbit.getRequestConfig({ params: { market, count, to } })
-            );
-          return response.data;
-        });
-      } else {
-        candles = await upbit.getMinuteCandles(market, unit, count);
-      }
-
-      if (!candles || candles.length === 0) break;
-
-      allCandles.push(...candles);
-      const oldestCandle = candles[candles.length - 1];
-      to = oldestCandle.candle_date_time_utc;
-
-      console.log(`  수집: ${allCandles.length}/${totalCount} 캔들`);
-      await sleep(100);
-    } catch (error) {
-      console.error(`캔들 데이터 수집 오류 (${market}):`, error.message);
-      break;
-    }
-  }
-
-  return allCandles;
+export async function getMultipleMinuteCandles(upbit, market, unit, totalCount, maxPerRequest = 200) {
+  return fetchCompleteUpbitCandleHistory({
+    marketDataClient: upbit,
+    market,
+    intervalMinutes: unit,
+    totalCount,
+    maxPerRequest,
+    requestSpacingMs: 100,
+    sleepImpl: milliseconds => sleep(milliseconds)
+  });
 }
 
 async function runContinuousOptimization() {
@@ -61,6 +38,13 @@ async function runContinuousOptimization() {
   const targetCoin = process.env.TARGET_COIN || 'KRW-BTC';
   const candleUnit = parseInt(process.env.BACKTEST_CANDLE_UNIT) || 15;
   const candleCount = parseInt(process.env.BACKTEST_CANDLE_COUNT) || 500;
+  const optimizationStoragePaths = resolveOptimizationStoragePaths({
+    env: process.env,
+    stateDir: process.env.COINPILOT_STATE_DIR,
+    cwd: process.cwd(),
+    projectRoot: process.cwd(),
+    legacyBase: 'cwd'
+  });
   const isDryRun = process.env.DRY_RUN !== 'false';
 
   // 드라이 모드일 때 더 짧은 간격 (6시간), 실전은 24시간
@@ -155,18 +139,21 @@ async function runContinuousOptimization() {
         targetCoin,
         candleUnit,
         candleCount: candles.length,
+        trainingDays: Math.round((candles.length * candleUnit) / (60 * 24)),
         fitness: fitness,
         parameters: optimalParams,
         note: '지속적 최적화를 통해 생성된 파라미터입니다.'
       };
 
+      const activeConfigFile = optimizationStoragePaths.optimalConfigFile.absolutePath;
+      fs.mkdirSync(path.dirname(activeConfigFile), { recursive: true, mode: 0o700 });
       fs.writeFileSync(
-        'optimal_config.json',
+        activeConfigFile,
         JSON.stringify(config, null, 2),
         'utf8'
       );
 
-      console.log('\n💾 최적 파라미터 저장: optimal_config.json');
+      console.log(`\n💾 최적 파라미터 저장: ${activeConfigFile}`);
 
       // 런타임 환경변수 업데이트
       console.log('\n🔄 런타임 환경변수 자동 업데이트 중...');
@@ -183,32 +170,15 @@ async function runContinuousOptimization() {
       console.log('✅ 런타임 환경변수 업데이트 완료');
 
       // 최적화 이력 로그
-      const historyFile = 'optimization_history.json';
-      let history = [];
-
-      if (fs.existsSync(historyFile)) {
-        history = JSON.parse(fs.readFileSync(historyFile, 'utf8'));
-      }
-
-      history.push({
+      const historyFile = optimizationStoragePaths.optimizationHistoryFile.absolutePath;
+      await appendOptimizerHistory(historyFile, {
         timestamp: new Date().toISOString(),
         cycle: cycleCount,
         fitness: fitness,
         parameters: optimalParams
       });
 
-      // 최근 100개만 유지
-      if (history.length > 100) {
-        history = history.slice(-100);
-      }
-
-      fs.writeFileSync(
-        historyFile,
-        JSON.stringify(history, null, 2),
-        'utf8'
-      );
-
-      console.log('📝 최적화 이력 저장: optimization_history.json');
+      console.log(`📝 최적화 이력 저장: ${historyFile}`);
 
       // 다음 사이클까지 대기
       const nextRun = new Date(Date.now() + interval);
@@ -229,7 +199,9 @@ function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-runContinuousOptimization().catch(error => {
-  console.error('치명적 오류:', error);
-  process.exit(1);
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  runContinuousOptimization().catch(error => {
+    console.error('치명적 오류:', error);
+    process.exit(1);
+  });
+}

@@ -7,6 +7,14 @@ import { getPaperEvidenceMutationLock, respondIfPaperEvidenceMutationBlocked } f
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const PROJECT_ROOT = path.resolve(__dirname, '..', '..', '..');
+const SUPPORTED_OPTIMIZATION_INTERVALS = new Set([
+  3_600_000,
+  7_200_000,
+  10_800_000,
+  21_600_000,
+  43_200_000,
+  86_400_000
+]);
 
 /**
  * 백테스트/최적화 관련 라우트
@@ -50,7 +58,9 @@ export default function createOptimizationRoutes(server) {
   // 최적 파라미터 조회
   router.get('/optimal-config', (req, res) => {
     try {
-      const configFile = path.join(PROJECT_ROOT, 'optimal_config.json');
+      const configFile = typeof server.getOptimalConfigFile === 'function'
+        ? server.getOptimalConfigFile()
+        : path.join(PROJECT_ROOT, 'optimal_config.json');
 
       if (fs.existsSync(configFile)) {
         const config = JSON.parse(fs.readFileSync(configFile, 'utf8'));
@@ -66,7 +76,9 @@ export default function createOptimizationRoutes(server) {
   // 최적화 이력 조회
   router.get('/optimization-history', (req, res) => {
     try {
-      const historyFile = path.join(PROJECT_ROOT, 'optimization_history.json');
+      const historyFile = typeof server.getOptimizationHistoryFile === 'function'
+        ? server.getOptimizationHistoryFile()
+        : path.join(PROJECT_ROOT, 'optimization_history.json');
 
       if (fs.existsSync(historyFile)) {
         const history = JSON.parse(fs.readFileSync(historyFile, 'utf8'));
@@ -95,9 +107,15 @@ export default function createOptimizationRoutes(server) {
   // 자동 최적화 토글
   router.post('/optimization/toggle', express.json(), (req, res) => {
     if (respondIfPaperEvidenceMutationBlocked(server.tradingSystem, res, 'optimization_toggle')) return;
+    const enabled = req.body?.enabled;
+    if (typeof enabled !== 'boolean') {
+      return res.status(400).json({ error: '자동 후보 비교 사용 여부를 확인해 주세요.' });
+    }
+
     try {
-      const { enabled } = req.body;
-      server.optimizationState.enabled = enabled;
+      const nextState = { ...server.optimizationState, enabled };
+      server.saveOptimizationState(nextState);
+      server.optimizationState = nextState;
 
       if (enabled) {
         server.startOptimizationScheduler();
@@ -105,7 +123,6 @@ export default function createOptimizationRoutes(server) {
         server.stopOptimizationScheduler();
       }
 
-      server.saveOptimizationState();
       res.json({ success: true, ...server.optimizationState });
     } catch {
       res.status(500).json({ error: '자동 후보 비교 설정을 저장하지 못했습니다. 잠시 후 다시 시도해 주세요.' });
@@ -115,16 +132,25 @@ export default function createOptimizationRoutes(server) {
   // 최적화 주기 변경
   router.post('/optimization/interval', express.json(), (req, res) => {
     if (respondIfPaperEvidenceMutationBlocked(server.tradingSystem, res, 'optimization_interval')) return;
+    const intervalValue = req.body?.interval;
+    const interval = typeof intervalValue === 'number' ||
+      (typeof intervalValue === 'string' && intervalValue.trim() !== '')
+      ? Number(intervalValue)
+      : NaN;
+    if (!Number.isSafeInteger(interval) || !SUPPORTED_OPTIMIZATION_INTERVALS.has(interval)) {
+      return res.status(400).json({ error: '비교 간격을 확인해 주세요.' });
+    }
+
     try {
-      const { interval } = req.body;
-      server.optimizationState.interval = parseInt(interval);
+      const nextState = { ...server.optimizationState, interval };
+      server.saveOptimizationState(nextState);
+      server.optimizationState = nextState;
 
       if (server.optimizationState.enabled) {
         server.stopOptimizationScheduler();
         server.startOptimizationScheduler();
       }
 
-      server.saveOptimizationState();
       res.json({ success: true, ...server.optimizationState });
     } catch {
       res.status(500).json({ error: '비교 간격을 저장하지 못했습니다. 잠시 후 다시 시도해 주세요.' });

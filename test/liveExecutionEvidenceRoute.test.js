@@ -126,7 +126,7 @@ test('live execution evidence API stays read-only and separates empty history fr
     assert.doesNotMatch(blockedBody.blockingReasons.join(' '), /internal detail/);
     assert.match(blockedBody.blockingReasons.join(' '), /현재 프로세스의 live evidence 안전 게이트/);
   } finally {
-    ctx.dashboard.stop();
+    await ctx.dashboard.stop();
     trader.stop();
     fs.rmSync(tempDir, { recursive: true, force: true });
   }

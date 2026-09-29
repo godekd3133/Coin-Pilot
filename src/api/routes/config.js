@@ -1,6 +1,71 @@
 import express from 'express';
 import { resolveMaxCandleAgeSeconds } from '../../risk/candleFreshness.js';
 import { getPaperEvidenceMutationLock, respondIfPaperEvidenceMutationBlocked } from '../../research/paperEvidenceMutationGuard.js';
+import { getMarketDataProvider, MARKET_DATA_FRESHNESS } from '../marketDataProvider.js';
+
+const MOBILE_INVESTMENT_PRESETS = {
+  aggressive: {
+    rsiPeriod: 7, rsiOversold: 25, rsiOverbought: 75, macdFast: 8, macdSlow: 17, macdSignal: 7,
+    bbPeriod: 15, bbStdDev: 1.5, emaShort: 5, emaMid: 15, emaLong: 30, stopLossPercent: 3,
+    takeProfitPercent: 15, trailingStopPercent: 2, buyThreshold: 50, sellThreshold: 50,
+    volumeMultiplier: 1.2, volumePeriod: 10, investmentRatio: 0.15
+  },
+  conservative: {
+    rsiPeriod: 21, rsiOversold: 20, rsiOverbought: 80, macdFast: 15, macdSlow: 30, macdSignal: 12,
+    bbPeriod: 25, bbStdDev: 2.5, emaShort: 15, emaMid: 40, emaLong: 100, stopLossPercent: 8,
+    takeProfitPercent: 6, trailingStopPercent: 4, buyThreshold: 70, sellThreshold: 70,
+    volumeMultiplier: 2, volumePeriod: 30, investmentRatio: 0.03
+  },
+  shortterm: {
+    rsiPeriod: 9, rsiOversold: 28, rsiOverbought: 72, macdFast: 9, macdSlow: 21, macdSignal: 8,
+    bbPeriod: 18, bbStdDev: 1.8, emaShort: 7, emaMid: 21, emaLong: 50, stopLossPercent: 4,
+    takeProfitPercent: 8, trailingStopPercent: 2.5, buyThreshold: 55, sellThreshold: 55,
+    volumeMultiplier: 1.5, volumePeriod: 15, investmentRatio: 0.1
+  },
+  scalping: {
+    rsiPeriod: 5, rsiOversold: 30, rsiOverbought: 70, macdFast: 5, macdSlow: 13, macdSignal: 5,
+    bbPeriod: 10, bbStdDev: 1.2, emaShort: 3, emaMid: 8, emaLong: 20, stopLossPercent: 1.2,
+    takeProfitPercent: 1.8, trailingStopPercent: 1, buyThreshold: 45, sellThreshold: 45,
+    volumeMultiplier: 2.5, volumePeriod: 5, investmentRatio: 0.02, minReboundPercent: 0.15,
+    minRsiRecovery: 2, minVolumeRatio: 0.8, minCloseStrength: 0.55, trendPeriod: 30,
+    trendSlopeLookback: 3, minTrendSlopePercent: -0.5, entryDelayMinMs: 1000,
+    entryDelayMaxMs: 5000, maxEntryRetracePercent: 0.25, maxEntryChasePercent: 0.35, maxHoldMinutes: 30
+  },
+  longterm: {
+    rsiPeriod: 28, rsiOversold: 20, rsiOverbought: 80, macdFast: 19, macdSlow: 39, macdSignal: 14,
+    bbPeriod: 30, bbStdDev: 2.2, emaShort: 20, emaMid: 60, emaLong: 200, stopLossPercent: 12,
+    takeProfitPercent: 25, trailingStopPercent: 5, buyThreshold: 65, sellThreshold: 65,
+    volumeMultiplier: 1.3, volumePeriod: 40, investmentRatio: 0.05
+  },
+  balanced: {
+    rsiPeriod: 14, rsiOversold: 30, rsiOverbought: 70, macdFast: 12, macdSlow: 26, macdSignal: 9,
+    bbPeriod: 20, bbStdDev: 2, emaShort: 10, emaMid: 30, emaLong: 60, stopLossPercent: 5,
+    takeProfitPercent: 10, trailingStopPercent: 3, buyThreshold: 60, sellThreshold: 60,
+    volumeMultiplier: 1.5, volumePeriod: 20, investmentRatio: 0.05
+  }
+};
+
+const CONFIGURATION_RANGES = {
+  investmentRatio: [0.01, 1],
+  rsiPeriod: [2, 100], rsiOversold: [1, 50], rsiOverbought: [50, 99], oversoldLookback: [1, 10],
+  macdFast: [1, 100], macdSlow: [2, 200], macdSignal: [1, 100], bbPeriod: [2, 200], bbStdDev: [0.1, 10],
+  emaShort: [1, 100], emaMid: [2, 200], emaLong: [3, 500], stopLossPercent: [0.1, 100],
+  takeProfitPercent: [0.1, 1000], trailingStopPercent: [0, 5], minReboundPercent: [0.01, 5],
+  maxReboundPercent: [0, 10], minRsiRecovery: [0.1, 30], minVolumeRatio: [0, 10], minCloseStrength: [0, 1],
+  trendPeriod: [5, 240], trendSlopeLookback: [1, 30], minTrendSlopePercent: [-10, 10],
+  maxSignalRangePercent: [0, 10], minSignalRangePercent: [0, 10], marketRegimeLookback: [1, 60],
+  marketRegimeMinBreadth: [0, 1], marketRegimeMinReturnPercent: [-10, 10],
+  positionRiskCheckIntervalMs: [250, 10_000], maxRiskDataGapSeconds: [5, 600],
+  maxAnalysisDataGapSeconds: [5, 600], maxCandleAgeSeconds: [60, 900], entryDelayMinMs: [1000, 5000],
+  entryDelayMaxMs: [1000, 5000], maxEntryRetracePercent: [0.01, 5], maxEntryChasePercent: [0.01, 5],
+  breakEvenTriggerPercent: [0, 5], breakEvenOffsetPercent: [0, 1], trailingActivationPercent: [0, 10],
+  maxHoldMinutes: [1, 240], maxLosingHoldMinutes: [0, 240], winnerExtendMinutes: [0, 240],
+  winnerExtendMinProfitPercent: [0, 5], maxEntriesPerSignalWindow: [0, 20],
+  lossCircuitBreakerCount: [0, 20], lossCircuitBreakerWindowMinutes: [1, 1440],
+  lossCircuitBreakerCooldownMinutes: [1, 1440], buyThreshold: [0, 100], sellThreshold: [0, 100],
+  volumeMultiplier: [0.1, 100], volumePeriod: [1, 200]
+};
+const BOOLEAN_CONFIGURATION_KEYS = new Set(['marketRegimeEnabled', 'requireReboundBelowOverbought']);
 
 /**
  * 설정/제어 관련 라우트
@@ -198,7 +263,8 @@ export default function createConfigRoutes(server) {
   router.post('/investment-presets/apply', (req, res) => {
     if (respondIfPaperEvidenceMutationBlocked(server.tradingSystem, res, 'investment_preset_apply')) return;
     try {
-      const { config } = req.body;
+      const presetId = typeof req.body?.presetId === 'string' ? req.body.presetId : null;
+      const config = presetId ? MOBILE_INVESTMENT_PRESETS[presetId] : req.body?.config;
 
       if (!config) {
         return res.status(400).json({ error: '프리셋 설정이 없습니다', success: false });
@@ -359,6 +425,9 @@ export default function createConfigRoutes(server) {
         initialSeedMoney: server.tradingSystem.initialSeedMoney ?? 0,
         strategyMode: server.tradingSystem.strategyMode,
         scalping: server.tradingSystem.isScalpingMode ? {
+          ...Object.fromEntries(Object.keys(CONFIGURATION_RANGES)
+            .filter(key => key !== 'investmentRatio' && server.tradingSystem.config?.[key] !== undefined)
+            .map(key => [key, server.tradingSystem.config[key]])),
           candleUnit: server.tradingSystem.candleUnit,
           candleCount: server.tradingSystem.candleCount,
           entryDelayMinMs: server.tradingSystem.entryDelayMinMs,
@@ -500,6 +569,36 @@ export default function createConfigRoutes(server) {
     if (respondIfPaperEvidenceMutationBlocked(server.tradingSystem, res, 'config_update')) return;
     try {
       const newConfig = req.body;
+      if (!newConfig || typeof newConfig !== 'object' || Array.isArray(newConfig)) {
+        return res.status(400).json({ error: '설정 값을 확인해 주세요.', success: false });
+      }
+
+      for (const [key, rawValue] of Object.entries(newConfig)) {
+        if (BOOLEAN_CONFIGURATION_KEYS.has(key)) {
+          if (typeof rawValue !== 'boolean' && rawValue !== 'true' && rawValue !== 'false') {
+            return res.status(400).json({ error: `${key} 값을 확인해 주세요.`, success: false });
+          }
+          newConfig[key] = rawValue === 'true' ? true : rawValue === 'false' ? false : rawValue;
+          continue;
+        }
+        const range = CONFIGURATION_RANGES[key];
+        if (!range || (typeof rawValue !== 'number' && typeof rawValue !== 'string') || String(rawValue).trim() === '') {
+          return res.status(400).json({ error: '지원하지 않는 설정 항목이 포함되어 있습니다.', success: false });
+        }
+        const value = Number(rawValue);
+        if (!Number.isFinite(value) || value < range[0] || value > range[1]) {
+          return res.status(400).json({ error: `${key} 값은 ${range[0]}~${range[1]} 범위로 설정해 주세요.`, success: false });
+        }
+        newConfig[key] = value;
+      }
+
+      let investmentRatio;
+      if (newConfig.investmentRatio !== undefined) {
+        investmentRatio = Number(newConfig.investmentRatio);
+        if (!Number.isFinite(investmentRatio) || investmentRatio < 0.01 || investmentRatio > 1) {
+          return res.status(400).json({ error: '1회 투자 비율은 1~100% 범위로 설정해 주세요.', success: false });
+        }
+      }
 
       if (newConfig.stopLossPercent && (newConfig.stopLossPercent < 0 || newConfig.stopLossPercent > 100)) {
         return res.status(400).json({ error: '손절률은 0~100% 범위에서 설정해 주세요.', success: false });
@@ -568,7 +667,10 @@ export default function createConfigRoutes(server) {
         newConfig.requireReboundBelowOverbought = newConfig.requireReboundBelowOverbought === 'true';
       }
 
-      Object.assign(server.tradingSystem.config, newConfig);
+      const configUpdates = { ...newConfig };
+      delete configUpdates.investmentRatio;
+      Object.assign(server.tradingSystem.config, configUpdates);
+      if (investmentRatio !== undefined) server.tradingSystem.investmentRatio = investmentRatio;
 
       if (server.tradingSystem.isScalpingMode) {
         const protectedKeys = [
@@ -621,7 +723,12 @@ export default function createConfigRoutes(server) {
         }
       }
 
-      res.json({ message: '설정을 저장했습니다.', success: true, config: server.tradingSystem.config });
+      res.json({
+        message: '설정을 저장했습니다.',
+        success: true,
+        config: server.tradingSystem.config,
+        investmentRatio: server.tradingSystem.investmentRatio
+      });
     } catch {
       res.status(500).json({ error: '설정을 저장하지 못했습니다. 잠시 후 다시 시도해 주세요.', success: false });
     }
@@ -641,7 +748,9 @@ export default function createConfigRoutes(server) {
 
       if (server.tradingSystem.upbit) {
         try {
-          const ticker = await server.tradingSystem.upbit.getTicker('KRW-BTC');
+          const ticker = await getMarketDataProvider(server).getTickers('KRW-BTC', {
+            freshness: MARKET_DATA_FRESHNESS.FRESH
+          });
           status.tickerTest = {
             success: true,
             btcPrice: ticker[0]?.trade_price

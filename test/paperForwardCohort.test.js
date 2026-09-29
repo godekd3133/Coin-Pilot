@@ -131,7 +131,8 @@ test('paper forward cohort does not aggregate eligible profit across configs', (
         strictOpenPositions: {},
         shadow: { trades: [], openPositions: {} },
         stopReason: 'stopped_cleanly',
-        analysisDataHealth: { continuityEligible: true }
+        analysisDataHealth: { continuityEligible: true },
+        riskMonitor: { continuityEligible: true }
       }));
     }
 
@@ -165,7 +166,8 @@ test('paper forward cohort requires each config to meet its own observation and 
       strictOpenPositions: {},
       shadow: { trades: [], openPositions: {} },
       stopReason: 'stopped_cleanly',
-      analysisDataHealth: { continuityEligible: true }
+      analysisDataHealth: { continuityEligible: true },
+      riskMonitor: { continuityEligible: true }
     }));
 
     const report = summarizePaperForwardCohort({ rootDir: root });
@@ -177,6 +179,133 @@ test('paper forward cohort requires each config to meet its own observation and 
     assert.equal(report.profitabilityEvidenceProfitAggregation, 'single_config');
     assert.equal(report.profitabilityEvidenceProfit, 40);
     assert.equal(report.eligibleStrictProfit, 40);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('paper forward continuity keeps legacy cohort comparison but requires verified analysis and risk continuity for profitability', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'coinpilot-paper-cohort-continuity-'));
+  try {
+    const cases = [
+      ['risk-false', true, false, false, false, 'continuity_ineligible'],
+      ['both-true', true, true, true, true, null],
+      ['analysis-false', false, true, false, false, 'continuity_ineligible'],
+      ['both-false', false, false, false, false, 'continuity_ineligible'],
+      ['analysis-missing', undefined, true, null, true, 'continuity_unverified'],
+      ['risk-missing', true, undefined, null, true, 'continuity_unverified'],
+      ['both-missing', undefined, undefined, null, true, 'continuity_unverified'],
+      ['analysis-false-risk-missing', false, undefined, false, false, 'continuity_ineligible'],
+      ['analysis-missing-risk-false', undefined, false, false, false, 'continuity_ineligible']
+    ];
+
+    for (const [name, analysisContinuity, riskContinuity] of cases) {
+      const directory = path.join(root, `.paper-forward-${name}`);
+      fs.mkdirSync(directory);
+      const ledger = {
+        active: false,
+        startedAt: '2026-01-01T00:00:00.000Z',
+        endedAt: '2026-01-08T00:00:00.000Z',
+        configSnapshotComplete: true,
+        configSnapshot: { signalProfile: 'rsi_rebound', slippage: 0.001, tradingFee: 0.0005 },
+        thresholds: { minDays: 7, minTrades: 20 },
+        strictTrades: Array.from({ length: 20 }, (_, index) => modeledStrictTrade(2, `${name}-${index}`)),
+        strictOpenPositions: {},
+        shadow: { trades: [], openPositions: {} },
+        stopReason: 'stopped_cleanly'
+      };
+      if (analysisContinuity !== undefined) ledger.analysisDataHealth = { continuityEligible: analysisContinuity };
+      if (riskContinuity !== undefined) ledger.riskMonitor = { continuityEligible: riskContinuity };
+      fs.writeFileSync(path.join(directory, 'paper_validation.json'), JSON.stringify(ledger));
+    }
+
+    const report = summarizePaperForwardCohort({ rootDir: root });
+    const byName = Object.fromEntries(report.sessions.map(session => [session.directoryName, session]));
+    for (const [name, analysis, risk, combined, strictEligible, profitabilityReason] of cases) {
+      const session = byName[`.paper-forward-${name}`];
+      assert.equal(session.strictCohortEligible, strictEligible, `${name}: strict cohort eligibility`);
+      assert.equal(session.profitabilityEvidenceEligible, name === 'both-true', `${name}: profitability eligibility`);
+      assert.equal(session.analysisContinuityEligible, analysis ?? null, `${name}: analysis continuity`);
+      assert.equal(session.riskContinuityEligible, risk ?? null, `${name}: risk continuity`);
+      assert.equal(session.continuityEligible, combined, `${name}: combined continuity`);
+      if (profitabilityReason) {
+        assert.ok(session.profitabilityEvidenceExclusionReasons.includes(profitabilityReason), `${name}: ${profitabilityReason}`);
+      }
+    }
+    assert.equal(report.eligibleStrictSessionCount, 4);
+    assert.equal(report.eligibleStrictTradeCount, 80);
+    assert.equal(report.profitabilityEvidenceSessionCount, 1);
+    assert.equal(report.profitabilityEvidenceTradeCount, 20);
+    assert.equal(report.profitabilityEvidenceProfit, 40);
+    assert.equal(report.strictCohortExclusionCounts.continuity_ineligible, 5);
+    assert.equal(report.profitabilityEvidenceExclusionCounts.continuity_ineligible, 5);
+    assert.equal(report.profitabilityEvidenceExclusionCounts.continuity_unverified, 3);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('paper forward heartbeat continuity enforces recorded interruption limits and leaves malformed history unverified', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'coinpilot-paper-cohort-heartbeat-'));
+  try {
+    const cases = [
+      ['over-default', [{ gapMs: 900001 }], undefined, false, false, 'continuity_ineligible'],
+      ['boundary-default', [{ gapMs: 900000 }], undefined, true, true, null],
+      ['over-custom', [{ gapMs: 600001 }], 10, false, false, 'continuity_ineligible'],
+      ['boundary-custom', [{ gapMs: 600000 }], 10, true, true, null],
+      ['null-gap', [{ gapMs: null }], undefined, null, false, 'continuity_unverified'],
+      ['missing-gap', [{ reason: 'heartbeat_gap' }], undefined, null, false, 'continuity_unverified'],
+      ['nan-like-gap', [{ gapMs: 'NaN' }], undefined, null, false, 'continuity_unverified'],
+      ['negative-gap', [{ gapMs: -1 }], undefined, null, false, 'continuity_unverified'],
+      ['malformed-container', null, undefined, null, false, 'continuity_unverified'],
+      ['legacy-absent', undefined, undefined, true, true, null],
+      ['empty-array', [], undefined, true, true, null],
+      ['invalid-threshold', [{ gapMs: 1000 }], 0, null, false, 'continuity_unverified'],
+      ['null-threshold', [{ gapMs: 1000 }], null, null, false, 'continuity_unverified'],
+      ['text-threshold', [{ gapMs: 1000 }], '15', null, false, 'continuity_unverified']
+    ];
+
+    for (const [name, interruptions, maxHeartbeatGapMinutes] of cases) {
+      const directory = path.join(root, `.paper-forward-${name}`);
+      fs.mkdirSync(directory);
+      const thresholds = { minDays: 7, minTrades: 20 };
+      if (maxHeartbeatGapMinutes !== undefined) thresholds.maxHeartbeatGapMinutes = maxHeartbeatGapMinutes;
+      const ledger = {
+        active: false,
+        startedAt: '2026-01-01T00:00:00.000Z',
+        endedAt: '2026-01-08T00:00:00.000Z',
+        configSnapshotComplete: true,
+        configSnapshot: { signalProfile: 'rsi_rebound', slippage: 0.001, tradingFee: 0.0005 },
+        thresholds,
+        strictTrades: Array.from({ length: 20 }, (_, index) => modeledStrictTrade(2, `${name}-${index}`)),
+        strictOpenPositions: {},
+        shadow: { trades: [], openPositions: {} },
+        stopReason: 'stopped_cleanly',
+        analysisDataHealth: { continuityEligible: true },
+        riskMonitor: { continuityEligible: true }
+      };
+      if (interruptions !== undefined) ledger.interruptions = interruptions;
+      fs.writeFileSync(path.join(directory, 'paper_validation.json'), JSON.stringify(ledger));
+    }
+
+    const report = summarizePaperForwardCohort({ rootDir: root });
+    const byName = Object.fromEntries(report.sessions.map(session => [session.directoryName, session]));
+    for (const [name, , , interruptionEligible, profitabilityEligible, exclusionReason] of cases) {
+      const session = byName[`.paper-forward-${name}`];
+      assert.equal(session.profitabilityEvidenceEligible, profitabilityEligible, `${name}: profitability eligibility`);
+      assert.equal(session.strictCohortEligible, interruptionEligible !== false, `${name}: strict cohort eligibility`);
+      assert.equal(session.interruptionContinuityEligible, interruptionEligible, `${name}: interruption continuity`);
+      assert.equal(session.continuityEligible, interruptionEligible, `${name}: combined continuity`);
+      if (exclusionReason) {
+        assert.ok(session.profitabilityEvidenceExclusionReasons.includes(exclusionReason), `${name}: ${exclusionReason}`);
+      }
+    }
+    assert.equal(report.eligibleStrictSessionCount, 12);
+    assert.equal(report.profitabilityEvidenceSessionCount, 4);
+    assert.equal(report.profitabilityEvidenceTradeCount, 80);
+    assert.equal(report.strictCohortExclusionCounts.continuity_ineligible, 2);
+    assert.equal(report.profitabilityEvidenceExclusionCounts.continuity_ineligible, 2);
+    assert.equal(report.profitabilityEvidenceExclusionCounts.continuity_unverified, 8);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -243,7 +372,8 @@ test('paper forward cohort fingerprints the same config independent of object ke
         shadow: { closedTrades: [], positions: {} },
         looseShadow: { closedTrades: [], positions: {} },
         stopReason: 'stopped_cleanly',
-        analysisDataHealth: { continuityEligible: true }
+        analysisDataHealth: { continuityEligible: true },
+        riskMonitor: { continuityEligible: true }
       }));
     }
 
@@ -305,7 +435,8 @@ test('paper forward profitability uses slippage-adjusted legacy strict trades, n
       shadow: { closedTrades: [], positions: {} },
       looseShadow: { closedTrades: [], positions: {} },
       stopReason: 'stopped_cleanly',
-      analysisDataHealth: { continuityEligible: true }
+      analysisDataHealth: { continuityEligible: true },
+      riskMonitor: { continuityEligible: true }
     }));
 
     const report = summarizePaperForwardCohort({ rootDir: root });

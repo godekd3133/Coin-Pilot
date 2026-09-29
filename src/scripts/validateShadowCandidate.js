@@ -1,16 +1,16 @@
 import dotenv from 'dotenv';
 import fs from 'fs';
-import axios from 'axios';
 import UpbitAPI from '../api/upbit.js';
 import { walkForwardValidate } from '../backtest/scalpingBacktest.js';
 import { resolveMaxCandleAgeSeconds } from '../risk/candleFreshness.js';
+import { pathToFileURL } from 'node:url';
 
 dotenv.config();
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const number = (value, fallback) => Number.isFinite(Number(value)) ? Number(value) : fallback;
 
-async function getHistoricalCandles(upbit, market, unit, totalCount) {
+export async function getHistoricalCandles(upbit, market, unit, totalCount) {
   const candles = [];
   let to = null;
 
@@ -20,13 +20,7 @@ async function getHistoricalCandles(upbit, market, unit, totalCount) {
     for (let attempt = 0; attempt < 5; attempt += 1) {
       try {
         const batchResult = to
-          ? await upbit.requestWithRetry(async () => {
-                const response = await axios.get(
-                `https://api.upbit.com/v1/candles/minutes/${unit}`,
-                upbit.getRequestConfig({ params: { market, count, to } })
-              );
-              return response.data;
-            })
+          ? await upbit.getMinuteCandles(market, unit, count, { to })
           : await upbit.getMinuteCandles(market, unit, count);
         batch = batchResult;
         break;
@@ -178,7 +172,9 @@ async function main() {
   console.log('승격: 항상 보류 (diagnostic shadow 전용)');
 }
 
-main().catch(error => {
-  console.error('❌ shadow 검증 오류:', error.message);
-  process.exitCode = 1;
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch(error => {
+    console.error('❌ shadow 검증 오류:', error.message);
+    process.exitCode = 1;
+  });
+}

@@ -1,0 +1,64 @@
+{
+  "schema": "coinpilot.paper-forward-position-observation.v1",
+  "observedAt": "2026-09-29T15:15:00.934Z",
+  "researchOnly": true,
+  "promoted": false,
+  "source": {
+    "directory": ".paper-forward-sealed-rsi-20260928-r5",
+    "processId": 11906,
+    "active": true,
+    "heartbeatAt": "2026-09-29T15:15:00.934Z",
+    "cycles": 16257
+  },
+  "event": {
+    "kind": "strict_paper_open_position",
+    "market": "KRW-XRP",
+    "signalTime": "2026-09-29T15:09:00",
+    "entryTime": "2026-09-29T15:10:04.310Z",
+    "entryPriceKrw": 2075,
+    "amount": 96.32723397590361,
+    "entryDelayMs": 3448,
+    "executionDriftPercent": 0.048216007714561235,
+    "signalReboundPercent": 0.1932367149758454,
+    "signalRsi": 37.83442528259287,
+    "signalOversoldRsi": 30.855741650326138,
+    "signalRsiRecovery": 6.97868363226673,
+    "signalVolumeRatio": 1.10586616896272,
+    "signalCloseStrength": 0.8,
+    "signalTrendSlopePercent": -0.08931561906889048,
+    "openPositionCount": 1,
+    "strictCloseCount": 9,
+    "recordedStrictNetProfitKrw": -1032.1391150690336,
+    "paperPathMfePercent": 0.24096385542168677,
+    "paperPathMaePercent": -0.48192771084337355
+  },
+  "costAndExecutionBoundary": {
+    "configuredSlippageRate": 0.001,
+    "configuredTradingFeeRate": 0.0005,
+    "paperExecutionCostModel": null,
+    "paperExecutionSlippageRate": null,
+    "paperExecutionTradingFeeRate": null,
+    "paperObservedEntryPrice": null,
+    "paperObservedExitPrice": null,
+    "paperEntryFee": null,
+    "actualExchangeFillObserved": false,
+    "interpretation": "This is an open simulated position, not an exchange order or fill. Closed-trade cost audit is pending settlement; do not infer realized PnL from candle-path MFE/MAE."
+  },
+  "runtimeHealth": {
+    "configSnapshotComplete": true,
+    "analysisContinuity": true,
+    "riskContinuity": true,
+    "stopReason": null,
+    "configDrift": null,
+    "watchdogTelemetryVersion": 1,
+    "lastWatchdogTickGapMs": null,
+    "maxWatchdogTickGapMs": 1294
+  },
+  "decision": {
+    "restart": false,
+    "configurationChanged": false,
+    "marketSetChanged": false,
+    "candidateLaunched": false,
+    "reason": "Keep the running owner and fixed market set unchanged while the position is open. The benchmark gate remains closed, and this single observation is not independent profitability evidence. Audit cost markers and config slippage only when it closes."
+  }
+}

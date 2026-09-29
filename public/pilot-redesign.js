@@ -52,6 +52,7 @@
         tradesLoaded: false,
         marketPrices: [],
         marketPricesLoaded: false,
+        marketSnapshot: null,
         targetCoins: [],
         selectedCoin: localStorage.getItem('selectedCoin') || 'KRW-BTC',
         candles: [],
@@ -227,24 +228,26 @@
             const status = Number(response?.status);
             const body = response?.body;
             const parsed = response?.parsed === true && body !== null && typeof body === 'object';
+            const idempotencyStatus = String(response?.idempotencyStatus || '').trim().toLowerCase();
+            const errorCode = typeof body?.error?.code === 'string' ? body.error.code : '';
             let outcome;
             let message;
 
             if (!Number.isInteger(status) || !parsed) {
                 outcome = 'unknown';
                 message = '서버 응답을 확인할 수 없어 요청 결과를 보류했습니다.';
-            } else if (status === 202 || body.pending === true) {
-                outcome = 'processing';
-                message = '서버가 요청을 처리 중입니다. 같은 요청으로 결과를 다시 확인할 수 있습니다.';
-            } else if (status === 409) {
+            } else if (idempotencyStatus === 'conflict' || errorCode === 'idempotency_key_conflict' || (status === 409 && idempotencyStatus !== 'completed')) {
                 outcome = 'conflict';
                 message = '서버 기록과 저장된 요청이 일치하지 않습니다. 새 변경을 잠갔습니다.';
-            } else if (status === 428) {
+            } else if (status === 428 || errorCode === 'idempotency_key_required') {
                 outcome = 'key_missing';
                 message = '서버가 요청 키를 확인하지 못했습니다. 새 변경을 잠갔습니다.';
-            } else if (status >= 500) {
+            } else if (idempotencyStatus === 'unknown' || (status >= 500 && idempotencyStatus !== 'completed')) {
                 outcome = 'unknown';
-                message = '서버 오류로 요청 결과를 확인할 수 없습니다.';
+                message = '서버가 요청 결과를 확인하지 못해 변경을 잠갔습니다.';
+            } else if (status === 202 || body.pending === true || idempotencyStatus === 'pending') {
+                outcome = 'processing';
+                message = '서버가 요청을 처리 중입니다. 같은 요청을 다시 보내 확인할 수 있습니다.';
             } else if (status >= 200 && status < 300) {
                 if (!clearIntent()) {
                     publish();
@@ -267,6 +270,19 @@
                         body,
                         intent: snapshot().intent || sendingIntent,
                         message: '서버가 요청을 거절했지만 안전 기록을 정리하지 못했습니다.'
+                    };
+                }
+                publish();
+                return { kind: 'rejected', status, body, intent };
+            } else if (status >= 500 && idempotencyStatus === 'completed') {
+                if (!clearIntent()) {
+                    publish();
+                    return {
+                        kind: 'terminal-locked',
+                        status,
+                        body,
+                        intent: snapshot().intent || sendingIntent,
+                        message: '요청 결과는 기록됐지만 안전 기록을 정리하지 못했습니다.'
                     };
                 }
                 publish();
@@ -401,9 +417,19 @@
                 signal: controller.signal
             });
             try {
-                return { status: response.status, body: await response.json(), parsed: true };
+                return {
+                    status: response.status,
+                    body: await response.json(),
+                    parsed: true,
+                    idempotencyStatus: response.headers?.get?.('Idempotency-Status') || null
+                };
             } catch {
-                return { status: response.status, body: null, parsed: false };
+                return {
+                    status: response.status,
+                    body: null,
+                    parsed: false,
+                    idempotencyStatus: response.headers?.get?.('Idempotency-Status') || null
+                };
             }
         } finally {
             window.clearTimeout(timeoutId);
@@ -588,6 +614,193 @@
             second: '2-digit',
             hour12: false
         });
+    }
+
+    function normalizeMarketPriceSnapshot(snapshot) {
+        if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot) || !Array.isArray(snapshot.prices)) {
+            return null;
+        }
+        return {
+            prices: snapshot.prices,
+            complete: typeof snapshot.complete === 'boolean' ? snapshot.complete : null,
+            missingMarkets: Array.isArray(snapshot.missingMarkets) ? snapshot.missingMarkets : [],
+            unavailableMarkets: Array.isArray(snapshot.unavailableMarkets) ? snapshot.unavailableMarkets : [],
+            sourceAsOf: snapshot.sourceAsOf ?? null,
+            fetchedAt: snapshot.fetchedAt ?? null,
+            marketListStale: typeof snapshot.marketListStale === 'boolean' ? snapshot.marketListStale : null,
+            marketListFetchedAt: snapshot.marketListFetchedAt ?? null,
+            legacyFallback: snapshot.legacyFallback === true
+        };
+    }
+
+    function oldestLegacyRowTimestamp(prices, field) {
+        if (!Array.isArray(prices) || prices.length === 0) return null;
+        const timestamps = prices.map(row => {
+            const value = row?.[field];
+            if (typeof value !== 'string' || !value.trim()) return null;
+            const milliseconds = Date.parse(value);
+            return Number.isFinite(milliseconds) && milliseconds > 0 ? milliseconds : null;
+        });
+        if (timestamps.some(value => value === null)) return null;
+        return new Date(Math.min(...timestamps)).toISOString();
+    }
+
+    function buildLegacyMarketPriceSnapshot(legacyPrices, targetCoins) {
+        const prices = Array.isArray(legacyPrices) ? legacyPrices : [];
+        const listCoins = targetCoins?.coins;
+        const listFetchedAt = typeof targetCoins?.fetchedAt === 'string' ? targetCoins.fetchedAt : null;
+        const validMarketList = Array.isArray(listCoins) && listCoins.length > 0 &&
+            targetCoins?.count === listCoins.length && typeof targetCoins?.stale === 'boolean' &&
+            listCoins.every(coin => typeof coin === 'string' && /^[A-Z0-9]+-[A-Z0-9]+$/.test(coin)) &&
+            new Set(listCoins).size === listCoins.length && Boolean(listFetchedAt) && Number.isFinite(Date.parse(listFetchedAt));
+        const requestedMarkets = validMarketList ? listCoins : [];
+        const returnedMarkets = [...new Set(prices
+            .map(row => row?.coin)
+            .filter(coin => typeof coin === 'string' && /^[A-Z0-9]+-[A-Z0-9]+$/.test(coin)))];
+        const returnedSet = new Set(returnedMarkets);
+        const missingMarkets = validMarketList
+            ? requestedMarkets.filter(coin => !returnedSet.has(coin))
+            : [];
+        const rowsVerified = prices.every(row => typeof row?.coin === 'string' &&
+            /^[A-Z0-9]+-[A-Z0-9]+$/.test(row.coin)) && returnedMarkets.length === prices.length;
+
+        return {
+            requestedMarkets,
+            returnedMarkets,
+            missingMarkets,
+            unavailableMarkets: missingMarkets,
+            complete: validMarketList ? rowsVerified && missingMarkets.length === 0 : null,
+            sourceAsOf: oldestLegacyRowTimestamp(prices, 'sourceAsOf'),
+            fetchedAt: oldestLegacyRowTimestamp(prices, 'fetchedAt'),
+            marketListStale: validMarketList ? targetCoins.stale : null,
+            marketListFetchedAt: validMarketList ? listFetchedAt : null,
+            prices,
+            legacyFallback: true
+        };
+    }
+
+    async function loadLegacyMarketSnapshotOn404(error, targetCoins, readJSON) {
+        if (error?.status !== 404) throw error;
+        const legacyPrices = await readJSON('/market/prices');
+        return buildLegacyMarketPriceSnapshot(legacyPrices, targetCoins);
+    }
+
+    function marketQuoteFreshnessIssue(market, now = Date.now()) {
+        if (!market) return '이 종목의 시세를 확인할 수 없어요.';
+        const marketPrice = Number(market.price);
+        if (!Number.isFinite(marketPrice) || marketPrice <= 0) return '현재가를 확인할 수 없어 주문할 수 없어요.';
+        const configuredMaximumAge = Number(state.status?.maxCandleAgeSeconds);
+        const maximumAgeMs = (Number.isFinite(configuredMaximumAge) && configuredMaximumAge > 0
+            ? configuredMaximumAge
+            : 90) * 1000;
+        const sourceTimestamp = Date.parse(market.sourceAsOf || '');
+        if (!Number.isFinite(sourceTimestamp)) return '최근 체결 시각을 확인할 수 없어 주문할 수 없어요.';
+        const sourceAgeMs = now - sourceTimestamp;
+        if (sourceAgeMs < -5000) return '최근 체결 시각이 현재보다 앞서 있어요. 서버 시각을 확인해 주세요.';
+        if (sourceAgeMs > maximumAgeMs) return '최근 체결 시각이 오래됐어요. 새로고침 후 다시 시도해 주세요.';
+        return null;
+    }
+
+    function marketSnapshotPresentation(snapshot, loaded, prices) {
+        const rows = Array.isArray(prices) ? prices : [];
+        const hasPrices = rows.length > 0;
+        const missingCount = Math.max(
+            Array.isArray(snapshot?.missingMarkets) ? snapshot.missingMarkets.length : 0,
+            Array.isArray(snapshot?.unavailableMarkets) ? snapshot.unavailableMarkets.length : 0
+        );
+        const marketListStatus = !loaded
+            ? '시장 목록을 확인할 수 없어요'
+            : snapshot?.marketListStale === true
+                ? '시장 목록을 새로 확인해야 해요'
+                : snapshot?.marketListStale === false
+                    ? '시장 목록을 확인했어요'
+                    : '시장 목록을 확인할 수 없어요';
+        const marketListTime = formatMarketTimestamp(snapshot?.marketListFetchedAt);
+        const listDetail = `${marketListStatus} · ${loaded ? '목록 확인' : '마지막 목록 확인'} ${marketListTime}`;
+        let stateLabel;
+        let tone;
+
+        if (!loaded) {
+            stateLabel = hasPrices ? '시세를 새로 불러오지 못해 이전 가격을 표시합니다' : '시세를 불러오지 못했습니다';
+            tone = 'unavailable';
+        } else if (!hasPrices) {
+            stateLabel = '표시할 시세가 없습니다';
+            tone = 'unavailable';
+        } else if (snapshot?.complete === false || missingCount > 0) {
+            stateLabel = missingCount > 0
+                ? `${missingCount}개 시장 시세를 확인할 수 없습니다`
+                : '일부 시장 시세를 확인할 수 없습니다';
+            tone = 'partial';
+        } else if (snapshot?.complete === true && rows.some(row => marketQuoteFreshnessIssue(row))) {
+            const staleCount = rows.filter(row => marketQuoteFreshnessIssue(row)).length;
+            stateLabel = `${staleCount}개 시장의 시세가 오래됐어요`;
+            tone = 'stale';
+        } else if (snapshot?.complete === true) {
+            stateLabel = '모든 시장의 시세를 확인했어요';
+            tone = 'complete';
+        } else {
+            stateLabel = '시세 상태를 확인할 수 없습니다';
+            tone = 'unavailable';
+        }
+
+        const marketState = tone === 'complete' && (snapshot?.legacyFallback === true || snapshot?.marketListStale !== false) ? 'stale' : tone;
+        const visualTone = marketState === 'stale' || snapshot?.legacyFallback === true ? 'warning' : tone;
+        const freshnessNote = snapshot?.legacyFallback === true ? '시세의 최신 여부는 확인할 수 없습니다' : null;
+        const detailLabel = [stateLabel, freshnessNote].filter(Boolean).join(' · ');
+
+        return {
+            state: marketState,
+            label: stateLabel,
+            tone: visualTone,
+            detail: `${detailLabel} · ${marketListStatus}`,
+            pageDetail: `${detailLabel} · ${listDetail}`
+        };
+    }
+
+    function selectedMarketQuotePresentation(marketData, snapshotPresentation, now = Date.now()) {
+        if (!marketData) {
+            return {
+                label: snapshotPresentation.label,
+                state: snapshotPresentation.state
+            };
+        }
+        const quoteIssue = marketQuoteFreshnessIssue(marketData, now);
+        if (quoteIssue) {
+            return {
+                label: quoteIssue,
+                state: quoteIssue.includes('오래') ? 'stale' : 'unavailable'
+            };
+        }
+        return { label: '현재 시세', state: 'complete' };
+    }
+
+    function updateMarketAnnouncement(elementId, message, { repeat = false } = {}) {
+        const element = byId(elementId);
+        if (!element) return;
+        if (!repeat && element.textContent === message) return;
+        if (repeat && element.textContent === message) {
+            element.textContent = '';
+            globalThis.setTimeout(() => {
+                if (element.isConnected) element.textContent = message;
+            }, 25);
+            return;
+        }
+        element.textContent = message;
+    }
+
+    function announceManualMarketRefresh() {
+        const marketData = currentMarket();
+        const marketPresentation = marketSnapshotPresentation(state.marketSnapshot, state.marketPricesLoaded, state.marketPrices);
+        const selectedPresentation = selectedMarketQuotePresentation(marketData, marketPresentation);
+        const symbol = symbolOf(state.selectedCoin);
+        const fetchedAt = state.marketSnapshot?.fetchedAt
+            ? ` · 서버 수집 ${formatMarketTimestamp(state.marketSnapshot.fetchedAt)}`
+            : '';
+        updateMarketAnnouncement(
+            'pilot-market-refresh-announcement',
+            `시세 새로고침 결과 · ${symbol}/KRW · ${selectedPresentation.label}${fetchedAt}`,
+            { repeat: true }
+        );
     }
 
     function formatDateTime(value) {
@@ -965,12 +1178,16 @@
             evidenceLocked || !manualModeReady || mutationLocked;
         $$(manualOrderSelectors).forEach(button => {
             const sessionDisabled = button.dataset.pilotSessionDisabled === 'true';
-            const disabled = blocked || offline || sessionDisabled || manualOrderBlocked;
+            const prefix = button.dataset.pilotTradeSubmit;
+            const marketSelect = prefix ? root.querySelector(`[data-pilot-trade-coin="${prefix}"]`) : null;
+            const quoteIssue = prefix ? marketQuoteFreshnessIssue(currentMarket(marketSelect?.value)) : null;
+            const disabled = blocked || offline || sessionDisabled || manualOrderBlocked || Boolean(quoteIssue);
             button.disabled = disabled;
             button.setAttribute('aria-disabled', disabled ? 'true' : 'false');
             if (blocked || offline) button.title = readOnlyObserverReason();
             else if (mutationLocked) button.title = '처리 중인 요청 결과를 확인한 뒤 새 주문을 할 수 있습니다.';
             else if (evidenceLocked) button.title = paperEvidenceMutationReason();
+            else if (quoteIssue) button.title = quoteIssue;
             else if (manualOrderBlocked) button.title = tradeBlockReason();
             else if (!disabled) button.removeAttribute('title');
         });
@@ -1034,12 +1251,15 @@
         });
     }
 
-    function canTrade() {
+    function canTrade(market = null) {
         if (state.online === false || state.coreReady !== true ||
             !runtimeCanAcceptManualOrders(state.status, state.actualMode) || isReadOnlyObserver() ||
             isPaperEvidenceMutationLocked() || state.pendingMutation?.locked === true) return false;
-        if (state.activeMode === 'paper') return isPaperMode();
-        return state.activeMode === 'live' && state.actualMode === 'LIVE';
+        const modeReady = state.activeMode === 'paper'
+            ? isPaperMode()
+            : state.activeMode === 'live' && state.actualMode === 'LIVE';
+        if (!modeReady) return false;
+        return market === null || marketQuoteFreshnessIssue(currentMarket(market)) === null;
     }
 
     function runtimeCanAcceptOrders(status) {
@@ -1075,7 +1295,7 @@
         return '';
     }
 
-    function tradeBlockReason() {
+    function tradeBlockReason(market = null) {
         if (state.online === false) {
             return '서버 연결이 끊겨 계좌와 시세를 확인할 수 없습니다. 다시 연결될 때까지 주문할 수 없습니다.';
         }
@@ -1092,6 +1312,7 @@
         if (state.activeMode === 'live' && state.actualMode !== 'LIVE') {
             return '서버가 모의투자여서 실제 주문은 나가지 않습니다.';
         }
+        if (market !== null) return marketQuoteFreshnessIssue(currentMarket(market)) || '';
         return '';
     }
 
@@ -1904,7 +2125,6 @@
         let deferredInstallPrompt = null;
         let serviceWorkerRegistration = null;
         let serviceWorkerFailed = false;
-        let hadServiceWorkerController = typeof navigator !== 'undefined' && Boolean(navigator.serviceWorker?.controller);
         const isSecureContext = window.isSecureContext === true;
         const serviceWorkerSupported = typeof navigator !== 'undefined' && 'serviceWorker' in navigator;
         const isIos = /iphone|ipad|ipod/i.test(window.navigator.userAgent || '') ||
@@ -1968,7 +2188,7 @@
         document.addEventListener('visibilitychange', refreshInstallState);
         window.addEventListener('pageshow', refreshInstallState);
         const showPwaUpdate = () => {
-            if (!updateBanner) return;
+            if (!updateBanner || !serviceWorkerRegistration?.waiting || !navigator.serviceWorker?.controller) return;
             updateBanner.hidden = false;
         };
         const watchInstallingWorker = worker => {
@@ -1996,15 +2216,14 @@
         };
         updateBanner?.querySelector('[data-pilot-action="reload-pwa"]')?.addEventListener('click', reloadPwa);
         if (isSecureContext && serviceWorkerSupported) {
-            navigator.serviceWorker.addEventListener('controllerchange', () => {
-                if (hadServiceWorkerController) showPwaUpdate();
-                else hadServiceWorkerController = true;
-            });
             navigator.serviceWorker.register('/sw.js').then(registration => {
                 serviceWorkerRegistration = registration;
                 watchInstallingWorker(registration.installing);
                 registration.addEventListener('updatefound', () => watchInstallingWorker(registration.installing));
-                registration.update().catch(() => { /* an offline shell can update on the next visit */ });
+                if (registration.waiting && navigator.serviceWorker.controller) showPwaUpdate();
+                registration.update().then(updatedRegistration => {
+                    if (updatedRegistration.waiting && navigator.serviceWorker.controller) showPwaUpdate();
+                }).catch(() => { /* an offline shell can update on the next visit */ });
                 renderInstallState();
             }).catch(error => {
                 console.warn('PWA service worker 등록 실패:', error.message);
@@ -2087,14 +2306,13 @@
                             <button type="button" class="pilot-mode-button is-active" data-pilot-mode="paper"><i class="ph ph-file-dashed" aria-hidden="true"></i><span>모의투자</span></button>
                             <button type="button" class="pilot-mode-button is-locked" data-pilot-mode="live"><i class="ph ph-lock-key" aria-hidden="true"></i><span>실거래</span></button>
                         </div>
-                        <div class="pilot-top-meta"><span class="pilot-connection is-warn" id="pilot-connection"><span class="pilot-connection-dot"></span><span id="pilot-connection-label">연결 확인 중</span></span><span id="pilot-clock">-</span></div>
+                        <div class="pilot-top-meta"><span class="pilot-connection is-warn" id="pilot-connection"><span class="pilot-connection-dot"></span><span id="pilot-connection-label">연결 확인 중</span></span><span id="pilot-clock">-</span><div class="pilot-pwa-update" id="pilot-pwa-update" role="status" aria-live="polite" hidden><span class="pilot-visually-hidden">새 버전이 나왔습니다. 업데이트를 눌러 적용하세요.</span><button type="button" class="pilot-button is-small" data-pilot-action="reload-pwa" aria-label="새 버전 적용"><i class="ph ph-arrows-clockwise" aria-hidden="true"></i><span aria-hidden="true">업데이트</span></button></div></div>
                     </header>
 
                         <section class="pilot-mode-banner" id="pilot-mode-banner" aria-live="polite">
                 <div class="pilot-mode-banner-copy"><i class="ph ph-lock-key" aria-hidden="true"></i><div><strong id="pilot-mode-banner-title">실거래 주문 잠금</strong><span id="pilot-mode-banner-copy">실제 주문 전 점검을 마칠 때까지 주문할 수 없습니다.</span></div></div>
                             <div class="pilot-mode-banner-actions"><span class="pilot-status-pill is-warning pilot-pwa-state" id="pilot-pwa-state">설치 메뉴에서 추가</span><button type="button" class="pilot-button pilot-pwa-install" id="pilot-pwa-install">앱으로 설치</button><button type="button" class="pilot-button" data-pilot-go="history">주문 전 점검 보기 <i class="ph ph-arrow-right" aria-hidden="true"></i></button></div>
                         </section>
-                        <section class="pilot-pwa-update" id="pilot-pwa-update" role="status" aria-live="polite" hidden><i class="ph ph-arrows-clockwise" aria-hidden="true"></i><div><strong>새 버전이 나왔습니다.</strong><span>새로고침하면 새 버전이 적용됩니다.</span></div><button type="button" class="pilot-button is-small" data-pilot-action="reload-pwa">새로고침</button></section>
                         <section class="pilot-offline-banner" id="pilot-offline-banner" role="status" aria-live="polite" hidden><i class="ph ph-cloud-slash" aria-hidden="true"></i><div><strong>오프라인 모드</strong><span>계좌와 시세를 불러올 수 없습니다. 연결이 복구될 때까지 주문과 설정을 사용할 수 없습니다.</span></div><button type="button" class="pilot-button is-small" data-pilot-action="refresh-core">다시 연결</button></section>
                         <section class="pilot-pending-mutation" id="pilot-pending-mutation" role="status" aria-live="polite" hidden><i class="ph ph-clock-countdown" aria-hidden="true"></i><div><strong id="pilot-pending-mutation-title">요청 결과 확인 필요</strong><span id="pilot-pending-mutation-copy">요청이 처리됐을 수 있어 새 주문과 가상 지갑 변경을 잠갔습니다.</span></div><button type="button" class="pilot-button is-small" id="pilot-pending-mutation-retry" data-pilot-action="retry-pending-mutation" hidden>같은 요청 결과 다시 확인</button></section>
 
@@ -2120,7 +2338,7 @@
 
                         <section class="pilot-page" data-pilot-page="portfolio"><div class="pilot-page-heading"><div><h1 class="pilot-page-title">포트폴리오</h1></div><div class="pilot-heading-actions"><button type="button" class="pilot-button" data-pilot-action="refresh-core"><i class="ph ph-arrows-clockwise" aria-hidden="true"></i> 새로고침</button></div></div><div class="pilot-history-summary"><div class="pilot-history-metric"><span>총 자산 평가액</span><strong id="pilot-portfolio-assets">-</strong></div><div class="pilot-history-metric"><span>누적 손익</span><strong id="pilot-portfolio-profit">-</strong></div><div class="pilot-history-metric"><span>현금 잔액</span><strong id="pilot-portfolio-cash">-</strong></div><div class="pilot-history-metric"><span>보유 종목</span><strong id="pilot-portfolio-count">-</strong></div></div><div class="pilot-split-grid" id="pilot-portfolio-allocation-grid"><section class="pilot-panel"><div class="pilot-panel-header"><div><h2 class="pilot-panel-title">자산 구성</h2></div></div><div class="pilot-panel-body" style="display:grid; grid-template-columns:170px minmax(0,1fr); gap:22px; align-items:center"><canvas id="pilot-allocation-chart" style="width:170px;height:170px" aria-label="자산 구성 차트"></canvas><div id="pilot-allocation-legend"></div></div></section><section class="pilot-panel"><div class="pilot-panel-header"><div><h2 class="pilot-panel-title">계좌 요약</h2></div></div><div class="pilot-panel-body" id="pilot-account-summary"></div></section></div><div class="pilot-section-spacer"></div><section class="pilot-panel"><div class="pilot-panel-header"><div><h2 class="pilot-panel-title">자산 추이</h2></div><div class="pilot-range-tabs"><button type="button" class="pilot-tab-button" data-pilot-portfolio-period="1h">1시간</button><button type="button" class="pilot-tab-button is-active" data-pilot-portfolio-period="24h">1일</button><button type="button" class="pilot-tab-button" data-pilot-portfolio-period="7d">1주</button><button type="button" class="pilot-tab-button" data-pilot-portfolio-period="30d">1개월</button></div></div><div class="pilot-chart-wrap"><canvas id="pilot-portfolio-chart" class="pilot-chart-canvas" aria-label="포트폴리오 자산 추이"></canvas><div class="pilot-chart-empty" id="pilot-portfolio-empty" hidden>자산 추이를 수집 중입니다.</div></div><div class="pilot-chart-footnote"><span id="pilot-portfolio-history-source-label">-</span></div></section><div class="pilot-section-spacer"></div><section class="pilot-panel"><div class="pilot-panel-header"><div><h2 class="pilot-panel-title">보유 포지션 상세</h2></div></div><div class="pilot-table-wrap"><table class="pilot-table"><thead><tr><th>자산</th><th class="pilot-table-number">수량</th><th class="pilot-table-number">평단</th><th class="pilot-table-number">현재가</th><th class="pilot-table-number">평가액</th><th class="pilot-table-number">평가손익</th><th>관리</th></tr></thead><tbody id="pilot-portfolio-positions"></tbody></table></div></section><div class="pilot-section-spacer"></div><section class="pilot-panel"><div class="pilot-panel-header"><div><h2 class="pilot-panel-title">모의투자 지갑</h2></div><span class="pilot-status-pill" id="pilot-wallet-mode">모의투자 전용</span></div><div class="pilot-panel-body"><div class="pilot-wallet"><div class="pilot-wallet-action"><h3>입금</h3><div class="pilot-wallet-action-row"><input class="pilot-input" type="number" id="pilot-deposit-amount" min="1000" step="1000" placeholder="금액 (원)"><button type="button" class="pilot-button is-success" data-pilot-action="deposit">입금</button></div><div class="pilot-wallet-presets"><button type="button" class="pilot-filter-chip" data-pilot-deposit="100000">+10만</button><button type="button" class="pilot-filter-chip" data-pilot-deposit="500000">+50만</button><button type="button" class="pilot-filter-chip" data-pilot-deposit="1000000">+100만</button></div></div><div class="pilot-wallet-action"><h3>출금</h3><div class="pilot-wallet-action-row"><input class="pilot-input" type="number" id="pilot-withdraw-amount" min="1000" step="1000" placeholder="금액 (원)"><button type="button" class="pilot-button is-danger" data-pilot-action="withdraw">출금</button></div><div class="pilot-wallet-presets"><button type="button" class="pilot-filter-chip" data-pilot-withdraw="100000">-10만</button><button type="button" class="pilot-filter-chip" data-pilot-withdraw="500000">-50만</button></div></div></div><div class="pilot-inline-note" style="margin-top:10px"><i class="ph ph-warning" aria-hidden="true"></i><span>초기화하면 보유 코인과 전략별 포지션·매매 기록이 사라집니다.</span><button type="button" class="pilot-button is-small" data-pilot-action="reset-wallet">모의 계좌 초기화</button></div></div></section></section>
 
-                        <section class="pilot-page" data-pilot-page="market"><div class="pilot-page-heading"><div><h1 class="pilot-page-title">시장 현황</h1></div><div class="pilot-heading-actions"><label class="pilot-field" style="min-width:200px"><span class="pilot-visually-hidden">시장 검색</span><input class="pilot-input pilot-market-search" id="pilot-market-search" type="search" placeholder="시장 검색 (BTC, ETH)"></label><button type="button" class="pilot-button" data-pilot-action="refresh-market"><i class="ph ph-arrows-clockwise" aria-hidden="true"></i> 시세 새로고침</button></div></div><div class="pilot-market-layout"><section class="pilot-panel"><div class="pilot-market-quote"><div><span class="pilot-market-symbol" id="pilot-market-symbol">BTC/KRW</span><span class="pilot-market-name" id="pilot-market-name">선택한 시장</span></div><div><span class="pilot-market-price" id="pilot-market-price">-</span><span class="pilot-market-change" id="pilot-market-change">-</span></div></div><div class="pilot-market-time-meta"><div class="pilot-market-time-item"><span class="pilot-market-time-label">최근 체결 시각</span><span class="pilot-market-time-value" id="pilot-market-source-asof">시각 정보 미제공</span></div><div class="pilot-market-time-item"><span class="pilot-market-time-label">서버 시세 수집 시각</span><span class="pilot-market-time-value" id="pilot-market-fetched-at">시각 정보 미제공</span></div></div><div class="pilot-market-metrics"><div><span class="pilot-market-metric-label">24시간 고가</span><strong class="pilot-market-metric-value" id="pilot-market-high">-</strong></div><div><span class="pilot-market-metric-label">24시간 저가</span><strong class="pilot-market-metric-value" id="pilot-market-low">-</strong></div><div><span class="pilot-market-metric-label">거래대금</span><strong class="pilot-market-metric-value" id="pilot-market-volume">-</strong></div><div><span class="pilot-market-metric-label">보유 평가</span><strong class="pilot-market-metric-value" id="pilot-market-holding">-</strong></div></div><div class="pilot-panel-header"><div><h2 class="pilot-panel-title">가격 차트</h2></div><div class="pilot-market-toolbar"><div class="pilot-market-control-group" role="group" aria-label="캔들 간격"><button type="button" class="pilot-market-interval" data-pilot-candle-interval="1" aria-pressed="false">1분</button><button type="button" class="pilot-market-interval is-active" data-pilot-candle-interval="5" aria-pressed="true">5분</button><button type="button" class="pilot-market-interval" data-pilot-candle-interval="15" aria-pressed="false">15분</button><button type="button" class="pilot-market-interval" data-pilot-candle-interval="60" aria-pressed="false">1시간</button></div><div class="pilot-market-control-group" role="group" aria-label="표시 캔들 수"><button type="button" class="pilot-market-range" data-pilot-candle-range="30" aria-pressed="false">30개</button><button type="button" class="pilot-market-range is-active" data-pilot-candle-range="60" aria-pressed="true">60개</button><button type="button" class="pilot-market-range" data-pilot-candle-range="100" aria-pressed="false">100개</button></div></div></div><div class="pilot-market-chart-wrap"><canvas id="pilot-market-chart" class="pilot-market-chart" aria-label="선택한 시장 캔들 차트"></canvas><div class="pilot-chart-empty" id="pilot-market-empty" hidden>캔들 데이터를 불러오는 중입니다.</div></div></section>${tradePanelMarkup('market')}</div><div class="pilot-section-spacer"></div><section class="pilot-panel"><div class="pilot-panel-header"><div><h2 class="pilot-panel-title">시장 목록</h2></div><div class="pilot-filter-bar"><select class="pilot-select" style="width:auto" id="pilot-market-sort"><option value="volume">거래대금순</option><option value="change_desc">상승률순</option><option value="change_asc">하락률순</option><option value="name">이름순</option></select></div></div><div class="pilot-market-list" id="pilot-market-list"></div></section></section>
+                        <section class="pilot-page" data-pilot-page="market"><div class="pilot-page-heading"><div><h1 class="pilot-page-title">시장 현황</h1></div><div class="pilot-heading-actions"><label class="pilot-field" style="min-width:200px"><span class="pilot-visually-hidden">시장 검색</span><input class="pilot-input pilot-market-search" id="pilot-market-search" type="search" placeholder="시장 검색 (BTC, ETH)"></label><button type="button" class="pilot-button" data-pilot-action="refresh-market"><i class="ph ph-arrows-clockwise" aria-hidden="true"></i> 시세 새로고침</button></div></div><div class="pilot-market-layout"><section class="pilot-panel"><div class="pilot-market-quote"><div><span class="pilot-market-symbol" id="pilot-market-symbol">BTC/KRW</span><span class="pilot-market-name" id="pilot-market-name">업비트 원화 시장</span><span class="pilot-market-status" id="pilot-market-status">시세 확인 중</span><span class="pilot-visually-hidden" id="pilot-market-status-announcement" role="status" aria-live="polite" aria-atomic="true"></span><span class="pilot-visually-hidden" id="pilot-market-refresh-announcement" role="status" aria-live="polite" aria-atomic="true"></span></div><div><span class="pilot-market-price" id="pilot-market-price">-</span><span class="pilot-market-change" id="pilot-market-change">-</span></div></div><div class="pilot-market-time-meta"><div class="pilot-market-time-item"><span class="pilot-market-time-label">최근 체결 시각</span><span class="pilot-market-time-value" id="pilot-market-source-asof">시각 정보 미제공</span></div><div class="pilot-market-time-item"><span class="pilot-market-time-label">서버 시세 수집 시각</span><span class="pilot-market-time-value" id="pilot-market-fetched-at">시각 정보 미제공</span></div></div><div class="pilot-market-metrics"><div><span class="pilot-market-metric-label">24시간 고가</span><strong class="pilot-market-metric-value" id="pilot-market-high">-</strong></div><div><span class="pilot-market-metric-label">24시간 저가</span><strong class="pilot-market-metric-value" id="pilot-market-low">-</strong></div><div><span class="pilot-market-metric-label">거래대금</span><strong class="pilot-market-metric-value" id="pilot-market-volume">-</strong></div><div><span class="pilot-market-metric-label">보유 평가</span><strong class="pilot-market-metric-value" id="pilot-market-holding">-</strong></div></div><div class="pilot-panel-header"><div><h2 class="pilot-panel-title">가격 차트</h2></div><div class="pilot-market-toolbar"><div class="pilot-market-control-group" role="group" aria-label="캔들 간격"><button type="button" class="pilot-market-interval" data-pilot-candle-interval="1" aria-pressed="false">1분</button><button type="button" class="pilot-market-interval is-active" data-pilot-candle-interval="5" aria-pressed="true">5분</button><button type="button" class="pilot-market-interval" data-pilot-candle-interval="15" aria-pressed="false">15분</button><button type="button" class="pilot-market-interval" data-pilot-candle-interval="60" aria-pressed="false">1시간</button></div><div class="pilot-market-control-group" role="group" aria-label="표시 캔들 수"><button type="button" class="pilot-market-range" data-pilot-candle-range="30" aria-pressed="false">30개</button><button type="button" class="pilot-market-range is-active" data-pilot-candle-range="60" aria-pressed="true">60개</button><button type="button" class="pilot-market-range" data-pilot-candle-range="100" aria-pressed="false">100개</button></div></div></div><div class="pilot-market-chart-wrap"><canvas id="pilot-market-chart" class="pilot-market-chart" aria-label="선택한 시장 캔들 차트"></canvas><div class="pilot-chart-empty" id="pilot-market-empty" hidden>캔들 데이터를 불러오는 중입니다.</div></div><div class="pilot-market-candle-status" id="pilot-market-candle-status" hidden></div><details class="pilot-market-candle-data" id="pilot-market-candle-data" hidden><summary>최근 캔들 값</summary><p class="pilot-market-candle-data-note" id="pilot-market-candle-data-note"></p><div class="pilot-market-data-table-wrap" id="pilot-market-data-table"></div></details></section>${tradePanelMarkup('market')}</div><div class="pilot-section-spacer"></div><section class="pilot-panel"><div class="pilot-panel-header"><div><h2 class="pilot-panel-title">시장 목록</h2></div><div class="pilot-filter-bar"><select class="pilot-select" style="width:auto" id="pilot-market-sort"><option value="volume">거래대금순</option><option value="change_desc">상승률순</option><option value="change_asc">하락률순</option><option value="name">이름순</option></select></div></div><div class="pilot-market-list" id="pilot-market-list"></div></section></section>
 
                         <section class="pilot-page" data-pilot-page="analysis"><div class="pilot-page-heading"><div><h1 class="pilot-page-title">전략 분석</h1></div><div class="pilot-heading-actions"><select class="pilot-select" style="width:auto" id="pilot-analysis-filter"><option value="all">전체 결과</option><option value="BUY">매수</option><option value="SELL">매도</option><option value="HOLD">관망</option></select><select class="pilot-select" style="width:auto" id="pilot-analysis-sort"><option value="score">총점순</option><option value="buy">매수점수순</option><option value="sell">매도점수순</option><option value="volume">거래대금순</option><option value="change">변동률순</option></select><button type="button" class="pilot-button" data-pilot-action="load-analysis"><i class="ph ph-play" aria-hidden="true"></i> 분석 실행</button></div></div><section class="pilot-panel"><div class="pilot-analysis-summary"><div class="pilot-analysis-stat"><strong id="pilot-analysis-total">—</strong><span>분석한 종목</span></div><div class="pilot-analysis-stat is-buy"><strong id="pilot-analysis-buy">—</strong><span>매수 판정</span></div><div class="pilot-analysis-stat is-sell"><strong id="pilot-analysis-sell">—</strong><span>매도 판정</span></div><div class="pilot-analysis-stat is-watch"><strong id="pilot-analysis-hold">—</strong><span>관망</span></div><div class="pilot-analysis-stat"><strong id="pilot-analysis-strong">—</strong><span>강한 신호</span></div></div><div class="pilot-analysis-table pilot-table-wrap"><table class="pilot-table"><thead><tr><th>자산</th><th class="pilot-table-number">현재가</th><th class="pilot-table-number">24시간 변동</th><th class="pilot-table-number">RSI</th><th>MACD</th><th class="pilot-table-number">신호 점수 (0~100)</th><th>판정</th><th>관리</th></tr></thead><tbody id="pilot-analysis-rows"></tbody></table></div></section></section>
 
@@ -2307,17 +2525,35 @@
         const paperState = paper?.state || (paper?.active ? 'RUNNING' : 'STOPPED');
         const paperNotStarted = paper?.available === false && paper?.reason === 'paper_validation_session_not_started';
         const paperKnown = paper?.available === true || paperNotStarted;
-        setText('pilot-gate-paper-detail', paperNotStarted
+        const paperStatePresentation = {
+            PASS: { label: '완료', tone: '', icon: 'check' },
+            RUNNING: { label: '진행 중', tone: 'pending', icon: 'hourglass-medium' },
+            STOPPED: { label: '중지됨', tone: 'neutral', icon: 'pause' }
+        }[paperState] || null;
+        const paperStatusKnown = paperKnown && paperStatePresentation !== null;
+        const paperDetail = paperNotStarted
             ? '실행 기록 없음 · 시작 가능'
-            : !paperKnown ? '상태 확인 필요'
-            : `${paperState === 'RUNNING' ? '진행 중' : '중지됨'} · 청산 ${number(paper.closedTradeCount)}회`);
-        renderGateIcon('pilot-gate-paper-icon', !paperKnown ? 'blocked' : paperState === 'PASS' ? '' : paperState === 'RUNNING' ? 'pending' : 'blocked', !paperKnown ? 'warning' : paperState === 'PASS' ? 'check' : paperState === 'RUNNING' ? 'hourglass-medium' : 'pause');
+            : !paperStatusKnown
+                ? '상태 확인 필요'
+                : `${paperStatePresentation.label} · 청산 ${number(paper.closedTradeCount)}회`;
+        const paperTone = paperStatusKnown ? paperStatePresentation.tone : 'blocked';
+        const paperIcon = paperStatusKnown ? paperStatePresentation.icon : 'warning';
+        setText('pilot-gate-paper-detail', paperDetail);
+        renderGateIcon('pilot-gate-paper-icon', paperTone, paperIcon);
 
         const protectiveOnly = state.status?.runtimeState === 'PROTECTIVE_ONLY';
-        const dataProblem = protectiveOnly || paper?.orphaned === true || paper?.analysisDataHealth?.failClosed === true || paper?.riskMonitor?.failClosed === true;
+        const marketPresentation = marketSnapshotPresentation(state.marketSnapshot, state.marketPricesLoaded, state.marketPrices);
+        const marketNeedsReview = marketPresentation.state !== 'complete';
+        const marketWarning = marketPresentation.state === 'partial'
+            ? '일부 시세 확인 필요'
+            : marketPresentation.state === 'stale'
+                ? '시세 최신 여부 확인 필요'
+                : '시세 상태 확인 필요';
+        const dataProblem = protectiveOnly || marketNeedsReview || paper?.orphaned === true || paper?.analysisDataHealth?.failClosed === true || paper?.riskMonitor?.failClosed === true;
         setText('pilot-gate-freshness-detail', protectiveOnly
             ? '보호 감시 전용 · 신규 진입 잠금'
-            : paperNotStarted ? '모의투자 시작 후 확인' : !paperKnown || dataProblem ? '데이터 확인 필요' : '데이터 정상');
+            : marketNeedsReview ? marketWarning
+                : paperNotStarted ? '모의투자 시작 후 확인' : !paperKnown || dataProblem ? '데이터 확인 필요' : '데이터 정상');
         renderGateIcon('pilot-gate-freshness-icon', dataProblem ? 'blocked' : !paperKnown ? 'pending' : '', dataProblem || !paperKnown ? 'warning' : 'database');
     }
 
@@ -2462,6 +2698,7 @@
         const target = byId(targetId);
         if (!target) return;
         const rows = positions();
+        target.closest('table')?.classList.toggle('is-position-empty', rows.length === 0);
         if (!rows.length) {
             const message = positionDataKnown() ? '현재 보유 포지션이 없습니다.' : '보유 정보를 불러오지 못했습니다.';
             target.innerHTML = `<tr><td colspan="7"><div class="pilot-inline-empty">${message}</div></td></tr>`;
@@ -2558,14 +2795,13 @@
                             : analysisIncomplete > 0
                                 ? `부분 응답 ${analysisIncomplete}회 기록`
                                 : '전체 대상 시장 분석 수신 정상';
+        const marketPresentation = marketSnapshotPresentation(state.marketSnapshot, state.marketPricesLoaded, state.marketPrices);
         const marketDetail = protectiveOnly && state.status?.stopReason === 'risk_data_gap'
             ? '허용 시세 공백 발생 · 연속성 확인 필요'
-            : !state.marketPricesLoaded
-                ? '시세를 불러오지 못했습니다.'
-                : state.marketPrices.length ? '시세를 불러왔습니다.' : '표시할 시세가 없습니다.';
+            : marketPresentation.detail;
         const items = [
             { title: '실행 모드', detail: protectiveOnly ? 'LIVE · 위험 감시 전용 · 신규 주문 잠금' : state.actualMode === 'LIVE' ? '서버 실거래 · 주문 전 확인 필요' : state.actualMode === 'DRY_RUN' ? '서버 모의투자 · 실제 자금 미사용' : '거래 모드를 확인할 수 없습니다.', tone: protectiveOnly ? 'danger' : modeKnown && state.actualMode !== 'LIVE' ? 'ok' : 'warning' },
-            { title: '시세 데이터', detail: state.marketPricesLoaded && stale > 0 ? `${stale}회 신규 진입 차단 기록` : marketDetail, tone: protectiveOnly && state.status?.stopReason === 'risk_data_gap' ? 'danger' : state.marketPricesLoaded && state.marketPrices.length > 0 && stale === 0 ? 'ok' : 'warning' },
+            { title: '시세 데이터', detail: state.marketPricesLoaded && stale > 0 ? `${stale}회 신규 진입 차단 기록` : marketDetail, tone: protectiveOnly && state.status?.stopReason === 'risk_data_gap' ? 'danger' : stale > 0 ? 'warning' : marketPresentation.tone === 'complete' && state.marketSnapshot?.marketListStale === false ? 'ok' : 'warning' },
             { title: '분석 데이터 상태', detail: analysisDetail, tone: analysisStatusKnown ? analysisTone : 'warning' },
             { title: '연속 손실 차단', detail: !circuitKnown ? '설정 상태를 확인할 수 없습니다.' : circuit.enabled ? `${circuit.lossCount || 0}/${circuit.maxLosses || 0}회 · ${circuit.coolingDown ? '차단 중' : '대기 중'}` : '비활성화', tone: !circuitKnown ? 'warning' : circuit.coolingDown ? 'danger' : circuit.enabled ? 'warning' : 'ok' },
             { title: '기록 연속성', detail: paper.continuityEligible === false ? '공백 기록으로 전환 보류' : paperNotStarted ? '모의투자 기록 없음' : paper.available === true ? '현재 실행 기록 확인 중' : '상태를 확인할 수 없습니다.', tone: paper.continuityEligible === false ? 'danger' : paper.available === true ? 'ok' : 'warning' }
@@ -2593,8 +2829,8 @@
         if (prefix === 'market') state.selectedCoin = selectedCoin || state.selectedCoin;
         const market = currentMarket(selectedCoin) || {};
         const position = currentPosition(selectedCoin);
-        const price = hasFiniteValue(market.price) ? Number(market.price)
-            : hasFiniteValue(position?.currentPrice) ? Number(position.currentPrice) : null;
+        const quoteIssue = marketQuoteFreshnessIssue(market);
+        const price = quoteIssue === null && hasFiniteValue(market.price) ? Number(market.price) : null;
         const holdingValue = hasFiniteValue(position?.currentValue) ? Number(position.currentValue) : null;
         const maxAmount = trade.side === 'buy'
             ? hasFiniteValue(state.account?.krwBalance) ? Number(state.account.krwBalance) : null
@@ -2614,8 +2850,8 @@
             modeLabel.textContent = !modeKnown ? '모드 확인 필요' : state.activeMode === 'live' ? '실거래' : '모의투자';
             modeLabel.className = `pilot-status-pill${!modeKnown || state.activeMode === 'live' && !state.liveEligible ? ' is-warning' : ''}`;
         }
-        if (lockCopy) lockCopy.textContent = canTrade() ? (state.activeMode === 'live' ? '사전 점검 통과 상태입니다. 실행 전 최종 확인이 필요합니다.' : '모의투자 주문입니다.') : tradeBlockReason();
-        if (lockIcon) lockIcon.className = `ph ${canTrade() ? (state.activeMode === 'live' ? 'ph-shield-check' : 'ph-lock-key-open') : 'ph-lock-key'}`;
+        if (lockCopy) lockCopy.textContent = canTrade(selectedCoin) ? (state.activeMode === 'live' ? '사전 점검 통과 상태입니다. 실행 전 최종 확인이 필요합니다.' : '모의투자 주문입니다.') : tradeBlockReason(selectedCoin);
+        if (lockIcon) lockIcon.className = `ph ${canTrade(selectedCoin) ? (state.activeMode === 'live' ? 'ph-shield-check' : 'ph-lock-key-open') : 'ph-lock-key'}`;
         if (amountLabel) amountLabel.textContent = trade.side === 'buy' ? '주문 금액 (원)' : '매도할 금액 (원)';
         if (balance) balance.textContent = trade.side === 'buy'
             ? `잔액 ${hasFiniteValue(state.account?.krwBalance) ? formatWon(state.account.krwBalance) : '미제공'}`
@@ -2629,9 +2865,9 @@
         setTradeText('holding', holdingValue !== null ? formatWon(holdingValue) : position ? '평가액 미제공' : positionDataKnown() ? '보유 자산 없음' : '자산 미제공');
         setTradeText('fee', amount ? formatWon(fee) : '-');
         submit.textContent = !modeKnown ? '거래 모드 확인 필요' : trade.side === 'buy' ? (state.activeMode === 'live' ? '실제 주문 실행' : '모의 주문 실행') : (state.activeMode === 'live' ? '실제 매도 실행' : '모의 매도 실행');
-        submit.disabled = !canTrade() || state.pendingMutation?.locked === true || !selectedCoin || amount <= 0 || (trade.side === 'sell' && (!holdingValue || holdingValue <= 0)) || (trade.side === 'buy' && amount < 5000);
+        submit.disabled = !canTrade(selectedCoin) || state.pendingMutation?.locked === true || !selectedCoin || amount <= 0 || (trade.side === 'sell' && (!holdingValue || holdingValue <= 0)) || (trade.side === 'buy' && amount < 5000);
         const disclaimer = root.querySelector(`[data-pilot-trade-disclaimer="${prefix}"]`);
-        if (disclaimer) disclaimer.textContent = canTrade() ? `수수료 0.05% 기준 예상치 · ${state.activeMode === 'live' ? '실제 체결 가격은 예상과 다를 수 있습니다.' : '모의 체결로 기록됩니다.'}` : '현재는 주문할 수 없습니다.';
+        if (disclaimer) disclaimer.textContent = canTrade(selectedCoin) ? `수수료 0.05% 기준 예상치 · ${state.activeMode === 'live' ? '실제 체결 가격은 예상과 다를 수 있습니다.' : '모의 체결로 기록됩니다.'}` : tradeBlockReason(selectedCoin);
         $$(`[data-pilot-trade-side="${prefix}"]`).forEach(button => button.classList.toggle('is-active', button.dataset.tradeSide === trade.side));
     }
 
@@ -2840,21 +3076,83 @@
     function drawMarketChart() {
         const canvas = byId('pilot-market-chart'); const empty = byId('pilot-market-empty');
         const candles = getDisplayedCandles(state.candles, state.candleDisplayRange);
+        const candleDataDetails = byId('pilot-market-candle-data');
+        const candleDataNote = byId('pilot-market-candle-data-note');
+        const candleDataTable = byId('pilot-market-data-table');
+        const candleDataStatus = byId('pilot-market-candle-status');
+        const hasLastKnownCandles = Array.isArray(state.candles)
+            && state.candles.length > 0
+            && state.candlesCoin === state.selectedCoin
+            && state.candlesInterval === state.candleInterval;
+        if (candleDataStatus) {
+            candleDataStatus.hidden = !state.candlesError && !(hasLastKnownCandles && state.candlesLoading);
+            if (state.candlesError) {
+                candleDataStatus.setAttribute('role', 'status');
+                candleDataStatus.setAttribute('aria-live', 'polite');
+            } else {
+                candleDataStatus.removeAttribute('role');
+                candleDataStatus.removeAttribute('aria-live');
+            }
+            candleDataStatus.textContent = state.candlesError
+                ? hasLastKnownCandles
+                    ? '최신 캔들을 불러오지 못했습니다. 마지막 정상 자료를 표시합니다.'
+                    : '최신 캔들을 불러오지 못했습니다.'
+                : state.candlesLoading ? '최신 캔들을 확인하는 동안 마지막 정상 자료를 표시합니다.' : '';
+        }
+        if (candleDataDetails && candleDataNote && candleDataTable) {
+            const recentCandles = candles.slice(-20).reverse();
+            candleDataDetails.hidden = recentCandles.length === 0;
+            candleDataNote.textContent = recentCandles.length
+                ? state.candlesError
+                    ? `최신 자료를 불러오지 못했습니다. 화면에 표시한 ${candles.length}개 중 마지막 정상 조회 자료 ${recentCandles.length}개 · 시각은 기기 현지 시간입니다.`
+                    : state.candlesLoading
+                        ? `최신 자료를 확인하는 중입니다. 화면에 표시한 ${candles.length}개 중 마지막 정상 조회 자료 ${recentCandles.length}개 · 시각은 기기 현지 시간입니다.`
+                        : `화면에 표시한 ${candles.length}개 중 최신 ${recentCandles.length}개 · 시각은 기기 현지 시간입니다.`
+                : '';
+            const tableMarkup = recentCandles.length
+                ? `<table class="pilot-table pilot-market-data-table"><caption class="pilot-visually-hidden">선택 종목 최신 캔들 OHLCV 기록</caption><thead><tr><th scope="col">시각</th><th class="pilot-table-number" scope="col">시가</th><th class="pilot-table-number" scope="col">고가</th><th class="pilot-table-number" scope="col">저가</th><th class="pilot-table-number" scope="col">종가</th><th class="pilot-table-number" scope="col">거래량</th></tr></thead><tbody>${recentCandles.map(candle => `<tr><th scope="row">${escapeHtml(formatDateTime(candle.time))}</th><td class="pilot-table-number">${formatPrice(candle.open)}</td><td class="pilot-table-number">${formatPrice(candle.high)}</td><td class="pilot-table-number">${formatPrice(candle.low)}</td><td class="pilot-table-number">${formatPrice(candle.close)}</td><td class="pilot-table-number">${formatQuantity(candle.volume)}</td></tr>`).join('')}</tbody></table>`
+                : '';
+            if (candleDataTable.innerHTML !== tableMarkup) candleDataTable.innerHTML = tableMarkup;
+        }
         if (empty) {
             empty.hidden = candles.length > 0;
             if (!candles.length) empty.textContent = state.candlesError
                 ? '가격 자료를 불러오지 못했습니다. 다시 시도해 주세요.'
                 : state.candlesLoading ? '가격 자료를 불러오는 중입니다.' : '표시할 가격 자료가 없습니다.';
         }
-        drawCanvas(canvas, 398, (ctx, width, height) => {
+        const chartWrap = canvas?.parentElement;
+        const configuredHeight = chartWrap && typeof window.getComputedStyle === 'function'
+            ? Number.parseFloat(window.getComputedStyle(chartWrap).getPropertyValue('--pilot-market-chart-height'))
+            : NaN;
+        const chartHeight = Number.isFinite(configuredHeight) && configuredHeight > 0
+            ? configuredHeight
+            : chartWrap?.clientHeight || 398;
+        drawCanvas(canvas, chartHeight, (ctx, width, height) => {
             if (!candles.length) return;
-            const padding = { top: 18, right: 54, bottom: 26, left: 16 }; const innerWidth = Math.max(10, width - padding.left - padding.right); const innerHeight = Math.max(10, height - padding.top - padding.bottom);
-            const high = Math.max(...candles.map(item => number(item.high)), ...candles.map(item => number(item.close))); const low = Math.min(...candles.map(item => number(item.low)), ...candles.map(item => number(item.close))); const range = high - low || 1; const y = value => padding.top + innerHeight - ((value - low) / range) * innerHeight;
+            const padding = { top: 18, right: 54, bottom: 26, left: 16 };
+            const high = Math.max(...candles.map(item => number(item.high)), ...candles.map(item => number(item.close)));
+            const low = Math.min(...candles.map(item => number(item.low)), ...candles.map(item => number(item.close)));
+            const range = high - low || 1;
             ctx.font = '10px -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif'; ctx.fillStyle = '#6b7684'; ctx.strokeStyle = 'rgba(2, 9, 19, 0.12)'; ctx.lineWidth = 1;
-            for (let row = 0; row <= 4; row += 1) { const lineY = padding.top + (row / 4) * innerHeight; ctx.beginPath(); ctx.moveTo(padding.left, lineY); ctx.lineTo(width - padding.right, lineY); ctx.stroke(); ctx.fillText(formatPrice(high - (row / 4) * range), width - padding.right + 7, lineY + 4); }
+            const tickLabels = Array.from({ length: 5 }, (_, row) => formatPrice(high - (row / 4) * range));
+            const axisLabelGap = 7;
+            const axisLabelEdge = 4;
+            const widestAxisLabel = Math.max(...tickLabels.map(label => ctx.measureText(label).width));
+            padding.right = Math.max(padding.right, Math.ceil(widestAxisLabel + axisLabelGap + axisLabelEdge));
+            const innerWidth = Math.max(10, width - padding.left - padding.right);
+            const innerHeight = Math.max(10, height - padding.top - padding.bottom);
+            const y = value => padding.top + innerHeight - ((value - low) / range) * innerHeight;
+            for (let row = 0; row <= 4; row += 1) { const lineY = padding.top + (row / 4) * innerHeight; ctx.beginPath(); ctx.moveTo(padding.left, lineY); ctx.lineTo(width - padding.right, lineY); ctx.stroke(); ctx.fillText(tickLabels[row], width - padding.right + axisLabelGap, lineY + 4); }
             const step = innerWidth / candles.length; const bodyWidth = Math.max(2, Math.min(12, step * 0.62));
             candles.forEach((candle, index) => { const x = padding.left + step * index + step / 2; const open = number(candle.open); const close = number(candle.close); const highValue = number(candle.high); const lowValue = number(candle.low); const bullish = close >= open; ctx.strokeStyle = bullish ? '#027648' : '#a51926'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(x, y(highValue)); ctx.lineTo(x, y(lowValue)); ctx.stroke(); ctx.fillStyle = bullish ? '#027648' : '#a51926'; const top = y(Math.max(open, close)); const bottom = y(Math.min(open, close)); ctx.fillRect(x - bodyWidth / 2, top, bodyWidth, Math.max(1, bottom - top)); });
-            ctx.fillStyle = '#6b7684'; if (candles[0]?.time) ctx.fillText(formatTime(candles[0].time), padding.left, height - 7); if (candles[candles.length - 1]?.time) ctx.fillText(formatTime(candles[candles.length - 1].time), Math.max(padding.left, width - padding.right - 42), height - 7);
+            ctx.fillStyle = '#6b7684';
+            if (candles[0]?.time) ctx.fillText(formatTime(candles[0].time), padding.left, height - 7);
+            if (candles[candles.length - 1]?.time) {
+                const lastTimeLabel = formatTime(candles[candles.length - 1].time);
+                const lastTimeWidth = ctx.measureText(lastTimeLabel).width;
+                const lastTimeX = Math.max(padding.left, width - padding.right - lastTimeWidth);
+                ctx.fillText(lastTimeLabel, lastTimeX, height - 7);
+            }
         });
     }
 
@@ -2874,9 +3172,23 @@
     function renderMarketHeader() {
         const marketData = currentMarket(); const market = marketData || {}; const position = currentPosition(); const symbol = symbolOf(state.selectedCoin);
         const priceKnown = hasFiniteValue(market.price);
-        setText('pilot-market-symbol', `${symbol}/KRW`); setText('pilot-market-name', marketData ? '업비트 원화 시장' : '시세를 확인할 수 없습니다.'); setText('pilot-market-price', priceKnown ? `${formatPrice(market.price)}원` : '미제공');
-        setText('pilot-market-source-asof', formatMarketTimestamp(market.sourceAsOf));
-        setText('pilot-market-fetched-at', formatMarketTimestamp(market.fetchedAt));
+        const marketPresentation = marketSnapshotPresentation(state.marketSnapshot, state.marketPricesLoaded, state.marketPrices);
+        const selectedMarketPresentation = selectedMarketQuotePresentation(marketData, marketPresentation);
+        const marketName = byId('pilot-market-name');
+        const marketStatus = byId('pilot-market-status');
+        const marketStatusLabel = selectedMarketPresentation.label;
+        setText('pilot-market-symbol', `${symbol}/KRW`);
+        if (marketName && marketName.textContent !== '업비트 원화 시장') marketName.textContent = '업비트 원화 시장';
+        if (marketStatus && marketStatus.textContent !== marketStatusLabel) marketStatus.textContent = marketStatusLabel;
+        updateMarketAnnouncement('pilot-market-status-announcement', `${symbol}/KRW · ${marketStatusLabel}`);
+        if (marketStatus) marketStatus.dataset.marketState = selectedMarketPresentation.state;
+        setText('pilot-market-price', priceKnown ? `${formatPrice(market.price)}원` : '미제공');
+        const sourceTimeElement = byId('pilot-market-source-asof');
+        const fetchedTimeElement = byId('pilot-market-fetched-at');
+        if (sourceTimeElement?.previousElementSibling) sourceTimeElement.previousElementSibling.textContent = marketData ? '최근 체결 시각' : '전체 시세 기준 시각';
+        if (fetchedTimeElement?.previousElementSibling) fetchedTimeElement.previousElementSibling.textContent = state.marketPricesLoaded ? '서버 시세 수집 시각' : '마지막 서버 시세 수집 시각';
+        setText('pilot-market-source-asof', formatMarketTimestamp(marketData?.sourceAsOf));
+        setText('pilot-market-fetched-at', formatMarketTimestamp(marketData?.fetchedAt ?? state.marketSnapshot?.fetchedAt));
         const changeElement = byId('pilot-market-change');
         if (changeElement) { changeElement.textContent = priceKnown && hasFiniteValue(market.change) ? formatPercent(market.change) : '미제공'; changeElement.className = `pilot-market-change ${classForValue(market.change)}`; }
         setText('pilot-market-high', hasFiniteValue(market.high) ? `${formatPrice(market.high)}원` : '미제공'); setText('pilot-market-low', hasFiniteValue(market.low) ? `${formatPrice(market.low)}원` : '미제공'); setText('pilot-market-volume', hasFiniteValue(market.volumeKrw) ? formatWon(market.volumeKrw) : '미제공');
@@ -2905,7 +3217,7 @@
             target.innerHTML = `<div class="pilot-empty-panel"><i class="ph ph-chart-line" aria-hidden="true"></i>${escapeHtml(emptyMessage)}</div>`;
             return;
         }
-        target.innerHTML = `<div class="pilot-market-row pilot-market-row-head" aria-hidden="true"><span class="pilot-market-row-label">시장</span><span class="pilot-market-row-label" style="text-align:right">현재가</span><span class="pilot-market-row-label" style="text-align:right">24시간</span><span class="pilot-market-row-label" style="text-align:right">거래량</span><span></span></div>${list.slice(0, 80).map(item => `<div class="pilot-market-row ${item.coin === state.selectedCoin ? 'is-selected' : ''}" role="button" tabindex="0" data-pilot-market-row="${escapeHtml(item.coin)}"><span class="pilot-market-row-symbol">${escapeHtml(symbolOf(item.coin))}/KRW</span><span class="pilot-market-row-price">${formatPrice(item.price)}</span><span class="pilot-market-row-change ${classForValue(item.change)}">${formatPercent(item.change)}</span><span class="pilot-market-row-volume">${formatWon(item.volumeKrw)}</span><span><i class="ph ph-arrow-up-right" aria-hidden="true"></i></span></div>`).join('')}`;
+        target.innerHTML = `<div class="pilot-market-row pilot-market-row-head" aria-hidden="true"><span class="pilot-market-row-label">시장</span><span class="pilot-market-row-label" style="text-align:right">현재가</span><span class="pilot-market-row-label" style="text-align:right">24시간</span><span class="pilot-market-row-label" style="text-align:right">거래량</span><span></span></div>${list.slice(0, 80).map(item => `<div class="pilot-market-row ${item.coin === state.selectedCoin ? 'is-selected' : ''}" role="button" tabindex="0" aria-pressed="${item.coin === state.selectedCoin ? 'true' : 'false'}" data-pilot-market-row="${escapeHtml(item.coin)}"><span class="pilot-market-row-symbol">${escapeHtml(symbolOf(item.coin))}/KRW</span><span class="pilot-market-row-price">${formatPrice(item.price)}</span><span class="pilot-market-row-change ${classForValue(item.change)}">${formatPercent(item.change)}</span><span class="pilot-market-row-volume">${formatWon(item.volumeKrw)}</span><span><i class="ph ph-arrow-up-right" aria-hidden="true"></i></span></div>`).join('')}`;
     }
 
     function renderPortfolio() {
@@ -3851,8 +4163,19 @@
         syncObserverControls();
         if (!quiet) setConnection(state.coreReady, state.coreReady ? '' : '연결 확인 중');
         const period = encodeURIComponent(state.chartPeriod || '24h');
-        const requests = { status: '/status', account: '/account', pnl: '/cumulative-pnl', today: '/today-summary', statistics: '/statistics', validation: '/scalping-validation', strategyReadiness: '/strategy-readiness', paper: '/paper-validation', momentumShadow: '/momentum-shadow', portfolioAnalysis: '/portfolio-analysis', history: `/portfolio/history?period=${period}`, trades: '/trades?limit=12', marketPrices: '/market/prices', targetCoins: '/target-coins' };
+        const requests = { status: '/status', account: '/account', pnl: '/cumulative-pnl', today: '/today-summary', statistics: '/statistics', validation: '/scalping-validation', strategyReadiness: '/strategy-readiness', paper: '/paper-validation', momentumShadow: '/momentum-shadow', portfolioAnalysis: '/portfolio-analysis', history: `/portfolio/history?period=${period}`, trades: '/trades?limit=12', marketPrices: '/market/prices/snapshot', targetCoins: '/target-coins' };
         const settled = await Promise.all(Object.entries(requests).map(async ([key, path]) => { try { return [key, await requestJSON(path)]; } catch (error) { return [key, null, error]; } }));
+        const marketPricesIndex = settled.findIndex(([key]) => key === 'marketPrices');
+        const marketPricesError = settled[marketPricesIndex]?.[2];
+        if (marketPricesError?.status === 404 && state.online !== false && requestGeneration === networkGeneration) {
+            const targetCoins = settled.find(([key]) => key === 'targetCoins')?.[1] || null;
+            try {
+                const legacySnapshot = await loadLegacyMarketSnapshotOn404(marketPricesError, targetCoins, requestJSON);
+                settled[marketPricesIndex] = ['marketPrices', legacySnapshot];
+            } catch (error) {
+                settled[marketPricesIndex] = ['marketPrices', null, error];
+            }
+        }
         if (state.online === false || requestGeneration !== networkGeneration) {
             const shouldRefreshAfterCurrent = refreshAfterCurrent;
             refreshAfterCurrent = false;
@@ -3865,12 +4188,15 @@
         }
         const currentSnapshot = Object.fromEntries(settled.map(([key, data]) => [key, data]));
         const loaded = Object.fromEntries(Object.entries(currentSnapshot).map(([key, data]) => [key, data !== null]));
+        const marketSnapshot = normalizeMarketPriceSnapshot(loaded.marketPrices ? currentSnapshot.marketPrices : null);
+        const marketSnapshotLoaded = Boolean(loaded.marketPrices && marketSnapshot);
         const historyEntry = settled.find(([key]) => key === 'history');
         state.portfolioHistoryError = Boolean(historyEntry?.[2] || historyEntry?.[1]?.error);
         state.statisticsLoaded = loaded.statistics;
         state.tradesLoaded = loaded.trades;
-        state.marketPricesLoaded = loaded.marketPrices;
-        settled.forEach(([key, data]) => { if (key === 'strategyReadiness') { state.strategyReadiness = data; return; } if (data === null) return; if (key === 'history') state.portfolioHistory = Array.isArray(data?.data) ? data.data : []; else if (key === 'targetCoins') state.targetCoins = Array.isArray(data?.coins) ? data.coins : []; else state[key] = data; });
+        state.marketPricesLoaded = marketSnapshotLoaded;
+        if (marketSnapshot) state.marketSnapshot = marketSnapshot;
+        settled.forEach(([key, data]) => { if (key === 'strategyReadiness') { state.strategyReadiness = data; return; } if (key === 'marketPrices') { if (marketSnapshot) state.marketPrices = marketSnapshot.prices; return; } if (data === null) return; if (key === 'history') state.portfolioHistory = Array.isArray(data?.data) ? data.data : []; else if (key === 'targetCoins') state.targetCoins = Array.isArray(data?.coins) ? data.coins : []; else state[key] = data; });
         if (!loaded.paper) state.paper = null;
         state.actualMode = loaded.status && ['DRY_RUN', 'LIVE'].includes(currentSnapshot.status?.mode)
             ? currentSnapshot.status.mode
@@ -3879,7 +4205,7 @@
         state.coreReady = isCoreTradingSnapshotReady({
             status: loaded.status ? currentSnapshot.status : null,
             account: loaded.account ? currentSnapshot.account : null,
-            marketPrices: loaded.marketPrices ? currentSnapshot.marketPrices : null,
+            marketPrices: marketSnapshotLoaded ? marketSnapshot.prices : null,
             selectedCoin: state.selectedCoin
         });
         state.activeMode = state.actualMode === 'LIVE' ? 'live' : 'paper'; state.liveEligible = state.coreReady && runtimeCanAcceptOrders(state.status) && state.actualMode === 'LIVE' && state.validation?.promoted === true && state.strategyReadiness?.status === 'READY' && state.strategyReadiness?.currentEvidence === true && state.strategyReadiness?.liveGate?.passed === true;
@@ -3920,6 +4246,7 @@
         state.tradesLoaded = false;
         state.marketPrices = [];
         state.marketPricesLoaded = false;
+        state.marketSnapshot = null;
         state.targetCoins = [];
         state.candles = [];
         state.candlesError = false;
@@ -3969,18 +4296,24 @@
         if (!state.selectedCoin || (!force && state.candles.length && state.candlesCoin === state.selectedCoin && state.candlesInterval === state.candleInterval)) { renderMarketHeader(); drawMarketChart(); return; }
         const coin = state.selectedCoin;
         const interval = state.candleInterval;
+        const hasLastKnownCandles = Array.isArray(state.candles)
+            && state.candles.length > 0
+            && state.candlesCoin === coin
+            && state.candlesInterval === interval;
         const requestSequence = ++state.candlesRequestSequence;
         const isCurrentRequest = () => requestSequence === state.candlesRequestSequence
             && coin === state.selectedCoin
             && interval === state.candleInterval;
-        state.candles = []; state.candlesError = false; state.candlesLoading = true; state.candlesCoin = coin; state.candlesInterval = interval; drawMarketChart();
+        if (!hasLastKnownCandles) state.candles = [];
+        state.candlesError = false; state.candlesLoading = true; state.candlesCoin = coin; state.candlesInterval = interval; drawMarketChart();
         try {
             const candles = await requestJSON(`/market/candles/${encodeURIComponent(coin)}?unit=${interval}&count=100`);
             if (!isCurrentRequest()) return;
             state.candles = candles;
         } catch (error) {
             if (!isCurrentRequest()) return;
-            state.candles = []; state.candlesError = true;
+            if (!hasLastKnownCandles) state.candles = [];
+            state.candlesError = true;
             if (!force) showToast(`가격 자료를 불러오지 못했습니다: ${error.message}`, 'warning');
         } finally {
             if (isCurrentRequest()) state.candlesLoading = false;
@@ -4066,6 +4399,20 @@
     }
 
     function protectedMutationError(outcome, fallback) {
+        const body = outcome?.body;
+        if (body?.code === 'MARKET_QUOTE_STALE' && Array.isArray(body.markets) && body.markets.length > 0) {
+            const details = body.markets.map(item => {
+                const market = symbolOf(item.market);
+                const ageSeconds = Number(item.ageMs) / 1000;
+                const maximumSeconds = Number(item.maximumAgeMs) / 1000;
+                if (!Number.isFinite(ageSeconds) || !Number.isFinite(maximumSeconds)) return market;
+                const ageLabel = ageSeconds >= 60
+                    ? `${Math.floor(ageSeconds / 60)}분 ${Math.floor(ageSeconds % 60)}초 전`
+                    : `${Math.floor(ageSeconds)}초 전`;
+                return `${market} 최근 체결 ${ageLabel} · 허용 ${Math.floor(maximumSeconds)}초`;
+            });
+            return `${details.join(' / ')}. 최신 시세를 확인한 뒤 다시 시도해 주세요.`;
+        }
         const error = outcome?.body?.error;
         if (error?.code === 'idempotency_key_required') return '서버가 요청 키를 확인하지 못했습니다. 결과를 확인할 때까지 새 변경은 잠겨 있습니다.';
         if (error?.code === 'idempotency_key_conflict') return '서버 기록과 저장된 요청이 일치하지 않습니다. 새 변경은 잠겨 있습니다.';
@@ -4122,7 +4469,7 @@
     async function executeTrade(prefix) {
         const trade = state.trade[prefix]; const select = root.querySelector(`[data-pilot-trade-coin="${prefix}"]`); const input = root.querySelector(`[data-pilot-trade-amount="${prefix}"]`); if (!trade || !select || !input) return;
         const coin = select.value; const amount = number(input.value); const market = currentMarket(coin) || {}; const holding = currentPosition(coin) || {};
-        if (!canTrade()) { showToast(tradeBlockReason(), 'warning'); return; }
+        if (!canTrade(coin)) { showToast(tradeBlockReason(coin), 'warning'); return; }
         if (!coin || amount <= 0) { showToast('자산과 주문 금액을 확인해주세요.', 'warning'); return; }
         if (trade.side === 'buy' && amount < 5000) { showToast('최소 매수 금액은 5,000원입니다.', 'warning'); return; }
         const quantity = market.price > 0 ? amount / market.price : amount / number(holding.currentPrice); const actionText = trade.side === 'buy' ? '매수' : '매도'; const detail = trade.side === 'buy' ? `${formatWon(amount)} 주문` : `${formatQuantity(quantity)}개 매도`;
@@ -4136,6 +4483,11 @@
             const outcome = await manualMutationClient.submit(path, body);
             if (!reportProtectedMutationOutcome(outcome, `${actionText} 요청을 처리하지 못했습니다.`)) return;
             const result = outcome.body || {};
+            if (result.success === false) {
+                showToast(protectedMutationError(outcome, `${actionText} 요청을 처리하지 못했습니다.`), 'warning');
+                await loadCore({ quiet: true });
+                return;
+            }
             showToast(result.message || `${symbolOf(coin)} ${actionText} 완료`, 'success');
             if (outcome.kind === 'terminal-locked') {
                 showToast(outcome.message, 'warning');
@@ -4157,6 +4509,12 @@
             if (!reportProtectedMutationOutcome(outcome, '조건 주문을 처리하지 못했습니다.')) return;
             const result = outcome.body || {};
             const failureCount = Array.isArray(result.failures) ? result.failures.length : 0;
+            const completedTrades = Array.isArray(result.trades) ? result.trades.length : 0;
+            if (result.success === false && completedTrades === 0) {
+                showToast(protectedMutationError(outcome, '조건 주문을 처리하지 못했습니다.'), 'warning');
+                await loadCore({ quiet: true });
+                return;
+            }
             const toastMessage = failureCount > 0
                 ? `${result.message || '조건에 맞는 주문을 완료했습니다.'} 실패 ${failureCount}건`
                 : result.message || '조건에 맞는 주문을 완료했습니다.';
@@ -4264,7 +4622,7 @@
     }
 
     async function handleAction(action) {
-        if (action === 'retry-pending-mutation') return retryPendingMutation(); if (action === 'refresh-core') return loadCore(); if (action === 'refresh-market') { await loadCore(); return loadCandles(true); } if (action === 'load-analysis') return loadAnalysis(); if (action === 'load-news') return loadNews(); if (action === 'load-recommendations') return loadRecommendations(); if (action === 'reload-strategy-research') return loadStrategyResearch({ force: true }); if (action === 'smart-buy') return executeSmart('buy'); if (action === 'smart-sell') return executeSmart('sell'); if (action === 'deposit') return walletAction('deposit'); if (action === 'withdraw') return walletAction('withdraw'); if (action === 'reset-wallet') return resetWallet(); if (action === 'start-paper') return startPaper(false); if (action === 'start-paper-reset') return startPaper(true); if (action === 'stop-paper') return stopPaper(); if (action === 'record-snapshot') return recordCurrentPortfolioSnapshot(); if (action === 'reload-settings') { state.settingsLoaded = false; return loadSettings(); } if (action === 'save-settings') return saveSettings(); if (action === 'run-optimization') return runOptimization(); if (action === 'refresh-history') { await loadCore(); return loadHistory(); }
+        if (action === 'retry-pending-mutation') return retryPendingMutation(); if (action === 'refresh-core') return loadCore(); if (action === 'refresh-market') { await loadCore(); announceManualMarketRefresh(); return; } if (action === 'load-analysis') return loadAnalysis(); if (action === 'load-news') return loadNews(); if (action === 'load-recommendations') return loadRecommendations(); if (action === 'reload-strategy-research') return loadStrategyResearch({ force: true }); if (action === 'smart-buy') return executeSmart('buy'); if (action === 'smart-sell') return executeSmart('sell'); if (action === 'deposit') return walletAction('deposit'); if (action === 'withdraw') return walletAction('withdraw'); if (action === 'reset-wallet') return resetWallet(); if (action === 'start-paper') return startPaper(false); if (action === 'start-paper-reset') return startPaper(true); if (action === 'stop-paper') return stopPaper(); if (action === 'record-snapshot') return recordCurrentPortfolioSnapshot(); if (action === 'reload-settings') { state.settingsLoaded = false; return loadSettings(); } if (action === 'save-settings') return saveSettings(); if (action === 'run-optimization') return runOptimization(); if (action === 'refresh-history') { await loadCore(); return loadHistory(); }
     }
 
     root.addEventListener('click', async event => {

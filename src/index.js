@@ -1,16 +1,22 @@
 import dotenv from 'dotenv';
 import MultiCoinTrader from './trader/multiCoinTrader.js';
 import DashboardServer from './api/dashboardServer.js';
+import { createPublicMarketDataSource } from './api/publicMarketDataSource.js';
 import BacktestEngine from './backtest/backtestEngine.js';
 import UpbitAPI from './api/upbit.js';
+import { LiveCredentialStore } from './api/liveCredentialStore.js';
 import Logger from './utils/logger.js';
 import ParameterOptimizer from './optimization/parameterOptimizer.js';
 import { loadEnv, formatEnvErrors, formatEnvWarnings } from './config/envLoader.js';
 import { resolveTradingLimits } from './config/tradingLimits.js';
-import { setupExitHandlers } from './runtime/exitHandlers.js';
+import { acquireHeadlessRuntimeWriterLock, setupExitHandlers } from './runtime/exitHandlers.js';
 import { runAfterDashboardReady } from './runtime/dashboardStartup.js';
+import { createProfileWriterStartup } from './runtime/profileWriterStartup.js';
+import { resolveOptimizationStoragePaths } from './runtime/optimizationStorage.js';
+import { appendOptimizerHistory } from './runtime/optimizerHistoryStore.js';
+import { fetchCompleteUpbitCandleHistory } from './market-data/completeUpbitCandleHistory.js';
 import fs from 'fs';
-import axios from 'axios';
+import path from 'node:path';
 
 dotenv.config();
 
@@ -25,47 +31,24 @@ let activeExitHandlers = null;
  * @returns {Array} 캔들 데이터 배열 (최신순)
  */
 async function getMultipleMinuteCandles(upbit, market, unit, totalCount) {
-  const maxPerRequest = 200;
-  const allCandles = [];
-  let to = null;
-
-  while (allCandles.length < totalCount) {
-    const count = Math.min(maxPerRequest, totalCount - allCandles.length);
-
-    try {
-      let candles;
-      if (to) {
-          candles = await upbit.requestWithRetry(async () => {
-            const response = await axios.get(
-              `https://api.upbit.com/v1/candles/minutes/${unit}`,
-            upbit.getRequestConfig({ params: { market, count, to } })
-            );
-          return response.data;
-        });
-      } else {
-        candles = await upbit.getMinuteCandles(market, unit, count);
-      }
-
-      if (!candles || candles.length === 0) break;
-
-      allCandles.push(...candles);
-      const oldestCandle = candles[candles.length - 1];
-      to = oldestCandle.candle_date_time_utc;
-
-      // 최적화 API 호출은 2초 간격으로 여유있게 (대시보드 갱신과 병렬 진행)
-      await new Promise(resolve => setTimeout(resolve, 2000));
-    } catch (error) {
-      console.error(`캔들 데이터 수집 오류 (${market}):`, error.message);
-      break;
-    }
-  }
-
-  return allCandles;
+  return fetchCompleteUpbitCandleHistory({
+    marketDataClient: upbit,
+    market,
+    intervalMinutes: unit,
+    totalCount,
+    requestSpacingMs: 2_000
+  });
 }
 
 // 최적화된 파라미터 로드
-function loadOptimalConfig() {
-  const configFile = 'optimal_config.json';
+function loadOptimalConfig(env = process.env) {
+  const configFile = resolveOptimizationStoragePaths({
+    env,
+    stateDir: env.COINPILOT_STATE_DIR,
+    cwd: process.cwd(),
+    projectRoot: process.cwd(),
+    legacyBase: 'cwd'
+  }).optimalConfigFile.absolutePath;
 
   if (fs.existsSync(configFile)) {
     try {
@@ -92,16 +75,36 @@ function redactConfigForLog(config) {
 // 설정 객체 생성
 function createConfig(env) {
   const dryRun = env.DRY_RUN !== false;
+  const liveCredentialSetupMode = env.DASHBOARD_LIVE_CREDENTIAL_SETUP_MODE === true;
+  const liveManualPrepareOnBoot = env.DASHBOARD_LIVE_MANUAL_PREPARE_ON_BOOT === true;
+  const dashboardStartTraderOnBoot = env.DASHBOARD_START_TRADER_ON_BOOT !== false;
+  if (liveCredentialSetupMode && dryRun) {
+    throw new Error('DASHBOARD_LIVE_CREDENTIAL_SETUP_MODE requires DRY_RUN=false.');
+  }
+  if (liveCredentialSetupMode && env.ENABLE_DASHBOARD === false) {
+    throw new Error('DASHBOARD_LIVE_CREDENTIAL_SETUP_MODE requires ENABLE_DASHBOARD=true.');
+  }
+  if (liveCredentialSetupMode && (!liveManualPrepareOnBoot || dashboardStartTraderOnBoot)) {
+    throw new Error(
+      'DASHBOARD_LIVE_CREDENTIAL_SETUP_MODE requires DASHBOARD_LIVE_MANUAL_PREPARE_ON_BOOT=true and DASHBOARD_START_TRADER_ON_BOOT=false.'
+    );
+  }
+  if (liveManualPrepareOnBoot && (dryRun || dashboardStartTraderOnBoot)) {
+    throw new Error(
+      'DASHBOARD_LIVE_MANUAL_PREPARE_ON_BOOT requires DRY_RUN=false and DASHBOARD_START_TRADER_ON_BOOT=false.'
+    );
+  }
   const strategyMode = env.TRADING_STRATEGY || 'oversold_reaction_scalping';
   const isScalpingMode = strategyMode === 'oversold_reaction_scalping';
 
   // 최적화된 파라미터 로드 (있으면 사용, 없으면 기본값)
   // 기존 종합점수 전략으로 생성된 파라미터는 스캘핑 반등 계약과 호환되지
   // 않으므로 새 전략에서는 무시한다.
-  const optimalParams = isScalpingMode ? null : loadOptimalConfig();
+  const optimalParams = isScalpingMode ? null : loadOptimalConfig(env);
   const tradingLimits = resolveTradingLimits({ env, isScalpingMode, optimalParams });
 
   return {
+    stateDir: env.COINPILOT_STATE_DIR || null,
     strategyMode,
     isScalpingMode,
     // API 키
@@ -271,6 +274,9 @@ function createConfig(env) {
 
     // 운영 모드
     dryRun,
+    liveCredentialSetupMode,
+    liveManualPrepareOnBoot,
+    dashboardStartTraderOnBoot,
     logLevel: env.LOG_LEVEL || 'info',
     enableDashboard: env.ENABLE_DASHBOARD !== false,
     dashboardPort: env.DASHBOARD_PORT || 3000
@@ -441,6 +447,13 @@ function startBacktestingLoop(config, logger, trader) {
 // 지속적 최적화 루프 (드라이 모드에서 더 짧은 간격)
 function startOptimizationLoop(config, logger) {
   const upbit = new UpbitAPI(config.accessKey, config.secretKey);
+  const optimizationStoragePaths = resolveOptimizationStoragePaths({
+    env: process.env,
+    stateDir: config.stateDir,
+    cwd: process.cwd(),
+    projectRoot: process.cwd(),
+    legacyBase: 'cwd'
+  });
 
   // 드라이 모드일 때 더 짧은 간격 (6시간), 실전은 24시간
   const interval = config.dryRun
@@ -452,7 +465,9 @@ function startOptimizationLoop(config, logger) {
     generations: parseInt(process.env.GENERATIONS) || 10,
     mutationRate: parseFloat(process.env.MUTATION_RATE) || 0.2,
     crossoverRate: parseFloat(process.env.CROSSOVER_RATE) || 0.7,
-    eliteSize: parseInt(process.env.ELITE_SIZE) || 2
+    eliteSize: parseInt(process.env.ELITE_SIZE) || 2,
+    optimalConfigFile: optimizationStoragePaths.optimalConfigFile.absolutePath,
+    optimizationHistoryFile: optimizationStoragePaths.optimizationHistoryFile.absolutePath
   });
 
   let cycleCount = 0;
@@ -505,24 +520,29 @@ function startOptimizationLoop(config, logger) {
 
       // 결과 저장
       // 학습 일수 계산 (분봉 개수 * 분봉 단위 / 분당 일수)
-      const trainingDays = Math.round((candleCount * candleUnit) / (60 * 24));
+      const trainingDays = Math.round((candles.length * candleUnit) / (60 * 24));
       const optimConfig = {
         updatedAt: new Date().toISOString(),
         cycle: cycleCount,
         targetCoin,
         trainingDays: trainingDays,
+        candleCount: candles.length,
         fitness: optimalFitness,
         parameters: optimalParams,
         note: '지속적 최적화를 통해 생성된 파라미터입니다.'
       };
 
+      fs.mkdirSync(path.dirname(optimizationStoragePaths.optimalConfigFile.absolutePath), {
+        recursive: true,
+        mode: 0o700
+      });
       fs.writeFileSync(
-        'optimal_config.json',
+        optimizationStoragePaths.optimalConfigFile.absolutePath,
         JSON.stringify(optimConfig, null, 2),
         'utf8'
       );
 
-      console.log('\n💾 최적 파라미터 저장: optimal_config.json');
+      console.log(`\n💾 최적 파라미터 저장: ${optimizationStoragePaths.optimalConfigFile.absolutePath}`);
 
       // 런타임 환경변수 업데이트
       console.log('\n🔄 런타임 환경변수 자동 업데이트 중...');
@@ -539,32 +559,15 @@ function startOptimizationLoop(config, logger) {
       console.log('✅ 런타임 환경변수 업데이트 완료');
 
       // 최적화 이력 로그
-      const historyFile = 'optimization_history.json';
-      let history = [];
-
-      if (fs.existsSync(historyFile)) {
-        history = JSON.parse(fs.readFileSync(historyFile, 'utf8'));
-      }
-
-      history.push({
+      const historyFile = optimizationStoragePaths.optimizationHistoryFile.absolutePath;
+      await appendOptimizerHistory(historyFile, {
         timestamp: new Date().toISOString(),
         cycle: cycleCount,
         fitness: optimalFitness,
         parameters: optimalParams
       });
 
-      // 최근 100개만 유지
-      if (history.length > 100) {
-        history = history.slice(-100);
-      }
-
-      fs.writeFileSync(
-        historyFile,
-        JSON.stringify(history, null, 2),
-        'utf8'
-      );
-
-      console.log('📝 최적화 이력 저장: optimization_history.json');
+      console.log(`📝 최적화 이력 저장: ${historyFile}`);
 
       // 다음 사이클까지 대기
       const nextRun = new Date(Date.now() + interval);
@@ -589,13 +592,36 @@ async function main() {
   printBanner();
 
   // 스키마 검증: 필수 env 누락/형식 오류는 부팅 시점에 실패시킨다.
-  const { values: env, errors: envErrors, warnings: envWarnings } = loadEnv();
+  const { values: parsedEnv, errors: envErrors, warnings: envWarnings } = loadEnv();
   if (envErrors.length > 0) {
     console.error(formatEnvErrors(envErrors));
     process.exit(1);
   }
   if (envWarnings.length > 0) {
     console.warn(formatEnvWarnings(envWarnings));
+  }
+
+  // App-based Upbit enrollment is available only in the dedicated LIVE setup
+  // profile. Load its encrypted pair before constructing the exchange clients.
+  let liveCredentialStore = null;
+  let env = parsedEnv;
+  if (parsedEnv.DASHBOARD_LIVE_CREDENTIAL_SETUP_MODE === true) {
+    liveCredentialStore = new LiveCredentialStore({
+      credentialsFile: parsedEnv.COINPILOT_LIVE_CREDENTIALS_FILE,
+      keyFile: parsedEnv.COINPILOT_LIVE_CREDENTIALS_KEY_FILE
+    });
+    const storedCredentials = liveCredentialStore.load();
+    if (storedCredentials) {
+      env = {
+        ...parsedEnv,
+        UPBIT_ACCESS_KEY: storedCredentials.accessKey,
+        UPBIT_SECRET_KEY: storedCredentials.secretKey
+      };
+    } else if (parsedEnv.UPBIT_ACCESS_KEY || parsedEnv.UPBIT_SECRET_KEY) {
+      throw new Error(
+        'App-based LIVE setup requires Upbit keys to be absent from environment variables; register them in the native app.'
+      );
+    }
   }
 
   // 설정 로드
@@ -648,71 +674,162 @@ async function main() {
   // 오래된 로그 정리
   logger.cleanOldLogs(7);
 
-  // 자동매매 시스템 초기화
-  const trader = new MultiCoinTrader(config);
-
-  // 대시보드 시작
+  // Claim the profile before MultiCoinTrader hydrates or migrates its JSON.
+  const profileWriterStartup = createProfileWriterStartup(config);
+  let trader;
+  let manualOrderIdempotencyStore;
   let dashboardServer = null;
-  if (config.enableDashboard) {
-    dashboardServer = new DashboardServer(trader, config.dashboardPort);
+  let runtimeLifecycleInstalled = false;
+  try {
+    const runtime = profileWriterStartup.createTraderAndStore(() => new MultiCoinTrader(config));
+    trader = runtime.trader;
+    manualOrderIdempotencyStore = runtime.manualOrderIdempotencyStore;
+
+    // DashboardServer.start() initializes this same store and validates its
+    // adopted lock before binding the HTTP listener.
+    if (config.enableDashboard) {
+      const publicMarketDataSource = createPublicMarketDataSource();
+      dashboardServer = new DashboardServer(trader, config.dashboardPort, {
+        publicMarketDataSource,
+        optimizationStateDir: config.stateDir,
+        manualOrderIdempotencyStore,
+        liveCredentialStore,
+        liveCredentialSetupMode: config.liveCredentialSetupMode,
+        validateLiveCredentials: async ({ accessKey, secretKey }) => {
+          const credentialProbe = new UpbitAPI(accessKey, secretKey, {
+            requestTimeoutMs: config.upbitRequestTimeoutMs
+          });
+          const accounts = await credentialProbe.getAccounts();
+          return Array.isArray(accounts);
+        },
+        onLiveCredentialsSaved: async credentials => {
+          trader.configureUpbitCredentials(credentials);
+          if (config.liveManualPrepareOnBoot) {
+            const prepared = await trader.prepareManualLiveSession();
+            trader.liveManualPrepared = prepared.ready === true;
+          }
+        }
+      });
+    }
+
+    await runAfterDashboardReady(dashboardServer, async () => {
+      // Headless startup initializes and verifies this already-owned store
+      // instead of acquiring a second profile lock.
+      await acquireHeadlessRuntimeWriterLock({
+        config,
+        trader,
+        createStore: () => manualOrderIdempotencyStore
+      });
+      // The startup owner controls both the portfolio lock and the journal
+      // lock so every clean shutdown releases the complete write boundary.
+      const runtimeWriterLockOwner = {
+        releaseWriterLock: () => profileWriterStartup.releaseWriterLock()
+      };
+
+      // 스캘핑 모드에서는 기존 종합점수 전략용 백테스트/최적화가
+      // 반등 전략 파라미터를 오염시키지 않도록 실행하지 않는다.
+      let backtestTimer = null;
+      let optimizationTimer = null;
+
+      let exitHandlers;
+      try {
+        if (config.dryRun && !config.isScalpingMode) {
+          backtestTimer = startBacktestingLoop(config, logger, trader);
+        }
+
+        if (!config.isScalpingMode) {
+          optimizationTimer = startOptimizationLoop(config, logger);
+        } else {
+          console.log('ℹ️  스캘핑 모드: 기존 종합점수 백테스트/유전 최적화 루프는 비활성화됩니다.');
+        }
+
+        // 종료 핸들러 설정
+        exitHandlers = setupExitHandlers(trader, dashboardServer, backtestTimer, optimizationTimer, logger, {
+          runtimeWriterLockStore: runtimeWriterLockOwner
+        });
+        activeExitHandlers = exitHandlers;
+        runtimeLifecycleInstalled = true;
+      } catch (error) {
+        if (backtestTimer) clearInterval(backtestTimer);
+        if (optimizationTimer) clearInterval(optimizationTimer);
+        try {
+          runtimeWriterLockOwner.releaseWriterLock();
+        } catch (releaseError) {
+          if (error && typeof error === 'object') error.writerLockReleaseError = releaseError;
+        }
+        throw error;
+      }
+
+      // 안내 메시지
+      console.log('💡 팁:');
+      console.log('  - Ctrl+C를 눌러 언제든지 종료할 수 있습니다.');
+      console.log('  - 로그는 logs/ 디렉토리에 저장됩니다.');
+      console.log('  - 웹 대시보드: ' + (dashboardServer?.protocol || 'http') + '://localhost:' + config.dashboardPort);
+      if (config.dryRun && !config.isScalpingMode) {
+        console.log('  - 백테스팅 결과: backtest_results_*.json 파일 확인');
+        console.log('  - 백테스팅 간격: ' + (config.backtestInterval / 60000) + '분마다');
+      }
+      if (!config.isScalpingMode) {
+        console.log('  - 최적화 결과: optimal_config.json 파일 확인');
+        console.log('  - 최적화 간격: ' + (config.dryRun ?
+          ((parseInt(process.env.OPTIMIZATION_INTERVAL_DRY) || 21600000) / 3600000) :
+          ((parseInt(process.env.OPTIMIZATION_INTERVAL) || 86400000) / 3600000)) + '시간마다');
+      }
+      console.log('');
+      console.log('─'.repeat(80));
+
+      if (config.liveManualPrepareOnBoot) {
+        if (trader.liveCredentialsConfigured) {
+          const manualPreparation = await trader.prepareManualLiveSession();
+          trader.liveManualPrepared = manualPreparation.ready === true;
+          if (manualPreparation.ready) {
+            console.log('ℹ️  LIVE 수동 준비 완료: 계좌/미체결 주문을 확인했고 자동 진입은 시작하지 않았습니다.');
+          } else {
+            console.warn('⚠️  LIVE 계좌/미체결 주문 상태를 확인할 수 없어 신규 주문을 잠급니다.');
+          }
+        } else {
+          console.log('ℹ️  LIVE 키 등록 대기: 계좌 조회와 주문 기능은 키 검증 전까지 잠겨 있습니다.');
+        }
+      }
+
+      const startTraderOnBoot = config.dashboardStartTraderOnBoot;
+      if (startTraderOnBoot) {
+        // 카운트다운
+        console.log('\n⏱️  3초 후 자동매매를 시작합니다...');
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        console.log('⏱️  2...');
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        console.log('⏱️  1...');
+        await new Promise(resolve => setTimeout(resolve, 1000));
+
+        // 자동매매 시작
+        try {
+          await trader.start();
+        } catch (error) {
+          console.error('\n❌ 치명적 오류:', error);
+          logger.error('Fatal Error', { error: error.message, stack: error.stack });
+          process.exitCode = Math.max(Number(process.exitCode) || 0, 1);
+          await exitHandlers.gracefulShutdown(1, { reason: 'startup_failure' });
+        }
+      } else {
+        console.log('ℹ️  부팅 시 자동매매 시작을 건너뜁니다. 대시보드에서 직접 시작할 수 있습니다.');
+      }
+    });
+  } catch (error) {
+    if (!runtimeLifecycleInstalled) {
+      try {
+        if (dashboardServer) await dashboardServer.stop();
+      } catch (cleanupError) {
+        if (error && typeof error === 'object') error.dashboardStartupCleanupError = cleanupError;
+      }
+      try {
+        profileWriterStartup.releaseWriterLock();
+      } catch (releaseError) {
+        if (error && typeof error === 'object') error.writerLockReleaseError = releaseError;
+      }
+    }
+    throw error;
   }
-
-  await runAfterDashboardReady(dashboardServer, async () => {
-    // 스캘핑 모드에서는 기존 종합점수 전략용 백테스트/최적화가
-    // 반등 전략 파라미터를 오염시키지 않도록 실행하지 않는다.
-    let backtestTimer = null;
-    let optimizationTimer = null;
-
-    if (config.dryRun && !config.isScalpingMode) {
-      backtestTimer = startBacktestingLoop(config, logger, trader);
-    }
-
-    if (!config.isScalpingMode) {
-      optimizationTimer = startOptimizationLoop(config, logger);
-    } else {
-      console.log('ℹ️  스캘핑 모드: 기존 종합점수 백테스트/유전 최적화 루프는 비활성화됩니다.');
-    }
-
-    // 종료 핸들러 설정
-    const exitHandlers = setupExitHandlers(trader, dashboardServer, backtestTimer, optimizationTimer, logger);
-    activeExitHandlers = exitHandlers;
-
-    // 안내 메시지
-    console.log('💡 팁:');
-    console.log('  - Ctrl+C를 눌러 언제든지 종료할 수 있습니다.');
-    console.log('  - 로그는 logs/ 디렉토리에 저장됩니다.');
-    console.log('  - 웹 대시보드: ' + (dashboardServer?.protocol || 'http') + '://localhost:' + config.dashboardPort);
-    if (config.dryRun && !config.isScalpingMode) {
-      console.log('  - 백테스팅 결과: backtest_results_*.json 파일 확인');
-      console.log('  - 백테스팅 간격: ' + (config.backtestInterval / 60000) + '분마다');
-    }
-    if (!config.isScalpingMode) {
-      console.log('  - 최적화 결과: optimal_config.json 파일 확인');
-      console.log('  - 최적화 간격: ' + (config.dryRun ?
-        ((parseInt(process.env.OPTIMIZATION_INTERVAL_DRY) || 21600000) / 3600000) :
-        ((parseInt(process.env.OPTIMIZATION_INTERVAL) || 86400000) / 3600000)) + '시간마다');
-    }
-    console.log('');
-    console.log('─'.repeat(80));
-
-    // 카운트다운
-    console.log('\n⏱️  3초 후 자동매매를 시작합니다...');
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    console.log('⏱️  2...');
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    console.log('⏱️  1...');
-    await new Promise(resolve => setTimeout(resolve, 1000));
-
-    // 자동매매 시작
-    try {
-      await trader.start();
-    } catch (error) {
-      console.error('\n❌ 치명적 오류:', error);
-      logger.error('Fatal Error', { error: error.message, stack: error.stack });
-      process.exitCode = Math.max(Number(process.exitCode) || 0, 1);
-      await exitHandlers.gracefulShutdown(1, { reason: 'startup_failure' });
-    }
-  });
 }
 
 // 프로그램 실행

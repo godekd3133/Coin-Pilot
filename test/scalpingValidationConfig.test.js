@@ -109,7 +109,9 @@ test('legacy multiCoinIndex 엔트리는 스캘핑 해석 시 fail-closed로 거
   const result = spawnSync(process.execPath, ['src/multiCoinIndex.js'], {
     encoding: 'utf8',
     timeout: 15_000,
-    env: { ...process.env, TRADING_STRATEGY: undefined }
+    // Keep dotenv from restoring a developer-local value; an empty configured
+    // value exercises the entry's intended missing-strategy fallback.
+    env: { ...process.env, TRADING_STRATEGY: '' }
   });
   assert.equal(result.status, 1);
   assert.match(result.stderr + result.stdout, /npm start/);

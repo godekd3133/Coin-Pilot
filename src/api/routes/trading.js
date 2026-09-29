@@ -2,9 +2,17 @@ import express from 'express';
 import fs from 'fs';
 import path from 'node:path';
 import { assessScalpingValidationReportFreshness } from '../../research/scalpingValidationFreshness.js';
-import { projectLiveAccountReadback } from '../../research/liveExecutionEvidence.js';
+import {
+  projectLiveAccountReadback,
+  readLiveOrderIntentEvidence,
+  resolveTerminalLiveOrderReadback
+} from '../../research/liveExecutionEvidence.js';
 import { getStrategyReadiness } from '../../research/strategyReadiness.js';
 import { createManualOrderIdempotencyMiddleware } from '../manualOrderIdempotencyStore.js';
+import { getMarketDataProvider, MARKET_DATA_FRESHNESS } from '../marketDataProvider.js';
+import { inspectMarketQuoteFreshness } from '../marketQuoteFreshness.js';
+import { API_READ_QUERY_LIMITS, parseBoundedIntegerQuery } from '../queryLimits.js';
+import { appendSmartTradeHistory } from '../smartTradeHistory.js';
 
 function projectLiveFillResult(fillResult, orderId = null) {
   const order = fillResult?.order;
@@ -151,7 +159,8 @@ export async function executeLiveOrderWithEvidence(tradingSystem, {
   orderType = 'limit',
   requested = null,
   referencePrice = null,
-  signal = null
+  signal = null,
+  clientIntentId = null
 } = {}) {
   if (!tradingSystem || tradingSystem.dryRun) {
     return {
@@ -196,7 +205,14 @@ export async function executeLiveOrderWithEvidence(tradingSystem, {
 
     let orderResult;
     try {
-      orderResult = await tradingSystem.submitLiveOrder(market, side, volume, price, orderType);
+      orderResult = await tradingSystem.submitLiveOrder(
+        market,
+        side,
+        volume,
+        price,
+        orderType,
+        clientIntentId
+      );
     } catch (error) {
       markLiveMarketOrderUnresolved(tradingSystem, market);
       const message = '주문 응답을 확인하지 못했습니다. 거래소 상태를 다시 확인할 때까지 이 시장의 주문을 잠갔습니다.';
@@ -301,11 +317,139 @@ export async function executeLiveOrderWithEvidence(tradingSystem, {
   }
 }
 
+function expectedSingleManualLiveOrder(req) {
+  const market = req?.body?.coin;
+  if (typeof market !== 'string' || !market) return null;
+  if (req.path === '/trade/buy') return { market, side: 'bid' };
+  if (req.path === '/trade/sell') return { market, side: 'ask' };
+  if (req.path === '/trade/execute') {
+    const action = typeof req.body?.action === 'string' ? req.body.action.toUpperCase() : '';
+    if (action === 'BUY') return { market, side: 'bid' };
+    if (action === 'SELL') return { market, side: 'ask' };
+    return null;
+  }
+  if (req.path === '/trade/quick') {
+    if (req.body?.action === 'BUY') return { market, side: 'bid' };
+    if (req.body?.action === 'SELL') return { market, side: 'ask' };
+  }
+  return null;
+}
+
+async function recoverSingleManualLiveOrder({ req, record, tradingSystem } = {}) {
+  const expected = expectedSingleManualLiveOrder(req);
+  const clientIntentId = record?.clientIntentId;
+  if (!expected || typeof clientIntentId !== 'string') return null;
+
+  const intentRead = readLiveOrderIntentEvidence(
+    tradingSystem?.liveOrderIntentEvidenceIndex,
+    clientIntentId
+  );
+  const intent = intentRead.intent;
+  if (!intentRead.available || !intent ||
+    intent.clientIntentId !== clientIntentId ||
+    intent.identifier !== clientIntentId ||
+    intent.market !== expected.market ||
+    intent.side !== expected.side ||
+    typeof tradingSystem?.upbit?.getOrder !== 'function') {
+    return null;
+  }
+
+  // A same-key retry may only query the persisted identifier. It never calls
+  // the route again or submits another order.
+  const order = await tradingSystem.upbit.getOrder(clientIntentId, { identifier: true });
+  const resolution = resolveTerminalLiveOrderReadback(order, {
+    clientIntentId,
+    market: expected.market,
+    side: expected.side,
+    orderType: intent.orderType
+  });
+  if (!resolution.terminal || typeof tradingSystem.persistLiveOrderReadback !== 'function') return null;
+
+  await tradingSystem.persistLiveOrderReadback({
+    lookupValue: clientIntentId,
+    lookupByIdentifier: true,
+    observedOrder: order,
+    clientIntentId,
+    market: intent.market,
+    side: intent.side,
+    orderType: intent.orderType,
+    request: intent.request
+  });
+
+  const filled = resolution.outcome === 'filled';
+  return {
+    status: filled ? 200 : 409,
+    body: {
+      success: filled,
+      mode: 'LIVE',
+      recovered: true,
+      market: expected.market,
+      side: expected.side,
+      message: filled
+        ? '거래소 주문 조회에서 최종 체결을 확인했습니다. 지갑 잔액 정산은 별도로 확인되지 않았습니다.'
+        : '거래소 주문 조회에서 미체결 취소를 확인했습니다. 원래 요청은 다시 실행하지 않았습니다.',
+      order: resolution.order,
+      fill: resolution.fill,
+      settlement: {
+        status: 'not_observed',
+        reason: 'wallet_readback_not_performed',
+        observedAt: null
+      },
+      strategyState: {
+        status: 'not_mutated',
+        reason: 'request_recovery_does_not_replay_route'
+      }
+    }
+  };
+}
+
 /**
  * 거래 관련 라우트 (분석, 매수/매도, 스마트 트레이딩, 번들)
  */
 export default function createTradingRoutes(server) {
   const router = express.Router();
+  const readFreshTickers = markets => getMarketDataProvider(server).getTickers(markets, {
+    freshness: MARKET_DATA_FRESHNESS.FRESH
+  });
+  const readFreshMarketTicker = async market => {
+    const tickers = await readFreshTickers([market]);
+    return tickers.find(ticker => ticker?.market === market) || null;
+  };
+  const inspectMarketQuote = (ticker, market, now = Date.now()) => {
+    if (ticker?.market !== market) {
+      return {
+        fresh: false,
+        market,
+        sourceAsOf: null,
+        ageMs: null,
+        maximumAgeMs: null,
+        reason: 'market_quote_unavailable'
+      };
+    }
+    return inspectMarketQuoteFreshness(ticker, {
+      now,
+      maximumAgeSeconds: server.tradingSystem.maxCandleAgeSeconds
+    });
+  };
+  const sendMarketQuoteBlock = (res, marketQuotes, additionalBody = {}) => {
+    const issues = marketQuotes.filter(entry => !entry.fresh);
+    if (issues.length === 0) return null;
+    const stale = issues.some(entry => entry.reason === 'market_source_stale' ||
+      entry.reason === 'market_source_timestamp_in_future');
+    return res.status(409).json({
+      success: false,
+      code: stale ? 'MARKET_QUOTE_STALE' : 'MARKET_QUOTE_UNAVAILABLE',
+      message: stale
+        ? '선택한 종목의 최근 체결 시각이 오래되어 주문을 보내지 않았습니다.'
+        : '선택한 종목의 시세와 원본 시각을 확인할 수 없어 주문을 보내지 않았습니다.',
+      ...additionalBody,
+      markets: issues.map(({ market, reason, sourceAsOf, ageMs, maximumAgeMs }) => ({
+        market, reason, sourceAsOf, ageMs, maximumAgeMs
+      }))
+    });
+  };
+  const readMinuteCandles = (...args) => getMarketDataProvider(server).getMinuteCandles(...args);
+
   router.use(createManualOrderIdempotencyMiddleware(server, {
     paths: new Set([
       '/trade/execute-bundle',
@@ -315,7 +459,14 @@ export default function createTradingRoutes(server) {
       '/trade/quick',
       '/trade/buy',
       '/trade/sell'
-    ])
+    ]),
+    liveReconciliationPaths: new Set([
+      '/trade/buy',
+      '/trade/sell',
+      '/trade/execute',
+      '/trade/quick'
+    ]),
+    recoverLiveRequest: recoverSingleManualLiveOrder
   }));
 
   // 마지막 읽기 전용 스캘핑 워크포워드 검증 결과
@@ -398,13 +549,13 @@ export default function createTradingRoutes(server) {
       // 있으므로, 순수 기술적 분석만 사용해 표시용 결과를 만든다.
       if (server.tradingSystem.isScalpingMode) {
         const targetCoins = server.tradingSystem.targetCoins || [];
-        const tickers = await server.tradingSystem.upbit.getTicker(targetCoins);
+        const tickers = await readFreshTickers(targetCoins);
         const recommendations = [];
 
         for (const ticker of tickers || []) {
           const coin = ticker.market;
           try {
-            const candles = await server.tradingSystem.upbit.getMinuteCandles(
+            const candles = await readMinuteCandles(
               coin,
               server.tradingSystem.candleUnit,
               server.tradingSystem.candleCount
@@ -470,13 +621,13 @@ export default function createTradingRoutes(server) {
       }
 
       // 전체 KRW 마켓에서 기회 탐색
-      const markets = await server.tradingSystem.upbit.getMarkets();
+      const markets = await getMarketDataProvider(server).getMarkets();
       const krwMarkets = markets.filter(m => m.market.startsWith('KRW-')).map(m => m.market);
 
       const { comprehensiveAnalysis } = await import('../../analysis/technicalIndicators.js');
 
       // 상위 거래량 코인 우선 분석
-      const tickers = await server.tradingSystem.upbit.getTicker(krwMarkets);
+      const tickers = await readFreshTickers(krwMarkets);
 
       // 거래량 기준 정렬 및 통계
       const sortedByVolume = [...tickers].sort((a, b) => b.acc_trade_price_24h - a.acc_trade_price_24h);
@@ -493,7 +644,7 @@ export default function createTradingRoutes(server) {
           const change24h = ticker.signed_change_rate * 100;
 
           // 캔들 데이터
-          const candles = await server.tradingSystem.upbit.getMinuteCandles(coin, 5, 100);
+          const candles = await readMinuteCandles(coin, 5, 100);
           if (!candles || candles.length < 50) continue;
 
           // 기술적 분석
@@ -785,15 +936,15 @@ export default function createTradingRoutes(server) {
       const { comprehensiveAnalysis } = await import('../../analysis/technicalIndicators.js');
 
       // 전체 KRW 마켓
-      const markets = await server.tradingSystem.upbit.getMarkets();
+      const markets = await getMarketDataProvider(server).getMarkets();
       const krwMarkets = markets.filter(m => m.market.startsWith('KRW-')).map(m => m.market);
-      const tickers = await server.tradingSystem.upbit.getTicker(krwMarkets);
+      const tickers = await readFreshTickers(krwMarkets);
 
       // 거래량 기준 정렬
       const sortedByVolume = [...tickers].sort((a, b) => b.acc_trade_price_24h - a.acc_trade_price_24h);
 
       // 상위 100개 코인 분석
-      const limit = parseInt(req.query.limit) || 100;
+      const limit = parseBoundedIntegerQuery(req.query.limit, API_READ_QUERY_LIMITS.allCoinScores);
       const topCoins = sortedByVolume.slice(0, limit);
 
       const coinScores = [];
@@ -808,7 +959,7 @@ export default function createTradingRoutes(server) {
           const volume24h = ticker.acc_trade_price_24h;
 
           // 캔들 데이터
-          const candles = await server.tradingSystem.upbit.getMinuteCandles(coin, 5, 100);
+          const candles = await readMinuteCandles(coin, 5, 100);
           if (!candles || candles.length < 30) continue;
 
           // 기술적 분석
@@ -978,9 +1129,19 @@ export default function createTradingRoutes(server) {
       const results = { sell: null, buy: null };
       const isDryRun = server.tradingSystem.dryRun;
 
+      // Read and validate both legs before the first portfolio/order mutation.
+      const [sellTicker, buyTicker] = await Promise.all([
+        readFreshMarketTicker(sellCoin),
+        readFreshMarketTicker(buyCoin)
+      ]);
+      const initialQuoteFailure = sendMarketQuoteBlock(res, [
+        inspectMarketQuote(sellTicker, sellCoin),
+        inspectMarketQuote(buyTicker, buyCoin)
+      ]);
+      if (initialQuoteFailure) return initialQuoteFailure;
+
       // 1. 매도 실행
-      const sellTicker = await server.tradingSystem.upbit.getTicker(sellCoin);
-      const sellPrice = sellTicker[0].trade_price;
+      const sellPrice = sellTicker.trade_price;
       let holding = server.tradingSystem.virtualPortfolio?.holdings.get(sellCoin);
       if (!isDryRun) {
         const accounts = await server.tradingSystem.getAccountInfo();
@@ -1091,8 +1252,16 @@ export default function createTradingRoutes(server) {
       }
 
       // 2. 매수 실행
-      const buyTicker = await server.tradingSystem.upbit.getTicker(buyCoin);
-      const buyPrice = buyTicker[0].trade_price;
+      const buyQuoteCheck = inspectMarketQuote(buyTicker, buyCoin);
+      const buyQuoteFailure = sendMarketQuoteBlock(res, [buyQuoteCheck], {
+        results,
+        message: buyQuoteCheck.reason === 'market_source_stale' ||
+          buyQuoteCheck.reason === 'market_source_timestamp_in_future'
+          ? '매도는 완료됐지만 매수 종목의 최근 체결 시각이 오래되어 매수는 보내지 않았습니다.'
+          : '매도는 완료됐지만 매수 종목의 시세를 확인할 수 없어 매수는 보내지 않았습니다.'
+      });
+      if (buyQuoteFailure) return buyQuoteFailure;
+      const buyPrice = buyTicker.trade_price;
       // 매도 후 실제 잔액 기반으로 매수 (드라이런에서는 수수료 차감된 금액 사용)
       const availableForBuy = results.sell.value;
       const requestedBuyAmount = Number(buyAmount);
@@ -1201,11 +1370,7 @@ export default function createTradingRoutes(server) {
         }
       }
 
-      // 스마트 거래 이력에 추가
-      if (!server.tradingSystem.smartTradeHistory) {
-        server.tradingSystem.smartTradeHistory = [];
-      }
-      server.tradingSystem.smartTradeHistory.push({
+      appendSmartTradeHistory(server.tradingSystem, {
         type: 'BUNDLE_TRADE',
         sell: results.sell,
         buy: results.buy,
@@ -1255,8 +1420,10 @@ export default function createTradingRoutes(server) {
         }
 
         // 현재가 조회
-        const ticker = await server.tradingSystem.upbit.getTicker(coin);
-        const currentPrice = ticker[0].trade_price;
+        const ticker = await readFreshMarketTicker(coin);
+        const quoteFailure = sendMarketQuoteBlock(res, [inspectMarketQuote(ticker, coin)]);
+        if (quoteFailure) return quoteFailure;
+        const currentPrice = ticker.trade_price;
 
         if (isDryRun) {
           // 모의투자 - 가상 포트폴리오 업데이트
@@ -1311,7 +1478,8 @@ export default function createTradingRoutes(server) {
             volume: investmentAmount,
             orderType: 'price',
             requested: { amount: investmentAmount },
-            referencePrice: currentPrice
+            referencePrice: currentPrice,
+            clientIntentId: req.manualOrderClientIntentId
           });
           if (!hasCompleteObservedLiveFill(liveExecution)) {
             return res.status(liveExecution.blocked ? 503 : 409).json({
@@ -1356,8 +1524,10 @@ export default function createTradingRoutes(server) {
         }
 
         // 현재가 조회
-        const ticker = await server.tradingSystem.upbit.getTicker(coin);
-        const currentPrice = ticker[0].trade_price;
+        const ticker = await readFreshMarketTicker(coin);
+        const quoteFailure = sendMarketQuoteBlock(res, [inspectMarketQuote(ticker, coin)]);
+        if (quoteFailure) return quoteFailure;
+        const currentPrice = ticker.trade_price;
 
         if (isDryRun) {
           // 모의투자 - 가상 포트폴리오 업데이트
@@ -1397,13 +1567,14 @@ export default function createTradingRoutes(server) {
           });
         } else {
           // 실전투자: 실제 체결 수량만 전략 포지션에 반영한다.
-          const liveExecution = await executeLiveOrderWithEvidence(server.tradingSystem, {
+        const liveExecution = await executeLiveOrderWithEvidence(server.tradingSystem, {
             market: coin,
             side: 'ask',
             volume: sellVolume,
             orderType: 'market',
             requested: { volume: sellVolume },
-            referencePrice: currentPrice
+            referencePrice: currentPrice,
+            clientIntentId: req.manualOrderClientIntentId
           });
           if (!hasCompleteObservedLiveFill(liveExecution)) {
             return res.status(liveExecution.blocked ? 503 : 409).json({
@@ -1492,9 +1663,23 @@ export default function createTradingRoutes(server) {
       const { comprehensiveAnalysis } = await import('../../analysis/technicalIndicators.js');
 
       // 상위 거래량 코인 분석 (상위 30개)
-      const markets = await server.tradingSystem.upbit.getMarkets();
+      const markets = await getMarketDataProvider(server).getMarkets();
       const krwMarkets = markets.filter(m => m.market.startsWith('KRW-')).map(m => m.market);
-      const tickers = await server.tradingSystem.upbit.getTicker(krwMarkets);
+      const requestedTickers = await readFreshTickers(krwMarkets);
+      const tickers = requestedTickers.filter(ticker =>
+        inspectMarketQuote(ticker, ticker?.market).fresh
+      );
+      if (tickers.length === 0) {
+        const quoteFailure = sendMarketQuoteBlock(res, requestedTickers.map(ticker =>
+          inspectMarketQuote(ticker, ticker?.market)
+        ));
+        return quoteFailure || res.status(409).json({
+          success: false,
+          code: 'MARKET_QUOTE_UNAVAILABLE',
+          message: '최근 시세를 확인할 수 있는 종목이 없어 주문을 보내지 않았습니다.'
+        });
+      }
+      const tickerByMarket = new Map(tickers.map(ticker => [ticker.market, ticker]));
 
       // 상위 30개 거래량 코인 분석
       const analyzeCount = Math.min(30, krwMarkets.length);
@@ -1509,7 +1694,7 @@ export default function createTradingRoutes(server) {
       for (const coin of topCoins) {
         try {
           const ticker = tickers.find(t => t.market === coin);
-          const candles = await server.tradingSystem.upbit.getMinuteCandles(coin, 5, 100);
+          const candles = await readMinuteCandles(coin, 5, 100);
           if (!candles || candles.length < 50) continue;
 
           const analysis = comprehensiveAnalysis(candles, {
@@ -1575,6 +1760,18 @@ export default function createTradingRoutes(server) {
         selectedCoins = selectedCoins.slice(0, maxAffordable);
       }
 
+      const selectedQuoteFailure = sendMarketQuoteBlock(res, selectedCoins.map(coinData =>
+        inspectMarketQuote(tickerByMarket.get(coinData.coin), coinData.coin)
+      ));
+      if (selectedQuoteFailure) return selectedQuoteFailure;
+      if (selectedCoins.length === 0) {
+        return res.status(409).json({
+          success: false,
+          code: 'NO_SMART_BUY_CANDIDATES',
+          message: '주문 조건을 충족하는 종목이 없어 주문을 보내지 않았습니다.'
+        });
+      }
+
       const amountPerCoin = Math.floor(totalAmount / selectedCoins.length);
 
       const orders = [];
@@ -1584,6 +1781,15 @@ export default function createTradingRoutes(server) {
 
       for (const coinData of selectedCoins) {
         if (amountPerCoin < 5000) continue;
+
+        const dispatchQuoteCheck = inspectMarketQuote(
+          tickerByMarket.get(coinData.coin),
+          coinData.coin
+        );
+        if (!dispatchQuoteCheck.fresh) {
+          liveFailures.push({ coin: coinData.coin, reason: dispatchQuoteCheck.reason, orderDispatched: false });
+          continue;
+        }
 
         // 실시간 잔액 체크 (마이너스 방지)
         if (isDryRun && runningBalance < amountPerCoin) {
@@ -1695,14 +1901,7 @@ export default function createTradingRoutes(server) {
         orders.push(tradeRecord);
 
         // 스마트 거래 이력 저장
-        if (!server.tradingSystem.smartTradeHistory) {
-          server.tradingSystem.smartTradeHistory = [];
-        }
-        server.tradingSystem.smartTradeHistory.unshift(tradeRecord);
-        // 최대 100개 유지
-        if (server.tradingSystem.smartTradeHistory.length > 100) {
-          server.tradingSystem.smartTradeHistory = server.tradingSystem.smartTradeHistory.slice(0, 100);
-        }
+        appendSmartTradeHistory(server.tradingSystem, tradeRecord);
       }
 
       if (isDryRun && server.tradingSystem.saveVirtualPortfolio) {
@@ -1785,7 +1984,14 @@ export default function createTradingRoutes(server) {
 
       // 보유 코인 분석
       const holdingCoins = Array.from(holdings.keys());
-      const tickers = await server.tradingSystem.upbit.getTicker(holdingCoins);
+      const tickers = await readFreshTickers(holdingCoins);
+      const tickerByMarket = new Map(tickers
+        .filter(ticker => typeof ticker?.market === 'string')
+        .map(ticker => [ticker.market, ticker]));
+      const holdingQuoteFailure = sendMarketQuoteBlock(res, holdingCoins.map(coin =>
+        inspectMarketQuote(tickerByMarket.get(coin), coin)
+      ));
+      if (holdingQuoteFailure) return holdingQuoteFailure;
 
       const coinAnalysis = [];
       let totalHoldingValue = 0;
@@ -1805,7 +2011,7 @@ export default function createTradingRoutes(server) {
         // RSI 분석
         let rsi = 50;
         try {
-          const candles = await server.tradingSystem.upbit.getMinuteCandles(coin, 5, 50);
+          const candles = await readMinuteCandles(coin, 5, 50);
           if (candles && candles.length >= 30) {
             const analysis = comprehensiveAnalysis(candles, {});
             rsi = analysis?.indicators?.rsi || 50;
@@ -1844,6 +2050,11 @@ export default function createTradingRoutes(server) {
         coinAnalysis.sort((a, b) => b.rsi - a.rsi);
       }
 
+      const plannedQuoteFailure = sendMarketQuoteBlock(res, coinAnalysis.map(data =>
+        inspectMarketQuote(tickerByMarket.get(data.coin), data.coin)
+      ));
+      if (plannedQuoteFailure) return plannedQuoteFailure;
+
       const orders = [];
       const liveFailures = [];
       const isDryRun = server.tradingSystem.dryRun;
@@ -1852,6 +2063,15 @@ export default function createTradingRoutes(server) {
 
       for (const data of coinAnalysis) {
         if (remainingTarget <= 0) break;
+
+        const dispatchQuoteCheck = inspectMarketQuote(
+          tickerByMarket.get(data.coin),
+          data.coin
+        );
+        if (!dispatchQuoteCheck.fresh) {
+          liveFailures.push({ coin: data.coin, reason: dispatchQuoteCheck.reason, orderDispatched: false });
+          continue;
+        }
 
         const currentHolding = isDryRun
           ? server.tradingSystem.virtualPortfolio?.holdings?.get(data.coin)
@@ -1988,13 +2208,7 @@ export default function createTradingRoutes(server) {
         orders.push(tradeRecord);
 
         // 스마트 거래 이력 저장
-        if (!server.tradingSystem.smartTradeHistory) {
-          server.tradingSystem.smartTradeHistory = [];
-        }
-        server.tradingSystem.smartTradeHistory.unshift(tradeRecord);
-        if (server.tradingSystem.smartTradeHistory.length > 100) {
-          server.tradingSystem.smartTradeHistory = server.tradingSystem.smartTradeHistory.slice(0, 100);
-        }
+        appendSmartTradeHistory(server.tradingSystem, tradeRecord);
       }
 
       if (isDryRun && server.tradingSystem.saveVirtualPortfolio) {
@@ -2042,8 +2256,10 @@ export default function createTradingRoutes(server) {
         return res.status(400).json({ error: '최소 매수 금액은 5,000원입니다', success: false });
       }
 
-      const ticker = await server.tradingSystem.upbit.getTicker(coin);
-      const currentPrice = ticker[0].trade_price;
+      const ticker = await readFreshMarketTicker(coin);
+      const quoteFailure = sendMarketQuoteBlock(res, [inspectMarketQuote(ticker, coin)]);
+      if (quoteFailure) return quoteFailure;
+      const currentPrice = ticker.trade_price;
       const isDryRun = server.tradingSystem.dryRun;
 
       if (action === 'BUY') {
@@ -2130,7 +2346,8 @@ export default function createTradingRoutes(server) {
             volume: buyAmount,
             orderType: 'price',
             requested: { amount: buyAmount },
-            referencePrice: currentPrice
+            referencePrice: currentPrice,
+            clientIntentId: req.manualOrderClientIntentId
           });
           if (!hasCompleteObservedLiveFill(liveExecution)) {
             return res.status(liveExecution.blocked ? 503 : 409).json({
@@ -2250,12 +2467,13 @@ export default function createTradingRoutes(server) {
           server.tradingSystem.saveVirtualPortfolio();
         } else {
           const liveExecution = await executeLiveOrderWithEvidence(server.tradingSystem, {
-            market: coin,
-            side: 'ask',
-            volume: sellVolume,
-            orderType: 'market',
-            requested: { volume: sellVolume },
-            referencePrice: currentPrice
+          market: coin,
+          side: 'ask',
+          volume: sellVolume,
+          orderType: 'market',
+          requested: { volume: sellVolume },
+          referencePrice: currentPrice,
+          clientIntentId: req.manualOrderClientIntentId
           });
           if (!hasCompleteObservedLiveFill(liveExecution)) {
             return res.status(liveExecution.blocked ? 503 : 409).json({
@@ -2329,8 +2547,10 @@ export default function createTradingRoutes(server) {
         return res.status(400).json({ error: '최소 매수 금액은 5,000원입니다', success: false });
       }
 
-      const ticker = await server.tradingSystem.upbit.getTicker(coin);
-      const currentPrice = ticker[0].trade_price;
+      const ticker = await readFreshMarketTicker(coin);
+      const quoteFailure = sendMarketQuoteBlock(res, [inspectMarketQuote(ticker, coin)]);
+      if (quoteFailure) return quoteFailure;
+      const currentPrice = ticker.trade_price;
       const isDryRun = server.tradingSystem.dryRun;
 
       // 수수료 적용 (0.05%)
@@ -2389,7 +2609,8 @@ export default function createTradingRoutes(server) {
           volume: amount,
           orderType: 'price',
           requested: { amount },
-          referencePrice: currentPrice
+          referencePrice: currentPrice,
+          clientIntentId: req.manualOrderClientIntentId
         });
         liveFill = liveExecution.fill;
         if (!hasCompleteObservedLiveFill(liveExecution)) {
@@ -2451,8 +2672,10 @@ export default function createTradingRoutes(server) {
         return res.status(400).json({ error: 'coin과 quantity는 필수입니다', success: false });
       }
 
-      const ticker = await server.tradingSystem.upbit.getTicker(coin);
-      const currentPrice = ticker[0].trade_price;
+      const ticker = await readFreshMarketTicker(coin);
+      const quoteFailure = sendMarketQuoteBlock(res, [inspectMarketQuote(ticker, coin)]);
+      if (quoteFailure) return quoteFailure;
+      const currentPrice = ticker.trade_price;
       const isDryRun = server.tradingSystem.dryRun;
 
       // 보유량 확인
@@ -2516,15 +2739,16 @@ export default function createTradingRoutes(server) {
 
           server.tradingSystem.saveVirtualPortfolio();
         }
-      } else {
-        const liveExecution = await executeLiveOrderWithEvidence(server.tradingSystem, {
-          market: coin,
-          side: 'ask',
-          volume: sellVolume,
-          orderType: 'market',
-          requested: { volume: sellVolume },
-          referencePrice: currentPrice
-        });
+        } else {
+          const liveExecution = await executeLiveOrderWithEvidence(server.tradingSystem, {
+            market: coin,
+            side: 'ask',
+            volume: sellVolume,
+            orderType: 'market',
+            requested: { volume: sellVolume },
+            referencePrice: currentPrice,
+            clientIntentId: req.manualOrderClientIntentId
+          });
         liveFill = liveExecution.fill;
         if (!hasCompleteObservedLiveFill(liveExecution)) {
           return res.status(liveExecution.blocked ? 503 : 409).json({
@@ -2632,9 +2856,9 @@ export default function createTradingRoutes(server) {
       }
 
       // 전체 마켓 조회
-      const markets = await server.tradingSystem.upbit.getMarkets();
+      const markets = await getMarketDataProvider(server).getMarkets();
       const krwMarkets = markets.filter(m => m.market.startsWith('KRW-')).map(m => m.market);
-      const tickers = await server.tradingSystem.upbit.getTicker(krwMarkets);
+      const tickers = await readFreshTickers(krwMarkets);
 
       // 거래량 기준 상위 50개 분석
       const sortedByVolume = [...tickers].sort((a, b) => b.acc_trade_price_24h - a.acc_trade_price_24h);
@@ -2651,7 +2875,7 @@ export default function createTradingRoutes(server) {
           const volume24h = ticker.acc_trade_price_24h;
 
           // 캔들 데이터
-          const candles = await server.tradingSystem.upbit.getMinuteCandles(coin, 5, 100);
+          const candles = await readMinuteCandles(coin, 5, 100);
           if (!candles || candles.length < 50) continue;
 
           // 기술적 분석

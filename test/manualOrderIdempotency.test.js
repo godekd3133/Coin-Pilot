@@ -12,9 +12,16 @@ import DashboardServer from '../src/api/dashboardServer.js';
 import createTradingRoutes from '../src/api/routes/trading.js';
 import createPortfolioRoutes from '../src/api/routes/portfolio.js';
 import {
+  addLiveOrderIntentEvidence,
+  createLiveExecutionEvidenceEvent,
+  inspectLiveExecutionEvidenceFile,
+  readLiveOrderIntentEvidence
+} from '../src/research/liveExecutionEvidence.js';
+import {
   ManualOrderIdempotencyStore,
   createDefaultManualOrderIdempotencyStore,
-  canonicalManualRequestEndpoint
+  canonicalManualRequestEndpoint,
+  createManualOrderIdempotencyMiddleware
 } from '../src/api/manualOrderIdempotencyStore.js';
 
 function makeRoot(t) {
@@ -44,8 +51,13 @@ function makeTemporaryDashboard(trader, root, port = 0) {
   });
 }
 
-function makeFakeUpbit({ price = 100, getMinuteCandles = async () => [] } = {}) {
-  const calls = { ticker: 0, candles: 0, order: 0 };
+function makeFakeUpbit({
+  price = 100,
+  tradeTimestamp = Date.now(),
+  getMinuteCandles = async () => [],
+  getOrder = async () => null
+} = {}) {
+  const calls = { ticker: 0, candles: 0, order: 0, orderReadback: 0, orderLookups: [] };
   return {
     calls,
     async getTicker(markets) {
@@ -54,6 +66,7 @@ function makeFakeUpbit({ price = 100, getMinuteCandles = async () => [] } = {}) 
       return requested.map(market => ({
         market,
         trade_price: price,
+        trade_timestamp: tradeTimestamp,
         signed_change_rate: 0,
         signed_change_price: 0,
         high_price: price,
@@ -66,6 +79,11 @@ function makeFakeUpbit({ price = 100, getMinuteCandles = async () => [] } = {}) 
       calls.candles += 1;
       return getMinuteCandles(...args);
     },
+    async getOrder(identifier, options) {
+      calls.orderReadback += 1;
+      calls.orderLookups.push({ identifier, options });
+      return getOrder(identifier, options);
+    },
     async getMarkets() { return []; },
     async order() { calls.order += 1; return { success: false }; },
     async waitForOrderFill() { return { filled: false, error: 'fake' }; },
@@ -73,7 +91,7 @@ function makeFakeUpbit({ price = 100, getMinuteCandles = async () => [] } = {}) 
   };
 }
 
-function makeDryTrader(root, { balance = 20000, price = 100, getMinuteCandles } = {}) {
+function makeDryTrader(root, { balance = 20000, price = 100, tradeTimestamp = Date.now(), getMinuteCandles } = {}) {
   const trader = new MultiCoinTrader({
     strategyMode: 'oversold_reaction_scalping',
     targetCoins: ['KRW-BTC'],
@@ -88,17 +106,44 @@ function makeDryTrader(root, { balance = 20000, price = 100, getMinuteCandles } 
   });
   trader.virtualPortfolio.krwBalance = balance;
   trader.initialSeedMoney = balance;
-  trader.upbit = makeFakeUpbit({ price, getMinuteCandles });
+  trader.upbit = makeFakeUpbit({ price, tradeTimestamp, getMinuteCandles });
   return trader;
 }
 
-function makeLiveTrader(root, { onSubmit = async () => { throw new Error('fake ambiguous submit'); } } = {}) {
-  const upbit = makeFakeUpbit();
+function makeLiveTrader(root, {
+  onSubmit = async () => { throw new Error('fake ambiguous submit'); },
+  getOrder = async () => null,
+  tradeTimestamp = Date.now()
+} = {}) {
+  const liveExecutionEvidenceFile = path.join(root, 'live_execution_evidence.jsonl');
+  const liveExecutionEvidenceStartup = inspectLiveExecutionEvidenceFile(liveExecutionEvidenceFile);
+  const liveOrderIntentEvidenceIndex = liveExecutionEvidenceStartup.orderIntentEvidenceIndex;
+  const upbit = makeFakeUpbit({ getOrder, tradeTimestamp });
   const unresolvedMarkets = new Set();
   let submitCount = 0;
+  let strategyMutationCount = 0;
+  let accountReadCount = 0;
+  const recordLiveExecutionEvidence = event => {
+    fs.mkdirSync(path.dirname(liveExecutionEvidenceFile), { recursive: true });
+    fs.appendFileSync(liveExecutionEvidenceFile, `${JSON.stringify(event)}\n`, 'utf8');
+    if (event.eventType === 'ORDER_INTENT' && !addLiveOrderIntentEvidence(liveOrderIntentEvidenceIndex, event)) {
+      return false;
+    }
+    return true;
+  };
+  const createLiveExecutionEvidence = options => createLiveExecutionEvidenceEvent(options);
+  const strategy = {
+    currentPosition: null,
+    openPosition() { strategyMutationCount += 1; },
+    closePosition() { strategyMutationCount += 1; },
+    recordPartialSell() { strategyMutationCount += 1; }
+  };
   const trader = {
     dryRun: false,
     virtualPortfolioFile: path.join(root, 'dry_portfolio.json'),
+    liveExecutionEvidenceFile,
+    liveExecutionEvidenceStartup,
+    liveOrderIntentEvidenceIndex,
     upbit,
     liveExecutionEvidenceWriteError: null,
     liveExecutionEvidenceDataError: null,
@@ -111,17 +156,91 @@ function makeLiveTrader(root, { onSubmit = async () => { throw new Error('fake a
     getRuntimeSafetyStatus: () => ({ runtimeState: 'RUNNING', exchangeStateKnown: true }),
     canExecuteLiveOrder: () => true,
     ensureLiveOrderMarketStateVerified: async () => true,
-    createLiveExecutionEvidence: event => ({ recordedAt: new Date().toISOString(), ...event }),
-    recordLiveExecutionEvidence: () => true,
+    createLiveExecutionEvidence,
+    recordLiveExecutionEvidence,
+    strategies: new Map([['KRW-BTC', strategy]]),
+    async getAccountInfo() {
+      accountReadCount += 1;
+      return [
+        { currency: 'KRW', balance: '100000', locked: '0' },
+        { currency: 'BTC', balance: '2', locked: '0' }
+      ];
+    },
+    getKRWBalance(accounts) {
+      return Number(accounts.find(account => account.currency === 'KRW')?.balance || 0);
+    },
+    saveVirtualPortfolio() {},
     markLiveMarketOrderUnresolved(market) { unresolvedMarkets.add(market); },
-    async submitLiveOrder(...args) {
+    async submitLiveOrder(market, side, volume, price, orderType, clientIntentId) {
+      const requested = orderType === 'price'
+        ? { amount: volume }
+        : orderType === 'market'
+          ? { volume }
+          : { volume, price };
+      recordLiveExecutionEvidence(createLiveExecutionEvidence({
+        eventType: 'ORDER_INTENT',
+        clientIntentId,
+        market,
+        side,
+        orderType,
+        requested
+      }));
       submitCount += 1;
-      return onSubmit(...args);
+      return onSubmit(market, side, volume, price, orderType, clientIntentId);
+    },
+    async persistLiveOrderReadback({
+      observedOrder,
+      clientIntentId,
+      market,
+      side,
+      orderType,
+      request
+    }) {
+      const orderId = observedOrder.uuid;
+      recordLiveExecutionEvidence(createLiveExecutionEvidence({
+        eventType: 'ORDER_SUBMITTED',
+        clientIntentId,
+        orderId,
+        market,
+        side,
+        orderType,
+        requested: request,
+        order: observedOrder
+      }));
+      recordLiveExecutionEvidence(createLiveExecutionEvidence({
+        eventType: 'ORDER_STATE_OBSERVED',
+        clientIntentId,
+        orderId,
+        market,
+        side,
+        orderType,
+        order: observedOrder
+      }));
+      const fillResult = {
+        filled: observedOrder.state === 'done',
+        partial: false,
+        order: observedOrder
+      };
+      recordLiveExecutionEvidence(createLiveExecutionEvidence({
+        eventType: observedOrder.state === 'done' ? 'FILL_OBSERVED' : 'FILL_NOT_OBSERVED',
+        clientIntentId,
+        orderId,
+        market,
+        side,
+        orderType,
+        order: observedOrder,
+        fillResult
+      }));
+      return orderId;
     }
   };
   const counts = {
     get submits() { return submitCount; },
     get tickers() { return upbit.calls.ticker; },
+    get orderReadbacks() { return upbit.calls.orderReadback; },
+    get orderLookups() { return [...upbit.calls.orderLookups]; },
+    get strategyMutations() { return strategyMutationCount; },
+    get accountReads() { return accountReadCount; },
     unresolvedMarkets
   };
   return { trader, counts };
@@ -181,7 +300,63 @@ async function postJson(ctx, endpoint, body, key = null) {
     body: JSON.stringify(body)
   });
   const responseBody = await response.json();
-  return { status: response.status, body: responseBody };
+  return {
+    status: response.status,
+    body: responseBody,
+    idempotencyStatus: response.headers.get('Idempotency-Status')
+  };
+}
+
+function makeExchangeOrder(identifier, market = 'KRW-BTC', side = 'bid', overrides = {}) {
+  return {
+    uuid: '6f1e2d3c-4b5a-4c6d-8e9f-0123456789ab',
+    identifier,
+    market,
+    side,
+    ord_type: side === 'bid' ? 'price' : 'market',
+    state: 'done',
+    executed_volume: '0.5',
+    remaining_volume: '0',
+    avg_price: '10000',
+    paid_fee: '2.5',
+    created_at: '2026-09-29T00:00:00Z',
+    done_at: '2026-09-29T00:00:01Z',
+    trades_count: 1,
+    ...overrides
+  };
+}
+
+async function startTerminalResponseRoute(t, server, status, body, { beforeRespond = () => {} } = {}) {
+  const app = express();
+  app.use(express.json());
+  const router = express.Router();
+  router.use(createManualOrderIdempotencyMiddleware(server, { paths: new Set(['/result']) }));
+  router.post('/result', (req, res) => {
+    beforeRespond(req, res);
+    return res.status(status).json(body);
+  });
+  app.use('/api', router);
+  const httpServer = app.listen(0, '127.0.0.1');
+  await once(httpServer, 'listening');
+  let closePromise = null;
+  const close = () => {
+    if (closePromise) return closePromise;
+    closePromise = new Promise((resolve, reject) => {
+      httpServer.close(error => {
+        if (error) return reject(error);
+        try {
+          server.manualOrderIdempotencyStore?.releaseWriterLock?.();
+          resolve();
+        } catch (caught) {
+          reject(caught);
+        }
+      });
+    });
+    return closePromise;
+  };
+  t.after(close);
+  const { port } = httpServer.address();
+  return { baseUrl: `http://127.0.0.1:${port}`, httpServer, close };
 }
 
 test('manual trade and wallet endpoints reject a missing key before reading prices or mutating state', async t => {
@@ -207,10 +382,88 @@ test('manual trade and wallet endpoints reject a missing key before reading pric
     assert.equal(result.status, 428, `${endpoint} must require Idempotency-Key`);
     assert.equal(result.body.pending, false);
     assert.equal(result.body.error.code, 'idempotency_key_required');
+    assert.equal(result.idempotencyStatus, 'rejected');
   }
   assert.equal(trader.upbit.calls.ticker, 0);
   assert.equal(trader.virtualPortfolio.krwBalance, initialBalance);
   assert.equal(trader.virtualPortfolio.holdings.size, 0);
+});
+
+test('DRY_RUN without a portfolio transaction does not leave a stale in-flight retry', async t => {
+  const root = makeRoot(t);
+  const trader = makeDryTrader(root);
+  trader.withManualPortfolioTransaction = undefined;
+  const server = makeServer(trader, root);
+  const ctx = await startRoutes(t, server);
+  const body = { coin: 'KRW-BTC', amount: 5000 };
+
+  const first = await postJson(ctx, '/api/trade/buy', body, 'dry-run-transaction-unavailable');
+  assert.equal(first.status, 202);
+  assert.equal(first.idempotencyStatus, 'unknown');
+  assert.equal(first.body.idempotency.status, 'unknown');
+  assert.equal(trader.upbit.calls.ticker, 0, 'the route must not run without its portfolio transaction');
+
+  const retry = await postJson(ctx, '/api/trade/buy', body, 'dry-run-transaction-unavailable');
+  assert.equal(retry.status, 202);
+  assert.equal(retry.idempotencyStatus, 'unknown');
+  assert.equal(retry.body.idempotency.status, 'unknown', 'unsupported transaction capability is not stale pending work');
+  assert.equal(trader.upbit.calls.ticker, 0, 'same-key retry must remain fail-closed');
+});
+
+test('durable terminal LIVE 409 and rolled-back DRY_RUN 503 replay with completed header and unchanged body', async t => {
+  const cases = [
+    {
+      name: 'LIVE terminal 409',
+      status: 409,
+      makeTrader: makeLiveTrader,
+      body: {
+        success: false,
+        mode: 'LIVE',
+        reason: 'live_order_in_progress',
+        error: { code: 'live_order_in_progress', message: 'fake terminal rejection' }
+      }
+    },
+    {
+      name: 'DRY_RUN rolled-back 503',
+      status: 503,
+      makeTrader: makeDryTrader,
+      body: {
+        success: false,
+        pending: false,
+        mode: 'DRY_RUN',
+        error: { code: 'fake_paper_transaction_failure', message: 'fake terminal rejection' }
+      }
+    }
+  ];
+
+  for (const item of cases) {
+    await t.test(item.name, async t => {
+      const root = makeRoot(t);
+      const trader = item.makeTrader === makeLiveTrader ? makeLiveTrader(root).trader : item.makeTrader(root);
+      const server = makeServer(trader, root);
+      const initialBalance = trader.dryRun ? trader.virtualPortfolio.krwBalance : null;
+      const ctx = await startTerminalResponseRoute(t, server, item.status, item.body, {
+        beforeRespond: () => {
+          if (trader.dryRun) trader.virtualPortfolio.krwBalance -= 1234;
+        }
+      });
+      const requestBody = { requestedAction: 'fake-only' };
+      const first = await postJson(ctx, '/api/result', requestBody, `terminal-result-${item.status}`);
+      const replay = await postJson(ctx, '/api/result', requestBody, `terminal-result-${item.status}`);
+
+      assert.equal(first.status, item.status);
+      assert.equal(first.idempotencyStatus, 'completed');
+      assert.deepEqual(first.body, item.body);
+      assert.equal(replay.status, item.status);
+      assert.equal(replay.idempotencyStatus, 'completed');
+      assert.deepEqual(replay.body, first.body);
+      assert.equal(server.manualOrderIdempotencyStore.records.values().next().value.state, 'completed');
+      if (trader.dryRun) {
+        assert.equal(trader.virtualPortfolio.krwBalance, initialBalance, 'the failed DRY_RUN mutation is rolled back');
+        assert.equal(trader.virtualPortfolio.holdings.size, 0);
+      }
+    });
+  }
 });
 
 test('DRY_RUN legacy buy mutates once, replays canonical same-body response, and rejects key reuse', async t => {
@@ -221,6 +474,7 @@ test('DRY_RUN legacy buy mutates once, replays canonical same-body response, and
   const key = 'dry-buy-key-01';
   const first = await postJson(ctx, '/api/trade/buy', { coin: 'KRW-BTC', amount: 5000 }, key);
   assert.equal(first.status, 200);
+  assert.equal(first.idempotencyStatus, 'completed');
   assert.equal(first.body.success, true);
   assert.equal(first.body.mode, 'DRY_RUN');
   assert.equal(trader.virtualPortfolio.krwBalance, 15000);
@@ -231,12 +485,14 @@ test('DRY_RUN legacy buy mutates once, replays canonical same-body response, and
   // JSON key order is not part of the body identity.
   const replay = await postJson(ctx, '/api/trade/buy', { amount: 5000, coin: 'KRW-BTC' }, key);
   assert.equal(replay.status, first.status);
+  assert.equal(replay.idempotencyStatus, 'completed');
   assert.deepEqual(replay.body, first.body);
   assert.equal(trader.virtualPortfolio.krwBalance, 15000);
   assert.equal(trader.upbit.calls.ticker, 1);
 
   const bodyConflict = await postJson(ctx, '/api/trade/buy', { coin: 'KRW-BTC', amount: 6000 }, key);
   assert.equal(bodyConflict.status, 409);
+  assert.equal(bodyConflict.idempotencyStatus, 'conflict');
   assert.equal(bodyConflict.body.pending, false);
   assert.equal(bodyConflict.body.idempotency.status, 'conflict');
   const endpointConflict = await postJson(ctx, '/api/trade/execute', {
@@ -255,6 +511,101 @@ test('DRY_RUN legacy buy mutates once, replays canonical same-body response, and
   const journal = fs.readFileSync(server.manualOrderIdempotencyStore.filePath, 'utf8');
   assert.equal(journal.includes(key), false, 'raw idempotency keys are not persisted');
   assert.equal(journal.includes('fake-bearer-token'), false, 'bearer credentials are not persisted');
+});
+
+test('manual buy rejects a stale Upbit trade timestamp before mutating the DRY_RUN portfolio', async t => {
+  const root = makeRoot(t);
+  const initialBalance = 20_000;
+  const trader = makeDryTrader(root, {
+    balance: initialBalance,
+    tradeTimestamp: Date.now() - 10 * 60_000
+  });
+  const ctx = await startRoutes(t, makeServer(trader, root));
+
+  const result = await postJson(
+    ctx,
+    '/api/trade/buy',
+    { coin: 'KRW-BTC', amount: 5_000 },
+    'dry-buy-stale-quote'
+  );
+
+  assert.equal(result.status, 409);
+  assert.equal(result.body.success, false);
+  assert.equal(result.body.code, 'MARKET_QUOTE_STALE');
+  assert.equal(result.body.markets[0].reason, 'market_source_stale');
+  assert.equal(trader.virtualPortfolio.krwBalance, initialBalance);
+  assert.equal(trader.virtualPortfolio.holdings.size, 0);
+  assert.equal(trader.upbit.calls.order, 0);
+});
+
+test('LIVE manual buy rejects a stale quote before creating an exchange-order intent', async t => {
+  const root = makeRoot(t);
+  const live = makeLiveTrader(root, { tradeTimestamp: Date.now() - 10 * 60_000 });
+  const ctx = await startRoutes(t, makeServer(live.trader, root));
+
+  const result = await postJson(ctx, '/api/trade/buy', {
+    coin: 'KRW-BTC',
+    amount: 5_000
+  }, 'live-buy-stale-quote');
+
+  assert.equal(result.status, 409);
+  assert.equal(result.body.code, 'MARKET_QUOTE_STALE');
+  assert.equal(live.counts.submits, 0);
+  assert.equal(live.counts.strategyMutations, 0);
+  assert.equal(live.counts.unresolvedMarkets.size, 0);
+});
+
+test('bundle rejects a stale buy leg before the fresh sell leg can mutate the portfolio', async t => {
+  const root = makeRoot(t);
+  const trader = makeDryTrader(root, { balance: 20_000 });
+  trader.virtualPortfolio.holdings.set('KRW-BTC', { amount: 10, avgPrice: 90, entryTime: null });
+  const originalUpbit = trader.upbit;
+  trader.upbit = {
+    ...originalUpbit,
+    async getTicker(markets) {
+      originalUpbit.calls.ticker += 1;
+      const requested = Array.isArray(markets) ? markets : [markets];
+      return requested.map(market => ({
+        market,
+        trade_price: 100,
+        trade_timestamp: market === 'KRW-ETH' ? Date.now() - 10 * 60_000 : Date.now()
+      }));
+    }
+  };
+  const ctx = await startRoutes(t, makeServer(trader, root));
+
+  const result = await postJson(ctx, '/api/trade/execute-bundle', {
+    sellCoin: 'KRW-BTC',
+    buyCoin: 'KRW-ETH'
+  }, 'bundle-stale-buy-leg');
+
+  assert.equal(result.status, 409);
+  assert.equal(result.body.code, 'MARKET_QUOTE_STALE');
+  assert.equal(result.body.markets.some(market => market.market === 'KRW-ETH'), true);
+  assert.equal(trader.virtualPortfolio.krwBalance, 20_000);
+  assert.equal(trader.virtualPortfolio.holdings.get('KRW-BTC').amount, 10);
+  assert.equal(trader.virtualPortfolio.holdings.has('KRW-ETH'), false);
+});
+
+test('smart buy does not select a stale server-side market candidate', async t => {
+  const root = makeRoot(t);
+  const trader = makeDryTrader(root, {
+    balance: 20_000,
+    tradeTimestamp: Date.now() - 10 * 60_000
+  });
+  trader.upbit.getMarkets = async () => [{ market: 'KRW-BTC' }];
+  const ctx = await startRoutes(t, makeServer(trader, root));
+
+  const result = await postJson(ctx, '/api/trade/smart-buy', {
+    totalAmount: 5_000,
+    minScore: 0,
+    maxCoins: 1
+  }, 'smart-buy-stale-candidate');
+
+  assert.equal(result.status, 409);
+  assert.equal(result.body.code, 'MARKET_QUOTE_STALE');
+  assert.equal(trader.virtualPortfolio.krwBalance, 20_000);
+  assert.equal(trader.virtualPortfolio.holdings.size, 0);
 });
 
 test('legacy bundle and execute request bodies are idempotent without changing their route payloads', async t => {
@@ -304,7 +655,7 @@ test('same-key concurrent request gets 202 while the original DRY_RUN command ex
       signalTickerRead();
       await tickerGate;
       const requested = Array.isArray(markets) ? markets : [markets];
-      return requested.map(market => ({ market, trade_price: 100 }));
+      return requested.map(market => ({ market, trade_price: 100, trade_timestamp: Date.now() }));
     }
   };
   const ctx = await startRoutes(t, makeServer(trader, root));
@@ -314,6 +665,7 @@ test('same-key concurrent request gets 202 while the original DRY_RUN command ex
 
   const concurrent = await postJson(ctx, '/api/trade/buy', body, 'same-key-concurrent');
   assert.equal(concurrent.status, 202);
+  assert.equal(concurrent.idempotencyStatus, 'pending');
   assert.equal(concurrent.body.pending, true);
   assert.equal(concurrent.body.idempotency.status, 'pending');
   releaseTicker();
@@ -339,7 +691,7 @@ test('two server instances sharing one profile allow only one protected request 
       signalTickerRead();
       await tickerGate;
       const requested = Array.isArray(markets) ? markets : [markets];
-      return requested.map(market => ({ market, trade_price: 100 }));
+      return requested.map(market => ({ market, trade_price: 100, trade_timestamp: Date.now() }));
     }
   };
   const secondTrader = makeDryTrader(root);
@@ -738,9 +1090,428 @@ test('ambiguous LIVE submission is submitted once and stays unknown after retry 
   const restartedCtx = await startRoutes(t, restartedServer);
   const afterRestart = await postJson(restartedCtx, '/api/trade/buy', body, 'live-ambiguous-once');
   assert.equal(afterRestart.status, 202);
+  assert.equal(afterRestart.idempotencyStatus, 'unknown');
   assert.equal(afterRestart.body.idempotency.status, 'unknown');
   assert.equal(restartedLive.counts.tickers, 0);
   assert.equal(restartedLive.counts.submits, 0);
+});
+
+test('MultiCoinTrader sends the pre-persisted intent identifier to the Upbit order call', async t => {
+  const root = makeRoot(t);
+  const trader = new MultiCoinTrader({
+    strategyMode: 'oversold_reaction_scalping',
+    targetCoins: ['KRW-BTC'],
+    dryRun: false,
+    virtualPortfolioFile: path.join(root, 'dry_portfolio.json'),
+    paperValidationFile: path.join(root, 'paper_validation.json'),
+    portfolioHistoryFile: path.join(root, 'portfolio_history.json'),
+    liveExecutionEvidenceFile: path.join(root, 'live_evidence.jsonl'),
+    positionRiskCheckIntervalMs: 0,
+    useNews: false
+  });
+  const clientIntentId = '123e4567-e89b-42d3-a456-426614174000';
+  let postedArguments = null;
+  trader._liveAccountStateKnown = true;
+  trader._liveExchangeStateKnown = true;
+  trader.canExecuteLiveOrder = () => true;
+  trader.upbit = {
+    async order(...args) {
+      postedArguments = args;
+      return {
+        success: true,
+        data: {
+          uuid: '6f1e2d3c-4b5a-4c6d-8e9f-0123456789ab',
+          identifier: clientIntentId,
+          market: 'KRW-BTC',
+          side: 'bid',
+          ord_type: 'price',
+          state: 'wait'
+        }
+      };
+    }
+  };
+
+  await trader.submitLiveOrder('KRW-BTC', 'bid', 5000, null, 'price', clientIntentId);
+
+  assert.deepEqual(postedArguments, [
+    'KRW-BTC', 'bid', 5000, null, 'price', clientIntentId, { priority: 'risk' }
+  ]);
+  const events = fs.readFileSync(trader.liveExecutionEvidenceFile, 'utf8')
+    .trim()
+    .split('\n')
+    .map(line => JSON.parse(line));
+  assert.equal(events[0].eventType, 'ORDER_INTENT');
+  assert.equal(events[0].clientIntentId, clientIntentId);
+  assert.equal(events[0].identifier, clientIntentId);
+  assert.equal(readLiveOrderIntentEvidence(trader.liveOrderIntentEvidenceIndex, clientIntentId).available, true);
+});
+
+test('same-process duplicate stays pending while the original LIVE request is active, then restart can recover', async t => {
+  const root = makeRoot(t);
+  let signalSubmitStarted;
+  const submitStarted = new Promise(resolve => { signalSubmitStarted = resolve; });
+  let releaseSubmit;
+  const submitGate = new Promise(resolve => { releaseSubmit = resolve; });
+  let acceptedIntentId = null;
+  let acceptedOrder = null;
+  const live = makeLiveTrader(root, {
+    onSubmit: async (_market, _side, _volume, _price, _orderType, clientIntentId) => {
+      acceptedIntentId = clientIntentId;
+      acceptedOrder = makeExchangeOrder(clientIntentId);
+      signalSubmitStarted();
+      await submitGate;
+      throw new Error('fake accepted POST with response lost after the concurrent retry');
+    },
+    getOrder: async identifier => identifier === acceptedIntentId ? { ...acceptedOrder } : null
+  });
+  const server = makeServer(live.trader, root);
+  const ctx = await startRoutes(t, server);
+  const body = { coin: 'KRW-BTC', amount: 5000 };
+  const key = 'same-process-active-live-order';
+  const firstPromise = postJson(ctx, '/api/trade/buy', body, key);
+  await submitStarted;
+
+  const concurrentRetry = await postJson(ctx, '/api/trade/buy', body, key);
+  assert.equal(concurrentRetry.status, 202);
+  assert.equal(concurrentRetry.idempotencyStatus, 'pending');
+  assert.equal(concurrentRetry.body.idempotency.status, 'pending');
+  assert.equal(live.counts.submits, 1);
+  assert.equal(live.counts.orderReadbacks, 0, 'the active command is not raced by identifier lookup');
+
+  releaseSubmit();
+  const first = await firstPromise;
+  assert.equal(first.status, 202);
+  assert.equal(first.body.idempotency.status, 'unknown');
+  await ctx.close();
+
+  const restartedLive = makeLiveTrader(root, {
+    onSubmit: async () => { throw new Error('restart recovery must not POST'); },
+    getOrder: async (identifier, options) => {
+      assert.equal(identifier, acceptedIntentId);
+      assert.deepEqual(options, { identifier: true });
+      return { ...acceptedOrder };
+    }
+  });
+  const restartedServer = makeServer(restartedLive.trader, root, {
+    storePath: server.manualOrderIdempotencyStore.filePath
+  });
+  const restartedCtx = await startRoutes(t, restartedServer);
+  const recovered = await postJson(restartedCtx, '/api/trade/buy', body, key);
+  assert.equal(recovered.status, 200);
+  assert.equal(recovered.idempotencyStatus, 'completed');
+  assert.equal(restartedLive.counts.orderReadbacks, 1);
+  assert.equal(restartedLive.counts.submits, 0);
+  assert.equal(live.counts.submits + restartedLive.counts.submits, 1);
+});
+
+test('single-order LIVE retry recovers a terminal identifier readback and caches it without replaying route mutations', async t => {
+  const cases = [
+    {
+      name: 'legacy buy',
+      endpoint: '/api/trade/buy',
+      body: { coin: 'KRW-BTC', amount: 5000 },
+      side: 'bid'
+    },
+    {
+      name: 'execute buy',
+      endpoint: '/api/trade/execute',
+      body: { coin: 'KRW-BTC', action: 'BUY', amount: 5000 },
+      side: 'bid'
+    },
+    {
+      name: 'execute sell',
+      endpoint: '/api/trade/execute',
+      body: { coin: 'KRW-BTC', action: 'SELL', amount: 5000 },
+      side: 'ask'
+    },
+    {
+      name: 'quick buy',
+      endpoint: '/api/trade/quick',
+      body: { coin: 'KRW-BTC', action: 'BUY', amount: 5000 },
+      side: 'bid'
+    },
+    {
+      name: 'quick sell',
+      endpoint: '/api/trade/quick',
+      body: { coin: 'KRW-BTC', action: 'SELL', amount: 5000 },
+      side: 'ask'
+    },
+    {
+      name: 'legacy sell',
+      endpoint: '/api/trade/sell',
+      body: { coin: 'KRW-BTC', quantity: 1 },
+      side: 'ask'
+    }
+  ];
+
+  for (const item of cases) {
+    await t.test(item.name, async t => {
+      const root = makeRoot(t);
+      let exchangeOrder = null;
+      let postedIntentId = null;
+      const live = makeLiveTrader(root, {
+        onSubmit: async (_market, _side, _volume, _price, _orderType, clientIntentId) => {
+          postedIntentId = clientIntentId;
+          assert.equal(
+            [...server.manualOrderIdempotencyStore.records.values()][0]?.clientIntentId,
+            clientIntentId,
+            'the intent identifier is durable before the exchange POST begins'
+          );
+          exchangeOrder = makeExchangeOrder(clientIntentId, 'KRW-BTC', item.side);
+          throw new Error('fake accepted POST with lost response');
+        },
+        getOrder: async (identifier, options) => {
+          if (!exchangeOrder || identifier !== postedIntentId || options?.identifier !== true) return null;
+          return { ...exchangeOrder };
+        }
+      });
+      const server = makeServer(live.trader, root);
+      const key = `live-recover-${item.name.replaceAll(' ', '-')}`;
+      const firstCtx = await startRoutes(t, server);
+      const first = await postJson(firstCtx, item.endpoint, item.body, key);
+      const pendingRecord = [...server.manualOrderIdempotencyStore.records.values()][0];
+
+      assert.equal(first.status, 202);
+      assert.equal(first.body.idempotency.status, 'unknown');
+      assert.match(pendingRecord.clientIntentId, /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
+      assert.notEqual(pendingRecord.keyHash, key, 'the raw idempotency key is not persisted');
+      assert.equal(Object.hasOwn(pendingRecord, 'idempotencyKey'), false);
+      assert.equal(postedIntentId, pendingRecord.clientIntentId, 'the persisted identifier is the identifier passed to the exchange POST path');
+      assert.equal(live.counts.submits, 1);
+      assert.equal(live.trader.upbit.calls.order, 0, 'the fake route never calls the exchange POST client directly');
+      await firstCtx.close();
+
+      const restartedLive = makeLiveTrader(root, {
+        onSubmit: async () => { throw new Error('retry must never POST'); },
+        getOrder: async (identifier, options) => {
+          assert.equal(identifier, pendingRecord.clientIntentId);
+          assert.deepEqual(options, { identifier: true });
+          return { ...exchangeOrder };
+        }
+      });
+      const restartedServer = makeServer(restartedLive.trader, root, {
+        storePath: server.manualOrderIdempotencyStore.filePath
+      });
+      const restartedCtx = await startRoutes(t, restartedServer);
+      const recovered = await postJson(restartedCtx, item.endpoint, item.body, key);
+
+      assert.equal(recovered.status, 200);
+      assert.equal(recovered.idempotencyStatus, 'completed');
+      assert.equal(recovered.body.success, true);
+      assert.equal(recovered.body.recovered, true);
+      assert.equal(recovered.body.fill.status, 'filled');
+      assert.equal(recovered.body.settlement.status, 'not_observed');
+      assert.equal(recovered.body.strategyState.status, 'not_mutated');
+      assert.equal(restartedLive.counts.orderReadbacks, 1);
+      assert.equal(restartedLive.counts.submits, 0);
+      assert.equal(restartedLive.trader.upbit.calls.order, 0);
+      assert.equal(restartedLive.counts.tickers, 0);
+      assert.equal(restartedLive.counts.strategyMutations, 0);
+      assert.equal(restartedLive.counts.accountReads, 0, 'recovery reads exchange order state only');
+
+      const completed = [...restartedServer.manualOrderIdempotencyStore.records.values()][0];
+      assert.equal(completed.state, 'completed');
+      assert.equal(completed.recovered, true);
+      assert.deepEqual(completed.responseBody, recovered.body);
+      const replay = await postJson(restartedCtx, item.endpoint, item.body, key);
+      assert.equal(replay.status, recovered.status);
+      assert.equal(replay.idempotencyStatus, 'completed');
+      assert.deepEqual(replay.body, recovered.body);
+      assert.equal(restartedLive.counts.orderReadbacks, 1, 'completed response is replayed without another exchange GET');
+      assert.equal(live.counts.submits + restartedLive.counts.submits, 1);
+    });
+  }
+});
+
+test('LIVE bundle and smart-order retries remain unknown without identifier lookup or plan replay', async t => {
+  const cases = [
+    {
+      endpoint: '/api/trade/execute-bundle',
+      body: { sellCoin: 'KRW-BTC', buyCoin: 'KRW-ETH', amount: 5000 }
+    },
+    {
+      endpoint: '/api/trade/smart-buy',
+      body: { totalAmount: 10000, minScore: 60, maxCoins: 1 }
+    },
+    {
+      endpoint: '/api/trade/smart-sell',
+      body: { targetAmount: 1000, strategy: 'worst' }
+    }
+  ];
+
+  for (const item of cases) {
+    await t.test(item.endpoint, async t => {
+      const root = makeRoot(t);
+      const live = makeLiveTrader(root);
+      const server = makeServer(live.trader, root);
+      const reservation = await server.manualOrderIdempotencyStore.reserve({
+        profileId: 'operator',
+        idempotencyKey: `live-compound-${item.endpoint}`,
+        method: 'POST',
+        endpoint: item.endpoint,
+        body: item.body,
+        mode: 'LIVE'
+      });
+      assert.equal(reservation.kind, 'reserved');
+      assert.equal(Object.hasOwn(reservation.record, 'clientIntentId'), false);
+      await server.manualOrderIdempotencyStore.markUnknown(reservation.record.recordId, 'simulated_interrupted_plan');
+
+      const ctx = await startRoutes(t, server);
+      const key = `live-compound-${item.endpoint}`;
+      const firstRetry = await postJson(ctx, item.endpoint, item.body, key);
+      const secondRetry = await postJson(ctx, item.endpoint, item.body, key);
+
+      assert.equal(firstRetry.status, 202);
+      assert.equal(firstRetry.idempotencyStatus, 'unknown');
+      assert.equal(secondRetry.status, 202);
+      assert.equal(secondRetry.body.idempotency.status, 'unknown');
+      assert.equal(live.counts.orderReadbacks, 0, 'compound plans do not auto-reconcile by one client identifier');
+      assert.equal(live.counts.submits, 0, 'compound plan retries never replay dynamic legs');
+      assert.equal(live.counts.tickers, 0, 'the route is not re-run');
+    });
+  }
+});
+
+test('terminal cancellation without a fill recovers as a cached no-fill result without wallet settlement', async t => {
+  const root = makeRoot(t);
+  let acceptedOrder = null;
+  const live = makeLiveTrader(root, {
+    onSubmit: async (_market, _side, _volume, _price, _orderType, clientIntentId) => {
+      acceptedOrder = makeExchangeOrder(clientIntentId, 'KRW-BTC', 'ask', {
+        state: 'cancel',
+        executed_volume: '0',
+        remaining_volume: '1',
+        avg_price: null,
+        paid_fee: '0'
+      });
+      throw new Error('fake accepted POST with lost response');
+    },
+    getOrder: async () => ({ ...acceptedOrder })
+  });
+  const server = makeServer(live.trader, root);
+  const firstCtx = await startRoutes(t, server);
+  const first = await postJson(firstCtx, '/api/trade/sell', { coin: 'KRW-BTC', quantity: 1 }, 'terminal-cancel-key');
+  assert.equal(first.status, 202);
+  await firstCtx.close();
+
+  const restartedLive = makeLiveTrader(root, {
+    getOrder: async (identifier, options) => {
+      assert.equal(identifier, acceptedOrder.identifier);
+      assert.deepEqual(options, { identifier: true });
+      return { ...acceptedOrder };
+    }
+  });
+  const restartedServer = makeServer(restartedLive.trader, root, { storePath: server.manualOrderIdempotencyStore.filePath });
+  const restartedCtx = await startRoutes(t, restartedServer);
+  const recovered = await postJson(restartedCtx, '/api/trade/sell', { coin: 'KRW-BTC', quantity: 1 }, 'terminal-cancel-key');
+
+  assert.equal(recovered.status, 409);
+  assert.equal(recovered.idempotencyStatus, 'completed');
+  assert.equal(recovered.body.success, false);
+  assert.equal(recovered.body.recovered, true);
+  assert.equal(recovered.body.fill.status, 'not_observed');
+  assert.equal(recovered.body.fill.exchangeState, 'cancel');
+  assert.equal(recovered.body.settlement.status, 'not_observed');
+  assert.equal(restartedLive.counts.submits, 0);
+  assert.equal(restartedLive.counts.strategyMutations, 0);
+});
+
+test('nonterminal, mismatched, incomplete, missing, or unreadable LIVE evidence stays unknown without another POST', async t => {
+  const cases = [
+    {
+      name: '404 identifier lookup',
+      getOrder: async () => { throw Object.assign(new Error('not found'), { status: 404 }); }
+    },
+    {
+      name: 'waiting order',
+      makeOrder: identifier => makeExchangeOrder(identifier, 'KRW-BTC', 'bid', { state: 'wait' })
+    },
+    {
+      name: 'identifier mismatch',
+      makeOrder: identifier => makeExchangeOrder(identifier, 'KRW-BTC', 'bid', {
+        identifier: '11111111-2222-4333-8444-555555555555'
+      })
+    },
+    {
+      name: 'incomplete fill accounting',
+      makeOrder: identifier => makeExchangeOrder(identifier, 'KRW-BTC', 'bid', { paid_fee: null })
+    },
+    {
+      name: 'partial terminal cancellation',
+      makeOrder: identifier => makeExchangeOrder(identifier, 'KRW-BTC', 'bid', {
+        state: 'cancel',
+        executed_volume: '0.1',
+        remaining_volume: '0.4'
+      })
+    },
+    {
+      name: 'missing intent link',
+      removeIntent: true,
+      makeOrder: identifier => makeExchangeOrder(identifier)
+    },
+    {
+      name: 'unreadable evidence',
+      corruptEvidence: true,
+      makeOrder: identifier => makeExchangeOrder(identifier)
+    }
+  ];
+
+  for (const item of cases) {
+    await t.test(item.name, async t => {
+      const root = makeRoot(t);
+      let acceptedOrder = null;
+      const firstLive = makeLiveTrader(root, {
+        onSubmit: async (_market, _side, _volume, _price, _orderType, clientIntentId) => {
+          acceptedOrder = item.makeOrder ? item.makeOrder(clientIntentId) : null;
+          throw new Error('fake accepted POST with lost response');
+        }
+      });
+      const server = makeServer(firstLive.trader, root);
+      const key = `live-unresolved-${item.name.replaceAll(' ', '-')}`;
+      const firstCtx = await startRoutes(t, server);
+      const first = await postJson(firstCtx, '/api/trade/buy', { coin: 'KRW-BTC', amount: 5000 }, key);
+      assert.equal(first.status, 202);
+      assert.equal(firstLive.counts.submits, 1);
+      await firstCtx.close();
+
+      const intentEvidenceFile = firstLive.trader.liveExecutionEvidenceFile;
+      if (item.removeIntent) fs.rmSync(intentEvidenceFile, { force: true });
+      if (item.corruptEvidence) fs.appendFileSync(intentEvidenceFile, 'not-json\n', 'utf8');
+      let readCount = 0;
+      const restartedLive = makeLiveTrader(root, {
+        onSubmit: async () => { throw new Error('retry must never POST'); },
+        getOrder: async () => {
+          readCount += 1;
+          if (item.getOrder) return item.getOrder();
+          return acceptedOrder ? { ...acceptedOrder } : null;
+        }
+      });
+      const restartedServer = makeServer(restartedLive.trader, root, {
+        storePath: server.manualOrderIdempotencyStore.filePath
+      });
+      const restartedCtx = await startRoutes(t, restartedServer);
+      const retry = await postJson(restartedCtx, '/api/trade/buy', { coin: 'KRW-BTC', amount: 5000 }, key);
+
+      assert.equal(retry.status, 202);
+      assert.equal(retry.idempotencyStatus, 'unknown');
+      assert.equal(retry.body.idempotency.status, 'unknown');
+      assert.equal(restartedLive.counts.submits, 0);
+      assert.equal(restartedLive.counts.tickers, 0);
+      assert.equal(restartedLive.counts.strategyMutations, 0);
+      assert.equal(restartedLive.counts.orderReadbacks, item.removeIntent || item.corruptEvidence ? 0 : 1);
+      assert.equal(restartedLive.counts.orderReadbacks, readCount);
+      assert.equal(firstLive.counts.submits + restartedLive.counts.submits, 1);
+      const unresolved = [...restartedServer.manualOrderIdempotencyStore.records.values()][0];
+      assert.equal(unresolved.state, 'unknown');
+      assert.equal(Object.hasOwn(unresolved, 'responseBody'), false);
+
+      const repeatedRetry = await postJson(restartedCtx, '/api/trade/buy', { coin: 'KRW-BTC', amount: 5000 }, key);
+      assert.equal(repeatedRetry.status, 202);
+      assert.equal(repeatedRetry.body.idempotency.status, 'unknown');
+      assert.equal(restartedLive.counts.submits, 0);
+      assert.equal(firstLive.counts.submits + restartedLive.counts.submits, 1);
+    });
+  }
 });
 
 test('smart sell rechecks the shared holding after awaited analysis and serializes automatic DRY_RUN order work', async t => {

@@ -2,6 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 export const LIVE_EXECUTION_EVIDENCE_SCHEMA = 'coinpilot.live-execution-evidence.v1';
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const LIVE_ORDER_INTENT_INDEX_SCHEMA = 'coinpilot.live-order-intent-index.v1';
 
 function finiteNumber(value) {
   if (value === null || value === undefined || (typeof value === 'string' && value.trim() === '')) return null;
@@ -74,6 +76,180 @@ export function compactLiveOrder(order) {
     createdAt: textOrNull(order.created_at),
     doneAt: textOrNull(order.done_at),
     tradesCount: finiteNumber(order.trades_count)
+  };
+}
+
+function isVerifiedLiveOrderIntent(event) {
+  return isValidEvent(event) && event.eventType === 'ORDER_INTENT' &&
+    typeof event.clientIntentId === 'string' && UUID_PATTERN.test(event.clientIntentId) &&
+    event.identifier === event.clientIntentId &&
+    Number.isFinite(Date.parse(event.recordedAt)) &&
+    typeof event.market === 'string' && event.market.trim() !== '' &&
+    ['bid', 'ask'].includes(event.side) &&
+    ['price', 'market', 'limit'].includes(event.orderType) &&
+    event.request && typeof event.request === 'object' && !Array.isArray(event.request);
+}
+
+function cloneLiveOrderIntent(intent) {
+  return JSON.parse(JSON.stringify(intent));
+}
+
+/**
+ * Build the request-path lookup table from the parsed startup evidence scan.
+ * A malformed stream, invalid intent, or duplicate identifier makes the whole
+ * index unavailable so a retry can never fall back to a disk scan.
+ */
+export function createLiveOrderIntentEvidenceIndex(events = [], { streamValid = true, reason = null } = {}) {
+  const index = {
+    schema: LIVE_ORDER_INTENT_INDEX_SCHEMA,
+    available: streamValid === true,
+    reason: streamValid === true ? null : (reason || 'live_order_intent_index_unavailable'),
+    intents: new Map()
+  };
+  if (!index.available) return index;
+
+  for (const event of events) {
+    if (event?.eventType !== 'ORDER_INTENT') continue;
+    if (!isVerifiedLiveOrderIntent(event)) {
+      index.available = false;
+      index.reason = 'live_order_intent_invalid';
+      index.intents.clear();
+      return index;
+    }
+    if (index.intents.has(event.clientIntentId)) {
+      index.available = false;
+      index.reason = 'live_order_intent_ambiguous';
+      index.intents.clear();
+      return index;
+    }
+    index.intents.set(event.clientIntentId, cloneLiveOrderIntent(event));
+  }
+  return index;
+}
+
+/** Check an intent before writing it, so duplicate IDs are not appended. */
+export function canAddLiveOrderIntentEvidence(index, event) {
+  return Boolean(index && index.schema === LIVE_ORDER_INTENT_INDEX_SCHEMA && index.available === true &&
+    index.intents instanceof Map && isVerifiedLiveOrderIntent(event) &&
+    !index.intents.has(event.clientIntentId));
+}
+
+/** Update the verified in-memory lookup after a durable ORDER_INTENT append. */
+export function addLiveOrderIntentEvidence(index, event) {
+  if (event?.eventType !== 'ORDER_INTENT') return true;
+  if (!canAddLiveOrderIntentEvidence(index, event)) {
+    if (index && index.schema === LIVE_ORDER_INTENT_INDEX_SCHEMA) {
+      index.available = false;
+      index.reason = index.intents?.has?.(event?.clientIntentId)
+        ? 'live_order_intent_ambiguous'
+        : 'live_order_intent_invalid';
+      index.intents?.clear?.();
+    }
+    return false;
+  }
+  index.intents.set(event.clientIntentId, cloneLiveOrderIntent(event));
+  return true;
+}
+
+/**
+ * Read the durable ORDER_INTENT from the startup-built in-memory index. This
+ * request-path helper never opens or scans the append-only evidence file.
+ */
+export function readLiveOrderIntentEvidence(index, clientIntentId) {
+  if (typeof clientIntentId !== 'string' || !UUID_PATTERN.test(clientIntentId)) {
+    return { available: false, reason: 'client_intent_id_invalid', intent: null };
+  }
+  if (!index || index.schema !== LIVE_ORDER_INTENT_INDEX_SCHEMA || index.available !== true ||
+    !(index.intents instanceof Map)) {
+    return {
+      available: false,
+      reason: typeof index?.reason === 'string' ? index.reason : 'live_order_intent_index_unavailable',
+      intent: null
+    };
+  }
+  const intent = index.intents.get(clientIntentId);
+  if (!intent) return { available: false, reason: 'live_order_intent_missing', intent: null };
+  if (!isVerifiedLiveOrderIntent(intent) || intent.clientIntentId !== clientIntentId ||
+    intent.identifier !== clientIntentId) {
+    return { available: false, reason: 'live_order_intent_invalid', intent: null };
+  }
+  return { available: true, reason: null, intent: cloneLiveOrderIntent(intent) };
+}
+
+/**
+ * Validate a read-only identifier lookup before it can resolve a manual LIVE
+ * request. Open orders, partial fills, and incomplete accounting remain
+ * unknown. A terminal fill is exchange evidence only; it says nothing about
+ * wallet settlement.
+ */
+export function resolveTerminalLiveOrderReadback(order, {
+  clientIntentId,
+  market,
+  side,
+  orderType
+} = {}) {
+  if (!order || typeof order !== 'object' ||
+    typeof order.uuid !== 'string' || !UUID_PATTERN.test(order.uuid) ||
+    typeof clientIntentId !== 'string' || order.identifier !== clientIntentId ||
+    typeof market !== 'string' || order.market !== market ||
+    !['bid', 'ask'].includes(side) || order.side !== side ||
+    !['price', 'market', 'limit'].includes(orderType) || order.ord_type !== orderType) {
+    return { terminal: false, reason: 'live_order_identity_mismatch', order: null };
+  }
+
+  const hasObservedNumber = value => value !== null && value !== undefined &&
+    !(typeof value === 'string' && value.trim() === '') && Number.isFinite(Number(value));
+  const executedVolume = hasObservedNumber(order.executed_volume) ? Number(order.executed_volume) : null;
+  const remainingVolume = hasObservedNumber(order.remaining_volume) ? Number(order.remaining_volume) : null;
+  const averagePrice = hasObservedNumber(order.avg_price) ? Number(order.avg_price) : null;
+  const paidFee = hasObservedNumber(order.paid_fee) ? Number(order.paid_fee) : null;
+  const compactOrder = compactLiveOrder(order);
+
+  if (order.state === 'done' && executedVolume > 0 && remainingVolume === 0 &&
+    averagePrice !== null && averagePrice > 0 && paidFee !== null && paidFee >= 0) {
+    return {
+      terminal: true,
+      outcome: 'filled',
+      order: compactOrder,
+      fill: {
+        status: 'filled',
+        orderId: order.uuid,
+        exchangeState: order.state,
+        executedVolume,
+        remainingVolume,
+        averagePrice,
+        paidFee,
+        error: null
+      }
+    };
+  }
+
+  if (order.state === 'cancel' && executedVolume === 0 && remainingVolume !== null &&
+    remainingVolume >= 0 && paidFee !== null && paidFee >= 0) {
+    return {
+      terminal: true,
+      outcome: 'cancelled_without_fill',
+      order: compactOrder,
+      fill: {
+        status: 'not_observed',
+        orderId: order.uuid,
+        exchangeState: order.state,
+        executedVolume,
+        remainingVolume,
+        averagePrice,
+        paidFee,
+        error: 'exchange order was cancelled without a fill'
+      }
+    };
+  }
+
+  return {
+    terminal: false,
+    reason: ['done', 'cancel'].includes(order.state) &&
+      (executedVolume > 0 || executedVolume === 0)
+      ? 'live_order_accounting_incomplete_or_partial'
+      : 'live_order_not_terminal',
+    order: compactOrder
   };
 }
 
@@ -199,6 +375,7 @@ export function isTerminalLiveOrderResolution(event) {
 
 export function isDefinitiveLiveOrderRejection(event) {
   const definitiveCodes = new Set([
+    'upbit_request_not_dispatched',
     'insufficient_funds_bid',
     'insufficient_funds_ask',
     'under_min_total_bid',
@@ -214,12 +391,25 @@ export function isDefinitiveLiveOrderRejection(event) {
 export function inspectLiveExecutionEvidenceFile(filePath, { fileSnapshot = null } = {}) {
   const existsSync = fileSnapshot?.existsSync || fs.existsSync;
   const readFileSync = fileSnapshot?.readText || fs.readFileSync;
-  if (!filePath || !existsSync(filePath)) {
+  if (!filePath) {
     return {
       available: false,
       malformedLineCount: 0,
       reconciliation: null,
-      blockingReasons: []
+      blockingReasons: [],
+      orderIntentEvidenceIndex: createLiveOrderIntentEvidenceIndex([], {
+        streamValid: false,
+        reason: 'live_order_intent_index_unavailable'
+      })
+    };
+  }
+  if (!existsSync(filePath)) {
+    return {
+      available: false,
+      malformedLineCount: 0,
+      reconciliation: null,
+      blockingReasons: [],
+      orderIntentEvidenceIndex: createLiveOrderIntentEvidenceIndex()
     };
   }
 
@@ -232,7 +422,11 @@ export function inspectLiveExecutionEvidenceFile(filePath, { fileSnapshot = null
       malformedLineCount: 0,
       reconciliation: null,
       blockingReasons: [`live evidence file read failed: ${error.message}`],
-      error: error.message
+      error: error.message,
+      orderIntentEvidenceIndex: createLiveOrderIntentEvidenceIndex([], {
+        streamValid: false,
+        reason: 'live_evidence_unreadable'
+      })
     };
   }
 
@@ -247,9 +441,17 @@ export function inspectLiveExecutionEvidenceFile(filePath, { fileSnapshot = null
     }
   }
   const reconciliation = reconcileLiveExecutionEvidence(events);
+  const orderIntentEvidenceIndex = createLiveOrderIntentEvidenceIndex(events, {
+    streamValid: malformedLineCount === 0 && reconciliation.invalidEventCount === 0,
+    reason: malformedLineCount > 0 ? 'live_evidence_malformed' : 'live_evidence_invalid'
+  });
   const blockingReasons = [];
   if (malformedLineCount > 0 || reconciliation.invalidEventCount > 0) {
     blockingReasons.push('live evidence contains malformed records');
+  }
+  if (!orderIntentEvidenceIndex.available &&
+    !blockingReasons.some(reason => reason === 'live evidence contains malformed records')) {
+    blockingReasons.push(`live order intent index unavailable: ${orderIntentEvidenceIndex.reason}`);
   }
   if (reconciliation.unresolvedSubmittedOrderCount > 0) {
     blockingReasons.push(`unresolved submitted orders: ${reconciliation.unresolvedSubmittedOrderCount}`);
@@ -264,7 +466,8 @@ export function inspectLiveExecutionEvidenceFile(filePath, { fileSnapshot = null
     available: true,
     malformedLineCount,
     reconciliation,
-    blockingReasons
+    blockingReasons,
+    orderIntentEvidenceIndex
   };
 }
 

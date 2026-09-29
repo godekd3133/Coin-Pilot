@@ -1,0 +1,187 @@
+{
+  "schemaVersion": 1,
+  "auditId": "coinpilot-r5-owner-outage-eth-exposure-20260929T1626Z",
+  "createdAt": "2026-09-29T16:30:00Z",
+  "scope": "Read-only market-data and persisted-ledger exposure audit. No production code, test, order, process, ledger, or lock changes.",
+  "limitations": [
+    "A candle OHLC range is not a tick path, execution, or proof of an exit.",
+    "Due-time PnL cases are conditional on the ETH position remaining open through the scheduled risk checks; they are hypothetical marks only.",
+    "This audit does not infer why the owner stopped updating, establish causality, or promote profitability evidence."
+  ],
+  "provenance": {
+    "ledger": {
+      "path": ".paper-forward-sealed-rsi-20260928-r5/paper_validation.json",
+      "sha256BeforeMarketRequest": "b778407398581e2f6b99415de237d31185ccc6be237323de7d43dbae03256f8f",
+      "sha256AfterMarketRequest": "b778407398581e2f6b99415de237d31185ccc6be237323de7d43dbae03256f8f",
+      "unchanged": true
+    },
+    "marketData": {
+      "provider": "Upbit public REST API via repository src/api/upbit.js UpbitAPI",
+      "credentials": "empty public-read client; no authenticated endpoint",
+      "request": {
+        "method": "GET",
+        "market": "KRW-ETH",
+        "unitMinutes": 1,
+        "count": 80,
+        "to": "2026-09-29T16:30:00.000Z",
+        "requestStartedAt": "2026-09-29T16:30:02.923Z",
+        "callCount": 1
+      },
+      "rawResponsePath": "/var/folders/wz/t7tvb0nx4gq2my6v96ngwktm0000gn/T/coinpilot-r5-owner-outage-eth-exposure-20260929T1626Z-f78b261c-8dce-4b0a-83b7-1a41c339030d.json",
+      "rawResponseSha256": "9a92ef6645b7319624eb19fe9abd32cd34d957e94d78d1f07e36ad383c71295a",
+      "returnedCandleCount": 80
+    }
+  },
+  "ledgerSnapshot": {
+    "active": true,
+    "endedAt": null,
+    "stopReason": null,
+    "lastHeartbeatAt": "2026-09-29T15:52:20.080Z",
+    "strictTradeCount": 10,
+    "recordedStrictNetKrw": -3638.994884541925,
+    "latestRecordedStrictCloseAt": "2026-09-29T15:25:06.993Z",
+    "strictCloseCountAfterHeartbeat": 0,
+    "ethPosition": {
+      "entryAt": "2026-09-29T15:29:10.198Z",
+      "entryPriceKrw": 3628000,
+      "quantityEth": 0.05507911700661521,
+      "entryNotionalKrw": 199827.0365,
+      "configuredMaxHoldMinutes": 30,
+      "scheduledMaxHoldDeadline": "2026-09-29T15:59:10.198Z",
+      "stopLossPercent": 1.2,
+      "stopLossPriceKrw": 3584464,
+      "takeProfitPercent": 1.8,
+      "takeProfitPriceKrw": 3693304,
+      "tradingFeeRatePerSide": 0.0005,
+      "configuredSlippageRatePerSide": 0.001,
+      "exitModifiers": {
+        "maxLosingHoldMinutes": 0,
+        "breakEvenTriggerPercent": 0,
+        "breakEvenOffsetPercent": 0.05,
+        "trailingActivationPercent": 0,
+        "trailingStopPercent": 0,
+        "winnerExtendMinutes": 0,
+        "winnerExtendMinProfitPercent": 0
+      }
+    }
+  },
+  "timing": {
+    "heartbeatToScheduledDeadlineMs": 410118,
+    "heartbeatToScheduledDeadlineMinutes": 6.8353,
+    "deadlineToCandleRequestStartMs": 1852725,
+    "positionWasStillPersistedOpenAtLedgerRead": true,
+    "deadlineInterpretation": "Configured 30-minute maximum hold is due at 15:59:10.198Z. The recorded losing-hold, break-even trigger, trailing activation, and winner-extension timers are zero/disabled, so no enabled configured modifier extends that deadline. This does not prove an execution or owner-side exit check occurred."
+  },
+  "candleCoverage": {
+    "responseOrder": "strictly_descending",
+    "duplicateTimestampCount": 0,
+    "firstFullMinuteAfterHeartbeat": "2026-09-29T15:53:00Z",
+    "latestCompletedMinuteAtRequestCursor": "2026-09-29T16:29:00Z",
+    "expectedPostHeartbeatMinuteCount": 37,
+    "observedPostHeartbeatMinuteCount": 37,
+    "missingExpectedMinutes": [],
+    "postHeartbeatGridComplete": true,
+    "heartbeatContainingMinute": "2026-09-29T15:52:00Z",
+    "heartbeatContainingMinuteExcludedFromFullMinuteGrid": true,
+    "positionEntryThroughLatestGridMissingMinutes": [],
+    "missingMinuteInterpretation": "No missing minutes in the requested post-heartbeat grid; gaps must be reported as incomplete coverage, never interpreted as quiet/no threshold touch."
+  },
+  "heartbeatBoundaryCandle": {
+    "minute": "2026-09-29T15:52:00Z",
+    "lowKrw": 3623000,
+    "highKrw": 3629000,
+    "closeKrw": 3624000,
+    "stopLossRangeCrossed": false,
+    "takeProfitRangeCrossed": false,
+    "interpretation": "This minute contains the 15:52:20.080Z heartbeat and is timing-ambiguous. Its full low/high range stays between the risk thresholds, ruling out either threshold touch within this minute. It is kept separate from the full-minute post-heartbeat grid."
+  },
+  "riskThresholdTouchAudit": {
+    "thresholdsKrw": {
+      "stopLoss": 3584464,
+      "takeProfit": 3693304
+    },
+    "positionEntryMinute": {
+      "minute": "2026-09-29T15:29:00Z",
+      "stopLossTouchObserved": false,
+      "takeProfitTouchObserved": false,
+      "timingQualification": "Entry occurs at :10.198; OHLC cannot identify the exact intraminute path, but neither threshold is in the full-minute range."
+    },
+    "fullMinutesBeforeHeartbeatAfterEntry": {
+      "range": "2026-09-29T15:30:00Z through 2026-09-29T15:51:00Z",
+      "candleCount": 22,
+      "stopLossTouchCandles": [],
+      "takeProfitTouchCandles": []
+    },
+    "fullMinutesAfterHeartbeatBeforeDeadline": {
+      "range": "2026-09-29T15:53:00Z through 2026-09-29T15:58:00Z",
+      "candleCount": 6,
+      "stopLossTouchCandles": [],
+      "takeProfitTouchCandles": []
+    },
+    "scheduledDeadlineMinute": {
+      "minute": "2026-09-29T15:59:00Z",
+      "candleCount": 1,
+      "stopLossTouchObserved": false,
+      "takeProfitTouchObserved": false,
+      "timingQualification": "The scheduled deadline is 15:59:10.198Z inside this candle. Its OHLC is a range bound; its 16:00 close is not a due-time fill."
+    },
+    "fullMinutesAfterDeadline": {
+      "range": "2026-09-29T16:00:00Z through 2026-09-29T16:29:00Z",
+      "candleCount": 30,
+      "stopLossTouchCandles": [],
+      "takeProfitTouchCandles": []
+    },
+    "postHeartbeatExtrema": {
+      "lowKrw": 3618000,
+      "lowAt": ["2026-09-29T15:54:00Z", "2026-09-29T15:55:00Z"],
+      "highKrw": 3638000,
+      "highAt": ["2026-09-29T16:27:00Z", "2026-09-29T16:28:00Z"]
+    },
+    "scopeNote": "No sampled post-entry bar range touched either configured threshold. This is market-path observation only, not proof of intrabar ordering, no execution, or the cause of the stale active ledger."
+  },
+  "hypotheticalMarks": {
+    "costModel": {
+      "grossPnlKrw": "(exitMark-entryPrice)*fixedOriginalQuantity",
+      "feeOnlyNetKrw": "grossPnl - feeRate*(entryPrice+exitMark)*quantity; fee charged once per side",
+      "feeAndSlippageNetKrw": "feeOnlyNet - slippageRate*(entryPrice+exitMark)*quantity; configured 0.1% slippage charged once per side",
+      "independentFormulaCrossCheck": "exitMark*quantity*(1-feeRate-slippageRate)-entryPrice*quantity*(1+feeRate+slippageRate)",
+      "executionStatus": "hypothetical marks only; no real fill observed or asserted"
+    },
+    "scheduledDeadlineCandle": {
+      "minute": "2026-09-29T15:59:00Z",
+      "lowKrw": 3621000,
+      "highKrw": 3624000,
+      "closeKrw": 3622000,
+      "feeOnlyNetRangeKrw": {
+        "lowMark": -585.1880786367833,
+        "highMark": -420.0333462924476
+      },
+      "feeAndConfiguredSlippageNetRangeKrw": {
+        "lowMark": -984.456597817737,
+        "highMark": -819.4671028244211
+      },
+      "candleCloseMarkOnlyKrw": {
+        "feeOnlyNet": -530.1365011886714,
+        "feeAndConfiguredSlippageNet": -929.4600994866317
+      },
+      "qualification": "Conditional counterfactual if the position remained open until the scheduled deadline. Candle low/high bound possible prices during the minute; neither is an observed fill or a known 15:59:10.198Z price. The candle close occurs at 16:00Z and is shown only as a later mark."
+    },
+    "latestCompletedCandle": {
+      "minute": "2026-09-29T16:29:00Z",
+      "closeMarkKrw": 3635000,
+      "grossMarkPnlKrw": 385.5538190463065,
+      "feeOnlyNetMarkKrw": 185.53400563678335,
+      "feeAndConfiguredSlippageNetMarkKrw": -214.50562118226296,
+      "qualification": "Mark-to-close scenario only; not an observed fill, current-owner action, or addition to the recorded ten-trade net."
+    },
+    "recordedPerformanceSeparation": "The fee/slippage scenarios above are not added to the persisted 10-trade net of -3638.994884541925 KRW."
+  },
+  "conclusion": {
+    "ownerOutageCauseEstablished": false,
+    "strictCloseAfterHeartbeatObserved": false,
+    "profitabilityPromotionSupported": false,
+    "ledgerOrPositionMutated": false,
+    "ordersPlaced": false,
+    "processesStartedOrRestarted": false
+  }
+}

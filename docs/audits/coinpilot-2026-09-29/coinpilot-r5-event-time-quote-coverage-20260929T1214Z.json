@@ -1,0 +1,77 @@
+{
+  "schema": "coinpilot.paper.event-time-quote-coverage.v1",
+  "generatedAt": "2026-09-29T12:14:31.183Z",
+  "researchOnly": true,
+  "promoted": false,
+  "paperOwner": {
+    "sessionId": "paper-1790604243722",
+    "processId": 11906,
+    "activeAtRead": true,
+    "heartbeatAt": "2026-09-29T12:14:24.005Z",
+    "configSnapshotComplete": true,
+    "strictClosedTrades": 8,
+    "actualFillsObserved": false,
+    "tradeCostModelMarkers": 0,
+    "strictExecutionCostAuditMarkers": 0,
+    "configuredTradingFeeRate": 0.0005,
+    "configuredSlippageRate": 0.001
+  },
+  "quoteSampler": {
+    "scheduleSeconds": 600,
+    "freshnessLimitSeconds": 900,
+    "samplesPerReport": 5,
+    "sampleIntervalMs": 2000,
+    "retainedReportCount": 1562,
+    "oldestReportAt": "2026-09-16T16:37:11.190Z",
+    "latestReportAt": "2026-09-29T12:08:34.187Z",
+    "historyRowsWithRawSamples": 0,
+    "historyFields": [
+      "generatedAt",
+      "complete",
+      "sampleCount",
+      "requestedSampleCount",
+      "errors",
+      "maxSpreadPercent",
+      "summary"
+    ]
+  },
+  "tradeTimeCoverage": {
+    "events": 16,
+    "entryAndExitEventsPerStrictTrade": 2,
+    "eventsWithPriorSamplerReport": 16,
+    "priorReportAgeSeconds": {
+      "within60Seconds": 1,
+      "within120Seconds": 1,
+      "within300Seconds": 10,
+      "within900Seconds": 16,
+      "median": 260,
+      "maximum": 599
+    },
+    "eventsWithRetainedRawBidAsk": 0
+  },
+  "sourceCodeBoundary": {
+    "paperExecutionCostModel": "strict_paper_cost_model_v1",
+    "entryFormula": "observed currentPrice * (1 + configured slippageRate)",
+    "exitFormula": "observed currentPrice * (1 - configured slippageRate)",
+    "paperObservedEntryExitPriceMeaning": "currentPrice inputs, not stored best bid/ask and not exchange fills",
+    "costRatesApplied": ["trading fee", "configured adverse slippage"],
+    "rawOrderBookSpreadAppliedPerTrade": false
+  },
+  "verification": {
+    "tests": [
+      "test/paperStrictSlippageExecution.test.js",
+      "test/paperStrictTradeCostAudit.test.js",
+      "test/paperExitPathReplay.test.js"
+    ],
+    "passed": 14,
+    "failed": 0,
+    "scope": "Unit/regression coverage for configured paper slippage, fee accounting, legacy sensitivity, and exit replay; does not validate actual fills or event-time order-book quotes."
+  },
+  "interpretation": {
+    "samplerPurpose": "The 600-second report is useful for spread-distribution monitoring, but its retained history cannot reconstruct quote-crossing cost at a strict entry or exit.",
+    "nextEvidenceRequirement": "A future separately authorized paper cohort should persist timestamped best bid/ask and source age at entry and exit, and mark event-time quote cost unavailable when missing or stale. Keep actualFillsObserved=false without exchange fill records.",
+    "ownerRestarted": false,
+    "runtimeConfigurationChanged": false,
+    "promotionAllowed": false
+  }
+}

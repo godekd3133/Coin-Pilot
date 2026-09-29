@@ -1,0 +1,55 @@
+{
+  "schema": "coinpilot.paper.signal-cap-exit-joint-counterfactual.v1",
+  "generatedAt": "2026-09-29T13:36:06Z",
+  "researchOnly": true,
+  "promoted": false,
+  "sessionId": "paper-1790604243722",
+  "actualFillsObserved": false,
+  "sourceReports": [
+    "docs/audits/coinpilot-2026-09-29/coinpilot-paper-exit-path-replay-r5-20260929T1208Z.json",
+    "docs/audits/coinpilot-2026-09-29/coinpilot-r5-signal-window-cap1-counterfactual-20260929T1327Z.json"
+  ],
+  "coverage": {
+    "strictTrades": 8,
+    "completeExitPaths": 8,
+    "remainingTradesAfterCap1": 7,
+    "selectionAssumption": "For the single duplicated signalTime, cap=1 keeps the earliest observed entry (BTC) and omits the later XRP entry."
+  },
+  "costBasis": {
+    "paperExecutionCostModelMarkers": 0,
+    "feeAlreadyIncludedInRecordedPnl": true,
+    "slippageRateSource": "config snapshot sensitivity, 0.10% per side",
+    "additionalFeeDeduction": false,
+    "quotedSpreadOrActualFillApplied": false
+  },
+  "counterfactuals": [
+    {
+      "takeProfitPercent": 0.3,
+      "baselineNetKrw": -1255.9063438315043,
+      "cap1ExcludedXrpTradeNetKrw": -0.8993431035109438,
+      "cap1NetKrw": -1255.0070007279933,
+      "excludedTradeExitReason": "take_profit"
+    },
+    {
+      "takeProfitPercent": 0.5,
+      "baselineNetKrw": -4199.640912784998,
+      "cap1ExcludedXrpTradeNetKrw": -993.9380412638341,
+      "cap1NetKrw": -3205.7028715211645,
+      "excludedTradeExitReason": "max_hold_recorded_exit"
+    },
+    {
+      "takeProfitPercent": 0.8,
+      "baselineNetKrw": -3389.7086205352816,
+      "cap1ExcludedXrpTradeNetKrw": -993.9380412638341,
+      "cap1NetKrw": -2395.770579271448,
+      "excludedTradeExitReason": "max_hold_recorded_exit"
+    }
+  ],
+  "decision": {
+    "allJointScenariosRemainNegative": true,
+    "conclusion": "The single cap=1 exclusion barely changes the 0.3% target result because that XRP trade would itself have taken the near-break-even target. Cap=1 improves the 0.5%/0.8% post-hoc totals by removing one max-hold loss, but every aggregate remains negative and only one duplicate window informs the counterfactual.",
+    "runtimeConfigChanged": false,
+    "candidateLaunched": false,
+    "promotionAllowed": false
+  }
+}

@@ -2,6 +2,7 @@ import {
   DEFAULT_DAILY_MOMENTUM_CONFIG,
   evaluateDailyMomentumVariants,
   prepareDailyMomentumCandles,
+  summarizeDailyMomentumMarketAttribution,
   simulateDailyMomentumPortfolio
 } from './dailyMomentumStudy.js';
 
@@ -433,6 +434,8 @@ function summarizeVariant(variant, criteria) {
     segments: variant.segments,
     allSegmentsAvailable,
     allSegmentsNonNegative: variant.allSegmentsNonNegative === true,
+    marketAttribution: variant.full?.marketAttribution ||
+      summarizeDailyMomentumMarketAttribution(variant.full?.trades),
     noUnknownBoundary,
     unknownBoundaryPositionMarkets,
     unknownBoundaryEntryMarkets,
@@ -488,6 +491,7 @@ export function evaluateDailyMomentumRobustness(rawCandlesByMarket, options = {}
           full: {
             available: continuous.full.available,
           metrics: continuous.full.metrics,
+          marketAttribution: summarizeDailyMomentumMarketAttribution(continuous.full.trades),
           entryWindowBlockedSignalCount: continuous.full.entryWindowBlockedSignalCount,
           unknownBoundaryPositionCount: continuous.full.unknownBoundaryPositionCount,
           unknownBoundaryPositionMarkets: continuous.full.unknownBoundaryPositionMarkets,
@@ -520,6 +524,7 @@ export function evaluateDailyMomentumRobustness(rawCandlesByMarket, options = {}
       config: variant.config,
       status: variant.status,
       fullMetrics: variant.full.metrics,
+      marketAttribution: variant.marketAttribution,
       worstSegmentReturnPercent: variant.worstSegmentReturnPercent,
       positiveSegmentCount: variant.positiveSegmentCount,
       segmentCount: variant.segmentCount,
@@ -542,6 +547,7 @@ export function evaluateDailyMomentumRobustness(rawCandlesByMarket, options = {}
       config: variant.config,
       status: variant.status,
       fullMetrics: variant.full.metrics,
+      marketAttribution: variant.marketAttribution,
       worstSegmentReturnPercent: variant.worstSegmentReturnPercent,
       positiveSegmentCount: variant.positiveSegmentCount,
       segmentCount: variant.segmentCount,

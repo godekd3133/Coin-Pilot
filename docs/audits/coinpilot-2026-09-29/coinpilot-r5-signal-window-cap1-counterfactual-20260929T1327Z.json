@@ -1,0 +1,62 @@
+{
+  "schema": "coinpilot.paper.signal-window-cap-counterfactual.v1",
+  "generatedAt": "2026-09-29T13:27:28Z",
+  "researchOnly": true,
+  "promoted": false,
+  "currentPaperSession": {
+    "sessionId": "paper-1790604243722",
+    "processId": 11906,
+    "activeAtRead": true,
+    "heartbeatAt": "2026-09-29T13:26:58.303Z",
+    "currentMaxEntriesPerSignalWindow": 0,
+    "strictClosedTrades": 8,
+    "uniqueSignalWindows": 7,
+    "duplicateWindows": 1,
+    "actualFillsObserved": false,
+    "tradeCostModelMarkers": 0,
+    "recordedTradingFeesAlreadyApplied": true,
+    "recordedConfiguredSlippageAlreadyApplied": false
+  },
+  "counterfactual": {
+    "policy": "At most one strict entry per signalTime; preserve the earliest actual entry and omit later entries in that signal group.",
+    "omittedTrade": {
+      "signalTime": "2026-09-28T14:53:00",
+      "market": "KRW-XRP",
+      "entryTime": "2026-09-28T14:54:11.670Z",
+      "recordedNetKrw": -594.6249636887351,
+      "recordedFeeKrw": 199.65653878754938,
+      "configuredTwoSidedSlippageSensitivityKrw": 399.3130775750988
+    },
+    "recordedNetBeforeKrw": -709.6865830314568,
+    "recordedNetAfterCap1Krw": -115.06161934272177,
+    "twoSidedSlippageStressBeforeKrw": -3908.4885414276227,
+    "twoSidedSlippageStressAfterCap1Krw": -2914.550500163789,
+    "additionalFeeDeduction": false
+  },
+  "priorHistoricalCap1Study": {
+    "file": "scalping_portfolio_validation.json",
+    "generatedAt": "2026-09-17T13:31:55.536Z",
+    "marketSet": ["KRW-BTC", "KRW-XRP"],
+    "minuteCandles": 10080,
+    "maxEntriesPerSignalWindow": 1,
+    "trainingTrades": 20,
+    "trainingNetKrw": -769.397290339577,
+    "trainingReturnPercent": -0.07693972903395771,
+    "trainingLowerBoundPercent": -0.38315737914844505,
+    "holdoutTrades": 15,
+    "holdoutNetKrw": 31.90673858707305,
+    "holdoutReturnPercent": 0.0031906738587073047,
+    "holdoutProfitFactor": 1.0598161372964174,
+    "holdoutLowerBoundPercent": -0.20414755647343785,
+    "signalWindowBlockedEntries": 2,
+    "promotionReason": "training_gate_failed"
+  },
+  "decision": {
+    "riskControlSignal": "The current sample's only duplicate-window cluster is net negative; cap=1 would reduce its recorded loss but the 8-trade result remains negative.",
+    "profitabilityProof": false,
+    "selectionCaveat": "This one current duplicate cluster is post-hoc and cannot estimate future edge; the prior cap=1 study was under-sampled and failed its training gate.",
+    "runtimeConfigChanged": false,
+    "candidateLaunched": false,
+    "promotionAllowed": false
+  }
+}

@@ -1,0 +1,87 @@
+{
+  "schema": "coinpilot.paper-forward-profitability-audit.v1",
+  "generatedAt": "2026-09-29T10:33:47Z",
+  "researchOnly": true,
+  "promoted": false,
+  "actualFillsObserved": false,
+  "snapshot": {
+    "source": "read-only /api/momentum-shadow projection",
+    "schema": "coinpilot.momentum-shadow.evidence.v1",
+    "exportedAt": "2026-09-29T10:25:01.026Z",
+    "valid": true,
+    "fresh": true,
+    "maxAgeSeconds": 900,
+    "sha256": "7f6470e1ec069e28518f43d4f8fd9d58ec93ccf6b2d3d528713ccd1ecfe67197"
+  },
+  "activeStrictSession": {
+    "sessionId": "paper-1790604243722",
+    "sourceObservationAt": "2026-09-29T10:33:47Z",
+    "active": true,
+    "cycles": 13233,
+    "heartbeatAt": "2026-09-29T10:33:39.639Z",
+    "configSnapshotComplete": true,
+    "configSlippagePercentPerSide": 0.1,
+    "closedTrades": 7,
+    "openPositions": 0,
+    "recordedNetPnlKrw": -672.7139198720386,
+    "analysisContinuity": true,
+    "riskContinuity": true
+  },
+  "costAudit": {
+    "costMethod": "per_trade_model_marker_else_fixed_quantity_both_sides_notional_stress",
+    "paperExecutionCostModel": null,
+    "slippageAlreadyApplied": false,
+    "evaluatedTradeCount": 7,
+    "unevaluableTradeCount": 0,
+    "grossProfitBeforeRecordedFeesKrw": 726.7195549054138,
+    "recordedFeesKrw": 1399.4334747774526,
+    "recordedNetAfterFeesKrw": -672.7139198720386,
+    "grossMinusRecordedFeesMatchesNet": true,
+    "twoSidedFixedQuantityNotionalKrw": 2798866.9495549053,
+    "configuredSlippagePercentPerSide": 0.1,
+    "additionalSlippageDragKrw": 2798.866949554905,
+    "costStressedNetPnlKrw": -3471.5808694269435,
+    "costStressedProfitableTradeCount": 3,
+    "additionalFeesDeducted": false,
+    "quoteCrossingCostAvailable": false,
+    "note": "Recorded profit already equals gross profit minus ledger fees. This sensitivity adds configured slippage once on both sides at fixed quantity; it is not a fill observation or quote-cross measurement."
+  },
+  "cohort": {
+    "sessionCount": 95,
+    "activeSessionCount": 1,
+    "endedSessionCount": 91,
+    "strictTradeCount": 57,
+    "strictTradeSessionCount": 25,
+    "eligibleStrictSessionCount": 0,
+    "eligibleStrictTradeCount": 0,
+    "strictCostUnverifiedTradeCount": 2,
+    "profitabilityEvidenceProfitBasis": "per_trade_cost_audit_adjusted_net_pnl",
+    "profitabilityEvidenceProfitKrw": null,
+    "profitabilityEvidenceSessionCount": 0,
+    "profitabilityEvidenceTradeCount": 0,
+    "strictCohortExclusionCounts": {
+      "config_snapshot_incomplete": 7,
+      "no_strict_trades": 63,
+      "diagnostic_trades_present": 18,
+      "continuity_ineligible": 3,
+      "session_still_active": 1,
+      "session_not_ended": 3
+    },
+    "profitabilityEvidenceExclusionCounts": {
+      "strict_cohort_ineligible": 95,
+      "observation_days_below_minimum": 91,
+      "trade_count_below_minimum": 95,
+      "observation_window_unverifiable": 4
+    },
+    "actualFillsObserved": false
+  },
+  "candidatePreflight": {
+    "launchAllowed": false,
+    "blockers": [
+      "existing_live_owner_count:2",
+      "benchmark_gate_closed"
+    ],
+    "promotionAllowed": false
+  },
+  "conclusion": "No profitability claim or promotion is supported. The active paper session is negative as recorded and remains negative under the configured two-sided slippage sensitivity; the cohort has no eligible strict profitability sample and no observed exchange fills."
+}

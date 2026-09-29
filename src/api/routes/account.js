@@ -26,9 +26,14 @@ export default function createAccountRoutes(server) {
         isRunning: server.tradingSystem.isRunning,
         mode: server.tradingSystem.dryRun ? 'DRY_RUN' : 'LIVE',
         ...runtimeSafety,
+        liveManualPrepared: server.tradingSystem.liveManualPrepared === true,
+        liveManualPrepareOnBoot: server.tradingSystem.liveManualPrepareOnBoot === true,
+        upbitCredentialsConfigured: server.liveCredentialStore?.status?.() === true ||
+          server.tradingSystem?.liveCredentialsConfigured === true,
         readOnlyObserver: server.tradingSystem.readOnlyObserver === true,
         strategyMode: server.tradingSystem.strategyMode,
         maxPositions: server.tradingSystem.maxPositions,
+        maxCandleAgeSeconds: server.tradingSystem.maxCandleAgeSeconds,
         entryDelayMs: server.tradingSystem.isScalpingMode
           ? [server.tradingSystem.entryDelayMinMs, server.tradingSystem.entryDelayMaxMs]
           : null,
@@ -240,33 +245,42 @@ export default function createAccountRoutes(server) {
         const tickers = await server.getCachedTicker(coins);
         const priceMap = {};
         tickers.forEach(t => { priceMap[t.market] = t.trade_price; });
+        let completeValuation = true;
 
         for (const item of coinList) {
-          const currentPrice = priceMap[item.coin] || item.avgPrice;
-          const currentValue = item.amount * currentPrice;
+          const quotedPrice = Number(priceMap[item.coin]);
+          const valuationAvailable = Number.isFinite(quotedPrice) && quotedPrice > 0;
+          const currentPrice = valuationAvailable ? quotedPrice : null;
+          const currentValue = valuationAvailable ? item.amount * currentPrice : null;
           const costBasis = item.amount * item.avgPrice;
-          const profit = currentValue - costBasis;
-          const profitPercent = costBasis > 0 ? ((profit / costBasis) * 100).toFixed(2) : '0.00';
+          const profit = valuationAvailable ? currentValue - costBasis : null;
+          const profitPercent = valuationAvailable && costBasis > 0
+            ? ((profit / costBasis) * 100).toFixed(2)
+            : null;
+
+          if (!valuationAvailable) completeValuation = false;
+          else totalValue += currentValue;
 
           holdings.push({
             coin: item.coin,
             amount: item.amount,
             avgPrice: item.avgPrice,
             currentPrice,
-            currentValue: Math.round(currentValue),
-            profit: Math.round(profit),
-            profitPercent
+            currentValue: currentValue === null ? null : Math.round(currentValue),
+            profit: profit === null ? null : Math.round(profit),
+            profitPercent,
+            valuationAvailable
           });
-
-          totalValue += currentValue;
         }
+        if (!completeValuation) totalValue = null;
       }
 
       holdings.sort((a, b) => parseFloat(b.profitPercent) - parseFloat(a.profitPercent));
 
       res.json({
         holdings,
-        totalValue: Math.round(totalValue),
+        totalValue: totalValue === null ? null : Math.round(totalValue),
+        valuationAvailable: totalValue !== null,
         count: holdings.length,
         mode: isDryRun ? 'DRY_RUN' : 'LIVE'
       });

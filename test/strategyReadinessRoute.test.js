@@ -130,7 +130,7 @@ test('strategy readiness reports current configured report, live gate result, an
     assert.equal(missing.currentEvidence, false);
     assert.match(missing.blockers.join(' '), /missing/);
   } finally {
-    dashboard.stop();
+    await dashboard.stop();
     trader.stop();
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -163,7 +163,7 @@ test('strategy readiness uses the actual MultiCoinTrader validator and blocks in
     assert.equal(body.liveGate.code, 'report_config_incomplete');
     assert.equal(body.liveGate.reason, 'The fixed validation report settings are incomplete.');
   } finally {
-    dashboard.stop();
+    await dashboard.stop();
     trader.stop();
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -190,7 +190,7 @@ test('strategy readiness stays blocked when the runtime promotion validator is u
     assert.equal(body.liveGate.checked, false);
     assert.match(body.blockers.join(' '), /Runtime promotion validator is unavailable/);
   } finally {
-    dashboard.stop();
+    await dashboard.stop();
     trader.stop();
     fs.rmSync(root, { recursive: true, force: true });
   }

@@ -1,29 +1,53 @@
 import express from 'express';
-import fs from 'fs';
 import path from 'path';
 import { resolveLogDirectory } from '../../utils/logger.js';
+import { readLogTail } from '../../utils/readLogTail.js';
 import { fileURLToPath } from 'url';
+import { API_READ_QUERY_LIMITS, parseBoundedIntegerQuery } from '../queryLimits.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const PROJECT_ROOT = path.resolve(__dirname, '..', '..', '..');
+
+function fetchSingleflight(inFlightRequests, key, fetcher) {
+  const existing = inFlightRequests.get(key);
+  if (existing) return existing;
+
+  let request;
+  request = Promise.resolve()
+    .then(fetcher)
+    .finally(() => {
+      if (inFlightRequests.get(key) === request) {
+        inFlightRequests.delete(key);
+      }
+    });
+  inFlightRequests.set(key, request);
+  return request;
+}
 
 /**
  * 뉴스/로그 관련 라우트
  */
 export default function createNewsRoutes(server) {
   const router = express.Router();
+  const inFlightAllNewsFetch = new Map();
+  const inFlightCoinNewsFetch = new Map();
 
   // 뉴스 조회 (누적된 전체 뉴스)
   router.get('/news', async (req, res) => {
     try {
-      const limit = parseInt(req.query.limit) || 100;
+      const limit = parseBoundedIntegerQuery(req.query.limit, API_READ_QUERY_LIMITS.news);
       const source = req.query.source || null;
 
       // 새 뉴스 스크랩 시도 (newsMonitor가 있으면)
-      if (server.tradingSystem.newsMonitor) {
+      const newsMonitor = server.tradingSystem.newsMonitor;
+      if (newsMonitor) {
         try {
-          const freshNews = await server.tradingSystem.newsMonitor.fetchAllNews?.() || [];
+          const freshNews = await fetchSingleflight(
+            inFlightAllNewsFetch,
+            'all',
+            () => newsMonitor.fetchAllNews?.()
+          ) || [];
           server.accumulateNews(freshNews, 'general');
         } catch (e) {
           console.warn('[News] 새 뉴스 스크랩 실패:', e.message);
@@ -55,7 +79,7 @@ export default function createNewsRoutes(server) {
     try {
       const coin = req.params.coin.toUpperCase();
       const market = coin.startsWith('KRW-') ? coin : `KRW-${coin}`;
-      const limit = parseInt(req.query.limit) || 50;
+      const limit = parseBoundedIntegerQuery(req.query.limit, API_READ_QUERY_LIMITS.coinNews);
 
       if (!server.tradingSystem.newsMonitor) {
         // newsMonitor 없어도 누적된 뉴스에서 필터링
@@ -70,7 +94,11 @@ export default function createNewsRoutes(server) {
       }
 
       // 새 뉴스 스크랩 및 누적
-      const coinNews = await server.tradingSystem.newsMonitor.fetchCoinSpecificNews(market);
+      const coinNews = await fetchSingleflight(
+        inFlightCoinNewsFetch,
+        market,
+        () => server.tradingSystem.newsMonitor.fetchCoinSpecificNews(market)
+      );
       server.accumulateNews(coinNews, `coin:${market}`);
 
       // 누적된 뉴스에서 해당 코인 필터링
@@ -120,12 +148,13 @@ export default function createNewsRoutes(server) {
   });
 
   // 로그 조회
-  router.get('/logs', (req, res) => {
+  router.get('/logs', async (req, res) => {
     try {
       const type = req.query.type || 'trading';
-      const lines = parseInt(req.query.lines) || 100;
+      const parsedLines = Number.parseInt(req.query.lines, 10);
+      const lines = Number.isFinite(parsedLines) && parsedLines > 0 ? parsedLines : 100;
 
-      const logDir = resolveLogDirectory(PROJECT_ROOT);
+      const logDir = server.logger?.logDir || resolveLogDirectory(PROJECT_ROOT);
       const today = new Date().toISOString().split('T')[0];
 
       let logFile;
@@ -137,22 +166,16 @@ export default function createNewsRoutes(server) {
         logFile = path.join(logDir, `trading-${today}.log`);
       }
 
-      if (fs.existsSync(logFile)) {
-        const content = fs.readFileSync(logFile, 'utf8');
-        const logLines = content.split('\n').filter(line => line.trim());
-        const recentLogs = logLines.slice(-lines);
-
-        res.json({
-          logs: recentLogs,
-          total: logLines.length
-        });
-      } else {
-        res.json({
-          logs: [],
-          total: 0,
-          message: 'Log file not found'
-        });
-      }
+      const result = await readLogTail(logFile, { maxLines: lines, maxBytes: 1024 * 1024 });
+      const response = {
+        logs: result.lines,
+        // Null means the file was larger than the bounded suffix we inspected.
+        total: result.totalLines,
+        truncated: result.truncated,
+        fileSizeBytes: result.fileSizeBytes
+      };
+      if (!result.fileExists) response.message = 'Log file not found';
+      res.json(response);
     } catch (error) {
       res.status(500).json({ error: error.message });
     }

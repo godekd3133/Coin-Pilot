@@ -17,6 +17,9 @@ const redesignStyleSource = fs.readFileSync(
 const indexSource = fs.readFileSync(path.join(projectRoot, 'public/index.html'), 'utf8');
 const serviceWorkerSource = fs.readFileSync(path.join(projectRoot, 'public/sw.js'), 'utf8');
 const manifestSource = fs.readFileSync(path.join(projectRoot, 'public/manifest.webmanifest'), 'utf8');
+const redesignScriptAsset = indexSource.match(/<script\s+src=["'](\/pilot-redesign\.js\?v=[^"']+)["']/)?.[1];
+const redesignStylesheetAsset = indexSource.match(/<link\s+rel=["']stylesheet["']\s+href=["'](\/pilot-redesign\.css\?v=[^"']+)["']/)?.[1];
+const serviceWorkerCacheName = serviceWorkerSource.match(/const CACHE_NAME = ["']([^"']+)["']/)?.[1];
 const tradingRouteSource = fs.readFileSync(path.join(projectRoot, 'src/api/routes/trading.js'), 'utf8');
 const coreReadinessFunctionSource = redesignSource.match(
   /function isCoreTradingSnapshotReady\(\{[\s\S]*?\n {4}\}/
@@ -30,11 +33,78 @@ const marketTimestampFunctionSource = redesignSource.match(
 const formatMarketTimestamp = marketTimestampFunctionSource
   ? new Function(`${marketTimestampFunctionSource}; return formatMarketTimestamp;`)()
   : null;
+const marketQuoteFreshnessFunctionSource = redesignSource.match(
+  /function marketQuoteFreshnessIssue\(market, now = Date\.now\(\)\) \{[\s\S]*?\n {4}\}/
+)?.[0];
+const marketQuoteFreshnessIssue = marketQuoteFreshnessFunctionSource
+  ? new Function('state', `${marketQuoteFreshnessFunctionSource}; return marketQuoteFreshnessIssue;`)({
+    status: { maxCandleAgeSeconds: 90 }
+  })
+  : null;
+const protectedMutationErrorFunctionSource = redesignSource.match(
+  /function protectedMutationError\(outcome, fallback\) \{[\s\S]*?\n {4}\}/
+)?.[0];
+const protectedMutationError = protectedMutationErrorFunctionSource
+  ? new Function('symbolOf', `${protectedMutationErrorFunctionSource}; return protectedMutationError;`)(
+    market => typeof market === 'string' ? market.replace(/^KRW-/, '') : '종목'
+  )
+  : null;
+const marketSnapshotNormalizerFunctionSource = redesignSource.match(
+  /function normalizeMarketPriceSnapshot\(snapshot\) \{[\s\S]*?\n {4}\}/
+)?.[0];
+const normalizeMarketPriceSnapshot = marketSnapshotNormalizerFunctionSource
+  ? new Function(`${marketSnapshotNormalizerFunctionSource}; return normalizeMarketPriceSnapshot;`)()
+  : null;
+const legacyMarketSnapshotHelpersStart = redesignSource.indexOf('    function oldestLegacyRowTimestamp(');
+const legacyMarketSnapshotHelpersEnd = redesignSource.indexOf('    function marketSnapshotPresentation(', legacyMarketSnapshotHelpersStart);
+const legacyMarketSnapshotHelpersSource = legacyMarketSnapshotHelpersStart >= 0 && legacyMarketSnapshotHelpersEnd > legacyMarketSnapshotHelpersStart
+  ? redesignSource.slice(legacyMarketSnapshotHelpersStart, legacyMarketSnapshotHelpersEnd)
+  : null;
+const buildLegacyMarketPriceSnapshot = legacyMarketSnapshotHelpersSource
+  ? new Function(`${legacyMarketSnapshotHelpersSource}; return buildLegacyMarketPriceSnapshot;`)()
+  : null;
+const loadLegacyMarketSnapshotFunctionSource = redesignSource.match(
+  /async function loadLegacyMarketSnapshotOn404\(error, targetCoins, readJSON\) \{[\s\S]*?\n {4}\}/
+)?.[0];
+const loadLegacyMarketSnapshotOn404 = loadLegacyMarketSnapshotFunctionSource
+  ? new Function(
+    'buildLegacyMarketPriceSnapshot',
+    `${loadLegacyMarketSnapshotFunctionSource}; return loadLegacyMarketSnapshotOn404;`
+  )(buildLegacyMarketPriceSnapshot)
+  : null;
+const marketSnapshotPresentationFunctionSource = redesignSource.match(
+  /function marketSnapshotPresentation\(snapshot, loaded, prices\) \{[\s\S]*?\n {4}\}/
+)?.[0];
+const marketSnapshotPresentation = marketSnapshotPresentationFunctionSource
+  ? new Function(
+    'formatMarketTimestamp', 'marketQuoteFreshnessIssue',
+    `${marketSnapshotPresentationFunctionSource}; return marketSnapshotPresentation;`
+  )(formatMarketTimestamp, () => null)
+  : null;
+const selectedMarketQuotePresentationFunctionSource = redesignSource.match(
+  /function selectedMarketQuotePresentation\(marketData, snapshotPresentation, now = Date\.now\(\)\) \{[\s\S]*?\n {4}\}/
+)?.[0];
+const selectedMarketQuotePresentation = selectedMarketQuotePresentationFunctionSource
+  ? new Function(
+    'marketQuoteFreshnessIssue',
+    `${selectedMarketQuotePresentationFunctionSource}; return selectedMarketQuotePresentation;`
+  )(marketQuoteFreshnessIssue)
+  : null;
 const displayedCandlesFunctionSource = redesignSource.match(
   /function getDisplayedCandles\(candles, displayRange\) \{[\s\S]*?\n {4}\}/
 )?.[0];
 const getDisplayedCandles = displayedCandlesFunctionSource
   ? new Function(`${displayedCandlesFunctionSource}; return getDisplayedCandles;`)()
+  : null;
+const positionRowsStart = redesignSource.indexOf('    function renderPositionRows(targetId) {');
+const positionRowsEnd = redesignSource.indexOf('\n    function renderPositionHeaders()', positionRowsStart);
+const positionRowsFunctionSource = positionRowsStart >= 0 && positionRowsEnd > positionRowsStart
+  ? redesignSource.slice(positionRowsStart, positionRowsEnd).trim()
+  : null;
+const marketChartStart = redesignSource.indexOf('    function drawMarketChart() {');
+const marketChartEnd = redesignSource.indexOf('\n    function renderCandleControls()', marketChartStart);
+const marketChartFunctionSource = marketChartStart >= 0 && marketChartEnd > marketChartStart
+  ? redesignSource.slice(marketChartStart, marketChartEnd).trim()
   : null;
 const candleLoaderFunctionSource = redesignSource.match(
   /async function loadCandles\(force = false\) \{[\s\S]*?\n {4}\}/
@@ -88,7 +158,7 @@ const runtimeCanAcceptManualOrders = manualRuntimeGateFunctionSource
   ? new Function(`${manualRuntimeGateFunctionSource}; return runtimeCanAcceptManualOrders;`)()
   : null;
 const canTradeFunctionSource = redesignSource.match(
-  /function canTrade\(\) \{[\s\S]*?\n {4}\}/
+  /function canTrade\(market = null\) \{[\s\S]*?\n {4}\}/
 )?.[0];
 const modeBannerPresentationFunctionSource = redesignSource.match(
   /function getModeBannerPresentation\(\{[\s\S]*?\n {4}\}\) \{[\s\S]*?\n {4}\}/
@@ -204,6 +274,7 @@ test('변경 요청은 전송 전에 정확한 경로·본문·UUID를 저장하
   assert.equal(storage.getItem('coinpilot.pending-mutation.v1'), null);
   const senderSource = redesignSource.match(/async function sendManualMutationRequest\([\s\S]*?\n {4}\}/)?.[0] || '';
   assert.match(senderSource, /'Idempotency-Key': idempotencyKey/);
+  assert.match(senderSource, /headers\?\.get\?\.\('Idempotency-Status'\)/);
   assert.match(senderSource, /fetch\(`\/api\$\{endpoint\}`/);
 });
 
@@ -273,6 +344,121 @@ test('202, conflict, missing-key, parse failure, and server errors retain the sh
         const retry = await client.retry();
         assert.equal(retry.kind, 'resolution-required');
         assert.equal(calls, 1);
+      }
+    });
+  }
+});
+
+test('durable terminal errors unlock while idempotency conflicts and unresolved outcomes stay locked', async t => {
+  const cases = [
+    {
+      name: 'completed LIVE rejection 409',
+      response: {
+        status: 409,
+        idempotencyStatus: 'completed',
+        body: { success: false, pending: false, error: { code: 'live_order_in_progress' } },
+        parsed: true
+      },
+      resultKind: 'rejected',
+      locked: false
+    },
+    {
+      name: 'completed DRY_RUN rejection 503',
+      response: {
+        status: 503,
+        idempotencyStatus: 'completed',
+        body: { success: false, pending: false, error: { code: 'paper_transaction_rejected' } },
+        parsed: true
+      },
+      resultKind: 'rejected',
+      locked: false
+    },
+    {
+      name: '409 idempotency key conflict',
+      response: {
+        status: 409,
+        idempotencyStatus: 'conflict',
+        body: { success: false, pending: false, error: { code: 'idempotency_key_conflict' } },
+        parsed: true
+      },
+      resultKind: 'pending',
+      lastOutcome: 'conflict',
+      locked: true
+    },
+    {
+      name: '409 idempotency key conflict while the original key is pending',
+      response: {
+        status: 409,
+        idempotencyStatus: 'conflict',
+        body: { success: false, pending: true, idempotency: { status: 'pending' }, error: { code: 'idempotency_key_conflict' } },
+        parsed: true
+      },
+      resultKind: 'pending',
+      lastOutcome: 'conflict',
+      locked: true
+    },
+    {
+      name: '428 missing key',
+      response: {
+        status: 428,
+        idempotencyStatus: 'rejected',
+        body: { success: false, pending: false, error: { code: 'idempotency_key_required' } },
+        parsed: true
+      },
+      resultKind: 'pending',
+      lastOutcome: 'key_missing',
+      locked: true
+    },
+    {
+      name: '503 outcome unknown',
+      response: {
+        status: 503,
+        idempotencyStatus: 'unknown',
+        body: { success: false, pending: true, error: { code: 'idempotency_outcome_unknown' } },
+        parsed: true
+      },
+      resultKind: 'pending',
+      lastOutcome: 'unknown',
+      locked: true
+    },
+    {
+      name: '503 without idempotency status from a proxy',
+      response: {
+        status: 503,
+        body: { success: false, error: { code: 'upstream_unavailable' } },
+        parsed: true
+      },
+      resultKind: 'pending',
+      lastOutcome: 'unknown',
+      locked: true
+    }
+  ];
+
+  for (const item of cases) {
+    await t.test(item.name, async () => {
+      const storage = createMemoryStorage();
+      let calls = 0;
+      const client = createPendingMutationClient({
+        storage,
+        createKey: () => testMutationKey,
+        sendRequest: async () => { calls += 1; return item.response; }
+      });
+
+      const result = await client.submit('/trade/buy', { coin: 'KRW-BTC', amount: 10000 });
+      const snapshot = client.snapshot();
+      assert.equal(result.kind, item.resultKind);
+      assert.equal(snapshot.locked, item.locked);
+      if (item.locked) {
+        assert.equal(snapshot.intent.lastOutcome, item.lastOutcome);
+        assert.equal(snapshot.intent.idempotencyKey, testMutationKey);
+        if (['conflict', 'key_missing'].includes(item.lastOutcome)) {
+          const retry = await client.retry();
+          assert.equal(retry.kind, 'resolution-required');
+          assert.equal(calls, 1);
+        }
+      } else {
+        assert.equal(snapshot.intent, null);
+        assert.equal(storage.getItem('coinpilot.pending-mutation.v1'), null);
       }
     });
   }
@@ -477,6 +663,203 @@ test('시장 차트 표시 구간 버튼은 접근 가능하고 캔들 데이터
   assert.match(redesignStyleSource, /\.pilot-market-range:focus-visible/);
 });
 
+test('포지션이 없을 때만 표의 최소 너비를 해제하고 빈 상태 행을 컨테이너에 맞춘다', () => {
+  assert.ok(positionRowsFunctionSource);
+  const renderPositionTable = (rows, known, initiallyEmpty = false) => {
+    const classes = new Set(['pilot-table']);
+    if (initiallyEmpty) classes.add('is-position-empty');
+    const table = {
+      classList: {
+        toggle(name, force) {
+          if (force) classes.add(name);
+          else classes.delete(name);
+          return classes.has(name);
+        }
+      }
+    };
+    const target = {
+      html: '',
+      closest(selector) {
+        assert.equal(selector, 'table');
+        return table;
+      },
+      set innerHTML(value) { this.html = value; },
+      get innerHTML() { return this.html; }
+    };
+    const render = new Function(
+      'byId', 'positions', 'positionDataKnown', 'isReadOnlyObserver', 'escapeHtml', 'symbolOf',
+      'formatQuantity', 'hasFiniteValue', 'formatPrice', 'formatOptionalPercent', 'formatWon',
+      'formatSignedWon', 'classForValue',
+      `${positionRowsFunctionSource}; return renderPositionRows;`
+    )(
+      () => target,
+      () => rows,
+      () => known,
+      () => false,
+      value => String(value),
+      value => String(value).split('-').at(-1),
+      value => String(value),
+      value => value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value)),
+      value => String(value),
+      value => `${value}%`,
+      value => `${value}원`,
+      value => `${value}원`,
+      value => Number(value) > 0 ? 'is-positive' : 'is-negative'
+    );
+    render('pilot-portfolio-positions');
+    return { classes, html: target.innerHTML };
+  };
+
+  const empty = renderPositionTable([], true);
+  assert.ok(empty.classes.has('is-position-empty'));
+  assert.match(empty.html, /<td colspan="7">/);
+  assert.match(empty.html, /현재 보유 포지션이 없습니다\./);
+
+  const populated = renderPositionTable([{
+    coin: 'KRW-BTC',
+    amount: 1,
+    avgPrice: 100,
+    currentPrice: 110,
+    currentValue: 110,
+    profit: 10,
+    profitPercent: 10
+  }], true, true);
+  assert.ok(!populated.classes.has('is-position-empty'));
+  assert.match(populated.html, /BTC/);
+  assert.match(redesignStyleSource, /\.pilot-table-wrap\s*\{\s*overflow-x:\s*auto;/);
+  assert.match(redesignStyleSource, /\.pilot-table\s*\{[^}]*min-width:\s*660px;/s);
+  assert.match(redesignStyleSource, /\.pilot-table\.is-position-empty\s*\{\s*min-width:\s*0;/);
+});
+
+test('시장 차트는 가장 긴 가격 축 라벨 폭을 확보하고 마지막 시간 라벨과 높이를 유지한다', () => {
+  assert.ok(marketChartFunctionSource);
+  const width = 602;
+  const textWidth = text => String(text).length * 9;
+  const textCalls = [];
+  const gridLineEnds = [];
+  const candleRects = [];
+  let currentMove = null;
+  const context = {
+    measureText: text => ({ width: textWidth(text) }),
+    beginPath() {},
+    moveTo(x, y) { currentMove = { x, y }; },
+    lineTo(x, _y) {
+      if (currentMove?.x === 16 && x !== 16) gridLineEnds.push(x);
+    },
+    stroke() {},
+    fillText(text, x, y) { textCalls.push({ text, x, y }); },
+    fillRect(x, y, rectWidth, height) { candleRects.push({ x, y, width: rectWidth, height }); }
+  };
+  const candles = [
+    { open: 1_200_000, close: 1_210_000, high: 1_234_567, low: 1_190_000, volume: 1.25, time: '09:30' },
+    { open: 1_210_000, close: 1_220_000, high: 1_230_000, low: 1_200_000, volume: 2.5, time: '09:35' }
+  ];
+  const canvas = { clientWidth: width, parentElement: { clientHeight: 398 } };
+  const empty = { hidden: false, textContent: '' };
+  const candleDataDetails = { hidden: true };
+  const candleDataNote = { textContent: '' };
+  let candleTableWrites = 0;
+  const candleDataTable = {
+    value: '',
+    get innerHTML() { return this.value; },
+    set innerHTML(value) { candleTableWrites += 1; this.value = value; }
+  };
+  const candleDataStatus = {
+    hidden: true,
+    textContent: '',
+    attributes: new Map(),
+    setAttribute(name, value) { this.attributes.set(name, value); },
+    removeAttribute(name) { this.attributes.delete(name); }
+  };
+  const state = { candles, candleDisplayRange: 60, candlesError: false, candlesLoading: false };
+  const drawCalls = [];
+  const drawMarketChart = new Function(
+    'byId', 'getDisplayedCandles', 'state', 'window', 'drawCanvas', 'formatPrice', 'formatTime', 'number',
+    'formatDateTime', 'formatQuantity', 'escapeHtml',
+    `${marketChartFunctionSource}; return drawMarketChart;`
+  )(
+    id => ({
+      'pilot-market-chart': canvas,
+      'pilot-market-empty': empty,
+      'pilot-market-candle-data': candleDataDetails,
+      'pilot-market-candle-data-note': candleDataNote,
+      'pilot-market-data-table': candleDataTable,
+      'pilot-market-candle-status': candleDataStatus
+    })[id] || null,
+    values => values,
+    state,
+    { getComputedStyle: () => ({ getPropertyValue: () => '300px' }) },
+    (_canvas, height, draw) => {
+      drawCalls.push(height);
+      draw(context, width, height);
+    },
+    value => `₩${Math.round(value).toLocaleString('en-US')}`,
+    value => value,
+    value => Number(value) || 0,
+    value => `time:${value}`,
+    value => `volume:${value}`,
+    value => String(value)
+  );
+  drawMarketChart();
+
+  const priceLabels = textCalls.filter(call => call.text.startsWith('₩'));
+  const lastTimeLabel = textCalls.find(call => call.text === '09:35');
+  assert.equal(priceLabels.length, 5);
+  assert.equal(gridLineEnds.length, 5);
+  assert.equal(drawCalls[0], 300);
+  assert.equal(empty.hidden, true);
+  const plotRight = gridLineEnds[0];
+  const widestTickWidth = Math.max(...priceLabels.map(call => textWidth(call.text)));
+  const expectedRightGutter = Math.max(54, Math.ceil(widestTickWidth + 7 + 4));
+  assert.equal(width - plotRight, expectedRightGutter);
+  for (const call of priceLabels) {
+    assert.equal(call.x, plotRight + 7);
+    assert.ok(call.x + textWidth(call.text) <= width);
+  }
+  assert.ok(lastTimeLabel);
+  assert.ok(lastTimeLabel.x >= 16);
+  assert.ok(lastTimeLabel.x + textWidth(lastTimeLabel.text) <= plotRight);
+  assert.ok(candleRects.length > 0);
+  assert.equal(candleDataDetails.hidden, false);
+  assert.match(candleDataNote.textContent, /화면에 표시한 2개 중 최신 2개/);
+  assert.match(candleDataTable.innerHTML, /<caption class="pilot-visually-hidden">선택 종목 최신 캔들 OHLCV 기록<\/caption>/);
+  assert.match(candleDataTable.innerHTML, /시가/);
+  assert.match(candleDataTable.innerHTML, /time:09:35/);
+  assert.match(candleDataTable.innerHTML, /volume:1\.25/);
+  assert.equal(candleTableWrites, 1);
+  for (const candle of candleRects) {
+    assert.ok(candle.x >= 16);
+    assert.ok(candle.x + candle.width <= plotRight);
+  }
+
+  const lastKnownTableMarkup = candleDataTable.innerHTML;
+  state.candlesLoading = true;
+  drawMarketChart();
+  assert.equal(candleDataStatus.hidden, false);
+  assert.match(candleDataStatus.textContent, /마지막 정상 자료를 표시합니다/);
+  assert.equal(candleDataStatus.attributes.has('aria-live'), false);
+  assert.equal(candleDataTable.innerHTML, lastKnownTableMarkup);
+  assert.equal(candleTableWrites, 1);
+
+  state.candlesLoading = false;
+  state.candlesError = true;
+  drawMarketChart();
+  assert.equal(candleDataStatus.hidden, false);
+  assert.match(candleDataStatus.textContent, /최신 캔들을 불러오지 못했습니다/);
+  assert.equal(candleDataStatus.attributes.get('role'), 'status');
+  assert.equal(candleDataStatus.attributes.get('aria-live'), 'polite');
+  assert.match(candleDataNote.textContent, /마지막 정상 조회 자료/);
+  assert.equal(candleDataTable.innerHTML, lastKnownTableMarkup);
+  assert.equal(candleTableWrites, 1);
+});
+
+test('market selection rows expose the pressed state to assistive technology', () => {
+  const marketList = redesignSource.split('function renderMarketList() {')[1]?.split('function renderPortfolio() {')[0];
+  assert.ok(marketList);
+  assert.match(marketList, /role="button" tabindex="0" aria-pressed="\$\{item\.coin === state\.selectedCoin \? 'true' : 'false'\}"/);
+  assert.match(marketList, /class="pilot-market-row \$\{item\.coin === state\.selectedCoin \? 'is-selected' : ''\}"/);
+});
+
 test('오래된 캔들 응답은 최신 시장 요청의 데이터와 로딩 상태를 바꾸지 않는다', async () => {
   assert.ok(candleLoaderFunctionSource);
   const state = {
@@ -571,6 +954,47 @@ test('오래된 캔들 요청 실패는 최신 요청의 오류 상태나 알림
   assert.deepEqual(toasts, []);
 });
 
+test('같은 시장의 강제 갱신 실패는 마지막 정상 캔들을 유지하고 오류를 표시한다', async () => {
+  const lastKnownCandles = [{ market: 'KRW-BTC', close: 60_000_000, time: '09:30' }];
+  const state = {
+    selectedCoin: 'KRW-BTC',
+    candleInterval: 5,
+    candles: lastKnownCandles,
+    candlesCoin: 'KRW-BTC',
+    candlesInterval: 5,
+    candlesError: false,
+    candlesLoading: false,
+    candlesRequestSequence: 0
+  };
+  let request;
+  const toasts = [];
+  const loader = new Function(
+    'state', 'requestJSON', 'renderMarketHeader', 'drawMarketChart', 'showToast',
+    `${candleLoaderFunctionSource}; return loadCandles;`
+  )(
+    state,
+    url => {
+      request = { url };
+      return new Promise((_resolve, reject) => { request.reject = reject; });
+    },
+    () => {},
+    () => {},
+    message => toasts.push(message)
+  );
+
+  const refresh = loader(true);
+  assert.deepEqual(state.candles, lastKnownCandles);
+  assert.equal(state.candlesLoading, true);
+  assert.equal(request.url, '/market/candles/KRW-BTC?unit=5&count=100');
+  request.reject(new Error('temporary network failure'));
+  await refresh;
+
+  assert.deepEqual(state.candles, lastKnownCandles);
+  assert.equal(state.candlesError, true);
+  assert.equal(state.candlesLoading, false);
+  assert.deepEqual(toasts, []);
+});
+
 test('redesign은 백그라운드 탭이 다시 보일 때 paper 상태를 즉시 갱신한다', () => {
   assert.match(redesignSource, /document\.addEventListener\(['"]visibilitychange['"]/);
   assert.match(redesignSource, /if \(!document\.hidden\)\s*loadCore\(\{ quiet: true \}\)/);
@@ -579,12 +1003,11 @@ test('redesign은 백그라운드 탭이 다시 보일 때 paper 상태를 즉�
 });
 
 test('PWA shell은 redesign asset version과 service worker cache version을 함께 갱신한다', () => {
-  const scriptAsset = indexSource.match(/<script\s+src=["'](\/pilot-redesign\.js\?v=[^"']+)["']/)?.[1];
-  assert.equal(scriptAsset, '/pilot-redesign.js?v=20260929-37');
-  assert.match(indexSource, /<link\s+rel=["']stylesheet["']\s+href=["']\/pilot-redesign\.css\?v=20260929-21["']/);
-  assert.match(serviceWorkerSource, /const CACHE_NAME = ['"]coinpilot-shell-v181['"]/);
-  assert.match(serviceWorkerSource, new RegExp(`['"]${scriptAsset.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}['"]`));
-  assert.match(serviceWorkerSource, /['"]\/pilot-redesign\.css\?v=20260929-21['"]/);
+  assert.match(redesignScriptAsset || '', /^\/pilot-redesign\.js\?v=\d{8}-\d+$/);
+  assert.match(redesignStylesheetAsset || '', /^\/pilot-redesign\.css\?v=\d{8}-\d+$/);
+  assert.match(serviceWorkerCacheName || '', /^coinpilot-shell-v\d+$/);
+  assert.match(serviceWorkerSource, new RegExp(`['"]${redesignScriptAsset.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}['"]`));
+  assert.match(serviceWorkerSource, new RegExp(`['"]${redesignStylesheetAsset.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}['"]`));
   assert.match(serviceWorkerSource, /NETWORK_FIRST_SHELL_PATHS/);
   assert.match(serviceWorkerSource, /fetch\(request\)[\s\S]*ignoreSearch: true/);
 });
@@ -633,6 +1056,32 @@ test('service worker does not replace failed third-party requests with the local
   assert.equal(intercepted, false);
 });
 
+test('service worker waits for the user update action before activating a replacement worker', async () => {
+  const handlers = {};
+  let skipWaitingCalls = 0;
+  vm.runInNewContext(serviceWorkerSource, {
+    caches: {
+      open: async () => ({ addAll: async () => {} })
+    },
+    self: {
+      location: { origin: 'https://coinpilot.example' },
+      addEventListener(name, handler) { handlers[name] = handler; },
+      skipWaiting() {
+        skipWaitingCalls += 1;
+        return Promise.resolve();
+      }
+    }
+  });
+
+  let installWork;
+  handlers.install({ waitUntil(promise) { installWork = promise; } });
+  await installWork;
+  assert.equal(skipWaitingCalls, 0, 'a new worker remains waiting after its shell is cached');
+
+  handlers.message({ data: { type: 'SKIP_WAITING' } });
+  assert.equal(skipWaitingCalls, 1, 'the explicit update action activates the waiting worker');
+});
+
 test('PWA manifest icon과 service worker app shell의 모든 정적 자산이 실제로 존재한다', () => {
   const manifest = JSON.parse(manifestSource);
   assert.equal(manifest.display, 'standalone');
@@ -661,8 +1110,8 @@ test('PWA manifest icon과 service worker app shell의 모든 정적 자산이 �
     '/icon-512.png',
     '/apple-touch-icon.png',
     '/auth-client.js',
-    '/pilot-redesign.css?v=20260929-21',
-    '/pilot-redesign.js?v=20260929-37'
+    redesignStylesheetAsset,
+    redesignScriptAsset
   ];
   for (const asset of shellAssets) {
     assert.match(
@@ -737,15 +1186,382 @@ test('selected-market UI binds exchange source time and server fetch time separa
     ? redesignSource.slice(marketPageStart, marketPageEnd)
     : '';
 
-  assert.match(renderMarketHeader, /formatMarketTimestamp\(market\.sourceAsOf\)/);
-  assert.match(renderMarketHeader, /formatMarketTimestamp\(market\.fetchedAt\)/);
+  assert.match(renderMarketHeader, /formatMarketTimestamp\(marketData\?\.sourceAsOf\)/);
+  assert.doesNotMatch(renderMarketHeader, /marketData\?\.sourceAsOf \?\? state\.marketSnapshot\?\.sourceAsOf/);
+  assert.match(renderMarketHeader, /formatMarketTimestamp\(marketData\?\.fetchedAt \?\? state\.marketSnapshot\?\.fetchedAt\)/);
   assert.doesNotMatch(renderMarketHeader, /Date\.now\(/);
   assert.match(marketPage, /최근 체결 시각/);
   assert.match(marketPage, /서버 시세 수집 시각/);
   assert.match(marketPage, /pilot-market-source-asof/);
   assert.match(marketPage, /pilot-market-fetched-at/);
-  assert.doesNotMatch(marketPage, /aria-live/);
+  assert.match(marketPage, /id="pilot-market-status-announcement" role="status" aria-live="polite" aria-atomic="true"/);
+  assert.match(marketPage, /id="pilot-market-refresh-announcement" role="status" aria-live="polite" aria-atomic="true"/);
+  assert.match(renderMarketHeader, /updateMarketAnnouncement\('pilot-market-status-announcement'/);
+  assert.match(redesignSource, /if \(action === 'refresh-market'\) \{ await loadCore\(\); announceManualMarketRefresh\(\); return; \}/);
+  assert.doesNotMatch(renderMarketHeader, /setText\('pilot-market-name', marketPresentation\.pageDetail\)/);
+  assert.match(renderMarketHeader, /marketName\.textContent !== '업비트 원화 시장'/);
+  assert.match(renderMarketHeader, /marketStatus\.textContent !== marketStatusLabel/);
+  const selectedMarketHeader = redesignSource.split('function renderMarketHeader() {')[1]?.split('function sortedMarketPrices()')[0] || '';
+  assert.match(selectedMarketHeader, /selectedMarketQuotePresentation\(marketData, marketPresentation\)/);
   assert.match(redesignStyleSource, /\.pilot-market-time-meta/);
+});
+
+test('selected market status is scoped to its own quote while market summary retains aggregate state', () => {
+  assert.equal(typeof selectedMarketQuotePresentation, 'function');
+  const now = Date.now();
+  const aggregateStale = {
+    label: '1개 시장의 시세가 오래됐어요',
+    state: 'stale'
+  };
+  const selectedFresh = selectedMarketQuotePresentation({
+    price: 100,
+    sourceAsOf: new Date(now - 1_000).toISOString()
+  }, aggregateStale, now);
+  assert.deepEqual(selectedFresh, { label: '현재 시세', state: 'complete' });
+
+  const selectedStale = selectedMarketQuotePresentation({
+    price: 100,
+    sourceAsOf: new Date(now - 10 * 60_000).toISOString()
+  }, { label: '전체 시세 상태를 확인하세요', state: 'partial' }, now);
+  assert.equal(selectedStale.state, 'stale');
+  assert.match(selectedStale.label, /최근 체결 시각이 오래됐어요/);
+
+  const missingSelected = selectedMarketQuotePresentation(null, {
+    label: '일부 시장 시세를 확인할 수 없습니다',
+    state: 'partial'
+  }, now);
+  assert.deepEqual(missingSelected, {
+    label: '일부 시장 시세를 확인할 수 없습니다',
+    state: 'partial'
+  });
+});
+
+test('selected-market order freshness matches server source-age admission and ignores fetch age alone', () => {
+  assert.equal(typeof marketQuoteFreshnessIssue, 'function');
+  const now = Date.now();
+  const fresh = marketQuoteFreshnessIssue({
+    price: 100,
+    sourceAsOf: new Date(now - 1_000).toISOString(),
+    fetchedAt: new Date(now).toISOString()
+  }, now);
+  const staleTrade = marketQuoteFreshnessIssue({
+    price: 100,
+    sourceAsOf: new Date(now - 10 * 60_000).toISOString(),
+    fetchedAt: new Date(now).toISOString()
+  }, now);
+  const futureTrade = marketQuoteFreshnessIssue({
+    price: 100,
+    sourceAsOf: new Date(now + 6_000).toISOString(),
+    fetchedAt: new Date(now).toISOString()
+  }, now);
+  const oldFetchFreshSource = marketQuoteFreshnessIssue({
+    price: 100,
+    sourceAsOf: new Date(now - 1_000).toISOString(),
+    fetchedAt: new Date(now - 10 * 60_000).toISOString()
+  }, now);
+
+  assert.equal(fresh, null);
+  assert.match(staleTrade, /최근 체결 시각이 오래됐어요/);
+  assert.match(futureTrade, /현재보다 앞서 있어요/);
+  assert.equal(oldFetchFreshSource, null,
+    'A cached fetch time alone must not contradict the server fresh-ticker admission policy.');
+  const selectedMarketHeader = redesignSource.split('function renderMarketHeader() {')[1]?.split('function sortedMarketPrices()')[0] || '';
+  assert.match(selectedMarketHeader, /selectedMarketQuotePresentation\(marketData, marketPresentation\)/);
+  assert.match(selectedMarketQuotePresentationFunctionSource, /marketQuoteFreshnessIssue\(marketData, now\)/);
+  assert.match(redesignSource, /marketQuoteFreshnessIssue\(currentMarket\(marketSelect\?\.value\)\)/);
+  const tradePanel = redesignSource.split('function renderTradePanel(prefix) {')[1]?.split('function renderTradePanels()')[0] || '';
+  assert.match(tradePanel, /canTrade\(selectedCoin\)/);
+  assert.match(tradePanel, /marketQuoteFreshnessIssue\(market\)/);
+});
+
+test('stale-quote 409 explains the measured age and direct failures do not record a portfolio snapshot', () => {
+  assert.equal(typeof protectedMutationError, 'function');
+  const message = protectedMutationError({
+    body: {
+      code: 'MARKET_QUOTE_STALE',
+      markets: [{ market: 'KRW-BTC', ageMs: 61000, maximumAgeMs: 90000 }]
+    }
+  }, '주문을 처리하지 못했습니다.');
+  assert.match(message, /BTC 최근 체결 1분 1초 전/);
+  assert.match(message, /허용 90초/);
+  assert.match(message, /최신 시세를 확인한 뒤 다시 시도/);
+
+  const directOrderHandler = redesignSource.split('async function executeTrade(prefix) {')[1]?.split('async function executeSmart(kind)')[0] || '';
+  assert.match(directOrderHandler, /if \(result\.success === false\)/);
+  assert.match(directOrderHandler, /await loadCore\(\{ quiet: true \}\)/);
+  assert.ok(
+    directOrderHandler.indexOf('if (result.success === false)') <
+      directOrderHandler.indexOf('recordCurrentPortfolioSnapshot'),
+    'A deterministic no-order response must return before the success-only snapshot write.'
+  );
+});
+
+test('PWA reads explicit price snapshot metadata and presents complete, partial, and unavailable states', () => {
+  assert.equal(typeof normalizeMarketPriceSnapshot, 'function');
+  assert.equal(typeof marketSnapshotPresentation, 'function');
+  const rows = [{ coin: 'KRW-BTC', price: 100 }];
+  const completeSnapshot = normalizeMarketPriceSnapshot({
+    requestedMarkets: ['KRW-BTC'],
+    returnedMarkets: ['KRW-BTC'],
+    missingMarkets: [],
+    unavailableMarkets: [],
+    complete: true,
+    sourceAsOf: '2026-09-29T01:02:03.000Z',
+    fetchedAt: '2026-09-29T01:02:08.000Z',
+    marketListStale: false,
+    marketListFetchedAt: '2026-09-29T01:01:00.000Z',
+    prices: rows
+  });
+
+  assert.deepEqual(completeSnapshot.prices, rows);
+  assert.equal(completeSnapshot.complete, true);
+  assert.equal(completeSnapshot.marketListStale, false);
+  assert.equal(completeSnapshot.sourceAsOf, '2026-09-29T01:02:03.000Z');
+  assert.equal(completeSnapshot.fetchedAt, '2026-09-29T01:02:08.000Z');
+  assert.equal(completeSnapshot.marketListFetchedAt, '2026-09-29T01:01:00.000Z');
+  const completePresentation = marketSnapshotPresentation(completeSnapshot, true, completeSnapshot.prices);
+  assert.equal(completePresentation.state, 'complete');
+  assert.equal(completePresentation.label, '모든 시장의 시세를 확인했어요');
+  assert.match(completePresentation.detail, /시장 목록을 확인했어요/);
+
+  const partialSnapshot = normalizeMarketPriceSnapshot({
+    complete: false,
+    missingMarkets: ['KRW-ETH', 'KRW-SOL'],
+    unavailableMarkets: ['KRW-ETH'],
+    sourceAsOf: null,
+    fetchedAt: null,
+    marketListStale: true,
+    marketListFetchedAt: '2026-09-28T23:00:00.000Z',
+    prices: rows
+  });
+  const partialPresentation = marketSnapshotPresentation(partialSnapshot, true, partialSnapshot.prices);
+  assert.equal(partialPresentation.state, 'partial');
+  assert.equal(partialPresentation.label, '2개 시장 시세를 확인할 수 없습니다');
+  assert.match(partialPresentation.detail, /시장 목록을 새로 확인해야 해요/);
+  assert.match(partialPresentation.pageDetail, /목록 확인/);
+  assert.ok(partialPresentation.pageDetail.includes(formatMarketTimestamp(partialSnapshot.marketListFetchedAt)));
+
+  const staleCompletePresentation = marketSnapshotPresentation({
+    ...completeSnapshot,
+    marketListStale: true
+  }, true, completeSnapshot.prices);
+  assert.equal(staleCompletePresentation.state, 'stale');
+  assert.equal(staleCompletePresentation.tone, 'warning');
+
+  assert.equal(normalizeMarketPriceSnapshot({ complete: true }), null);
+  const unavailablePresentation = marketSnapshotPresentation(null, false, []);
+  assert.equal(unavailablePresentation.state, 'unavailable');
+  assert.match(unavailablePresentation.label, /시세를 불러오지 못했습니다/);
+  assert.match(unavailablePresentation.detail, /시장 목록을 확인할 수 없어요/);
+
+  const coreLoader = redesignSource.split('async function loadCore(')[1]?.split('function clearDynamicStateForOffline()')[0] || '';
+  assert.match(coreLoader, /marketPrices: '\/market\/prices\/snapshot'/);
+  assert.match(coreLoader, /marketPrices: marketSnapshotLoaded \? marketSnapshot\.prices : null/);
+  assert.doesNotMatch(coreReadinessFunctionSource || '', /marketSnapshot|complete|missingMarkets/);
+});
+
+test('snapshot 404 alone falls back to legacy prices and keeps unknown freshness visible', async () => {
+  assert.equal(typeof buildLegacyMarketPriceSnapshot, 'function');
+  assert.equal(typeof loadLegacyMarketSnapshotOn404, 'function');
+  const legacyPrices = [
+    {
+      coin: 'KRW-BTC',
+      price: 100,
+      sourceAsOf: '2026-09-29T02:05:00.000Z',
+      fetchedAt: '2026-09-29T02:06:00.000Z'
+    },
+    {
+      coin: 'KRW-ETH',
+      price: 200,
+      sourceAsOf: '2026-09-29T02:03:00.000Z',
+      fetchedAt: '2026-09-29T02:04:00.000Z'
+    }
+  ];
+  const verifiedTargetList = {
+    coins: ['KRW-BTC', 'KRW-ETH'],
+    count: 2,
+    stale: false,
+    fetchedAt: '2026-09-29T02:01:00.000Z'
+  };
+  const requestedPaths = [];
+  const snapshot = await loadLegacyMarketSnapshotOn404(
+    Object.assign(new Error('snapshot route unavailable'), { status: 404 }),
+    verifiedTargetList,
+    async route => { requestedPaths.push(route); return legacyPrices; }
+  );
+
+  assert.deepEqual(requestedPaths, ['/market/prices']);
+  assert.equal(snapshot.complete, true);
+  assert.equal(snapshot.marketListStale, false);
+  assert.equal(snapshot.legacyFallback, true);
+  assert.equal(snapshot.sourceAsOf, '2026-09-29T02:03:00.000Z');
+  assert.equal(snapshot.fetchedAt, '2026-09-29T02:04:00.000Z');
+  const legacyPresentation = marketSnapshotPresentation(
+    normalizeMarketPriceSnapshot(snapshot), true, snapshot.prices
+  );
+  assert.equal(legacyPresentation.state, 'stale');
+  assert.equal(legacyPresentation.tone, 'warning');
+  assert.match(legacyPresentation.detail, /시세의 최신 여부는 확인할 수 없습니다/);
+  assert.match(legacyPresentation.detail, /시장 목록을 확인했어요/);
+
+  const unverifiedSnapshot = buildLegacyMarketPriceSnapshot(legacyPrices, null);
+  const unverifiedPresentation = marketSnapshotPresentation(
+    normalizeMarketPriceSnapshot(unverifiedSnapshot), true, unverifiedSnapshot.prices
+  );
+  assert.equal(unverifiedSnapshot.complete, null);
+  assert.equal(unverifiedSnapshot.marketListStale, null);
+  assert.equal(unverifiedSnapshot.marketListFetchedAt, null);
+  assert.equal(unverifiedPresentation.state, 'unavailable');
+  assert.match(unverifiedPresentation.detail, /시장 목록을 확인할 수 없어요/);
+  assert.equal(unverifiedPresentation.tone, 'warning');
+
+  for (const error of [
+    Object.assign(new Error('server error'), { status: 503 }),
+    new Error('network timeout')
+  ]) {
+    const paths = [];
+    await assert.rejects(loadLegacyMarketSnapshotOn404(
+      error,
+      verifiedTargetList,
+      async route => { paths.push(route); return legacyPrices; }
+    ), currentError => currentError === error);
+    assert.deepEqual(paths, []);
+  }
+
+  const coreLoader = redesignSource.split('async function loadCore(')[1]?.split('function clearDynamicStateForOffline()')[0] || '';
+  assert.match(coreLoader, /marketPricesError\?\.status === 404/);
+  assert.match(coreLoader, /loadLegacyMarketSnapshotOn404\(marketPricesError, targetCoins, requestJSON\)/);
+});
+
+test('overview data status warns for partial, stale, and unknown market snapshots', () => {
+  const gateRendererStart = redesignSource.indexOf('    function renderGateIcon(');
+  const gateRendererEnd = redesignSource.indexOf('\n    function renderChartPeriodButtons()', gateRendererStart);
+  const gateRendererSource = gateRendererStart >= 0 && gateRendererEnd > gateRendererStart
+    ? redesignSource.slice(gateRendererStart, gateRendererEnd)
+    : null;
+  assert.ok(gateRendererSource);
+
+  function renderFreshnessGate(marketSnapshot, marketPricesLoaded, marketPrices) {
+    const texts = new Map();
+    const elements = new Map();
+    const byId = id => {
+      if (!elements.has(id)) elements.set(id, { className: '', innerHTML: '' });
+      return elements.get(id);
+    };
+    const renderGateCards = new Function(
+      'state', 'classifyReadiness', 'marketSnapshotPresentation', 'byId', 'setText', 'number',
+      `${gateRendererSource}; return renderGateCards;`
+    )(
+      {
+        strategyReadiness: null,
+        status: { runtimeState: 'RUNNING' },
+        paper: { available: true, state: 'RUNNING', closedTradeCount: 0 },
+        marketSnapshot,
+        marketPricesLoaded,
+        marketPrices
+      },
+      classifyReadiness,
+      marketSnapshotPresentation,
+      byId,
+      (id, value) => texts.set(id, value),
+      value => Number.isFinite(Number(value)) ? Number(value) : 0
+    );
+    renderGateCards();
+    return {
+      detail: texts.get('pilot-gate-freshness-detail'),
+      iconClass: byId('pilot-gate-freshness-icon').className
+    };
+  }
+
+  const rows = [{ coin: 'KRW-BTC', price: 100 }];
+  const complete = normalizeMarketPriceSnapshot({
+    prices: rows,
+    complete: true,
+    marketListStale: false,
+    missingMarkets: [],
+    unavailableMarkets: []
+  });
+  const partial = normalizeMarketPriceSnapshot({
+    prices: rows,
+    complete: false,
+    marketListStale: false,
+    missingMarkets: ['KRW-ETH'],
+    unavailableMarkets: ['KRW-ETH']
+  });
+  const stale = normalizeMarketPriceSnapshot({
+    ...complete,
+    marketListStale: true
+  });
+  const unknown = normalizeMarketPriceSnapshot({
+    ...complete,
+    complete: null,
+    marketListStale: null,
+    legacyFallback: true
+  });
+
+  const completeView = renderFreshnessGate(complete, true, rows);
+  assert.equal(completeView.detail, '데이터 정상');
+  assert.doesNotMatch(completeView.iconClass, /is-blocked/);
+
+  for (const [snapshot, expected] of [
+    [partial, '일부 시세 확인 필요'],
+    [stale, '시세 최신 여부 확인 필요'],
+    [unknown, '시세 상태 확인 필요']
+  ]) {
+    const view = renderFreshnessGate(snapshot, true, rows);
+    assert.equal(view.detail, expected);
+    assert.match(view.iconClass, /is-blocked/);
+  }
+});
+
+test('overview labels stopped paper runs neutrally and keeps unknown state blocked', () => {
+  const gateRendererStart = redesignSource.indexOf('    function renderGateIcon(');
+  const gateRendererEnd = redesignSource.indexOf('\n    function renderChartPeriodButtons()', gateRendererStart);
+  const gateRendererSource = gateRendererStart >= 0 && gateRendererEnd > gateRendererStart
+    ? redesignSource.slice(gateRendererStart, gateRendererEnd)
+    : null;
+  assert.ok(gateRendererSource);
+
+  function renderPaperGate(paper) {
+    const texts = new Map();
+    const elements = new Map();
+    const byId = id => {
+      if (!elements.has(id)) elements.set(id, { className: '', innerHTML: '' });
+      return elements.get(id);
+    };
+    const renderGateCards = new Function(
+      'state', 'classifyReadiness', 'marketSnapshotPresentation', 'byId', 'setText', 'number',
+      `${gateRendererSource}; return renderGateCards;`
+    )(
+      { paper, status: { runtimeState: 'RUNNING' } },
+      () => ({ stateLabel: '통과' }),
+      marketSnapshotPresentation,
+      byId,
+      (id, value) => texts.set(id, value),
+      value => Number.isFinite(Number(value)) ? Number(value) : 0
+    );
+    renderGateCards();
+    return {
+      detail: texts.get('pilot-gate-paper-detail'),
+      iconClass: byId('pilot-gate-paper-icon').className,
+      iconMarkup: byId('pilot-gate-paper-icon').innerHTML
+    };
+  }
+
+  const stopped = renderPaperGate({ available: true, state: 'STOPPED', closedTradeCount: 0 });
+  assert.equal(stopped.detail, '중지됨 · 청산 0회');
+  assert.equal(stopped.iconClass, 'pilot-gate-icon is-neutral');
+  assert.match(stopped.iconMarkup, /ph-pause/);
+
+  const completed = renderPaperGate({ available: true, state: 'PASS', closedTradeCount: 3 });
+  assert.equal(completed.detail, '완료 · 청산 3회');
+  assert.equal(completed.iconClass, 'pilot-gate-icon');
+  assert.match(completed.iconMarkup, /ph-check/);
+
+  const unknown = renderPaperGate({ available: true, state: 'FUTURE_STATE', closedTradeCount: 3 });
+  assert.equal(unknown.detail, '상태 확인 필요');
+  assert.equal(unknown.iconClass, 'pilot-gate-icon is-blocked');
+  assert.match(unknown.iconMarkup, /ph-warning/);
 });
 
 test('complete cash-only portfolios use one 100 percent row without a chart', () => {
@@ -1154,7 +1970,7 @@ test('offline recovery queues exactly a fresh read without locking ordinary succ
   assert.match(loadCore, /const currentSnapshot = Object\.fromEntries\(settled\.map/);
   assert.match(loadCore, /status: loaded\.status \? currentSnapshot\.status : null/);
   assert.match(loadCore, /account: loaded\.account \? currentSnapshot\.account : null/);
-  assert.match(loadCore, /marketPrices: loaded\.marketPrices \? currentSnapshot\.marketPrices : null/);
+  assert.match(loadCore, /marketPrices: marketSnapshotLoaded \? marketSnapshot\.prices : null/);
   assert.match(loadCore, /state\.connected\s*=\s*state\.coreReady/);
   assert.match(loadCore, /if \(state\.coreReady\)\s*state\.lastSync\s*=/);
   assert.match(redesignSource, /function recoverOnline\(\)[\s\S]*?loadCore\(\{\s*afterNetworkRestore:\s*true\s*\}\)/);
@@ -1208,9 +2024,10 @@ test('visible redesign shell owns PWA registration and installation controls', (
 
 test('설치·오프라인 안내는 사용자 조건과 다음 행동만 표시한다', () => {
   const guide = redesignSource.split('function openInstallGuide() {')[1]?.split('const renderInstallState')[0];
-  const update = redesignSource.match(/<section class="pilot-pwa-update"[\s\S]*?<\/section>/)?.[0];
+  const update = redesignSource.match(/<div class="pilot-pwa-update"[\s\S]*?<\/div>/)?.[0];
+  const topMeta = redesignSource.match(/<div class="pilot-top-meta">[\s\S]*?<\/div>/)?.[0];
   const offline = redesignSource.match(/<section class="pilot-offline-banner"[\s\S]*?<\/section>/)?.[0];
-  assert.ok(guide && update && offline);
+  assert.ok(guide && update && topMeta && offline);
   assert.match(guide, /보안 연결\(HTTPS\) 주소로 다시 여세요/);
   assert.match(guide, /브라우저 메뉴에서 설치 항목을 확인하세요/);
   assert.match(guide, /Safari에서 CoinPilot을 엽니다/);
@@ -1218,14 +2035,35 @@ test('설치·오프라인 안내는 사용자 조건과 다음 행동만 표시
   assert.match(guide, /설치 방법/);
   assert.doesNotMatch(guide, /service worker|설치 이벤트|HTTPS로 노출|localhost|127\.0\.0\.1/i);
   assert.match(update, /새 버전이 나왔습니다/);
-  assert.match(update, /새로고침하면 새 버전이 적용됩니다/);
-  assert.match(update, />새로고침<\/button>/);
+  assert.match(update, /업데이트를 눌러 적용하세요/);
+  assert.match(update, /aria-label="새 버전 적용"/);
+  assert.match(update, /data-pilot-action="reload-pwa"/);
+  assert.match(update, />업데이트<\/span>/);
+  assert.match(topMeta, /pilot-pwa-update/);
   assert.doesNotMatch(update, /paper\/live|최신 설치앱 화면/);
   assert.match(offline, /계좌와 시세를 불러올 수 없습니다/);
   assert.match(offline, /연결이 복구될 때까지 주문과 설정을 사용할 수 없습니다/);
   assert.doesNotMatch(offline, /화면 껍데기|서버 API|service worker/i);
   assert.match(redesignSource, /setText\('pilot-mode-banner-copy',/);
   assert.doesNotMatch(redesignSource, /pilot-mode-subtitle/);
+});
+
+test('PWA update control stays inside a height-reserved topbar row', () => {
+  const topbar = redesignSource.match(/<header class="pilot-topbar">[\s\S]*?<\/header>/)?.[0];
+  assert.ok(topbar);
+  assert.match(topbar, /class="pilot-top-meta"[\s\S]*class="pilot-pwa-update"/);
+  assert.match(redesignStyleSource, /\.pilot-top-meta\s*\{[\s\S]*min-height:\s*44px/);
+  assert.match(redesignStyleSource, /\.pilot-pwa-update\s*\{[\s\S]*flex:\s*0 0 auto/);
+  assert.match(redesignStyleSource, /\.pilot-pwa-update \.pilot-button\s*\{[\s\S]*min-height:\s*44px/);
+  assert.match(redesignStyleSource, /@media\s*\(max-width:\s*360px\)[\s\S]*\.pilot-pwa-update \.pilot-button\s*\{[\s\S]*min-height:\s*44px/);
+  assert.doesNotMatch(topbar, /class="pilot-pwa-update"[\s\S]*?<section class="pilot-pwa-update"/);
+});
+
+test('PWA update notice only appears for a waiting worker and stays hidden after controller activation', () => {
+  assert.match(redesignSource, /if \(!updateBanner \|\| !serviceWorkerRegistration\?\.waiting \|\| !navigator\.serviceWorker\?\.controller\) return;/);
+  assert.match(redesignSource, /if \(registration\.waiting && navigator\.serviceWorker\.controller\) showPwaUpdate\(\)/);
+  assert.match(redesignSource, /updatedRegistration\.waiting && navigator\.serviceWorker\.controller\) showPwaUpdate\(\)/);
+  assert.doesNotMatch(redesignSource, /if \(hadServiceWorkerController\) showPwaUpdate\(\)/);
 });
 
 test('SPA navigation exposes its landmark and current view to assistive technology', () => {
@@ -1469,9 +2307,30 @@ test('대시보드 세션 카드에는 현재 상태와 청산 횟수만 표시�
 });
 
 test('mobile redesigned shell은 한 줄 네비게이션과 safe-area 여백을 확보한다', () => {
+  assert.match(redesignStyleSource, /body\.pilot-redesign-shell\s*\{[\s\S]*height:\s*100dvh[\s\S]*overflow:\s*hidden/);
+  assert.match(redesignStyleSource, /\.pilot-topbar\s*\{[\s\S]*padding:\s*calc\(16px \+ env\(safe-area-inset-top,\s*0px\)\) 32px 16px/);
   assert.match(
     redesignStyleSource,
-    /@media\s*\(max-width:\s*760px\)[\s\S]*\.pilot-app\s*\{[\s\S]*padding-bottom:\s*calc\(96px\s*\+\s*env\(safe-area-inset-bottom,\s*0px\)\)/
+    /@media\s*\(max-width:\s*760px\)[\s\S]*\.pilot-topbar\s*\{[\s\S]*padding:\s*calc\(13px \+ env\(safe-area-inset-top,\s*0px\)\) 14px 13px/
+  );
+  assert.match(
+    redesignStyleSource,
+    /@media\s*\(max-height:\s*640px\)[\s\S]*body\.pilot-redesign-shell\s*\{[\s\S]*overflow-y:\s*auto[\s\S]*\.pilot-content\s*\{[\s\S]*overflow:\s*visible/
+  );
+  assert.match(
+    redesignStyleSource,
+    /\.pilot-market-candle-data summary:focus-visible\s*\{\s*outline:\s*3px solid var\(--sl-blue\)/
+  );
+  assert.match(redesignStyleSource, /\.pilot-top-meta\s*\{[\s\S]*min-height:\s*44px/);
+  assert.match(redesignStyleSource, /\.pilot-main\s*\{[\s\S]*display:\s*flex[\s\S]*height:\s*100%[\s\S]*overflow:\s*hidden/);
+  assert.match(redesignStyleSource, /\.pilot-content\s*\{[\s\S]*flex:\s*1 1 auto[\s\S]*overflow-y:\s*auto[\s\S]*overscroll-behavior-y:\s*contain/);
+  assert.match(
+    redesignStyleSource,
+    /@media\s*\(max-width:\s*760px\)[\s\S]*\.pilot-app\s*\{[\s\S]*padding-bottom:\s*0/
+  );
+  assert.match(
+    redesignStyleSource,
+    /@media\s*\(max-width:\s*760px\)[\s\S]*\.pilot-content\s*\{[\s\S]*padding:\s*22px 14px calc\(126px \+ env\(safe-area-inset-bottom,\s*0px\)\)/
   );
   assert.match(
     redesignStyleSource,
@@ -1493,7 +2352,7 @@ test('mobile redesigned shell은 한 줄 네비게이션과 safe-area 여백을 
   );
   assert.match(
     redesignStyleSource,
-    /@media\s*\(max-width:\s*360px\)[\s\S]*\.pilot-pwa-update\s*\{[\s\S]*display:\s*grid/
+    /@media\s*\(max-width:\s*480px\)[\s\S]*\.pilot-gate-grid\s*\{[\s\S]*grid-template-columns:\s*1fr/
   );
 });
 
@@ -1507,6 +2366,10 @@ test('mobile navigation keeps readable labels and touch targets at least 44px hi
     /\.pilot-mobile-menu-close\s*\{[\s\S]*width:\s*44px[\s\S]*height:\s*44px/
   );
   assert.match(redesignStyleSource, /\.pilot-mobile-menu-nav \.pilot-nav-button\s*\{[\s\S]*min-height:\s*54px/);
+  assert.match(
+    redesignStyleSource,
+    /@media\s*\(max-width:\s*520px\)[\s\S]*\.pilot-chart-empty \.pilot-button\s*\{[\s\S]*min-height:\s*44px/
+  );
   assert.match(redesignStyleSource, /\.pilot-mobile-menu-sheet\s*\{[\s\S]*env\(safe-area-inset-bottom/);
   assert.match(redesignStyleSource, /@media\s*\(prefers-reduced-motion:\s*reduce\)/);
 });

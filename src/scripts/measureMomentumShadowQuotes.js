@@ -1,8 +1,8 @@
 import dotenv from 'dotenv';
 import fs from 'node:fs';
 import path from 'node:path';
-import axios from 'axios';
 import UpbitAPI from '../api/upbit.js';
+import { pathToFileURL } from 'node:url';
 import {
   projectMomentumShadowQuote,
   summarizeMomentumShadowQuoteSamples
@@ -30,14 +30,11 @@ const upbit = new UpbitAPI('', '', { requestTimeoutMs: 10_000 });
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-async function fetchQuotes() {
-  return upbit.requestWithRetry(async () => {
-    const response = await axios.get('https://api.upbit.com/v1/orderbook',
-      upbit.getRequestConfig({ params: { markets: markets.join(',') } }));
-    return (response.data || [])
-      .filter(book => book?.market)
-      .map(book => projectMomentumShadowQuote(book.market, book));
-  });
+export async function fetchQuotes(api = upbit, quoteMarkets = markets) {
+  const orderbooks = await api.getOrderbook(quoteMarkets.join(','));
+  return (orderbooks || [])
+    .filter(book => book?.market)
+    .map(book => projectMomentumShadowQuote(book.market, book));
 }
 
 async function main() {
@@ -95,7 +92,9 @@ async function main() {
   if (!output.complete) process.exitCode = 1;
 }
 
-main().catch(error => {
-  console.error(error.message);
-  process.exitCode = 1;
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch(error => {
+    console.error(error.message);
+    process.exitCode = 1;
+  });
+}

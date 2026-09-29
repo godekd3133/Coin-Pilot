@@ -58,6 +58,26 @@ struct CoinPilotBundledPreviewDataSource {
                 return example
             }
             value = historyResponse
+        case "/api/market/prices/snapshot":
+            guard let prices = try requiredValue("marketPrices") as? [[String: Any]],
+                  !prices.isEmpty else {
+                throw CoinPilotAPIError.invalidData
+            }
+            let fetchedAtValues = prices.compactMap { $0["fetchedAt"] as? String }
+            guard fetchedAtValues.count == prices.count,
+                  Set(fetchedAtValues).count == 1,
+                  let fetchedAt = fetchedAtValues.first else {
+                throw CoinPilotAPIError.invalidData
+            }
+            let sourceAsOf: Any = prices.compactMap { $0["sourceAsOf"] as? String }.sorted().first ?? NSNull()
+            value = [
+                "prices": prices,
+                "complete": true,
+                "missingMarkets": [String](),
+                "marketListStale": false,
+                "sourceAsOf": sourceAsOf,
+                "fetchedAt": fetchedAt
+            ]
         case "/api/market/prices":
             value = try requiredValue("marketPrices")
         case "/api/paper-validation/summary":

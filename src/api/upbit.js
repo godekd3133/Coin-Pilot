@@ -2,15 +2,12 @@ import axios from 'axios';
 import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import { v4 as uuidv4 } from 'uuid';
+import { sharedUpbitRequestScheduler } from './upbitRequestScheduler.js';
 
-// MultiCoinTrader owns separate market and risk clients. A module-level slot
-// prevents those clients from independently exceeding the exchange request
-// budget inside one Node process.
-let sharedNextRequestAt = 0;
-let sharedBackoffUntil = 0;
-let sharedRateLimitQueue = [];
-let sharedRateLimitProcessorRunning = false;
-let sharedRateLimitSequence = 0;
+// Upbit documents progressively longer temporary 418 blocks but does not
+// specify a fixed fallback duration. Keep every lane closed for five minutes
+// when the response omits a trusted duration, and fail the current operation.
+const UPBIT_418_FALLBACK_BACKOFF_MS = 5 * 60 * 1000;
 
 function serializeQueryString(query) {
   const params = new URLSearchParams();
@@ -27,32 +24,73 @@ function serializeQueryString(query) {
   return decodeURIComponent(params.toString());
 }
 
-function processSharedRateLimitQueue() {
-  if (sharedRateLimitProcessorRunning) return;
-  sharedRateLimitProcessorRunning = true;
+function getRetryAfterMs(header, now = Date.now()) {
+  const value = String(header ?? '').trim();
+  if (!value) return 0;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds > 0) return seconds * 1000;
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? Math.max(0, timestamp - now) : 0;
+}
 
-  (async () => {
-    try {
-      while (sharedRateLimitQueue.length > 0) {
-        sharedRateLimitQueue.sort((a, b) => a.priority - b.priority || a.sequence - b.sequence);
-        const request = sharedRateLimitQueue.shift();
-        const now = Date.now();
-        const waitMs = Math.max(
-          0,
-          sharedNextRequestAt - now,
-          sharedBackoffUntil - now
-        );
-        if (waitMs > 0) await new Promise(resolve => setTimeout(resolve, waitMs));
+function getHeader(headers, name) {
+  return headers?.[name] ?? headers?.[name.toLowerCase()] ??
+    (typeof headers?.get === 'function' ? headers.get(name) : undefined);
+}
 
-        const requestStartedAt = Date.now();
-        sharedNextRequestAt = requestStartedAt + Math.max(120, request.minRequestInterval);
-        request.resolve(requestStartedAt);
-      }
-    } finally {
-      sharedRateLimitProcessorRunning = false;
-      if (sharedRateLimitQueue.length > 0) processSharedRateLimitQueue();
-    }
-  })();
+function parseRemainingReq(value) {
+  if (typeof value !== 'string' || !value.trim()) return null;
+  let group = null;
+  let remaining = null;
+  for (const part of value.split(';')) {
+    const separator = part.indexOf('=');
+    if (separator < 0) continue;
+    const key = part.slice(0, separator).trim().toLowerCase();
+    const content = part.slice(separator + 1).trim();
+    if (key === 'group' && /^[a-z0-9-]+$/i.test(content)) group = content.toLowerCase();
+    if (key === 'sec' && /^\d+$/.test(content)) remaining = Number(content);
+  }
+  return group && Number.isSafeInteger(remaining) ? { group, remaining } : null;
+}
+
+function getNextSecondBoundaryDelayMs(now) {
+  return 1000 - (now % 1000);
+}
+
+function getTemporaryBlockDurationMs(error, now = Date.now()) {
+  const headers = error.response?.headers;
+  const retryAfterMs = getRetryAfterMs(getHeader(headers, 'Retry-After'), now);
+  if (retryAfterMs > 0) return { durationMs: retryAfterMs, source: 'retry-after' };
+  return { durationMs: UPBIT_418_FALLBACK_BACKOFF_MS, source: 'fallback' };
+}
+
+function createRequestDeadlineError(deadlineAt) {
+  const error = new Error('Upbit request exceeded its absolute deadline');
+  error.name = 'UpbitRequestDeadlineError';
+  error.code = 'UPBIT_REQUEST_DEADLINE';
+  error.deadlineAt = deadlineAt;
+  return error;
+}
+
+function createFillDeadlineError(deadlineAt) {
+  const error = new Error('Order fill state remains unknown after its deadline');
+  error.name = 'UpbitFillDeadlineError';
+  error.code = 'UPBIT_FILL_DEADLINE';
+  error.deadlineAt = deadlineAt;
+  error.orderState = 'unknown';
+  error.unresolved = true;
+  return error;
+}
+
+function isSchedulerAdmissionError(error) {
+  return [
+    'UPBIT_QUEUE_FULL',
+    'UPBIT_QUEUE_TIMEOUT',
+    'UPBIT_REQUEST_ABORTED',
+    'UPBIT_REQUEST_DEADLINE',
+    'UPBIT_FILL_DEADLINE'
+  ]
+    .includes(error?.code) || error?.name === 'AbortError';
 }
 
 class UpbitAPI {
@@ -60,11 +98,22 @@ class UpbitAPI {
     this.accessKey = accessKey;
     this.secretKey = secretKey;
     this.baseURL = 'https://api.upbit.com/v1';
+    this.axios = options.axios || axios;
+    this.scheduler = options.scheduler || sharedUpbitRequestScheduler;
+    this.random = typeof options.random === 'function' ? options.random : Math.random;
     const configuredTimeout = options.requestTimeoutMs ?? process.env.UPBIT_REQUEST_TIMEOUT_MS;
     const parsedTimeout = Number(configuredTimeout);
     this.requestTimeoutMs = Number.isFinite(parsedTimeout) && parsedTimeout > 0
       ? parsedTimeout
       : 10_000;
+    this.normalQueueTimeoutMs = Number.isFinite(Number(options.normalQueueTimeoutMs)) &&
+      Number(options.normalQueueTimeoutMs) >= 0
+      ? Number(options.normalQueueTimeoutMs)
+      : 10_000;
+    this.riskQueueTimeoutMs = Number.isFinite(Number(options.riskQueueTimeoutMs)) &&
+      Number(options.riskQueueTimeoutMs) >= 0
+      ? Number(options.riskQueueTimeoutMs)
+      : 30_000;
     this.lastRequestTime = 0;
     const configuredRequestInterval = options.minRequestIntervalMs ?? process.env.UPBIT_MIN_REQUEST_INTERVAL_MS;
     const parsedRequestInterval = Number(configuredRequestInterval);
@@ -90,23 +139,121 @@ class UpbitAPI {
     };
   }
 
+  getRequestConfigWithOptions(config = {}, requestOptions = {}) {
+    const requestConfig = { ...config };
+    if (requestOptions.signal) requestConfig.signal = requestOptions.signal;
+    const deadlineAt = Number(requestOptions.deadlineAt);
+    if (requestOptions.deadlineAt !== undefined && requestOptions.deadlineAt !== null &&
+      Number.isFinite(deadlineAt)) {
+      const remainingMs = Math.floor(deadlineAt - this.getCurrentTime());
+      if (remainingMs <= 0) throw createRequestDeadlineError(deadlineAt);
+      return {
+        ...requestConfig,
+        timeout: Math.min(this.requestTimeoutMs, remainingMs)
+      };
+    }
+    return this.getRequestConfig(requestConfig);
+  }
+
+  getCurrentTime() {
+    return typeof this.scheduler?.now === 'function' ? this.scheduler.now() : Date.now();
+  }
+
+  sleep(delayMs) {
+    const setTimer = this.scheduler?.setTimer || ((callback, timeout) => setTimeout(callback, timeout));
+    return new Promise(resolve => setTimer(resolve, Math.max(0, delayMs)));
+  }
+
+  getDeadlineRemainingMs(requestOptions = {}) {
+    const deadlineAt = Number(requestOptions.deadlineAt);
+    if (requestOptions.deadlineAt === undefined || requestOptions.deadlineAt === null ||
+      !Number.isFinite(deadlineAt)) return null;
+    return Math.max(0, deadlineAt - this.getCurrentTime());
+  }
+
+  async waitBeforeRetry(delayMs, requestOptions = {}) {
+    const remainingMs = this.getDeadlineRemainingMs(requestOptions);
+    if (remainingMs !== null && remainingMs <= 0) {
+      throw createRequestDeadlineError(requestOptions.deadlineAt);
+    }
+    await this.sleep(remainingMs === null ? delayMs : Math.min(delayMs, remainingMs));
+    if (this.getDeadlineRemainingMs(requestOptions) === 0) {
+      throw createRequestDeadlineError(requestOptions.deadlineAt);
+    }
+  }
+
+  getSchedulerOptions(requestOptions = {}) {
+    const priority = requestOptions.priority === 'risk' ? 'risk' : 'normal';
+    const queueWaitTimeoutMs = requestOptions.queueWaitTimeoutMs ??
+      (priority === 'risk' ? this.riskQueueTimeoutMs : this.normalQueueTimeoutMs);
+    const schedulerOptions = {
+      priority,
+      signal: requestOptions.signal,
+      priorityOrder: requestOptions.priorityOrder,
+      rateLimitGroup: requestOptions.rateLimitGroup || 'all',
+      rateLimitScope: requestOptions.rateLimitScope || 'process',
+      queueWaitTimeoutMs,
+      minRequestIntervalMs: this.minRequestInterval
+    };
+    const deadlineAt = Number(requestOptions.deadlineAt);
+    if (requestOptions.deadlineAt !== undefined && requestOptions.deadlineAt !== null &&
+      Number.isFinite(deadlineAt)) {
+      schedulerOptions.deadlineAt = deadlineAt;
+      schedulerOptions.queueWaitTimeoutMs = Math.min(
+        queueWaitTimeoutMs,
+        Math.max(0, deadlineAt - this.getCurrentTime())
+      );
+    }
+    return schedulerOptions;
+  }
+
+  async scheduleRequest(requestFn, requestOptions = {}) {
+    return this.scheduler.schedule(startedAt => {
+      this.lastRequestTime = startedAt;
+      return requestFn();
+    }, this.getSchedulerOptions(requestOptions));
+  }
+
+  applyRateLimitBackoff(error, attempt = 0, requestOptions = {}) {
+    const headers = error.response?.headers;
+    const retryAfterHeader = getHeader(headers, 'Retry-After');
+    const remaining = parseRemainingReq(getHeader(headers, 'Remaining-Req'));
+    const retryAfterMs = getRetryAfterMs(retryAfterHeader, this.getCurrentTime());
+    const waitTime = Math.max(
+      retryAfterMs,
+      Math.pow(2, attempt) * 2000 + Math.floor(this.random() * 250)
+    );
+    this.scheduler.applyBackoff(waitTime, {
+      rateLimitGroup: remaining?.group || requestOptions.rateLimitGroup,
+      rateLimitScope: requestOptions.rateLimitScope
+    });
+    return waitTime;
+  }
+
+  applyTemporaryBlockBackoff(error, requestOptions = {}) {
+    const { durationMs, source } = getTemporaryBlockDurationMs(error, this.getCurrentTime());
+    this.scheduler.applyBackoff(durationMs, {
+      rateLimitScope: requestOptions.rateLimitScope,
+      rateLimitScopeWide: true
+    });
+    return { durationMs, source };
+  }
+
+  observeRateLimitResponse(response, requestOptions = {}) {
+    const parsed = parseRemainingReq(getHeader(response?.headers, 'Remaining-Req'));
+    if (!parsed || parsed.remaining !== 0) return;
+    const now = this.getCurrentTime();
+    this.scheduler.applyBackoff(getNextSecondBoundaryDelayMs(now), {
+      rateLimitGroup: parsed.group,
+      rateLimitScope: requestOptions.rateLimitScope
+    });
+  }
+
   /**
    * Rate limiting을 위한 대기
    */
   async waitForRateLimit(options = {}) {
-    const priority = options.priority === 'risk' ? 0 : 1;
-    const requestStartedAt = await new Promise((resolve, reject) => {
-      const request = {
-        priority,
-        sequence: sharedRateLimitSequence++,
-        minRequestInterval: this.minRequestInterval,
-        resolve,
-        reject
-      };
-      sharedRateLimitQueue.push(request);
-      processSharedRateLimitQueue();
-    });
-    this.lastRequestTime = requestStartedAt;
+    await this.scheduleRequest(() => undefined, options);
   }
 
   /**
@@ -116,20 +263,11 @@ class UpbitAPI {
    * @returns {Promise} 요청 결과
    */
   queueRequest(requestFn, priority = 5) {
-    return new Promise((resolve, reject) => {
-      this.requestQueue.push({
-        fn: requestFn,
-        priority,
-        resolve,
-        reject,
-        addedAt: Date.now()
-      });
-
-      // 우선순위 정렬 (낮은 값이 먼저)
-      this.requestQueue.sort((a, b) => a.priority - b.priority);
-
-      // 큐 처리 시작
-      this.processQueue();
+    const numericPriority = Number(priority);
+    const priorityName = priority === 'risk' || numericPriority <= 0 ? 'risk' : 'normal';
+    return this.scheduleRequest(requestFn, {
+      priority: priorityName,
+      priorityOrder: Number.isFinite(numericPriority) ? numericPriority : 0
     });
   }
 
@@ -139,35 +277,46 @@ class UpbitAPI {
   async processQueue() {
     if (this.isProcessingQueue) return;
     this.isProcessingQueue = true;
-
-    while (this.requestQueue.length > 0) {
-      const request = this.requestQueue.shift();
-
-      try {
-        await this.waitForRateLimit();
-        const result = await request.fn();
-        request.resolve(result);
-      } catch (error) {
-        request.reject(error);
+    try {
+      while (this.requestQueue.length > 0) {
+        const request = this.requestQueue.shift();
+        const numericPriority = Number(request.priority);
+        const priority = request.priority === 'risk' || numericPriority <= 0 ? 'risk' : 'normal';
+        try {
+          const result = await this.scheduleRequest(request.fn, {
+            priority,
+            priorityOrder: Number.isFinite(numericPriority) ? numericPriority : 0
+          });
+          request.resolve(result);
+        } catch (error) {
+          request.reject(error);
+        }
       }
-
-      // 큐 처리 간격 대기
-      if (this.requestQueue.length > 0) {
-        await new Promise(resolve => setTimeout(resolve, this.queueInterval));
-      }
+    } finally {
+      this.isProcessingQueue = false;
     }
-
-    this.isProcessingQueue = false;
   }
 
   /**
    * 큐 상태 조회
    */
   getQueueStatus() {
+    const shared = this.scheduler.getStatus();
     return {
-      queueLength: this.requestQueue.length,
-      isProcessing: this.isProcessingQueue,
-      lastRequestTime: this.lastRequestTime
+      queueLength: shared.queuedTotal + this.requestQueue.length,
+      isProcessing: this.isProcessingQueue || shared.queuedTotal > 0 || shared.inFlightTotal > 0,
+      lastRequestTime: this.lastRequestTime,
+      sharedQueueLength: shared.queuedTotal,
+      queuedByPriority: shared.queued,
+      oldestWaitAgeMsByPriority: shared.oldestWaitAgeMs,
+      inFlightByPriority: shared.inFlight,
+      inFlightTotal: shared.inFlightTotal,
+      maxInFlight: shared.maxInFlight,
+      maxInFlightByPriority: shared.maxInFlightByPriority,
+      maxQueuedByPriority: shared.maxQueuedByPriority,
+      nextStartInMs: shared.nextStartInMs,
+      backoffRemainingMs: shared.backoffRemainingMs,
+      backoffRemainingMsByScopeAndGroup: shared.backoffRemainingMsByScopeAndGroup
     };
   }
 
@@ -175,44 +324,65 @@ class UpbitAPI {
    * 재시도 로직이 포함된 API 요청
    */
   async requestWithRetry(requestFn, maxRetries = 3, requestOptions = {}) {
-    for (let attempt = 0; attempt < maxRetries; attempt++) {
+    const attempts = Number.isSafeInteger(Number(maxRetries)) && Number(maxRetries) > 0
+      ? Number(maxRetries)
+      : 1;
+    let finalError;
+
+    for (let attempt = 0; attempt < attempts; attempt++) {
       try {
-        await this.waitForRateLimit(requestOptions);
-        return await requestFn();
+        const remainingMs = this.getDeadlineRemainingMs(requestOptions);
+        if (remainingMs !== null && remainingMs <= 0) {
+          throw createRequestDeadlineError(requestOptions.deadlineAt);
+        }
+        const result = await this.scheduleRequest(requestFn, requestOptions);
+        if (this.getDeadlineRemainingMs(requestOptions) === 0) {
+          throw createRequestDeadlineError(requestOptions.deadlineAt);
+        }
+        return result;
       } catch (error) {
+        finalError = error;
+        if (isSchedulerAdmissionError(error)) throw error;
         const status = error.response?.status;
+
+        // Upbit's 418 means the IP/pocket is temporarily blocked. Apply the
+        // response duration (or the conservative shared fallback) and fail
+        // this request instead of retrying into the block.
+        if (status === 418) {
+          const { durationMs, source } = this.applyTemporaryBlockBackoff(error, requestOptions);
+          console.error(`Rate limited with HTTP 418. Shared cooldown: ${durationMs}ms (${source})`);
+          throw error;
+        }
 
         // Rate limit - 재시도
         if (status === 429) {
-          const retryAfterHeader = error.response?.headers?.['retry-after'];
-          const retryAfterSeconds = Number(retryAfterHeader);
-          const retryAfterMs = Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0
-            ? retryAfterSeconds * 1000
-            : 0;
-          const waitTime = Math.max(
-            retryAfterMs,
-            Math.pow(2, attempt) * 2000 + Math.floor(Math.random() * 250)
-          );
-          sharedBackoffUntil = Math.max(sharedBackoffUntil, Date.now() + waitTime);
-          console.log(`Rate limited. Waiting ${waitTime}ms before retry (${attempt + 1}/${maxRetries})`);
-          await new Promise(resolve => setTimeout(resolve, waitTime));
-          continue;
+          const waitTime = this.applyRateLimitBackoff(error, attempt, requestOptions);
+          console.log(`Rate limited. Waiting ${waitTime}ms before retry (${attempt + 1}/${attempts})`);
+          if (this.getDeadlineRemainingMs(requestOptions) === 0) {
+            throw createRequestDeadlineError(requestOptions.deadlineAt);
+          }
+          if (attempt < attempts - 1) continue;
+          throw error;
+        }
+
+        if (this.getDeadlineRemainingMs(requestOptions) === 0) {
+          throw createRequestDeadlineError(requestOptions.deadlineAt);
         }
 
         // 서버 에러 (5xx) - 재시도
-        if (status >= 500 && attempt < maxRetries - 1) {
+        if (status >= 500 && attempt < attempts - 1) {
           const waitTime = Math.pow(2, attempt) * 500;
-          console.log(`Server error (${status}). Waiting ${waitTime}ms before retry (${attempt + 1}/${maxRetries})`);
-          await new Promise(resolve => setTimeout(resolve, waitTime));
+          console.log(`Server error (${status}). Waiting ${waitTime}ms before retry (${attempt + 1}/${attempts})`);
+          await this.waitBeforeRetry(waitTime, requestOptions);
           continue;
         }
 
         // 네트워크 에러 - 재시도
         if (['ECONNRESET', 'ETIMEDOUT', 'ENOTFOUND', 'EPIPE', 'ECONNABORTED', 'EAI_AGAIN', 'ENETRESET'].includes(error.code)) {
-          if (attempt < maxRetries - 1) {
+          if (attempt < attempts - 1) {
             const waitTime = Math.pow(2, attempt) * 1000;
-            console.log(`Network error (${error.code}). Waiting ${waitTime}ms before retry (${attempt + 1}/${maxRetries})`);
-            await new Promise(resolve => setTimeout(resolve, waitTime));
+            console.log(`Network error (${error.code}). Waiting ${waitTime}ms before retry (${attempt + 1}/${attempts})`);
+            await this.waitBeforeRetry(waitTime, requestOptions);
             continue;
           }
         }
@@ -221,6 +391,8 @@ class UpbitAPI {
         throw error;
       }
     }
+
+    throw finalError || new Error('Upbit request failed without a response');
   }
 
   /**
@@ -277,19 +449,27 @@ class UpbitAPI {
       payload.query_hash_alg = 'SHA512';
     }
 
-    return jwt.sign(payload, this.secretKey);
+    return jwt.sign(payload, this.secretKey, { algorithm: 'HS512' });
   }
 
   /**
    * 마켓 코드 조회
    */
-  async getMarkets() {
+  async getMarkets(requestOptions = {}) {
+    const priorityOptions = {
+      ...requestOptions,
+      rateLimitGroup: 'market',
+      rateLimitScope: 'ip'
+    };
     try {
-      const response = await axios.get(
-        `${this.baseURL}/market/all`,
-        this.getRequestConfig()
-      );
-      return response.data;
+      return await this.requestWithRetry(async () => {
+        const response = await this.axios.get(
+          `${this.baseURL}/market/all`,
+          this.getRequestConfigWithOptions({}, priorityOptions)
+        );
+        this.observeRateLimitResponse(response, priorityOptions);
+        return response.data;
+      }, 3, priorityOptions);
     } catch (error) {
       console.error('Error fetching markets:', error.message);
       throw error;
@@ -301,29 +481,59 @@ class UpbitAPI {
    * @param {string} market - 마켓 코드 (예: KRW-BTC)
    * @param {number} unit - 분 단위 (1, 3, 5, 15, 10, 30, 60, 240)
    * @param {number} count - 캔들 개수 (최대 200)
+   * @param {{ to?: string }} requestOptions - Optional Upbit pagination cursor and scheduler controls
    */
-  async getMinuteCandles(market, unit = 5, count = 200) {
+  async getMinuteCandles(market, unit = 5, count = 200, requestOptions = {}) {
+    if (!Number.isSafeInteger(count) || count < 1 || count > 200) {
+      throw new RangeError('Upbit minute candle count must be an integer from 1 to 200.');
+    }
+    const cursor = requestOptions?.to;
+    if (cursor !== undefined && cursor !== null &&
+      (typeof cursor !== 'string' || !cursor.trim())) {
+      throw new TypeError('Upbit minute candle cursor must be a non-empty string when provided.');
+    }
+    const priorityOptions = {
+      ...requestOptions,
+      rateLimitGroup: 'candle',
+      rateLimitScope: 'ip'
+    };
     return this.requestWithRetry(async () => {
-      const response = await axios.get(
+      const params = { market, count };
+      if (cursor !== undefined && cursor !== null) params.to = cursor;
+      const response = await this.axios.get(
         `${this.baseURL}/candles/minutes/${unit}`,
-        this.getRequestConfig({
-          params: { market, count }
-        })
+        this.getRequestConfigWithOptions({
+          params
+        }, priorityOptions)
       );
+      this.observeRateLimitResponse(response, priorityOptions);
       return response.data;
-    });
+    }, 3, priorityOptions);
   }
 
   /**
    * 일봉 캔들 조회
    */
-  async getDayCandles(market, count = 200) {
+  async getDayCandles(market, count = 200, requestOptions = {}) {
+    const cursor = requestOptions?.to;
+    if (cursor !== undefined && cursor !== null &&
+      (typeof cursor !== 'string' || !cursor.trim())) {
+      throw new TypeError('Upbit day candle cursor must be a non-empty string when provided.');
+    }
+    const priorityOptions = {
+      ...requestOptions,
+      rateLimitGroup: 'candle',
+      rateLimitScope: 'ip'
+    };
     return this.requestWithRetry(async () => {
-      const response = await axios.get(`${this.baseURL}/candles/days`, this.getRequestConfig({
-        params: { market, count }
-      }));
+      const params = { market, count };
+      if (cursor !== undefined && cursor !== null) params.to = cursor;
+      const response = await this.axios.get(`${this.baseURL}/candles/days`, this.getRequestConfigWithOptions({
+        params
+      }, priorityOptions));
+      this.observeRateLimitResponse(response, priorityOptions);
       return response.data;
-    });
+    }, 3, priorityOptions);
   }
 
   /**
@@ -331,40 +541,82 @@ class UpbitAPI {
    */
   async getTicker(markets, requestOptions = {}) {
     const marketString = Array.isArray(markets) ? markets.join(',') : markets;
+    const priorityOptions = {
+      ...requestOptions,
+      rateLimitGroup: 'ticker',
+      rateLimitScope: 'ip'
+    };
     return this.requestWithRetry(async () => {
-      const response = await axios.get(`${this.baseURL}/ticker`, this.getRequestConfig({
+      const response = await this.axios.get(`${this.baseURL}/ticker`, this.getRequestConfigWithOptions({
         params: { markets: marketString }
-      }));
+      }, priorityOptions));
+      this.observeRateLimitResponse(response, priorityOptions);
       return response.data;
-    }, 3, requestOptions);
+    }, 3, priorityOptions);
+  }
+
+  /**
+   * Orderbook depth 조회
+   * @param {string|string[]} markets - 마켓 코드 또는 마켓 코드 배열
+   * @param {object} requestOptions - Scheduler controls such as signal or deadlineAt
+   * @returns {Promise<Array>} Upbit orderbook response data
+   */
+  async getOrderbook(markets, requestOptions = {}) {
+    const marketString = Array.isArray(markets) ? markets.join(',') : markets;
+    const priorityOptions = {
+      ...requestOptions,
+      rateLimitGroup: 'orderbook',
+      rateLimitScope: 'ip'
+    };
+    return this.requestWithRetry(async () => {
+      const response = await this.axios.get(`${this.baseURL}/orderbook`, this.getRequestConfigWithOptions({
+        params: { markets: marketString }
+      }, priorityOptions));
+      this.observeRateLimitResponse(response, priorityOptions);
+      return response.data;
+    }, 3, priorityOptions);
   }
 
   /**
    * 계좌 조회
    */
-  async getAccounts() {
+  async getAccounts(requestOptions = {}) {
+    const priorityOptions = {
+      ...requestOptions,
+      priority: 'risk',
+      rateLimitGroup: 'default',
+      rateLimitScope: 'pocket'
+    };
     return this.requestWithRetry(async () => {
       const token = this.generateToken();
-      const response = await axios.get(`${this.baseURL}/accounts`, this.getRequestConfig({
+      const response = await this.axios.get(`${this.baseURL}/accounts`, this.getRequestConfigWithOptions({
         headers: { Authorization: `Bearer ${token}` }
-      }));
+      }, priorityOptions));
+      this.observeRateLimitResponse(response, priorityOptions);
       return response.data;
-    });
+    }, 3, priorityOptions);
   }
 
   /**
    * 주문 가능 정보 조회
    */
-  async getOrderChance(market) {
+  async getOrderChance(market, requestOptions = {}) {
+    const priorityOptions = {
+      ...requestOptions,
+      priority: 'risk',
+      rateLimitGroup: 'default',
+      rateLimitScope: 'pocket'
+    };
     return this.requestWithRetry(async () => {
       const query = { market };
       const token = this.generateToken(query);
-      const response = await axios.get(`${this.baseURL}/orders/chance`, this.getRequestConfig({
+      const response = await this.axios.get(`${this.baseURL}/orders/chance`, this.getRequestConfigWithOptions({
         params: query,
         headers: { Authorization: `Bearer ${token}` }
-      }));
+      }, priorityOptions));
+      this.observeRateLimitResponse(response, priorityOptions);
       return response.data;
-    });
+    }, 3, priorityOptions);
   }
 
   /**
@@ -377,7 +629,13 @@ class UpbitAPI {
    * @param {string|null} identifier - 재기동 조회를 위한 계정 내 고유 주문 식별자
    * @returns {Object} 주문 결과 { success: boolean, data?: OrderData, error?: ErrorInfo }
    */
-  async order(market, side, volume, price = null, ord_type = 'limit', identifier = null) {
+  async order(market, side, volume, price = null, ord_type = 'limit', identifier = null, requestOptions = {}) {
+    const priorityOptions = {
+      ...requestOptions,
+      priority: 'risk',
+      rateLimitGroup: 'order',
+      rateLimitScope: 'pocket'
+    };
     const query = {
       market,
       side,
@@ -396,14 +654,38 @@ class UpbitAPI {
       query.volume = volume.toString();
     }
 
+    let requestDispatched = false;
     try {
-      await this.waitForRateLimit();
-      const token = this.generateToken(query);
-      const response = await axios.post(`${this.baseURL}/orders`, query, this.getRequestConfig({
-        headers: { Authorization: `Bearer ${token}` }
-      }));
+      const response = await this.scheduleRequest(async () => {
+        const token = this.generateToken(query);
+        const requestConfig = this.getRequestConfigWithOptions({
+          headers: { Authorization: `Bearer ${token}` }
+        }, priorityOptions);
+        requestDispatched = true;
+        const result = await this.axios.post(`${this.baseURL}/orders`, query, requestConfig);
+        this.observeRateLimitResponse(result, priorityOptions);
+        return result;
+      }, priorityOptions);
       return { success: true, data: response.data };
     } catch (error) {
+      if (!requestDispatched) {
+        const message = `주문 요청이 거래소로 전송되지 않았습니다: ${error.message || '요청 대기열을 사용할 수 없습니다.'}`;
+        return {
+          success: false,
+          error: {
+            code: 'upbit_request_not_dispatched',
+            message,
+            dispatched: false,
+            schedulerCode: error.code || null
+          }
+        };
+      }
+      if (error.response?.status === 429) {
+        this.applyRateLimitBackoff(error, 0, priorityOptions);
+      } else if (error.response?.status === 418) {
+        const { durationMs, source } = this.applyTemporaryBlockBackoff(error, priorityOptions);
+        console.error(`Rate limited with HTTP 418. Shared cooldown: ${durationMs}ms (${source})`);
+      }
       const parsedError = this.parseApiError(error);
       console.error(`Order failed [${market} ${side}]: ${parsedError.message} (${parsedError.code})`);
 
@@ -433,33 +715,47 @@ class UpbitAPI {
   /**
    * 주문 취소
    */
-  async cancelOrder(uuid) {
+  async cancelOrder(uuid, requestOptions = {}) {
+    const priorityOptions = {
+      ...requestOptions,
+      priority: 'risk',
+      rateLimitGroup: 'default',
+      rateLimitScope: 'pocket'
+    };
     return this.requestWithRetry(async () => {
       const query = { uuid };
       const token = this.generateToken(query);
-      const response = await axios.delete(`${this.baseURL}/order`, this.getRequestConfig({
+      const response = await this.axios.delete(`${this.baseURL}/order`, this.getRequestConfigWithOptions({
         params: query,
         headers: { Authorization: `Bearer ${token}` }
-      }));
+      }, priorityOptions));
+      this.observeRateLimitResponse(response, priorityOptions);
       return response.data;
-    });
+    }, 3, priorityOptions);
   }
 
   /**
    * 주문 리스트 조회
    */
-  async getOrders(market, state = 'wait') {
+  async getOrders(market, state = 'wait', requestOptions = {}) {
+    const priorityOptions = {
+      ...requestOptions,
+      priority: 'risk',
+      rateLimitGroup: 'default',
+      rateLimitScope: 'pocket'
+    };
     return this.requestWithRetry(async () => {
       const query = Array.isArray(state)
         ? { market, 'states[]': state }
         : { market, state };
       const token = this.generateToken(query);
-      const response = await axios.get(`${this.baseURL}/orders`, this.getRequestConfig({
+      const response = await this.axios.get(`${this.baseURL}/orders`, this.getRequestConfigWithOptions({
         params: query,
         headers: { Authorization: `Bearer ${token}` }
-      }));
+      }, priorityOptions));
+      this.observeRateLimitResponse(response, priorityOptions);
       return response.data;
-    });
+    }, 3, priorityOptions);
   }
 
   /**
@@ -467,18 +763,26 @@ class UpbitAPI {
    * @param {string} uuidOrIdentifier - UUID 또는 사전 기록한 client identifier
    * @param {{ identifier?: boolean }} options - identifier 조회인지 여부
    */
-  async getOrder(uuidOrIdentifier, { identifier = false } = {}) {
+  async getOrder(uuidOrIdentifier, requestOptions = {}) {
+    const priorityOptions = {
+      ...requestOptions,
+      priority: 'risk',
+      rateLimitGroup: 'default',
+      rateLimitScope: 'pocket'
+    };
+    const { identifier = false } = priorityOptions;
     return this.requestWithRetry(async () => {
       const query = identifier
         ? { identifier: uuidOrIdentifier }
         : { uuid: uuidOrIdentifier };
       const token = this.generateToken(query);
-      const response = await axios.get(`${this.baseURL}/order`, this.getRequestConfig({
+      const response = await this.axios.get(`${this.baseURL}/order`, this.getRequestConfigWithOptions({
         params: query,
         headers: { Authorization: `Bearer ${token}` }
-      }));
+      }, priorityOptions));
+      this.observeRateLimitResponse(response, priorityOptions);
       return response.data;
-    });
+    }, 3, priorityOptions);
   }
 
   /**
@@ -488,12 +792,25 @@ class UpbitAPI {
    * @param {number} checkIntervalMs - 확인 간격 (기본 1초)
    * @returns {Object} { filled: boolean, order: OrderData, error?: string }
    */
-  async waitForOrderFill(uuid, maxWaitMs = 30000, checkIntervalMs = 1000) {
-    const startTime = Date.now();
+  async waitForOrderFill(uuid, maxWaitMs = 30000, checkIntervalMs = 1000, requestOptions = {}) {
+    const parsedMaxWaitMs = Number(maxWaitMs);
+    const fillDeadlineAt = this.getCurrentTime() + (
+      Number.isFinite(parsedMaxWaitMs) && parsedMaxWaitMs > 0 ? parsedMaxWaitMs : 0
+    );
+    const priorityOptions = {
+      ...requestOptions,
+      priority: 'risk',
+      rateLimitGroup: 'default',
+      rateLimitScope: 'pocket',
+      deadlineAt: fillDeadlineAt
+    };
 
-    while (Date.now() - startTime < maxWaitMs) {
+    while (this.getCurrentTime() < fillDeadlineAt) {
       try {
-        const order = await this.getOrder(uuid);
+        const order = await this.getOrder(uuid, priorityOptions);
+        if (this.getCurrentTime() >= fillDeadlineAt) {
+          throw createFillDeadlineError(fillDeadlineAt);
+        }
 
         if (!order) {
           return { filled: false, order: null, error: '주문 조회 실패' };
@@ -518,30 +835,24 @@ class UpbitAPI {
         }
 
         // 아직 체결 대기 중 - 대기
-        await new Promise(resolve => setTimeout(resolve, checkIntervalMs));
+        const remainingMs = this.getDeadlineRemainingMs(priorityOptions) || 0;
+        await this.sleep(Math.min(Math.max(0, checkIntervalMs), remainingMs));
       } catch (error) {
         console.error(`주문 상태 확인 오류: ${error.message}`);
-        await new Promise(resolve => setTimeout(resolve, checkIntervalMs));
+        if (error.response?.status === 418 || priorityOptions.signal?.aborted ||
+          isSchedulerAdmissionError(error)) {
+          if (['UPBIT_QUEUE_TIMEOUT', 'UPBIT_REQUEST_DEADLINE'].includes(error.code)) {
+            throw createFillDeadlineError(fillDeadlineAt);
+          }
+          throw error;
+        }
+        const remainingMs = this.getDeadlineRemainingMs(priorityOptions) || 0;
+        if (remainingMs <= 0) throw createFillDeadlineError(fillDeadlineAt);
+        await this.sleep(Math.min(Math.max(0, checkIntervalMs), remainingMs));
       }
     }
 
-    // 시간 초과
-    try {
-      const finalOrder = await this.getOrder(uuid);
-      const executedVolume = parseFloat(finalOrder?.executed_volume || 0);
-
-      if (executedVolume > 0) {
-        return {
-          filled: true,
-          partial: parseFloat(finalOrder.remaining_volume || 0) > 0,
-          order: finalOrder
-        };
-      }
-
-      return { filled: false, order: finalOrder, error: '체결 대기 시간 초과' };
-    } catch (error) {
-      return { filled: false, order: null, error: `최종 확인 실패: ${error.message}` };
-    }
+    throw createFillDeadlineError(fillDeadlineAt);
   }
 
   /**

@@ -5,7 +5,11 @@ struct ServerAddressPolicyTests {
     static func main() throws {
         let cases: [(String, Bool)] = [
             ("https://coinpilot.example.com", true),
+            ("https://coinpilot.example.com/live", true),
+            ("https://coinpilot.example.com/live/", false),
+            ("https://coinpilot.example.com/dashboard", false),
             ("http://192.168.1.229:3000", true),
+            ("http://192.168.1.229:3000/live", true),
             ("http://coinpilot.local:3000", true),
             ("http://[fd12:3456:789a::10]:3000", true),
             ("http://[fc12:3456:789a::10]:3000", true),
@@ -18,6 +22,7 @@ struct ServerAddressPolicyTests {
             ("https://localhost:3000", false),
             ("http://user:pass@192.168.1.229:3000", false),
             ("http://192.168.1.229:3000/dashboard", false),
+            ("https://coinpilot.example.com/live?token=secret", false),
             ("http://192.168.1.229:3000/?token=secret", false)
         ]
 

@@ -2,6 +2,7 @@ import express from 'express';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { randomUUID } from 'crypto';
 import { createServer } from 'http';
 import { createServer as createHttpsServer } from 'https';
 import { Server as SocketIOServer } from 'socket.io';
@@ -9,6 +10,7 @@ import Logger, { resolveLogDirectory } from '../utils/logger.js';
 
 // Route modules
 import createAccountRoutes from './routes/account.js';
+import createLiveCredentialsRoutes from './routes/liveCredentials.js';
 import createPortfolioRoutes from './routes/portfolio.js';
 import { projectReadOnlyPaperPortfolioAnalysis } from './readOnlyPaperPortfolio.js';
 import createNewsRoutes from './routes/news.js';
@@ -24,18 +26,83 @@ import { createDashboardAuth, createOriginGuard } from './auth.js';
 import { createDefaultManualOrderIdempotencyStore } from './manualOrderIdempotencyStore.js';
 import { getPaperEvidenceMutationLock } from '../research/paperEvidenceMutationGuard.js';
 import { resolveDashboardTls } from './dashboardTls.js';
-import { UpbitCacheMarketDataProvider } from './marketDataProvider.js';
+import {
+  getMarketDataProvider,
+  MARKET_DATA_FRESHNESS,
+  UpbitCacheMarketDataProvider
+} from './marketDataProvider.js';
+import { getMarketDataAdapterKind } from '../market-data/marketDataAdapters.js';
+import { readLogTail } from '../utils/readLogTail.js';
+import { parseRecentLogErrors } from '../utils/parseRecentLogErrors.js';
+import { resolveOptimizationStoragePaths } from '../runtime/optimizationStorage.js';
+import { fetchCompleteUpbitCandleHistory } from '../market-data/completeUpbitCandleHistory.js';
+import { appendOptimizerHistory } from '../runtime/optimizerHistoryStore.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 // 프로젝트 루트: src/api/ 에서 2단계 상위
 const PROJECT_ROOT = path.resolve(__dirname, '..', '..');
+const MAX_NEWS_RETENTION_LIMIT = 2000;
+const NEWS_ACCUMULATION_BATCH_SIZE = 2000;
 
 class DashboardServer {
   constructor(tradingSystem, port = 3000, options = {}) {
+    const newsRetentionLimit = options.newsRetentionLimit ?? MAX_NEWS_RETENTION_LIMIT;
+    if (!Number.isSafeInteger(newsRetentionLimit) ||
+      newsRetentionLimit < 1 || newsRetentionLimit > MAX_NEWS_RETENTION_LIMIT) {
+      throw new RangeError(`newsRetentionLimit must be an integer from 1 to ${MAX_NEWS_RETENTION_LIMIT}`);
+    }
     this.app = express();
+    // The production Nginx proxy connects over loopback. Trust only that hop so
+    // req.ip reflects the originating client for login throttling without
+    // accepting forwarded-address headers from arbitrary peers.
+    this.app.set('trust proxy', options.trustProxy ?? 'loopback');
     this.port = port;
     this.tradingSystem = tradingSystem;
+    const publicMarketDataSource = options.publicMarketDataSource;
+    if (publicMarketDataSource !== undefined && publicMarketDataSource !== null) {
+      const requiredReads = ['getMarkets', 'getTicker', 'getMinuteCandles'];
+      const missingRead = requiredReads.find(method => typeof publicMarketDataSource[method] !== 'function');
+      if (missingRead) {
+        throw new TypeError(`publicMarketDataSource must provide ${requiredReads.join(', ')}.`);
+      }
+    }
+    this.publicMarketDataSource = publicMarketDataSource ?? null;
+    const dashboardEnv = options.env || process.env;
+    this.optimizationStoragePaths = resolveOptimizationStoragePaths({
+      env: dashboardEnv,
+      cwd: options.cwd || process.cwd(),
+      projectRoot: PROJECT_ROOT,
+      legacyBase: 'projectRoot',
+      stateDir: options.optimizationStateDir ?? tradingSystem?.config?.stateDir,
+      optimizationStateFile: options.optimizationStateFile,
+      optimizationHistoryFile: options.optimizationHistoryFile,
+      optimalConfigFile: options.optimalConfigFile
+    });
+    this.optimizationStateFile = this.optimizationStoragePaths.optimizationStateFile.absolutePath;
+    this.optimizationHistoryFile = this.optimizationStoragePaths.optimizationHistoryFile.absolutePath;
+    this.optimalConfigFile = this.optimizationStoragePaths.optimalConfigFile.absolutePath;
+    this.liveCredentialStore = options.liveCredentialStore || null;
+    const setupModeFromEnv = ['1', 'true', 'yes', 'on'].includes(
+      String(dashboardEnv.DASHBOARD_LIVE_CREDENTIAL_SETUP_MODE || '').trim().toLowerCase()
+    );
+    this.liveCredentialSetupMode = options.liveCredentialSetupMode === undefined
+      ? setupModeFromEnv
+      : options.liveCredentialSetupMode === true;
+    this.liveCredentialEnrollmentReady = Boolean(
+      this.liveCredentialStore &&
+      typeof this.liveCredentialStore.setCredentialValidator === 'function' &&
+      typeof this.liveCredentialStore.setUpdateCallback === 'function' &&
+      typeof options.validateLiveCredentials === 'function' &&
+      typeof options.onLiveCredentialsSaved === 'function'
+    );
+    if (this.liveCredentialStore) {
+      this.liveCredentialStore.setCredentialValidator?.(options.validateLiveCredentials || null);
+      this.liveCredentialStore.setUpdateCallback?.(options.onLiveCredentialsSaved || null);
+    }
+    this.newsRetentionLimit = newsRetentionLimit;
+    this.paperForwardCohortRootDir = options.paperForwardCohortRootDir;
+    this.momentumShadowProjectionCacheMs = options.momentumShadowProjectionCacheMs;
     const portfolioPath = tradingSystem?.virtualPortfolioFile ||
       tradingSystem?.config?.virtualPortfolioFile ||
       path.join(PROJECT_ROOT, 'dry_portfolio.json');
@@ -45,8 +112,7 @@ class DashboardServer {
       createDefaultManualOrderIdempotencyStore(tradingSystem, idempotencyFile, {
         writerLockPath: `${path.resolve(portfolioPath)}.manual_order_writer.lock`
       });
-    const dashboardEnv = options.env || process.env;
-    this.logger = new Logger('debug', {
+    this.logger = options.logger || new Logger('debug', {
       logDir: resolveLogDirectory(PROJECT_ROOT, dashboardEnv.STAGING_OUTPUT_DIR)
     });
     this.tlsConfig = resolveDashboardTls(dashboardEnv, PROJECT_ROOT);
@@ -100,7 +166,9 @@ class DashboardServer {
       statistics: 1000,  // 통계: 1초
       candles: 1000      // 캔들: 1초
     };
-    this.marketDataProvider = options.marketDataProvider || new UpbitCacheMarketDataProvider(this);
+    this.marketDataProvider = this.publicMarketDataSource
+      ? new UpbitCacheMarketDataProvider(this)
+      : (options.marketDataProvider || new UpbitCacheMarketDataProvider(this));
 
     // 알림 상태 추적
     this.lastSignals = new Map();        // 마지막 신호 저장 (중복 알림 방지)
@@ -109,8 +177,8 @@ class DashboardServer {
     this.notificationInitialTimer = null;
 
     // 뉴스 누적 저장소 (서버 시작 이후 모든 뉴스 누적)
-    this.accumulatedNews = [];           // 누적된 전체 뉴스
-    this.newsSeenKeys = new Set();       // 중복 체크용 키 (title+link 해시)
+    this.accumulatedNews = [];           // 최신순으로 정렬된 보존 뉴스
+    this.newsSeenKeys = new Set();       // 보존 뉴스의 중복 키 (title+link)
     this.newsAccumulatorStartTime = new Date();
 
     // 자동 최적화 상태
@@ -178,28 +246,43 @@ class DashboardServer {
     let addedCount = 0;
     const now = new Date();
 
-    for (const news of newsList) {
-      if (!news || !news.title) continue;
+    for (let batchStart = 0; batchStart < newsList.length; batchStart += NEWS_ACCUMULATION_BATCH_SIZE) {
+      const batchEnd = Math.min(batchStart + NEWS_ACCUMULATION_BATCH_SIZE, newsList.length);
+      let batchAdded = false;
 
-      const key = this.generateNewsKey(news);
-      if (this.newsSeenKeys.has(key)) continue;
+      for (let index = batchStart; index < batchEnd; index++) {
+        const news = newsList[index];
+        if (!news || !news.title) continue;
 
-      this.newsSeenKeys.add(key);
-      this.accumulatedNews.push({
-        ...news,
-        accumulatedAt: now,
-        sourceCategory: source,
-        id: `news_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`
-      });
-      addedCount++;
+        const key = this.generateNewsKey(news);
+        if (this.newsSeenKeys.has(key)) continue;
+
+        this.newsSeenKeys.add(key);
+        this.accumulatedNews.push({
+          ...news,
+          accumulatedAt: now,
+          sourceCategory: source,
+          id: `news_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`
+        });
+        addedCount++;
+        batchAdded = true;
+      }
+
+      // Bound temporary rows and sort/evict once per input batch, rather than
+      // sorting the retained array after every incoming article.
+      if (batchAdded) {
+        this.accumulatedNews.sort((a, b) => {
+          const timeA = new Date(a.timestamp || a.accumulatedAt);
+          const timeB = new Date(b.timestamp || b.accumulatedAt);
+          return timeB - timeA;
+        });
+
+        while (this.accumulatedNews.length > this.newsRetentionLimit) {
+          const evicted = this.accumulatedNews.pop();
+          this.newsSeenKeys.delete(this.generateNewsKey(evicted));
+        }
+      }
     }
-
-    // 최신순 정렬
-    this.accumulatedNews.sort((a, b) => {
-      const timeA = new Date(a.timestamp || a.accumulatedAt);
-      const timeB = new Date(b.timestamp || b.accumulatedAt);
-      return timeB - timeA;
-    });
 
     // 로그
     if (addedCount > 0) {
@@ -293,6 +376,17 @@ class DashboardServer {
   // Cache metadata distinguishes exchange source time from local fetch time.
   async getCachedTickerWithMetadata(coins) {
     const requestedCoins = Array.isArray(coins) ? [...coins] : coins;
+    const publicMarketDataSource = this.publicMarketDataSource;
+    if (publicMarketDataSource && typeof publicMarketDataSource.getTicker !== 'function') {
+      throw new TypeError('publicMarketDataSource has no ticker reader.');
+    }
+    const adapter = this.tradingSystem?.marketDataAdapter;
+    if (!publicMarketDataSource && getMarketDataAdapterKind(adapter) === 'fixture') {
+      return {
+        tickers: await adapter.getTickers(requestedCoins),
+        fetchedAt: null
+      };
+    }
     const coinKey = Array.isArray(requestedCoins) ? [...requestedCoins].sort().join(',') : requestedCoins;
     const cacheKey = `ticker:${coinKey}`;
 
@@ -309,7 +403,9 @@ class DashboardServer {
 
     let request;
     request = Promise.resolve()
-      .then(() => this.tradingSystem.upbit.getTicker(requestedCoins))
+      .then(() => publicMarketDataSource
+        ? publicMarketDataSource.getTicker(requestedCoins)
+        : this.tradingSystem.upbit.getTicker(requestedCoins))
       .then(data => {
         const cachedAt = Date.now();
         this.setCache(cacheKey, data, cachedAt);
@@ -356,6 +452,14 @@ class DashboardServer {
       const readiness = this.buildReadiness();
       res.status(readiness.ready ? 200 : 503).json(readiness);
     });
+    this.app.get('/service-ready', (req, res) => {
+      const readiness = this.buildServiceReadiness();
+      res.status(readiness.ready ? 200 : 503).json(readiness);
+    });
+    this.app.get('/trading-ready', (req, res) => {
+      const readiness = this.buildTradingReadiness();
+      res.status(readiness.ready ? 200 : 503).json(readiness);
+    });
 
     // 공개 인증 엔드포인트는 가드보다 먼저 마운트한다.
     this.app.get('/api/auth/status', this.auth.statusHandler);
@@ -383,6 +487,7 @@ class DashboardServer {
     // 모듈화된 라우트 마운트
     // ========================================
     this.app.use('/api', createAccountRoutes(this));
+    this.app.use('/api', createLiveCredentialsRoutes(this));
     this.app.use('/api', createPortfolioRoutes(this));
     this.app.use('/api', createNewsRoutes(this));
     this.app.use('/api', createMarketRoutes(this));
@@ -390,7 +495,10 @@ class DashboardServer {
     this.app.use('/api', createConfigRoutes(this));
     this.app.use('/api', createTradingRoutes(this));
     this.app.use('/api', createAiRoutes(this));
-    this.app.use('/api', createResearchRoutes(this));
+    this.app.use('/api', createResearchRoutes(this, {
+      paperForwardCohortRootDir: this.paperForwardCohortRootDir,
+      momentumShadowProjectionCacheMs: this.momentumShadowProjectionCacheMs
+    }));
 
     // ========================================
     // 추가 라우트 (dashboardServer 전용)
@@ -409,43 +517,14 @@ class DashboardServer {
           lastTradeTime = this.tradingSystem.smartTradeHistory[0].timestamp;
         }
 
-        // 에러 로그 확인
+        // Keep log reads bounded so a large file cannot block the trading loop.
         const logDir = this.logger.logDir;
         const today = now.toISOString().split('T')[0];
         const errorLogFile = path.join(logDir, `error-${today}.log`);
         let recentErrors = [];
 
-        if (fs.existsSync(errorLogFile)) {
-          const content = fs.readFileSync(errorLogFile, 'utf8');
-          // 타임스탬프 패턴으로 에러 항목 분리 (멀티라인 JSON 포함)
-          // 에러 로그 형식: [2025-12-29T05:19:16.515Z] [ERROR] message\n{json...}
-          const timestampPattern = /^\[\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z\]/;
-          const lines = content.split('\n');
-          const errorEntries = [];
-          let currentEntry = '';
-
-          for (const line of lines) {
-            if (timestampPattern.test(line)) {
-              // 새 에러 항목 시작
-              if (currentEntry.trim()) {
-                errorEntries.push(currentEntry.trim());
-              }
-              currentEntry = line;
-            } else if (currentEntry) {
-              // 현재 에러에 이어지는 줄 (JSON 등)
-              currentEntry += '\n' + line;
-            }
-          }
-          // 마지막 항목 추가
-          if (currentEntry.trim()) {
-            errorEntries.push(currentEntry.trim());
-          }
-
-          // 최근 10개 에러, 각 에러당 최대 2000자
-          recentErrors = errorEntries.slice(-10).map(entry => {
-            return entry.length > 2000 ? entry.substring(0, 2000) + '...(truncated)' : entry;
-          });
-        }
+        const errorTail = await readLogTail(errorLogFile, { maxLines: 1000, maxBytes: 512 * 1024 });
+        recentErrors = parseRecentLogErrors(errorTail.lines);
 
         // 다음 분석 예정 시간
         const checkInterval = this.tradingSystem.config?.checkInterval || 60000;
@@ -602,8 +681,20 @@ class DashboardServer {
         let totalValue = 0;
         let totalCost = 0;
 
-        // 가상 포트폴리오 또는 실제 포트폴리오 분석
-        const portfolioHoldings = this.tradingSystem.virtualPortfolio?.holdings;
+        // Read holdings from the active account mode. LIVE must never reuse a
+        // stale virtual portfolio left on the process.
+        const isDryRun = this.tradingSystem.dryRun === true;
+        const liveAccounts = isDryRun ? null : await this.tradingSystem.getAccountInfo();
+        const portfolioHoldings = isDryRun
+          ? this.tradingSystem.virtualPortfolio?.holdings
+          : new Map((Array.isArray(liveAccounts) ? liveAccounts : [])
+            .filter(account => account?.currency && account.currency !== 'KRW')
+            .map(account => {
+              const amount = Number(account.balance);
+              const avgPrice = Number(account.avg_buy_price) || 0;
+              return [`KRW-${account.currency}`, { amount, avgPrice }];
+            })
+            .filter(([, holding]) => Number.isFinite(holding.amount) && holding.amount > 0));
 
         // Map 또는 Object 모두 처리
         const isMap = portfolioHoldings instanceof Map;
@@ -611,21 +702,37 @@ class DashboardServer {
           ? Array.from(portfolioHoldings.entries())
           : Object.entries(portfolioHoldings || {});
 
+        const coins = holdingsEntries.map(([coin]) => coin);
+        const marketSnapshot = coins.length > 0
+          ? await getMarketDataProvider(this).getSnapshot(coins, {
+            freshness: MARKET_DATA_FRESHNESS.CACHED
+          })
+          : {
+            tickers: [],
+            priceMap: new Map(),
+            sourceAsOfByMarket: new Map(),
+            sourceAsOf: null,
+            fetchedAt: null,
+            complete: true,
+            unavailableMarkets: []
+          };
+
         if (holdingsEntries.length > 0) {
-          const coins = holdingsEntries.map(([coin]) => coin);
-          const tickers = await this.getCachedTicker(coins);
-          const priceMap = {};
-          tickers.forEach(t => { priceMap[t.market] = t; });
-
           for (const [coin, holding] of holdingsEntries) {
-            const ticker = priceMap[coin];
-            const currentPrice = ticker?.trade_price || holding.avgPrice;
-            const currentValue = holding.amount * currentPrice;
+            const ticker = marketSnapshot.tickers.find(item => item.market === coin) || null;
+            const currentPrice = marketSnapshot.priceMap.get(coin) ?? null;
+            const valuationAvailable = Number.isFinite(currentPrice) && currentPrice > 0;
+            const change24h = ticker?.signed_change_rate;
+            const change24hAvailable = change24h !== null && change24h !== undefined &&
+              Number.isFinite(Number(change24h));
+            const currentValue = valuationAvailable ? holding.amount * currentPrice : null;
             const costBasis = holding.amount * holding.avgPrice;
-            const profit = currentValue - costBasis;
-            const profitPercent = costBasis > 0 ? ((currentValue / costBasis) - 1) * 100 : 0;
+            const profit = valuationAvailable ? currentValue - costBasis : null;
+            const profitPercent = valuationAvailable && costBasis > 0
+              ? ((currentValue / costBasis) - 1) * 100
+              : null;
 
-            totalValue += currentValue;
+            if (valuationAvailable) totalValue += currentValue;
             totalCost += costBasis;
 
             holdings.push({
@@ -634,46 +741,71 @@ class DashboardServer {
               amount: holding.amount,
               avgPrice: holding.avgPrice,
               currentPrice,
-              currentValue: Math.round(currentValue),
+              currentValue: currentValue === null ? null : Math.round(currentValue),
               costBasis: Math.round(costBasis),
-              profit: Math.round(profit),
-              profitPercent: profitPercent.toFixed(2),
-              change24h: ticker?.signed_change_rate ? (ticker.signed_change_rate * 100).toFixed(2) : '0',
-              weight: 0 // 아래에서 계산
+              profit: profit === null ? null : Math.round(profit),
+              profitPercent: profitPercent === null ? null : profitPercent.toFixed(2),
+              change24h: change24hAvailable
+                ? (Number(change24h) * 100).toFixed(2)
+                : null,
+              valuationAvailable,
+              sourceAsOf: marketSnapshot.sourceAsOfByMarket.get(coin) ?? null,
+              fetchedAt: marketSnapshot.fetchedAt,
+              weight: null
             });
           }
         }
 
-        // KRW 잔액 추가
-        const krwBalance = this.tradingSystem.dryRun
-          ? (this.tradingSystem.virtualPortfolio?.krwBalance || 0)
-          : 0;
+        const valuationAvailable = holdings.every(holding => holding.valuationAvailable === true);
+        if (!valuationAvailable) totalValue = null;
 
-        const totalAssets = totalValue + krwBalance;
+        // KRW 잔액 추가
+        const krwBalance = isDryRun
+          ? (this.tradingSystem.virtualPortfolio?.krwBalance || 0)
+          : (this.tradingSystem.getKRWBalance(liveAccounts) || 0);
+
+        const totalAssets = valuationAvailable ? totalValue + krwBalance : null;
 
         // 비중 계산
-        holdings.forEach(h => {
-          h.weight = totalAssets > 0 ? ((h.currentValue / totalAssets) * 100).toFixed(1) : '0';
-        });
+        if (valuationAvailable) {
+          holdings.forEach(h => {
+            h.weight = totalAssets > 0 ? ((h.currentValue / totalAssets) * 100).toFixed(1) : '0';
+          });
+        }
 
         // 수익률 순 정렬
-        const topGainers = [...holdings].sort((a, b) => parseFloat(b.profitPercent) - parseFloat(a.profitPercent)).slice(0, 3);
-        const topLosers = [...holdings].sort((a, b) => parseFloat(a.profitPercent) - parseFloat(b.profitPercent)).slice(0, 3);
+        const valuedHoldings = holdings.filter(holding => holding.valuationAvailable === true);
+        const topGainers = [...valuedHoldings]
+          .sort((a, b) => parseFloat(b.profitPercent) - parseFloat(a.profitPercent)).slice(0, 3);
+        const topLosers = [...valuedHoldings]
+          .sort((a, b) => parseFloat(a.profitPercent) - parseFloat(b.profitPercent)).slice(0, 3);
 
         // 비중 순 정렬
-        const byWeight = [...holdings].sort((a, b) => parseFloat(b.weight) - parseFloat(a.weight));
+        const byWeight = valuationAvailable
+          ? [...holdings].sort((a, b) => parseFloat(b.weight) - parseFloat(a.weight))
+          : holdings;
 
         res.json({
           holdings: byWeight,
           summary: {
             totalHoldings: holdings.length,
-            totalValue: Math.round(totalValue),
+            totalValue: totalValue === null ? null : Math.round(totalValue),
             totalCost: Math.round(totalCost),
-            totalProfit: Math.round(totalValue - totalCost),
-            totalProfitPercent: totalCost > 0 ? (((totalValue / totalCost) - 1) * 100).toFixed(2) : '0',
+            totalProfit: totalValue === null ? null : Math.round(totalValue - totalCost),
+            totalProfitPercent: totalValue !== null && totalCost > 0
+              ? (((totalValue / totalCost) - 1) * 100).toFixed(2)
+              : null,
             krwBalance: Math.round(krwBalance),
-            krwWeight: totalAssets > 0 ? ((krwBalance / totalAssets) * 100).toFixed(1) : '0',
-            totalAssets: Math.round(totalAssets)
+            krwWeight: totalAssets !== null && totalAssets > 0
+              ? ((krwBalance / totalAssets) * 100).toFixed(1)
+              : null,
+            totalAssets: totalAssets === null ? null : Math.round(totalAssets),
+            valuationAvailable,
+            valuationStatus: valuationAvailable ? 'available' : 'unavailable',
+            valuationAsOf: marketSnapshot.sourceAsOf,
+            sourceAsOf: marketSnapshot.sourceAsOf,
+            fetchedAt: marketSnapshot.fetchedAt,
+            unavailableMarkets: marketSnapshot.unavailableMarkets
           },
           topGainers,
           topLosers
@@ -688,16 +820,13 @@ class DashboardServer {
       try {
         const coin = req.params.coin;
 
-        // upbit API 객체 확인
-        if (!this.tradingSystem?.upbit) {
-          return res.status(500).json({ error: 'Upbit API not initialized' });
-        }
-
         // 현재가 조회
         let ticker = null;
         let currentPrice = 0;
         try {
-          ticker = await this.tradingSystem.upbit.getTicker(coin);
+          ticker = await getMarketDataProvider(this).getTickers(coin, {
+            freshness: MARKET_DATA_FRESHNESS.FRESH
+          });
           currentPrice = ticker?.[0]?.trade_price || 0;
         } catch (tickerErr) {
           console.error(`[coin-detail] 현재가 조회 실패 (${coin}):`, tickerErr.message);
@@ -716,7 +845,7 @@ class DashboardServer {
         // 캔들 데이터로 기술적 분석
         let analysis = null;
         try {
-          const candles = await this.tradingSystem.upbit.getMinuteCandles(coin, 5, 50);
+          const candles = await getMarketDataProvider(this).getMinuteCandles(coin, 5, 50);
           if (candles?.length >= 30) {
             const { comprehensiveAnalysis } = await import('../analysis/technicalIndicators.js');
             analysis = comprehensiveAnalysis(candles, {});
@@ -891,7 +1020,7 @@ class DashboardServer {
    * 새로운 신호와 속보 체크 후 알림 발송
    */
   async checkAndEmitNotifications() {
-    if (!this.tradingSystem?.upbit || this.io.engine.clientsCount === 0) return;
+    if (this.io.engine.clientsCount === 0) return;
 
     try {
       // 1. 번들 제안 체크
@@ -929,7 +1058,7 @@ class DashboardServer {
     const bundles = [];
 
     try {
-      if (!this.tradingSystem.upbit) return bundles;
+      const marketDataProvider = getMarketDataProvider(this);
 
       // 보유 포지션 확인
       const holdings = this.getActiveHoldings();
@@ -938,7 +1067,9 @@ class DashboardServer {
 
       // 현재가 조회
       const holdingCoins = Array.from(holdings.keys());
-      const tickers = await this.tradingSystem.upbit.getTicker(holdingCoins);
+      const tickers = await marketDataProvider.getTickers(holdingCoins, {
+        freshness: MARKET_DATA_FRESHNESS.FRESH
+      });
       if (!tickers || !Array.isArray(tickers)) return bundles;
       const priceMap = new Map(tickers.map(t => [t.market, t]));
 
@@ -954,7 +1085,7 @@ class DashboardServer {
         const profitPercent = ((currentPrice - holding.avgPrice) / holding.avgPrice) * 100;
 
         try {
-          const candles = await this.tradingSystem.upbit.getMinuteCandles(coin, 5, 50);
+          const candles = await marketDataProvider.getMinuteCandles(coin, 5, 50);
           if (!candles || candles.length < 30) continue;
 
           const analysis = comprehensiveAnalysis(candles, {
@@ -996,10 +1127,12 @@ class DashboardServer {
       if (sellCandidates.length === 0) return bundles;
 
       // 상위 거래량 코인에서 매수 후보 탐색
-      const markets = await this.tradingSystem.upbit.getMarkets();
+      const markets = await marketDataProvider.getMarkets();
       if (!markets || !Array.isArray(markets)) return bundles;
       const krwMarkets = markets.filter(m => m.market.startsWith('KRW-')).map(m => m.market);
-      const allTickers = await this.tradingSystem.upbit.getTicker(krwMarkets);
+      const allTickers = await marketDataProvider.getTickers(krwMarkets, {
+        freshness: MARKET_DATA_FRESHNESS.FRESH
+      });
       if (!allTickers || !Array.isArray(allTickers)) return bundles;
       const topCoins = [...allTickers]
         .filter(t => !holdings.has(t.market))
@@ -1012,7 +1145,7 @@ class DashboardServer {
       for (const coin of topCoins) {
         try {
           const ticker = allTickers.find(t => t.market === coin);
-          const candles = await this.tradingSystem.upbit.getMinuteCandles(coin, 5, 50);
+          const candles = await marketDataProvider.getMinuteCandles(coin, 5, 50);
           if (!candles || candles.length < 30) continue;
 
           const analysis = comprehensiveAnalysis(candles, {
@@ -1242,16 +1375,25 @@ class DashboardServer {
     if (trader && typeof trader.isRunning === 'boolean') {
       checks.traderRunning = trader.isRunning;
       ready = ready && trader.isRunning;
-      const runtimeSafety = typeof trader.getRuntimeSafetyStatus === 'function'
-        ? trader.getRuntimeSafetyStatus()
-        : null;
-      if (runtimeSafety) {
+      let runtimeSafety = null;
+      if (typeof trader.getRuntimeSafetyStatus === 'function') {
+        try {
+          runtimeSafety = trader.getRuntimeSafetyStatus() || null;
+        } catch {
+          runtimeSafety = null;
+        }
+      }
+      checks.runtimeSafetyAvailable = Boolean(runtimeSafety && typeof runtimeSafety === 'object');
+      if (checks.runtimeSafetyAvailable) {
         checks.runtimeState = runtimeSafety.runtimeState;
         checks.entriesPaused = runtimeSafety.entriesPaused;
         checks.protectiveMonitorActive = runtimeSafety.protectiveMonitorActive;
         checks.stopReason = runtimeSafety.stopReason;
         checks.exchangeStateKnown = runtimeSafety.exchangeStateKnown;
-        if (runtimeSafety.exchangeStateKnown === false) ready = false;
+        if (runtimeSafety.exchangeStateKnown === false ||
+          (trader.dryRun !== true && runtimeSafety.exchangeStateKnown !== true)) ready = false;
+      } else {
+        ready = false;
       }
 
       const lastCycleAt = trader.paperValidation?.telemetry?.lastCycleAt || null;
@@ -1261,18 +1403,65 @@ class DashboardServer {
         checks.lastCycleAgeSeconds = Math.max(0, Math.floor((now - lastCycleMs) / 1000));
       }
 
+      let analysis = null;
       if (typeof trader.getAnalysisDataHealthStatus === 'function') {
-        const analysis = trader.getAnalysisDataHealthStatus(now);
-        checks.analysisHealthy = analysis.failClosed !== true;
-        checks.analysisStaleReason = analysis.staleReason || null;
-        ready = ready && checks.analysisHealthy;
+        try {
+          analysis = trader.getAnalysisDataHealthStatus(now) || null;
+        } catch {
+          analysis = null;
+        }
       }
+      checks.analysisHealthAvailable = Boolean(analysis && typeof analysis === 'object');
+      checks.analysisHealthy = Boolean(analysis && typeof analysis.failClosed === 'boolean' &&
+        analysis.failClosed === false);
+      checks.analysisStaleReason = analysis?.staleReason || null;
+      {
+        const lastCompleteAt = analysis?.lastCompleteAt || null;
+        const lastCompleteMs = lastCompleteAt ? Date.parse(lastCompleteAt) : null;
+        const intervalValue = trader.config?.checkInterval;
+        const intervalConfigured = intervalValue !== undefined && intervalValue !== null && intervalValue !== '';
+        const configuredIntervalMs = intervalConfigured ? Number(intervalValue) : 60_000;
+        const intervalValid = Number.isFinite(configuredIntervalMs) &&
+          configuredIntervalMs > 0 && configuredIntervalMs <= 60 * 60 * 1000;
+        const analysisGapValue = analysis?.maxAnalysisDataGapSeconds;
+        const analysisGapConfigured = analysisGapValue !== undefined &&
+          analysisGapValue !== null && analysisGapValue !== '';
+        const analysisGapSeconds = analysisGapConfigured ? Number(analysisGapValue) : NaN;
+        const analysisGapValid = Number.isFinite(analysisGapSeconds) &&
+          analysisGapSeconds >= 0 && analysisGapSeconds <= 60 * 60;
+        const cycleFreshnessLimitMs = Math.min(
+          2 * 60 * 60 * 1000,
+          Math.max(
+            120_000,
+            intervalValid ? configuredIntervalMs * 5 : 0,
+            analysisGapValid ? analysisGapSeconds * 1000 : 0
+          )
+        );
+        const hasCompleteCycle = Number.isFinite(lastCompleteMs) && lastCompleteMs <= now;
+        const cycleAgeMs = hasCompleteCycle ? now - lastCompleteMs : null;
+        checks.analysisCycleConfigValid = intervalValid && analysisGapValid;
+        checks.analysisLastCompleteAt = lastCompleteAt;
+        checks.analysisFirstCycleComplete = hasCompleteCycle;
+        checks.analysisCycleAgeSeconds = cycleAgeMs === null ? null : Math.floor(cycleAgeMs / 1000);
+        checks.analysisCycleMaxAgeSeconds = Math.ceil(cycleFreshnessLimitMs / 1000);
+        checks.analysisCycleFresh = checks.analysisCycleConfigValid &&
+          hasCompleteCycle && cycleAgeMs <= cycleFreshnessLimitMs;
+        ready = ready && checks.analysisHealthAvailable && checks.analysisHealthy;
+        ready = ready && checks.analysisCycleFresh;
+      }
+      let risk = null;
       if (typeof trader.getRiskMonitorStatus === 'function') {
-        const risk = trader.getRiskMonitorStatus(now);
-        checks.riskHealthy = risk.failClosed !== true;
-        checks.riskStaleReason = risk.staleReason || null;
-        ready = ready && checks.riskHealthy;
+        try {
+          risk = trader.getRiskMonitorStatus(now) || null;
+        } catch {
+          risk = null;
+        }
       }
+      checks.riskHealthAvailable = Boolean(risk && typeof risk === 'object');
+      checks.riskHealthy = Boolean(risk && typeof risk.failClosed === 'boolean' &&
+        risk.failClosed === false);
+      checks.riskStaleReason = risk?.staleReason || null;
+      ready = ready && checks.riskHealthAvailable && checks.riskHealthy;
     }
 
     return {
@@ -1283,9 +1472,69 @@ class DashboardServer {
     };
   }
 
+  /**
+   * HTTP service readiness is intentionally separate from trading readiness:
+   * a stopped or protective-only trader can still serve safe read-only status.
+   */
+  buildServiceReadiness(now = Date.now()) {
+    const checks = {
+      httpServerListening: this.httpServer?.listening === true
+    };
+    return {
+      ready: checks.httpServerListening,
+      uptimeSec: Math.floor(process.uptime()),
+      timestamp: new Date(now).toISOString(),
+      checks
+    };
+  }
+
+  /**
+   * Entry-capable readiness rejects observer-only runtimes even though they
+   * may be fully healthy as an HTTP service.
+   */
+  buildTradingReadiness(now = Date.now()) {
+    const readiness = this.buildReadiness(now);
+    const trader = this.tradingSystem;
+    const traderCanTrade = Boolean(
+      trader && typeof trader.isRunning === 'boolean' &&
+      trader.isRunning && trader.readOnlyObserver !== true
+    );
+    const checks = {
+      ...readiness.checks,
+      traderCanTrade,
+      tradingHealthChecksPassed: Boolean(
+        traderCanTrade &&
+        readiness.checks.runtimeSafetyAvailable === true &&
+        readiness.checks.entriesPaused === false &&
+        (trader.dryRun === true || readiness.checks.exchangeStateKnown === true) &&
+        readiness.checks.analysisHealthAvailable === true &&
+        readiness.checks.analysisHealthy === true &&
+        readiness.checks.analysisFirstCycleComplete === true &&
+        readiness.checks.analysisCycleFresh === true &&
+        readiness.checks.riskHealthAvailable === true &&
+        readiness.checks.riskHealthy === true
+      )
+    };
+    return {
+      ...readiness,
+      ready: readiness.ready && checks.tradingHealthChecksPassed,
+      checks
+    };
+  }
+
   // 최적화 상태 파일 경로
   getOptimizationStateFile() {
-    return path.join(PROJECT_ROOT, 'optimization_state.json');
+    return this.optimizationStateFile || this.optimizationStoragePaths?.optimizationStateFile.absolutePath || path.join(PROJECT_ROOT, 'optimization_state.json');
+  }
+
+  // 비교 이력 파일 경로
+  getOptimizationHistoryFile() {
+    return this.optimizationHistoryFile || this.optimizationStoragePaths?.optimizationHistoryFile.absolutePath || path.join(PROJECT_ROOT, 'optimization_history.json');
+  }
+
+  // active 설정 파일 경로 (읽기 전용)
+  getOptimalConfigFile() {
+    return this.optimalConfigFile || this.optimizationStoragePaths?.optimalConfigFile.absolutePath || path.join(PROJECT_ROOT, 'optimal_config.json');
   }
 
   // 최적화 상태 로드
@@ -1307,17 +1556,47 @@ class DashboardServer {
   }
 
   // 최적화 상태 저장
-  saveOptimizationState() {
+  saveOptimizationState(state = this.optimizationState) {
+    const stateFile = this.getOptimizationStateFile();
+    fs.mkdirSync(path.dirname(stateFile), { recursive: true, mode: 0o700 });
+    const tempFile = path.join(
+      path.dirname(stateFile),
+      `.${path.basename(stateFile)}.${process.pid}.${randomUUID()}.tmp`
+    );
+    let descriptor = null;
+    let tempCreated = false;
+
     try {
-      const stateFile = this.getOptimizationStateFile();
       const saveData = {
-        enabled: this.optimizationState.enabled,
-        interval: this.optimizationState.interval,
-        lastRun: this.optimizationState.lastRun
+        enabled: state.enabled,
+        interval: state.interval,
+        lastRun: state.lastRun
       };
-      fs.writeFileSync(stateFile, JSON.stringify(saveData, null, 2), 'utf8');
+      descriptor = fs.openSync(tempFile, 'wx', 0o600);
+      tempCreated = true;
+      fs.writeFileSync(descriptor, JSON.stringify(saveData, null, 2), 'utf8');
+      fs.fsyncSync(descriptor);
+      fs.closeSync(descriptor);
+      descriptor = null;
+      fs.renameSync(tempFile, stateFile);
+      tempCreated = false;
     } catch (error) {
+      if (descriptor !== null) {
+        try {
+          fs.closeSync(descriptor);
+        } catch {
+          // Preserve the original write/rename error.
+        }
+      }
+      if (tempCreated) {
+        try {
+          fs.unlinkSync(tempFile);
+        } catch {
+          // Preserve the original write/rename error.
+        }
+      }
       console.error('최적화 상태 저장 실패:', error.message);
+      throw error;
     }
   }
 
@@ -1368,9 +1647,6 @@ class DashboardServer {
       this.optimizationState.isRunning = true;
       console.log('\n🧬 자동 최적화 사이클 시작...');
 
-      // 동적 import로 최적화 모듈 로드
-      const { default: ParameterOptimizer } = await import('../optimization/parameterOptimizer.js');
-
       const targetCoin = process.env.TARGET_COIN || 'KRW-BTC';
       const candleUnit = parseInt(process.env.BACKTEST_CANDLE_UNIT) || 15;
       const candleCount = parseInt(process.env.BACKTEST_CANDLE_COUNT) || 500;
@@ -1385,7 +1661,7 @@ class DashboardServer {
       }
 
       // 최적화 실행
-      const optimizer = new ParameterOptimizer({
+      const optimizer = await this.createParameterOptimizer({
         populationSize: parseInt(process.env.POPULATION_SIZE) || 20,
         generations: parseInt(process.env.GENERATIONS) || 10,
         mutationRate: parseFloat(process.env.MUTATION_RATE) || 0.2,
@@ -1395,37 +1671,17 @@ class DashboardServer {
 
       const result = await optimizer.optimize(candles);
 
-      // 결과 저장
-      const config = {
-        updatedAt: new Date().toISOString(),
+      // 후보 비교 결과는 history에만 기록하고 active 설정이나 trader에는 적용하지 않습니다.
+      const historyFile = this.getOptimizationHistoryFile();
+      await appendOptimizerHistory(historyFile, history => ({
+        timestamp: new Date().toISOString(),
+        cycle: history.length + 1,
         targetCoin,
         candleUnit,
         candleCount: candles.length,
         fitness: result.fitness,
-        parameters: result.parameters,
-        note: '자동 최적화를 통해 생성된 파라미터입니다.'
-      };
-
-      fs.writeFileSync(
-        path.join(PROJECT_ROOT, 'optimal_config.json'),
-        JSON.stringify(config, null, 2),
-        'utf8'
-      );
-
-      // 히스토리 업데이트
-      const historyFile = path.join(PROJECT_ROOT, 'optimization_history.json');
-      let history = [];
-      if (fs.existsSync(historyFile)) {
-        history = JSON.parse(fs.readFileSync(historyFile, 'utf8'));
-      }
-      history.push({
-        timestamp: new Date().toISOString(),
-        cycle: history.length + 1,
-        fitness: result.fitness,
         parameters: result.parameters
-      });
-      if (history.length > 100) history = history.slice(-100);
-      fs.writeFileSync(historyFile, JSON.stringify(history, null, 2), 'utf8');
+      }));
 
       this.optimizationState.lastRun = new Date().toISOString();
       if (this.optimizationState.enabled) {
@@ -1433,10 +1689,7 @@ class DashboardServer {
       }
       this.saveOptimizationState();
 
-      // 🔥 트레이딩 시스템에 새 파라미터 즉시 적용 (핫 리로드)
-      this.applyOptimalParameters(result.parameters);
-
-      console.log('✅ 자동 최적화 완료!');
+      console.log('✅ 후보 비교 완료!');
       console.log(`   예상 수익률: ${result.fitness?.toFixed(2)}%`);
 
     } catch (error) {
@@ -1446,41 +1699,44 @@ class DashboardServer {
     }
   }
 
+  async createParameterOptimizer(options) {
+    const { default: ParameterOptimizer } = await import('../optimization/parameterOptimizer.js');
+    return new ParameterOptimizer(options);
+  }
+
   // 캔들 데이터 수집 헬퍼
-  async collectCandleData(market, unit, totalCount) {
-    const axios = (await import('axios')).default;
-    const maxPerRequest = 200;
-    const allCandles = [];
-    let to = null;
+  async collectCandleData(market, unit, totalCount, maxPerRequest = 200) {
+    const publicMarketDataSource = this.publicMarketDataSource;
+    const adapter = this.tradingSystem?.marketDataAdapter;
+    const upbit = this.tradingSystem?.upbit;
+    let readCandlePage;
 
-    while (allCandles.length < totalCount) {
-      const count = Math.min(maxPerRequest, totalCount - allCandles.length);
-
-      try {
-        const params = { market, count };
-        if (to) params.to = to;
-
-        const response = await axios.get(
-          `https://api.upbit.com/v1/candles/minutes/${unit}`,
-          this.tradingSystem?.upbit?.getRequestConfig
-            ? this.tradingSystem.upbit.getRequestConfig({ params })
-            : { params, timeout: Number(process.env.UPBIT_REQUEST_TIMEOUT_MS) || 10000 }
-        );
-
-        const candles = response.data;
-        if (!candles || candles.length === 0) break;
-
-        allCandles.push(...candles);
-        to = candles[candles.length - 1].candle_date_time_utc;
-
-        await new Promise(resolve => setTimeout(resolve, 100));
-      } catch (error) {
-        console.error(`캔들 데이터 수집 오류:`, error.message);
-        break;
+    if (publicMarketDataSource !== undefined && publicMarketDataSource !== null) {
+      if (typeof publicMarketDataSource.getMinuteCandles !== 'function') {
+        throw new TypeError('Public market data source has no candle reader.');
       }
+      readCandlePage = (...args) => publicMarketDataSource.getMinuteCandles(...args);
+    } else if (typeof adapter?.getMinuteCandles === 'function') {
+      readCandlePage = (...args) => adapter.getMinuteCandles(...args);
+    } else if (typeof upbit?.getMinuteCandles === 'function') {
+      readCandlePage = (...args) => upbit.getMinuteCandles(...args);
     }
 
-    return allCandles;
+    if (!readCandlePage) {
+      throw new TypeError('Upbit minute-candle reader is unavailable.');
+    }
+
+    return fetchCompleteUpbitCandleHistory({
+      marketDataClient: {
+        getMinuteCandles: (targetMarket, intervalMinutes, count, requestOptions = {}) =>
+          readCandlePage(targetMarket, intervalMinutes, count, requestOptions)
+      },
+      market,
+      intervalMinutes: unit,
+      totalCount,
+      maxPerRequest,
+      requestSpacingMs: 0
+    });
   }
 
   /**

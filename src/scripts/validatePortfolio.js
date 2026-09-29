@@ -1,7 +1,6 @@
 import dotenv from 'dotenv';
 import fs from 'fs';
 import path from 'node:path';
-import axios from 'axios';
 import UpbitAPI from '../api/upbit.js';
 import {
   walkForwardValidatePortfolio,
@@ -14,20 +13,14 @@ dotenv.config();
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const number = (value, fallback) => Number.isFinite(Number(value)) ? Number(value) : fallback;
 
-async function getHistoricalCandles(upbit, market, unit, totalCount) {
+export async function getHistoricalCandles(upbit, market, unit, totalCount) {
   const candles = [];
   let to = null;
 
   while (candles.length < totalCount) {
     const count = Math.min(200, totalCount - candles.length);
     const batch = to
-      ? await upbit.requestWithRetry(async () => {
-          const response = await axios.get(
-            `https://api.upbit.com/v1/candles/minutes/${unit}`,
-            upbit.getRequestConfig({ params: { market, count, to } })
-          );
-          return response.data;
-        })
+      ? await upbit.getMinuteCandles(market, unit, count, { to })
       : await upbit.getMinuteCandles(market, unit, count);
 
     if (!Array.isArray(batch) || batch.length === 0) break;

@@ -1,0 +1,75 @@
+{
+  "schema": "coinpilot.paper-forward-strict-close-cost-audit.v1",
+  "observedAt": "2026-09-29T15:26:51.911Z",
+  "researchOnly": true,
+  "promoted": false,
+  "source": {
+    "ledger": ".paper-forward-sealed-rsi-20260928-r5/paper_validation.json",
+    "processId": 11906,
+    "active": true,
+    "heartbeatAt": "2026-09-29T15:26:51.911Z",
+    "cycles": 16380,
+    "configSnapshotComplete": true,
+    "analysisContinuity": true,
+    "riskContinuity": true,
+    "stopReason": null,
+    "configDrift": null,
+    "auditFunction": "src/research/paperStrictTradeCostAudit.js"
+  },
+  "closedStrictTrade": {
+    "id": 1790694604310,
+    "market": "KRW-XRP",
+    "signalTime": "2026-09-29T15:09:00",
+    "entryTime": "2026-09-29T15:10:04.310Z",
+    "exitTime": "2026-09-29T15:25:06.993Z",
+    "exitReason": "손절 실행 (-1.20% 하락)",
+    "entryPriceKrw": 2075,
+    "exitPriceKrw": 2050,
+    "amount": 96.32723397590361,
+    "grossProfitKrw": -2408.1808493975905,
+    "recordedFeesKrw": 198.6749200753012,
+    "recordedNetProfitKrw": -2606.8557694728916,
+    "recordedProfitPercent": -1.3042168674698795,
+    "paperExecutionCostModel": null,
+    "paperExecutionSlippageRate": null,
+    "paperExecutionTradingFeeRate": null,
+    "paperObservedEntryPrice": null,
+    "paperObservedExitPrice": null,
+    "actualExchangeFillObserved": false
+  },
+  "configuredCostSnapshot": {
+    "slippageRatePerSide": 0.001,
+    "tradingFeeRate": 0.0005
+  },
+  "strictExecutionCostAudit": {
+    "closedTradeCount": 10,
+    "evaluatedTradeCount": 10,
+    "unevaluableTradeCount": 0,
+    "modeledExecutionTradeCount": 0,
+    "unmodeledExecutionTradeCount": 10,
+    "slippageAlreadyAppliedToPaperLedger": false,
+    "configuredSlippagePercentPerSide": 0.1,
+    "recordedNetPnlKrw": -3638.994884541925,
+    "twoSidedFixedQuantityNotionalKrw": 3995799.184707812,
+    "additionalSlippageDragKrw": 3995.799184707812,
+    "additionalFeesDeducted": false,
+    "costStressedNetPnlKrw": -7634.794069249737,
+    "quoteCrossingCostAvailable": false,
+    "actualFillsObserved": false,
+    "method": "configured slippage applied once to fixed recorded quantity at both entry and exit; existing ledger fees remain untouched"
+  },
+  "newTradeSensitivity": {
+    "twoSidedFixedQuantityNotionalKrw": 397349.8401506024,
+    "configuredSlippageDragKrw": 397.3498401506024,
+    "costStressedNetPnlKrw": -3004.2056096234937
+  },
+  "sessionAfterClose": {
+    "strictCloseCount": 10,
+    "strictOpenPositionCount": 0,
+    "recordedRealizedNetPnlKrw": -3638.994884541925,
+    "shadowCandidates": 0,
+    "shadowCloseCount": 0,
+    "shadowOpenPositionCount": 0
+  },
+  "interpretation": "The XRP stop closed at the configured 1.2% price stop; fees bring the recorded net loss to about 1.30%. The separate configured-slippage sensitivity adds no second fee and is not an actual fill or quote-cross observation. The running owner has no open position at this observation."
+}

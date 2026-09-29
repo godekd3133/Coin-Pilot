@@ -63,6 +63,44 @@ function snapshot() {
   };
 }
 
+test('malformed existing DRY_RUN portfolio blocks startup and preserves the original bytes', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'coinpilot-corrupt-portfolio-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const portfolioFile = path.join(root, 'dry_portfolio.json');
+  const originalBytes = Buffer.from('{"krwBalance": not-json');
+  fs.writeFileSync(portfolioFile, originalBytes);
+
+  assert.throws(() => new MultiCoinTrader(makeConfig(root)), error =>
+    error.code === 'DRY_RUN_PORTFOLIO_LOAD_FAILED' &&
+    error.cause instanceof SyntaxError
+  );
+  assert.deepEqual(fs.readFileSync(portfolioFile), originalBytes);
+});
+
+test('structurally invalid existing DRY_RUN portfolio blocks startup without rewriting it', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'coinpilot-invalid-portfolio-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const portfolioFile = path.join(root, 'dry_portfolio.json');
+  const originalBytes = Buffer.from(JSON.stringify({ krwBalance: 'unknown', holdings: [] }));
+  fs.writeFileSync(portfolioFile, originalBytes);
+
+  assert.throws(() => new MultiCoinTrader(makeConfig(root)), error =>
+    error.code === 'DRY_RUN_PORTFOLIO_LOAD_FAILED' &&
+    error.cause instanceof TypeError
+  );
+  assert.deepEqual(fs.readFileSync(portfolioFile), originalBytes);
+});
+
+test('a missing DRY_RUN portfolio still starts with the configured seed without writing a file', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'coinpilot-new-portfolio-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const portfolioFile = path.join(root, 'dry_portfolio.json');
+  const trader = new MultiCoinTrader(makeConfig(root));
+
+  assert.equal(trader.virtualPortfolio.krwBalance, 100_000);
+  assert.equal(fs.existsSync(portfolioFile), false);
+});
+
 test('shared snapshot cycle is dry-run only and restores the context boundary', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'coinpilot-shared-snapshot-'));
   const trader = new MultiCoinTrader(makeConfig(root));
@@ -111,4 +149,3 @@ test('live trader cannot enter the shared snapshot research boundary', async () 
     /DRY_RUN 연구 세션/
   );
 });
-

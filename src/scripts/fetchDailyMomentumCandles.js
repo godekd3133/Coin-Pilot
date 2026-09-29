@@ -1,8 +1,8 @@
 import dotenv from 'dotenv';
 import fs from 'node:fs';
 import path from 'node:path';
-import axios from 'axios';
 import UpbitAPI from '../api/upbit.js';
+import { pathToFileURL } from 'node:url';
 
 dotenv.config();
 
@@ -14,19 +14,15 @@ const markets = [...new Set((process.env.DAILY_MOMENTUM_MARKETS ||
 const days = Math.max(30, Math.floor(number(process.env.DAILY_MOMENTUM_DAYS, 400)));
 const outputFile = process.env.DAILY_MOMENTUM_CANDLES_FILE || '/private/tmp/coinpilot-daily-momentum-candles.json';
 
-async function fetchMarketCandles(upbit, market) {
+export async function fetchMarketCandles(upbit, market, options = {}) {
+  const requestedDays = options.days ?? days;
+  const wait = options.sleepFn || sleep;
   const byTimestamp = new Map();
   let to = null;
-  let remaining = days;
+  let remaining = requestedDays;
   while (remaining > 0) {
     const count = Math.min(200, remaining);
-    const batch = await upbit.requestWithRetry(async () => {
-      const response = await axios.get(
-        'https://api.upbit.com/v1/candles/days',
-        upbit.getRequestConfig({ params: { market, count, ...(to ? { to } : {}) } })
-      );
-      return response.data;
-    });
+    const batch = await upbit.getDayCandles(market, count, to ? { to } : undefined);
     if (!Array.isArray(batch) || batch.length === 0) break;
     for (const candle of batch) {
       const timestamp = candle?.candle_date_time_utc;
@@ -36,7 +32,7 @@ async function fetchMarketCandles(upbit, market) {
     if (!oldest || oldest === to || batch.length < count) break;
     to = oldest;
     remaining -= batch.length;
-    await sleep(180);
+    await wait(180);
   }
   return [...byTimestamp.values()]
     .sort((a, b) => String(a.candle_date_time_utc).localeCompare(String(b.candle_date_time_utc)));
@@ -64,7 +60,9 @@ async function main() {
   console.log(`saved: ${outputFile}`);
 }
 
-main().catch(error => {
-  console.error(error.message);
-  process.exitCode = 1;
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch(error => {
+    console.error(error.message);
+    process.exitCode = 1;
+  });
+}

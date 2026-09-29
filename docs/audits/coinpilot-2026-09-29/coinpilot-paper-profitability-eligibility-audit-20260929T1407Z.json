@@ -1,0 +1,130 @@
+{
+  "schema": "coinpilot.paper-forward-eligibility-audit.v1",
+  "observedAt": "2026-09-29T14:07:16Z",
+  "researchOnly": true,
+  "promoted": false,
+  "source": {
+    "cohortReport": "/private/tmp/coinpilot-paper-forward-cohort.json",
+    "cohortReportGeneratedAt": "2026-09-29T14:06:14.039Z",
+    "cohortReportSha256": "2d8544f88137a5bc7a4e96f47956cd50578de373bf55799e913cb8bc8e923204",
+    "cohortRule": "same-config, ended strict-only session; continuity and complete per-trade cost audit required",
+    "profitabilityThresholds": {
+      "minimumObservationDays": 7,
+      "minimumStrictTrades": 20,
+      "minimumReturnPercent": 0.2,
+      "maximumDrawdownPercent": 15
+    }
+  },
+  "cohort": {
+    "sessions": 95,
+    "strictTradeSessions": 25,
+    "strictTrades": 58,
+    "diagnosticTrades": 779,
+    "completeConfigSnapshots": 88,
+    "activeSessions": 1,
+    "endedSessions": 91,
+    "eligibleStrictSessions": 0,
+    "eligibleStrictTrades": 0,
+    "profitabilityEvidenceSessions": 0,
+    "profitabilityEvidenceTrades": 0,
+    "profitabilityEvidenceProfitBasis": "per_trade_cost_audit_adjusted_net_pnl",
+    "profitabilityEvidenceProfitKrw": null,
+    "actualFillsObserved": false,
+    "strictCostUnverifiedTrades": 2,
+    "mixedRecordedStrictProfitKrw": 2782.193431583575,
+    "mixedRecordedStrictProfitComparable": false,
+    "strictCohortExclusions": {
+      "no_strict_trades": 63,
+      "diagnostic_trades_present": 18,
+      "config_snapshot_incomplete": 7,
+      "continuity_ineligible": 3,
+      "session_not_ended": 3,
+      "session_still_active": 1
+    },
+    "perSessionEligibilityCoverage": {
+      "sessionsWithStrictTrades": 25,
+      "maximumStrictTradesInOneSession": 9,
+      "sessionsAtOrAboveSevenDays": 0,
+      "sessionsAtOrAboveTwentyStrictTrades": 0,
+      "sessionsMeetingBothMinimums": 0
+    },
+    "profitabilityEvidenceExclusionsOverlapping": {
+      "strict_cohort_ineligible": 95,
+      "trade_count_below_minimum": 95,
+      "observation_days_below_minimum": 91,
+      "observation_window_unverifiable": 4
+    },
+    "stopReasons": {
+      "none": 35,
+      "stopped_cleanly": 35,
+      "risk_data_gap": 10,
+      "stopped_with_unsettled_diagnostic_positions": 9,
+      "analysis_data_gap": 5,
+      "owner_process_missing": 1
+    }
+  },
+  "currentScalpingOwner": {
+    "directory": ".paper-forward-sealed-rsi-20260928-r5",
+    "pid": 11906,
+    "active": true,
+    "heartbeatAt": "2026-09-29T14:07:10.102Z",
+    "cycles": 15541,
+    "configSnapshotComplete": true,
+    "configSlippage": 0.001,
+    "analysisContinuity": true,
+    "riskContinuity": true,
+    "stopReason": null,
+    "strictCloses": 8,
+    "latestStrictCloseAt": "2026-09-29T11:22:06.251Z",
+    "recordedStrictNetProfitKrw": -709.6865830314568,
+    "strictOpenPositions": 0,
+    "shadowCandidates": 0,
+    "shadowCloses": 0,
+    "shadowOpenPositions": 0,
+    "tradeCostModelMarkers": [],
+    "actualFillsObserved": false,
+    "eligibilityProgress": {
+      "minimumObservationDays": 7,
+      "minimumStrictTrades": 20,
+      "elapsedDaysAtObservation": 1.0022254398148147,
+      "strictClosesStillNeeded": 12,
+      "earliestSevenDayMarkIfContinuityHolds": "2026-10-05T14:04:03.722Z"
+    }
+  },
+  "currentCandidatePreflight": {
+    "launchAllowed": false,
+    "blockers": [
+      "existing_live_owner_count:2",
+      "benchmark_gate_closed"
+    ],
+    "benchmark": {
+      "market": "KRW-BTC",
+      "trendPercent": -3.095890644877607,
+      "requiredTrendPercent": 2,
+      "gateOpen": false,
+      "tradeCount": 4,
+      "restartSafe": false
+    },
+    "quoteSampler": {
+      "generatedAt": "2026-09-29T14:00:16.367Z",
+      "ageSeconds": 449,
+      "maxAgeSeconds": 900,
+      "complete": true,
+      "errorCount": 0,
+      "samples": 5,
+      "requestedSamples": 5,
+      "markets": 12,
+      "missingMarkets": [],
+      "overCeilingMarkets": [
+        "KRW-DOGE"
+      ]
+    }
+  },
+  "decision": {
+    "launchBaselineOrCandidate": false,
+    "changeParametersOrMarketSet": false,
+    "promote": false,
+    "continueExistingOwnerWithoutRestart": true,
+    "interpretation": "All 95 sessions fail the cohort integrity gate. Of 25 sessions with strict closes, the maximum is 9; no session reaches 20 strict closes or seven observation days. The mixed +2782.19 KRW total is not comparable evidence. r5 is at 8 of 20 required closes after about one day and has no observed fills; retain its locked configuration and wait without extrapolating the pace. Its earliest seven-day mark is 2026-10-05T14:04:03.722Z if continuity remains intact."
+  }
+}

@@ -1,0 +1,98 @@
+{
+  "schema": "coinpilot.paper-forward-eligibility-audit.v1",
+  "observedAt": "2026-09-29T15:05:08Z",
+  "researchOnly": true,
+  "promoted": false,
+  "source": {
+    "cohortReport": "/private/tmp/coinpilot-paper-forward-cohort.json",
+    "cohortReportGeneratedAt": "2026-09-29T15:03:59.124Z",
+    "cohortReportSha256": "b2c8dcfd6824df6ddb2289ebaaba42e18e91fdde6fb053a84c35367a9f4b81df",
+    "profitabilityEvidenceProfitBasis": "per_trade_cost_audit_adjusted_net_pnl",
+    "thresholds": {
+      "minimumObservationDays": 7,
+      "minimumStrictTradesPerSession": 20,
+      "minimumReturnPercent": 0.2,
+      "maximumDrawdownPercent": 15
+    }
+  },
+  "cohort": {
+    "sessions": 95,
+    "strictTradeSessions": 25,
+    "strictTrades": 59,
+    "diagnosticTrades": 779,
+    "configSnapshotsComplete": 88,
+    "activeSessions": 1,
+    "endedSessions": 91,
+    "strictCohortEligibleSessions": 0,
+    "profitabilityEvidenceEligibleSessions": 0,
+    "profitabilityEvidenceEligibleTrades": 0,
+    "actualFillsObserved": false,
+    "strictCostUnverifiedTrades": 2,
+    "mixedRecordedStrictProfitKrw": 2459.740899545998,
+    "mixedRecordedStrictProfitComparable": false,
+    "perSessionCoverage": {
+      "maxStrictTradesInAnySession": 9,
+      "sessionsWithAtLeastSevenDays": 0,
+      "sessionsWithAtLeastTwentyStrictTrades": 0
+    },
+    "strictCohortExclusionsMutuallyExclusive": {
+      "no_strict_trades": 63,
+      "diagnostic_trades_present": 18,
+      "config_snapshot_incomplete": 7,
+      "continuity_ineligible": 3,
+      "session_not_ended": 3,
+      "session_still_active": 1
+    },
+    "profitabilityExclusionsOverlapping": {
+      "strict_cohort_ineligible": 95,
+      "trade_count_below_minimum": 95,
+      "observation_days_below_minimum": 91,
+      "observation_window_unverifiable": 4
+    },
+    "stopReasons": {
+      "none": 35,
+      "stopped_cleanly": 35,
+      "risk_data_gap": 10,
+      "stopped_with_unsettled_diagnostic_positions": 9,
+      "analysis_data_gap": 5,
+      "owner_process_missing": 1
+    }
+  },
+  "currentScalpingOwner": {
+    "directory": ".paper-forward-sealed-rsi-20260928-r5",
+    "pid": 11906,
+    "active": true,
+    "heartbeatAt": "2026-09-29T15:04:12.298Z",
+    "cycles": 16144,
+    "configSnapshotComplete": true,
+    "analysisContinuity": true,
+    "riskContinuity": true,
+    "strictCloses": 9,
+    "strictOpenPositions": 0,
+    "recordedStrictNetProfitKrw": -1032.1391150690336,
+    "latestStrictCloseAt": "2026-09-29T14:39:09.166Z",
+    "configSlippageRatePerSide": 0.001,
+    "configTradingFeeRate": 0.0005,
+    "stopReason": null,
+    "configDrift": null,
+    "actualFillsObserved": false
+  },
+  "candidatePreflight": {
+    "launchAllowed": false,
+    "blockers": [
+      "existing_live_owner_count:2",
+      "benchmark_gate_closed"
+    ],
+    "benchmarkTrendPercent": -3.095890644877607,
+    "benchmarkRequiredTrendPercent": 2,
+    "quoteReportComplete": true,
+    "quoteReportErrors": 0
+  },
+  "decision": {
+    "launchBaselineOrCandidate": false,
+    "changeParametersOrMarketSet": false,
+    "promote": false,
+    "restartOwner": false,
+    "interpretation": "One new strict SOL close raised the mixed cohort from 58 to 59 trades but did not change eligibility. No single session has yet reached even 10 strict closes, seven observation days, or the 20-trade minimum. The +2459.74 KRW mixed total is not comparable profitability evidence. Keep the active owner unchanged and do not extrapolate from this close."
+  }
+}

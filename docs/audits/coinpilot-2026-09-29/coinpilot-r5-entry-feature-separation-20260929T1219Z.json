@@ -1,0 +1,72 @@
+{
+  "schema": "coinpilot.paper.entry-feature-separation-diagnostic.v1",
+  "generatedAt": "2026-09-29T12:19:26Z",
+  "researchOnly": true,
+  "promoted": false,
+  "source": {
+    "file": ".paper-forward-sealed-rsi-20260928-r5/paper_validation.json",
+    "sessionId": "paper-1790604243722",
+    "processId": 11906,
+    "activeAtRead": true,
+    "heartbeatAt": "2026-09-29T12:19:21.696Z",
+    "strictClosedTradeCount": 8,
+    "configSnapshotComplete": true,
+    "analysisContinuity": true,
+    "riskContinuity": true,
+    "actualFillsObserved": false,
+    "paperExecutionCostModelMarkers": 0
+  },
+  "method": {
+    "clusterKey": "signalTime, falling back to signalKey",
+    "clusters": 7,
+    "profitableClusters": 3,
+    "losingClusters": 4,
+    "featureAggregation": "Within-cluster arithmetic mean, then descriptive mean/median/range across clusters",
+    "inferenceLimit": "Seven signal-time clusters are not a sufficient independent holdout; adjacent market signals may still be correlated. No hypothesis test or tuning selection was performed."
+  },
+  "outcome": {
+    "strictClosedTrades": 8,
+    "profitableTradeRows": 3,
+    "losingTradeRows": 5,
+    "recordedNetProfitKrw": -709.686583,
+    "profitFieldIncludesRecordedFees": true
+  },
+  "clusterFeatureDistributions": {
+    "signalReboundPercent": {
+      "profitable": {"mean": 0.22, "median": 0.1991, "min": 0.1655, "max": 0.2954},
+      "losing": {"mean": 0.2038, "median": 0.1756, "min": 0.1633, "max": 0.3008},
+      "separatedBySimpleThreshold": false
+    },
+    "signalRsiRecovery": {
+      "profitable": {"mean": 14.9379, "median": 15.6857, "min": 13.4397, "max": 15.6882},
+      "losing": {"mean": 14.3973, "median": 9.4494, "min": 8.9306, "max": 29.7597},
+      "separatedBySimpleThreshold": false
+    },
+    "signalVolumeRatio": {
+      "profitable": {"mean": 5.6101, "median": 1.3167, "min": 1.2661, "max": 14.2474},
+      "losing": {"mean": 4.6017, "median": 3.0949, "min": 1.1831, "max": 11.0338},
+      "separatedBySimpleThreshold": false
+    },
+    "signalTrendSlopePercent": {
+      "profitable": {"mean": -0.0652, "median": -0.0531, "min": -0.0996, "max": -0.043},
+      "losing": {"mean": -0.0609, "median": -0.0632, "min": -0.1046, "max": -0.0127},
+      "allClustersNegative": true,
+      "separatedBySimpleThreshold": false
+    },
+    "signalCloseStrength": {
+      "profitable": {"mean": 0.9583, "median": 1, "min": 0.875, "max": 1},
+      "losing": {"mean": 0.9128, "median": 0.9505, "min": 0.75, "max": 1},
+      "separatedBySimpleThreshold": false
+    },
+    "signalRangePercent": {
+      "profitable": {"mean": 0.2362, "median": 0.1655, "min": 0.1493, "max": 0.3939},
+      "losing": {"mean": 0.2807, "median": 0.2341, "min": 0.1905, "max": 0.4642},
+      "separatedBySimpleThreshold": false
+    }
+  },
+  "decision": {
+    "runtimeParametersChanged": false,
+    "candidateLaunched": false,
+    "recommendation": "Do not tune a single entry threshold from this sample. Feature ranges overlap; a nonnegative-trend gate would also reject all three profitable clusters. Collect a larger, separately evaluated cohort with event-time execution-cost evidence before choosing filters."
+  }
+}

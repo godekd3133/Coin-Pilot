@@ -275,6 +275,84 @@ function buildMetrics({ initialBalance, finalEquity, trades, equityCurve, exposu
   };
 }
 
+export function summarizeDailyMomentumMarketAttribution(trades = []) {
+  const markets = new Map();
+  let omittedInvalidTradeCount = 0;
+  let closedTradeCount = 0;
+  for (const trade of Array.isArray(trades) ? trades : []) {
+    const market = String(trade?.market || '').trim();
+    const profitAmount = Number(trade?.profitAmount);
+    if (!market || !Number.isFinite(profitAmount)) {
+      omittedInvalidTradeCount += 1;
+      continue;
+    }
+    const row = markets.get(market) || {
+      market,
+      tradeCount: 0,
+      profitableTradeCount: 0,
+      losingTradeCount: 0,
+      netProfit: 0,
+      grossProfit: 0,
+      grossLoss: 0
+    };
+    row.tradeCount += 1;
+    row.netProfit += profitAmount;
+    if (profitAmount > 0) {
+      row.profitableTradeCount += 1;
+      row.grossProfit += profitAmount;
+    } else if (profitAmount < 0) {
+      row.losingTradeCount += 1;
+      row.grossLoss += Math.abs(profitAmount);
+    }
+    markets.set(market, row);
+    closedTradeCount += 1;
+  }
+
+  const rows = [...markets.values()];
+  const totalNetProfit = rows.reduce((sum, row) => sum + row.netProfit, 0);
+  const totalGrossProfit = rows.reduce((sum, row) => sum + row.grossProfit, 0);
+  const topNetProfitMarkets = [...rows]
+    .sort((left, right) => right.netProfit - left.netProfit || left.market.localeCompare(right.market))
+    .slice(0, 3);
+  const topGrossProfitMarkets = [...rows]
+    .sort((left, right) => right.grossProfit - left.grossProfit || left.market.localeCompare(right.market))
+    .slice(0, 3)
+    .map(row => ({
+      ...row,
+      grossProfitSharePercent: totalGrossProfit > 0 ? (row.grossProfit / totalGrossProfit) * 100 : null
+    }));
+  const topTwoNetProfit = topNetProfitMarkets.slice(0, 2)
+    .reduce((sum, row) => sum + row.netProfit, 0);
+  const topTwoGrossProfit = topGrossProfitMarkets.slice(0, 2)
+    .reduce((sum, row) => sum + row.grossProfit, 0);
+
+  return {
+    available: closedTradeCount > 0,
+    basis: 'simulated_closed_trade_pnl_after_configured_round_trip_cost',
+    closedTradeCount,
+    omittedInvalidTradeCount,
+    marketCount: rows.length,
+    profitableMarketCount: rows.filter(row => row.netProfit > 0).length,
+    losingMarketCount: rows.filter(row => row.netProfit < 0).length,
+    totalNetProfit,
+    totalGrossProfit,
+    topNetProfitMarkets,
+    topOneNetProfitSharePercent: totalNetProfit > 0 && topNetProfitMarkets.length > 0
+      ? (topNetProfitMarkets[0].netProfit / totalNetProfit) * 100
+      : null,
+    topTwoNetProfitSharePercent: totalNetProfit > 0
+      ? (topTwoNetProfit / totalNetProfit) * 100
+      : null,
+    topGrossProfitMarkets,
+    topOneGrossProfitSharePercent: totalGrossProfit > 0 && topGrossProfitMarkets.length > 0
+      ? topGrossProfitMarkets[0].grossProfitSharePercent
+      : null,
+    topTwoGrossProfitSharePercent: totalGrossProfit > 0
+      ? (topTwoGrossProfit / totalGrossProfit) * 100
+      : null
+  };
+}
+
 function failureResult(options, dataQuality) {
   return {
     available: false,
@@ -890,6 +968,7 @@ export function evaluateDailyMomentumVariants(rawCandlesByMarket, {
       full: {
         available: full.available,
         metrics: full.metrics,
+        marketAttribution: summarizeDailyMomentumMarketAttribution(full.trades),
         entryWindowBlockedSignalCount: full.entryWindowBlockedSignalCount,
         unknownBoundaryPositionCount: full.unknownBoundaryPositionCount,
         unknownBoundaryPositionMarkets: full.unknownBoundaryPositionMarkets,

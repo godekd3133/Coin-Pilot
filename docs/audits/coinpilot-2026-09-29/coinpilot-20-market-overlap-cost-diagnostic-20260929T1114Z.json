@@ -1,0 +1,86 @@
+{
+  "schema": "coinpilot.paper-market-overlap-cost-diagnostic.v1",
+  "generatedAt": "2026-09-29T11:14:38Z",
+  "researchOnly": true,
+  "promoted": false,
+  "actualFillsObserved": false,
+  "sources": [
+    ".paper-forward-v71-default/paper_validation.json",
+    ".paper-forward-v73-baseline-mfe/paper_validation.json"
+  ],
+  "sourceConfig": {
+    "configFingerprint": "d567d1b395484e3b",
+    "fullConfigSnapshotsEqual": true,
+    "baselineAssetsKrw": 1000000,
+    "targetMarkets": [
+      "KRW-B3",
+      "KRW-BTC",
+      "KRW-CP",
+      "KRW-ETH",
+      "KRW-ETHFI",
+      "KRW-FLOCK",
+      "KRW-IQ",
+      "KRW-LSK",
+      "KRW-MTL",
+      "KRW-POWR",
+      "KRW-PROM",
+      "KRW-PUNDIX",
+      "KRW-RAY",
+      "KRW-SOL",
+      "KRW-SOPH",
+      "KRW-STEEM",
+      "KRW-STORJ",
+      "KRW-TREE",
+      "KRW-VTHO",
+      "KRW-XRP"
+    ],
+    "sessionCount": 2,
+    "sessionWindowsNonOverlapping": true,
+    "strictClosedTrades": 11,
+    "strictOpenPositions": 0,
+    "diagnosticOpenPositionsAtStopPerSession": 2,
+    "stopReasons": [
+      "stopped_with_unsettled_diagnostic_positions",
+      "stopped_with_unsettled_diagnostic_positions"
+    ],
+    "configuredSlippagePercentPerSide": 0.1
+  },
+  "allMarketsDiagnostic": {
+    "recordedNetAfterFeesKrw": 1511.5227971620996,
+    "slippageDragKrw": 441.8182789366304,
+    "costStressedNetKrw": 1069.704518225469,
+    "evaluatedTrades": 11,
+    "executionCostModelMarkedTrades": 0
+  },
+  "overlapWithCurrentR5Universe": {
+    "currentMarkets": [
+      "KRW-BTC",
+      "KRW-ETH",
+      "KRW-SOL",
+      "KRW-XRP"
+    ],
+    "observedOverlapMarkets": [
+      "KRW-XRP"
+    ],
+    "strictTrades": 2,
+    "recordedNetAfterFeesKrw": -28.71032562356481,
+    "slippageDragKrw": 80.02727531203246,
+    "costStressedNetKrw": -108.73760093559726
+  },
+  "outsideCurrentR5Universe": {
+    "strictTrades": 9,
+    "observedMarkets": [
+      "KRW-B3",
+      "KRW-ETHFI",
+      "KRW-PROM",
+      "KRW-POWR",
+      "KRW-PUNDIX",
+      "KRW-RAY",
+      "KRW-SOPH"
+    ],
+    "recordedNetAfterFeesKrw": 1540.2331227856644,
+    "slippageDragKrw": 361.79100362459794,
+    "costStressedNetKrw": 1178.4421191610663
+  },
+  "interpretation": "The positive configured-slippage sensitivity in this tiny 20-market group is concentrated outside the current four-market R5 universe; the two XRP trades in the overlap are negative after the same sensitivity. This is a post-hoc subset analysis, not an independent holdout, not actual fill evidence, and not authorization to change the market list or launch a candidate."
+}

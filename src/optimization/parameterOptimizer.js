@@ -1,11 +1,24 @@
 import BacktestEngine from '../backtest/backtestEngine.js';
-import axios from 'axios';
+import fs from 'node:fs';
+import path from 'node:path';
+import { resolveOptimizationStoragePaths } from '../runtime/optimizationStorage.js';
+import { fetchCompleteUpbitCandleHistory } from '../market-data/completeUpbitCandleHistory.js';
 
 /**
  * 유전 알고리즘 기반 파라미터 최적화
  */
 class ParameterOptimizer {
   constructor(config = {}) {
+    const optimizationStoragePaths = resolveOptimizationStoragePaths({
+      env: config.env || process.env,
+      cwd: config.cwd || process.cwd(),
+      projectRoot: config.projectRoot || config.cwd || process.cwd(),
+      stateDir: config.stateDir,
+      legacyBase: 'cwd',
+      optimizationStateFile: config.optimizationStateFile,
+      optimizationHistoryFile: config.optimizationHistoryFile,
+      optimalConfigFile: config.optimalConfigFile
+    });
     this.config = {
       populationSize: config.populationSize || 20,
       generations: config.generations || 10,
@@ -14,6 +27,9 @@ class ParameterOptimizer {
       eliteSize: config.eliteSize || 2,
       ...config
     };
+    this.optimizationStateFile = optimizationStoragePaths.optimizationStateFile.absolutePath;
+    this.optimizationHistoryFile = optimizationStoragePaths.optimizationHistoryFile.absolutePath;
+    this.optimalConfigFile = optimizationStoragePaths.optimalConfigFile.absolutePath;
 
     // 확장된 파라미터 범위 (소수점 지원)
     // 트레이딩에서 사용하는 모든 19개 파라미터 포함
@@ -133,9 +149,7 @@ class ParameterOptimizer {
    */
   loadSavedParameters() {
     try {
-      const fs = require('fs');
-      const path = require('path');
-      const configPath = path.join(process.cwd(), 'optimal_config.json');
+      const configPath = this.optimalConfigFile;
 
       if (fs.existsSync(configPath)) {
         const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
@@ -371,42 +385,16 @@ class ParameterOptimizer {
   /**
    * 여러 번의 API 호출로 충분한 분봉 데이터 수집
    */
-  async getMultipleMinuteCandles(upbitAPI, market, unit, totalCount) {
-    const maxPerRequest = 200;
-    const allCandles = [];
-    let to = null;
-
-    while (allCandles.length < totalCount) {
-      const count = Math.min(maxPerRequest, totalCount - allCandles.length);
-
-      try {
-        let candles;
-        if (to) {
-          candles = await upbitAPI.requestWithRetry(async () => {
-            const response = await axios.get(
-              `https://api.upbit.com/v1/candles/minutes/${unit}`,
-              upbitAPI.getRequestConfig({ params: { market, count, to } })
-            );
-            return response.data;
-          });
-        } else {
-          candles = await upbitAPI.getMinuteCandles(market, unit, count);
-        }
-
-        if (!candles || candles.length === 0) break;
-
-        allCandles.push(...candles);
-        const oldestCandle = candles[candles.length - 1];
-        to = oldestCandle.candle_date_time_utc;
-
-        await this.sleep(100);
-      } catch (error) {
-        console.error(`캔들 데이터 수집 오류 (${market}):`, error.message);
-        break;
-      }
-    }
-
-    return allCandles;
+  async getMultipleMinuteCandles(upbitAPI, market, unit, totalCount, maxPerRequest = 200) {
+    return fetchCompleteUpbitCandleHistory({
+      marketDataClient: upbitAPI,
+      market,
+      intervalMinutes: unit,
+      totalCount,
+      maxPerRequest,
+      requestSpacingMs: 100,
+      sleepImpl: milliseconds => this.sleep(milliseconds)
+    });
   }
 
   /**
@@ -456,10 +444,8 @@ class ParameterOptimizer {
    * 최적 파라미터 저장
    */
   saveOptimalParameters(params) {
-    const fs = require('fs');
-    const path = require('path');
-
-    const configPath = path.join(process.cwd(), 'optimal_config.json');
+    const configPath = this.optimalConfigFile;
+    fs.mkdirSync(path.dirname(configPath), { recursive: true, mode: 0o700 });
 
     const config = {
       updatedAt: new Date().toISOString(),

@@ -1,0 +1,73 @@
+{
+  "schema": "coinpilot.ios-bundled-local-public-pack-build.v1",
+  "observedAt": "2026-09-29T14:49:30Z",
+  "researchOnly": true,
+  "promoted": false,
+  "publicPack": {
+    "path": "/private/tmp/coinpilot-public-market-validation-20260929T1436Z.json",
+    "schemaVersion": 1,
+    "source": "upbit-public-market-api",
+    "generatedAt": "2026-09-29T14:36:20.583Z",
+    "sha256": "37736616048512f03f5bc453c7aaadd020ba82466c25d9f35764e6609049ff55",
+    "marketCodes": [
+      "KRW-BTC",
+      "KRW-ETH",
+      "KRW-XRP",
+      "KRW-SOL"
+    ],
+    "candleCount": 3200,
+    "candlesPerInterval": {
+      "1": 800,
+      "5": 800,
+      "15": 800,
+      "60": 800
+    },
+    "firstCandleAt": "2026-09-21T07:00:00.000Z",
+    "latestCandleAt": "2026-09-29T14:36:00.000Z",
+    "uniqueVolumeValuesPerMarketInterval": 200,
+    "apiPath": "UpbitAPI.getMinuteCandles -> public GET /candles/minutes/{unit}",
+    "accountDataIncluded": false,
+    "ordersIncluded": false,
+    "fillsObserved": false
+  },
+  "simulatorBuild": {
+    "dataMode": "bundled-local",
+    "codeSigningAllowed": false,
+    "result": "BUILD SUCCEEDED",
+    "derivedDataPath": "/private/tmp/coinpilot-bundled-local-build-20260929T1436Z",
+    "appBundle": "/private/tmp/coinpilot-bundled-local-build-20260929T1436Z/Build/Products/Debug-iphonesimulator/App.app",
+    "packCopiedByteExact": true,
+    "embeddedSha256Matches": true,
+    "embeddedPackSha256": "37736616048512f03f5bc453c7aaadd020ba82466c25d9f35764e6609049ff55",
+    "installedOrLaunched": false
+  },
+  "existingSimulatorInstall": {
+    "device": "iPhone 17 Simulator",
+    "bundleId": "com.godekd3133.coinpilot",
+    "dataMode": "bundled-local",
+    "resourceGeneratedAt": "2026-09-29T08:10:00Z",
+    "resourceSha256": "462cb41158f328d7f527b0580c4177bcae1b001479f702e1ce8460eed4b0abfe",
+    "markets": [
+      "KRW-BTC",
+      "KRW-ETH",
+      "KRW-XRP",
+      "KRW-SOL"
+    ],
+    "candlesPerMarket": 200,
+    "intervals": [
+      5
+    ],
+    "uniqueVolumeValuesPerMarket": 1,
+    "classification": "temporary synthetic UI fixture; not live or account data",
+    "mustNotBeReportedAs": "verified real public-market installation"
+  },
+  "integrityLimits": {
+    "packIsStaticSnapshot": true,
+    "runtimeRefresh": false,
+    "sourceFieldCryptographicallyAuthenticated": false,
+    "embeddedSha256ProvesUpstreamAuthenticity": false,
+    "realDeviceOrTestFlightVerified": false,
+    "visualRuntimeReviewCompleted": false
+  },
+  "decision": "A current public-data pack was generated through the repository's paced public OHLCV GET client and copied byte-for-byte into an unsigned Simulator build. The build was not installed or launched. The existing booted Simulator installation remains the documented synthetic fixture and must not be used as evidence of a real-data user experience."
+}

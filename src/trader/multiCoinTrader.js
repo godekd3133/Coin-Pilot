@@ -1,5 +1,9 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import UpbitAPI from '../api/upbit.js';
+import {
+  getMarketDataAdapterKind,
+  UpbitMarketDataAdapter
+} from '../market-data/marketDataAdapters.js';
 import { comprehensiveAnalysis } from '../analysis/technicalIndicators.js';
 import NewsMonitor from '../analysis/newsMonitor.js';
 import TradingStrategy from '../strategy/tradingStrategy.js';
@@ -55,6 +59,8 @@ function cloneManualPortfolioValue(value) {
   return JSON.parse(JSON.stringify(value));
 }
 import {
+  addLiveOrderIntentEvidence,
+  canAddLiveOrderIntentEvidence,
   createLiveExecutionEvidenceEvent,
   isDefinitiveLiveOrderRejection,
   isTerminalLiveOrderResolution,
@@ -352,8 +358,11 @@ function summarizeLiveMarketRegime(analyses, config = {}) {
 }
 
 class MultiCoinTrader {
-  constructor(config) {
+  constructor(config, { marketDataAdapter } = {}) {
     this.config = config;
+    if (marketDataAdapter !== undefined && config.dryRun === false) {
+      throw new Error('Injected market data adapters are available in DRY_RUN only.');
+    }
     const configuredStorageMiB = config.paperMinimumStorageMiB ?? process.env.SCALP_PAPER_MIN_STORAGE_MIB;
     const parsedStorageMiB = Number(configuredStorageMiB);
     this.paperMinimumStorageMiB = Number.isFinite(parsedStorageMiB) && parsedStorageMiB >= 128
@@ -362,9 +371,29 @@ class MultiCoinTrader {
     this.upbit = new UpbitAPI(config.accessKey, config.secretKey, {
       requestTimeoutMs: config.upbitRequestTimeoutMs
     });
+    const selectedMarketDataAdapter = marketDataAdapter === undefined
+      ? new UpbitMarketDataAdapter(() => this.upbit)
+      : marketDataAdapter;
+    const marketDataAdapterKind = getMarketDataAdapterKind(selectedMarketDataAdapter);
+    if (!marketDataAdapterKind) {
+      throw new TypeError('MultiCoinTrader requires a built-in market data adapter.');
+    }
+    // LIVE is always tied to this trader's exchange client; injected adapters
+    // remain unavailable if a DRY_RUN trader's mode is later changed.
+    Object.defineProperty(this, 'marketDataAdapter', {
+      get() {
+        if (marketDataAdapter !== undefined && this.dryRun !== true) {
+          throw new Error('Injected market data adapters are available in DRY_RUN only.');
+        }
+        return selectedMarketDataAdapter;
+      },
+      enumerable: true,
+      configurable: false
+    });
     this.riskUpbit = new UpbitAPI(config.accessKey, config.secretKey, {
       requestTimeoutMs: config.upbitRequestTimeoutMs
     });
+    this.liveManualPrepareOnBoot = config.liveManualPrepareOnBoot === true && config.dryRun === false;
     this.newsMonitor = new NewsMonitor();
     this.strategyMode = config.strategyMode || 'oversold_reaction_scalping';
     this.isScalpingMode = this.strategyMode === 'oversold_reaction_scalping';
@@ -506,6 +535,7 @@ class MultiCoinTrader {
     this._startupSafetyHold = false;
     this._stopRequested = false;
     this._entriesPaused = false;
+    this.liveManualPrepared = false;
     this._riskMonitorProtectiveOnly = false;
     this._riskMonitorExitInProgress = false;
     this._deferredProtectiveExitIntents = new Map();
@@ -546,6 +576,7 @@ class MultiCoinTrader {
     this.liveExecutionEvidenceWriteError = null;
     this.liveExecutionEvidenceDataError = null;
     this.liveExecutionEvidenceStartup = inspectLiveExecutionEvidenceFile(this.liveExecutionEvidenceFile);
+    this.liveOrderIntentEvidenceIndex = this.liveExecutionEvidenceStartup.orderIntentEvidenceIndex || null;
     const startupReconciliation = this.liveExecutionEvidenceStartup.reconciliation;
     const knownSubmittedOrders = startupReconciliation?.knownSubmittedOrders || [];
     this._liveEngineOrderMarkets = new Map(knownSubmittedOrders
@@ -657,6 +688,11 @@ class MultiCoinTrader {
   recordLiveExecutionEvidence(event) {
     if (this.dryRun || !event) return true;
     if (this.liveExecutionEvidenceWriteError || this.liveExecutionEvidenceDataError) return false;
+    if (event.eventType === 'ORDER_INTENT' &&
+      !canAddLiveOrderIntentEvidence(this.liveOrderIntentEvidenceIndex, event)) {
+      this.liveExecutionEvidenceDataError = 'live order intent index is unavailable or ambiguous';
+      return false;
+    }
     const outcomeKey = event.clientIntentId && ['ORDER_SUBMITTED', 'ORDER_REJECTED'].includes(event.eventType)
       ? `${event.eventType}:${event.clientIntentId}`
       : null;
@@ -682,6 +718,11 @@ class MultiCoinTrader {
         fs.fsyncSync(descriptor);
       } finally {
         fs.closeSync(descriptor);
+      }
+      if (event.eventType === 'ORDER_INTENT' &&
+        !addLiveOrderIntentEvidence(this.liveOrderIntentEvidenceIndex, event)) {
+        this.liveExecutionEvidenceDataError = 'live order intent index update failed after append';
+        return false;
       }
       this.applyLiveExecutionEvidenceRuntimeState(event);
       if (outcomeKey) this._liveRecordedIntentOutcomeKeys.add(outcomeKey);
@@ -786,7 +827,7 @@ class MultiCoinTrader {
   async cancelLiveOrderIfOpen(orderId, order = null) {
     if (!orderId || ['cancel', 'done'].includes(order?.state)) return true;
     try {
-      await this.upbit.cancelOrder(orderId);
+      await this.upbit.cancelOrder(orderId, { priority: 'risk' });
       return true;
     } catch (error) {
       console.error(`❌ live 주문 취소 실패 (${orderId}): ${error.message}`);
@@ -894,7 +935,7 @@ class MultiCoinTrader {
     this._livePendingOrderMarkets.add(market);
   }
 
-  async submitLiveOrder(market, side, volume, price, orderType) {
+  async submitLiveOrder(market, side, volume, price, orderType, requestedClientIntentId = null) {
     if (this.dryRun) throw new Error('submitLiveOrder is only available in LIVE mode');
     if (!market || !['bid', 'ask'].includes(side)) throw new Error('invalid live order market or side');
     const validPositive = value => Number.isFinite(Number(value)) && Number(value) > 0;
@@ -911,12 +952,21 @@ class MultiCoinTrader {
     if (this.liveExecutionEvidenceWriteError || this.liveExecutionEvidenceDataError) {
       throw new Error('live execution evidence is unavailable');
     }
-    let clientIntentId = null;
-    for (let attempt = 0; attempt < 5; attempt += 1) {
-      const candidate = randomUUID();
-      if (!this._liveUsedOrderIntentIds.has(candidate)) {
-        clientIntentId = candidate;
-        break;
+    let clientIntentId = requestedClientIntentId;
+    if (clientIntentId !== null && clientIntentId !== undefined) {
+      if (typeof clientIntentId !== 'string' ||
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(clientIntentId) ||
+        this._liveUsedOrderIntentIds.has(clientIntentId)) {
+        throw new Error('invalid or already-used live order identifier');
+      }
+    } else {
+      clientIntentId = null;
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        const candidate = randomUUID();
+        if (!this._liveUsedOrderIntentIds.has(candidate)) {
+          clientIntentId = candidate;
+          break;
+        }
       }
     }
     if (!clientIntentId) throw new Error('could not allocate an unused live order identifier');
@@ -939,7 +989,15 @@ class MultiCoinTrader {
     }
     this._liveLatestOrderIntentByMarket.set(market, clientIntentId);
     try {
-      const orderResult = await this.upbit.order(market, side, volume, price, orderType, clientIntentId);
+      const orderResult = await this.upbit.order(
+        market,
+        side,
+        volume,
+        price,
+        orderType,
+        clientIntentId,
+        { priority: 'risk' }
+      );
       const orderId = orderResult?.data?.uuid || null;
       if (orderResult?.success === true) {
         const recorded = this.recordLiveExecutionEvidence(this.createLiveExecutionEvidence({
@@ -991,7 +1049,7 @@ class MultiCoinTrader {
 
   async waitForLiveOrderFill(market, orderId, timeoutMs, intervalMs) {
     try {
-      return await this.upbit.waitForOrderFill(orderId, timeoutMs, intervalMs);
+      return await this.upbit.waitForOrderFill(orderId, timeoutMs, intervalMs, { priority: 'risk' });
     } catch (error) {
       this.markLiveMarketOrderUnresolved(market);
       throw error;
@@ -1083,7 +1141,7 @@ class MultiCoinTrader {
         const priceMap = priceMapOverride instanceof Map ? new Map(priceMapOverride) : new Map();
         if (!(priceMapOverride instanceof Map)) {
           try {
-            const tickers = await this.upbit.getTicker(holdingCoins);
+            const tickers = await this.marketDataAdapter.getTickers(holdingCoins);
             if (Array.isArray(tickers)) {
               for (const ticker of tickers) {
                 const price = Number(ticker?.trade_price);
@@ -1115,7 +1173,7 @@ class MultiCoinTrader {
 
         if (!(priceMapOverride instanceof Map)) {
           try {
-            const tickers = await this.upbit.getTicker(holdingCoins);
+            const tickers = await this.marketDataAdapter.getTickers(holdingCoins);
             // ticker 응답을 맵으로 변환
             if (tickers && Array.isArray(tickers)) {
               for (const ticker of tickers) {
@@ -1146,7 +1204,7 @@ class MultiCoinTrader {
       // 실전 모드: 실제 업비트 계좌 잔액 사용
       const accounts = !allowAveragePriceFallback && Array.isArray(accountsOverride)
         ? accountsOverride
-        : await this.upbit.getAccounts();
+        : await this.upbit.getAccounts({ priority: 'risk' });
       if (!accounts || !Array.isArray(accounts)) {
         console.error('계좌 조회 실패');
         return allowAveragePriceFallback ? 0 : null;
@@ -1170,7 +1228,7 @@ class MultiCoinTrader {
         const priceMap = priceMapOverride instanceof Map ? new Map(priceMapOverride) : new Map();
         if (!(priceMapOverride instanceof Map)) {
           try {
-            const tickers = await this.upbit.getTicker(coinMarkets);
+            const tickers = await this.marketDataAdapter.getTickers(coinMarkets);
             if (Array.isArray(tickers)) {
               for (const ticker of tickers) {
                 const price = Number(ticker?.trade_price);
@@ -1207,7 +1265,7 @@ class MultiCoinTrader {
       if (coinAccounts.length > 0) {
         const coinMarkets = coinAccounts.map(acc => `KRW-${acc.currency}`);
         try {
-          const tickers = await this.upbit.getTicker(coinMarkets);
+          const tickers = await this.marketDataAdapter.getTickers(coinMarkets);
           // ticker 응답 유효성 검사
           if (tickers && Array.isArray(tickers) && tickers.length > 0) {
             for (const ticker of tickers) {
@@ -1249,7 +1307,7 @@ class MultiCoinTrader {
     } else {
       // 실전 모드: 실제 업비트 계좌에서 보유 코인 목록 반환
       try {
-        const accounts = await this.upbit.getAccounts();
+        const accounts = await this.upbit.getAccounts({ priority: 'risk' });
         if (!accounts || !Array.isArray(accounts)) {
           return [];
         }
@@ -1675,6 +1733,26 @@ class MultiCoinTrader {
     if (fs.existsSync(portfolioFile)) {
       try {
         const data = JSON.parse(fs.readFileSync(portfolioFile, 'utf8'));
+        if (!data || typeof data !== 'object' || Array.isArray(data) ||
+            !Number.isFinite(data.krwBalance) || data.krwBalance < 0 ||
+            (data.holdings !== undefined &&
+              (!data.holdings || typeof data.holdings !== 'object' || Array.isArray(data.holdings))) ||
+            (data.positions !== undefined &&
+              (!data.positions || typeof data.positions !== 'object' || Array.isArray(data.positions))) ||
+            (data.tradeHistory !== undefined &&
+              !Array.isArray(data.tradeHistory) &&
+              (!data.tradeHistory || typeof data.tradeHistory !== 'object')) ||
+            (data.manualOrderIdempotencyRecords !== undefined &&
+              !Array.isArray(data.manualOrderIdempotencyRecords))) {
+          throw new TypeError('Stored DRY_RUN portfolio has an invalid shape.');
+        }
+        for (const holding of Object.values(data.holdings || {})) {
+          if (!holding || typeof holding !== 'object' || Array.isArray(holding) ||
+              !Number.isFinite(holding.amount) || holding.amount < 0 ||
+              !Number.isFinite(holding.avgPrice) || holding.avgPrice < 0) {
+            throw new TypeError('Stored DRY_RUN portfolio has an invalid holding.');
+          }
+        }
         this.virtualPortfolio.krwBalance = data.krwBalance;
         this.virtualPortfolio.holdings = new Map(Object.entries(data.holdings || {}));
         this.manualOrderIdempotencyRecords = data.manualOrderIdempotencyRecords ?? [];
@@ -1781,7 +1859,12 @@ class MultiCoinTrader {
           this.saveVirtualPortfolio();
         }
       } catch (error) {
-        console.log('⚠️  가상 포트폴리오 로드 실패:', error.message);
+        const startupError = new Error(
+          'Existing DRY_RUN portfolio could not be loaded; refusing to start with a replacement wallet.',
+          { cause: error }
+        );
+        startupError.code = 'DRY_RUN_PORTFOLIO_LOAD_FAILED';
+        throw startupError;
       }
     }
   }
@@ -4746,6 +4829,95 @@ class MultiCoinTrader {
   /**
    * 다중 코인 자동매매 시작
    */
+  get liveCredentialsConfigured() {
+    return !this.dryRun &&
+      typeof this.upbit?.accessKey === 'string' && this.upbit.accessKey.trim().length > 0 &&
+      typeof this.upbit?.secretKey === 'string' && this.upbit.secretKey.trim().length > 0;
+  }
+
+  configureUpbitCredentials({ accessKey, secretKey } = {}) {
+    const nextAccessKey = typeof accessKey === 'string' ? accessKey.trim() : '';
+    const nextSecretKey = typeof secretKey === 'string' ? secretKey.trim() : '';
+    if (!nextAccessKey || !nextSecretKey) throw new Error('Upbit Access Key와 Secret Key를 모두 입력하세요.');
+    if (this.dryRun) throw new Error('모의투자 서버에는 실계정 키를 등록할 수 없습니다.');
+    if (this.isRunning || this._orderInProgress || this._riskCheckInProgress || this._gracefulShutdownPromise) {
+      throw new Error('실행 중이거나 주문을 확인 중일 때는 거래소 키를 바꿀 수 없습니다.');
+    }
+    if (this.liveCredentialsConfigured) {
+      throw new Error('이미 LIVE 키가 설정되어 있어 이 경로로 키를 교체할 수 없습니다.');
+    }
+    const onlyStartupMarketsAreUnverified =
+      this._liveAccountStateKnown !== true &&
+      this._liveExchangeStateKnown !== true &&
+      (this._livePendingOrderMarkets?.size || 0) === 0 &&
+      (this._liveEvidenceBlockedMarkets?.size || 0) === 0 &&
+      (this._liveUnresolvedOrderIds?.size || 0) === 0 &&
+      (this._liveUnresolvedOrderIntents?.size || 0) === 0;
+    if (this.getCurrentPositionCount() > 0 ||
+        (this.hasUnresolvedLiveOrderState() && !onlyStartupMarketsAreUnverified)) {
+      throw new Error('보유 자산이나 확인이 끝나지 않은 주문이 있어 거래소 키를 바꿀 수 없습니다.');
+    }
+
+    this.config.accessKey = nextAccessKey;
+    this.config.secretKey = nextSecretKey;
+    this.upbit.accessKey = nextAccessKey;
+    this.upbit.secretKey = nextSecretKey;
+    this.riskUpbit.accessKey = nextAccessKey;
+    this.riskUpbit.secretKey = nextSecretKey;
+    this._liveAccountStateKnown = false;
+    this._liveExchangeStateKnown = false;
+    this._liveVerifiedOrderMarkets.clear();
+    this._liveOrderStateUnknownMarkets = new Set(this.getLiveManagedMarkets());
+    this._livePendingOrderMarkets.clear();
+    this._lastSyncTime = 0;
+    this.stopReason = 'exchange_state_unverified';
+    this._entriesPaused = true;
+    this.liveManualPrepared = false;
+    return { configured: true };
+  }
+
+  /**
+   * Read-only LIVE account/order reconciliation for a dashboard that starts
+   * without the automatic trading loop. Existing exchange orders are left in
+   * place and keep their markets locked until they settle or are handled by
+   * the user.
+   */
+  async prepareManualLiveSession() {
+    if (this.dryRun) throw new Error('Manual LIVE preparation requires a LIVE server.');
+    if (!this.liveManualPrepareOnBoot) throw new Error('Manual LIVE mode is not enabled for this server.');
+    if (!this.liveCredentialsConfigured) throw new Error('Upbit credentials have not been registered.');
+    if (this.isRunning || this._orderInProgress || this._riskCheckInProgress || this._gracefulShutdownPromise) {
+      throw new Error('The LIVE trader is busy and cannot enter manual-only mode.');
+    }
+
+    this._stopRequested = false;
+    this._entriesPaused = true;
+    this._startupReconciliationPending = true;
+    this._riskMonitorProtectiveOnly = false;
+    this._riskMonitorExitInProgress = false;
+    this.stopReason = 'exchange_state_unverified';
+    const synchronized = await this.syncWithExchange({ cancelStaleEngineOrders: false });
+    if (synchronized !== true || this._liveExchangeStateKnown !== true || this._liveAccountStateKnown !== true) {
+      this._startupReconciliationPending = false;
+      this._entriesPaused = true;
+      this.isRunning = false;
+      this.stopReason = 'exchange_state_unverified';
+      this.liveManualPrepared = false;
+      return { ready: false, reason: 'exchange_state_unverified' };
+    }
+
+    this._startupReconciliationPending = false;
+    this._entriesPaused = true;
+    this.isRunning = false;
+    this.stopReason = 'operator_stop';
+    this.liveManualPrepared = true;
+    return {
+      ready: true,
+      exchangeStateKnown: true,
+      pendingOrderMarkets: [...this._livePendingOrderMarkets]
+    };
+  }
+
   start() {
     if (this._startPromise) return this._startPromise;
     const startPromise = this.performStart();
@@ -5485,6 +5657,7 @@ class MultiCoinTrader {
       const tickers = snapshotContext?.sharedSnapshot === true &&
         snapshotContext.tickerMap instanceof Map
         ? [...snapshotContext.tickerMap.values()]
+        // Keep protective pricing on its priority-lane exchange client, never the analysis fixture.
         : await this.riskUpbit.getTicker(monitoredCoins, { priority: 'risk' });
       const priceMap = snapshotContext?.sharedSnapshot === true &&
         snapshotContext.priceMap instanceof Map
@@ -5639,11 +5812,11 @@ class MultiCoinTrader {
    * 주문 후 실제 체결 결과와 내부 포지션 상태 불일치 방지
    * 상태를 확인하지 못하면 false를 반환하며 caller는 분석·신규 판단을 건너뛴다.
    */
-  async syncWithExchange() {
+  async syncWithExchange(options = {}) {
     if (this.dryRun) return true; // 모의투자는 동기화 불필요
 
     if (this._exchangeSyncPromise) return this._exchangeSyncPromise;
-    const syncPromise = this.performExchangeSync();
+    const syncPromise = this.performExchangeSync(options);
     this._exchangeSyncPromise = syncPromise;
     try {
       return await syncPromise;
@@ -5665,6 +5838,7 @@ class MultiCoinTrader {
   async persistLiveOrderReadback({
     lookupValue,
     lookupByIdentifier = false,
+    observedOrder = null,
     orderId = null,
     clientIntentId = null,
     market = null,
@@ -5672,8 +5846,10 @@ class MultiCoinTrader {
     orderType = null,
     request = null
   } = {}) {
-    if (typeof this.upbit.getOrder !== 'function') throw new Error('exchange order readback is unavailable');
-    const order = await this.upbit.getOrder(lookupValue, { identifier: lookupByIdentifier });
+    const order = observedOrder || (typeof this.upbit.getOrder === 'function'
+      ? await this.upbit.getOrder(lookupValue, { identifier: lookupByIdentifier, priority: 'risk' })
+      : null);
+    if (!order) throw new Error('exchange order readback is unavailable');
     if (!order || typeof order.uuid !== 'string' || !order.uuid ||
       (orderId && order.uuid !== orderId) ||
       (market && order.market && order.market !== market) ||
@@ -5818,6 +5994,7 @@ class MultiCoinTrader {
   refreshLiveEvidenceRecoveryState({ checkedMarkets = new Set(), orderReadUnknownMarkets = new Set(), orderPendingMarkets = new Set() } = {}) {
     const inspection = inspectLiveExecutionEvidenceFile(this.liveExecutionEvidenceFile);
     this.liveExecutionEvidenceStartup = inspection;
+    this.liveOrderIntentEvidenceIndex = inspection.orderIntentEvidenceIndex || null;
     const reconciliation = inspection.reconciliation;
     if (!reconciliation) return;
 
@@ -5853,7 +6030,7 @@ class MultiCoinTrader {
     }
   }
 
-  async performExchangeSync() {
+  async performExchangeSync({ cancelStaleEngineOrders = !this.liveManualPrepareOnBoot } = {}) {
     const fullManagedMarketSet = this.getLiveManagedMarkets();
     const scopedMarkets = new Set([
       ...this._liveEvidenceBlockedMarkets,
@@ -5885,9 +6062,10 @@ class MultiCoinTrader {
       // the order list is being checked is reflected in the recovered account.
       const pendingOrderStatus = await this.cleanupPendingOrders({
         managedMarkets: orderMarketsToRefresh,
-        preserveUntouchedMarkets: partialMarketRefresh
+        preserveUntouchedMarkets: partialMarketRefresh,
+        cancelStaleEngineOrders
       });
-      const accounts = await this.upbit.getAccounts();
+      const accounts = await this.upbit.getAccounts({ priority: 'risk' });
       if (!Array.isArray(accounts)) throw new Error('거래소 계좌 응답이 올바르지 않습니다.');
       const exchangeHoldings = new Map();
       const isFiniteNonnegativeField = value =>
@@ -6022,7 +6200,11 @@ class MultiCoinTrader {
   /**
    * 미체결 주문 정리
    */
-  async cleanupPendingOrders({ managedMarkets: requestedMarkets = null, preserveUntouchedMarkets = false } = {}) {
+  async cleanupPendingOrders({
+    managedMarkets: requestedMarkets = null,
+    preserveUntouchedMarkets = false,
+    cancelStaleEngineOrders = !this.liveManualPrepareOnBoot
+  } = {}) {
     let complete = true;
     let discoveryComplete = true;
     const unknownMarkets = new Set();
@@ -6042,7 +6224,7 @@ class MultiCoinTrader {
     for (const coin of managedMarkets) {
       let pendingOrders;
       try {
-        pendingOrders = await this.upbit.getOrders(coin, ['wait', 'watch']);
+        pendingOrders = await this.upbit.getOrders(coin, ['wait', 'watch'], { priority: 'risk' });
       } catch (error) {
         console.error(`  ❌ [${coin}] 미체결 주문 조회 실패: ${error.message}`);
         complete = false;
@@ -6084,9 +6266,14 @@ class MultiCoinTrader {
             complete = false;
             continue;
           }
+          if (!cancelStaleEngineOrders) {
+            console.log(`    ⏸️  ${uuid} - 수동 LIVE 프로필에서는 기존 미체결 주문을 취소하지 않습니다.`);
+            complete = false;
+            continue;
+          }
           console.log(`    🔄 ${orderAgeMinutes}분 경과 주문 취소: ${uuid}`);
           try {
-            await this.upbit.cancelOrder(uuid);
+            await this.upbit.cancelOrder(uuid, { priority: 'risk' });
             console.log('    ✅ 취소 요청 완료 - 취소/체결 상태를 다시 확인합니다.');
           } catch (error) {
             console.log(`    ⚠️  취소 실패: ${error.message}`);
@@ -6382,7 +6569,7 @@ class MultiCoinTrader {
     };
     this.cycleRequestStats.batchTickerRequests += 1;
     try {
-      const tickers = await this.upbit.getTicker(this.targetCoins);
+      const tickers = await this.marketDataAdapter.getTickers(this.targetCoins);
       if (!Array.isArray(tickers)) return null;
       return new Map(
         tickers
@@ -6415,7 +6602,7 @@ class MultiCoinTrader {
       ? [marketData.ticker]
       : sharedSnapshot
         ? null
-        : await this.upbit.getTicker(coin);
+        : await this.marketDataAdapter.getTickers(coin);
     if (!ticker || !Array.isArray(ticker) || ticker.length === 0) {
       throw new Error(`${coin} 현재가 조회 실패 - 응답 없음`);
     }
@@ -6428,7 +6615,7 @@ class MultiCoinTrader {
     if (marketData.candles === undefined && !sharedSnapshot) this.cycleRequestStats.candleRequests += 1;
     const candles = marketData.candles || (sharedSnapshot
       ? null
-      : await this.upbit.getMinuteCandles(coin, this.candleUnit, this.candleCount));
+      : await this.marketDataAdapter.getMinuteCandles(coin, this.candleUnit, this.candleCount));
     const minimumCandleCount = Math.max(50, (this.config.rsiPeriod || 14) + 10);
     if (!candles || !Array.isArray(candles) || candles.length < minimumCandleCount) {
       this.recordInsufficientCandleData(coin, Array.isArray(candles) ? candles.length : 0, minimumCandleCount);
@@ -6558,8 +6745,8 @@ class MultiCoinTrader {
         candles = marketData.candles;
       } else {
         [ticker, candles] = await Promise.all([
-          this.upbit.getTicker(coin),
-          this.upbit.getMinuteCandles(coin, this.candleUnit, this.candleCount)
+          this.marketDataAdapter.getTickers(coin),
+          this.marketDataAdapter.getMinuteCandles(coin, this.candleUnit, this.candleCount)
         ]);
       }
     } catch (error) {
@@ -7017,7 +7204,7 @@ class MultiCoinTrader {
             console.log(`  🔄 주문 취소 시도...`);
 
             try {
-              await this.upbit.cancelOrder(orderId);
+              await this.upbit.cancelOrder(orderId, { priority: 'risk' });
               console.log(`  ✅ 주문 취소됨`);
             } catch (cancelError) {
               console.error(`  ❌ 주문 취소 실패: ${cancelError.message}`);
@@ -7461,7 +7648,7 @@ class MultiCoinTrader {
 
           // 잔액 확인
           try {
-            const accounts = await this.upbit.getAccounts();
+            const accounts = await this.upbit.getAccounts({ priority: 'risk' });
             const krwAccount = accounts.find(acc => acc.currency === 'KRW');
             const assetAccount = accounts.find(acc => acc.currency === coin.split('-')[1]);
             const settlementEvidenceRecorded = this.recordLiveExecutionEvidence(this.createLiveExecutionEvidence({
@@ -7598,7 +7785,7 @@ class MultiCoinTrader {
 
       return accounts;
     }
-    return await this.upbit.getAccounts();
+    return await this.upbit.getAccounts({ priority: 'risk' });
   }
 
   /**

@@ -5,10 +5,11 @@
   "description": "Native SwiftUI app for CoinPilot account and activity data",
   "scripts": {
     "stage:web": "node scripts/stage-web.mjs",
+    "market-data:pack": "node scripts/fetchBundledLocalMarketData.mjs",
     "ios:open": "open ios/App/App.xcodeproj",
     "test:auto-connect": "node --test tests/AutoConnectTests.mjs",
     "test:server-policy": "swiftc ios/App/App/ServerAddressPolicy.swift tests/ServerAddressPolicyTests.swift -o /tmp/coinpilot-ios-server-policy-tests && /tmp/coinpilot-ios-server-policy-tests",
-    "test:store": "swiftc -D COINPILOT_TEST_SIMULATOR_TOKEN_STORE ios/App/App/ServerAddressPolicy.swift ios/App/App/CoinPilotStore.swift ios/App/App/CoinPilotBundledPreview.swift tests/CoinPilotStoreTests.swift -o /tmp/coinpilot-ios-store-tests && /tmp/coinpilot-ios-store-tests",
+    "test:store": "swiftc -D COINPILOT_TEST_SIMULATOR_TOKEN_STORE ios/App/App/ServerAddressPolicy.swift ios/App/App/CoinPilotStore.swift ios/App/App/CoinPilotBundledPreview.swift ios/App/App/CoinPilotBundledMarketData.swift tests/CoinPilotStoreTests.swift -o /tmp/coinpilot-ios-store-tests && /tmp/coinpilot-ios-store-tests",
     "ios:build:sim": "xcodebuild -project ios/App/App.xcodeproj -scheme App -sdk iphonesimulator -configuration Debug -destination 'generic/platform=iOS Simulator' COINPILOT_DATA_MODE=server CODE_SIGNING_ALLOWED=NO build",
     "ios:build:preview": "xcodebuild -project ios/App/App.xcodeproj -scheme App -sdk iphonesimulator -configuration Debug -destination 'generic/platform=iOS Simulator' COINPILOT_DATA_MODE=bundled-preview CODE_SIGNING_ALLOWED=NO build"
   }

@@ -1,0 +1,56 @@
+{
+  "schema": "coinpilot.paper-forward-position-observation.v1",
+  "observedAt": "2026-09-29T14:13:31.315Z",
+  "researchOnly": true,
+  "promoted": false,
+  "source": {
+    "directory": ".paper-forward-sealed-rsi-20260928-r5",
+    "processId": 11906,
+    "processAlive": true,
+    "heartbeatAt": "2026-09-29T14:13:31.315Z",
+    "cycleCount": 15608
+  },
+  "event": {
+    "kind": "new_observed_strict_paper_open_position",
+    "market": "KRW-SOL",
+    "signalTime": "2026-09-29T14:08:00",
+    "entryTime": "2026-09-29T14:09:08.280Z",
+    "entryPriceKrw": 163000,
+    "amount": 1.226288389570552,
+    "investmentNotionalKrw": 199889.00949699998,
+    "entryDelayMs": 2075,
+    "executionDriftPercent": -0.06131207847946045,
+    "paperPathMfePercent": 0.06134969325153375,
+    "paperPathMaePercent": -0.245398773006135,
+    "openPositionCount": 1,
+    "strictClosedTradeCount": 8,
+    "strictRecordedNetProfitKrw": -709.6865830314568,
+    "realizedPnlChanged": false
+  },
+  "costAndEvidenceBoundary": {
+    "configuredSlippageRate": 0.001,
+    "configuredTradingFeeRate": 0.0005,
+    "paperExecutionCostModel": null,
+    "paperExecutionSlippageRate": null,
+    "paperExecutionTradingFeeRate": null,
+    "paperObservedEntryPrice": null,
+    "paperObservedExitPrice": null,
+    "actualFillsObserved": false,
+    "interpretation": "This is an open simulated position, not an exchange order or fill. Per-trade cost audit for a close is not yet applicable. Recorded MFE/MAE are paper candle-path metrics, not realized execution evidence. Do not apply an additional cost deduction until the existing per-trade cost basis is verified."
+  },
+  "runtimeHealth": {
+    "active": true,
+    "analysisContinuity": true,
+    "riskContinuity": true,
+    "stopReason": null,
+    "configSnapshotComplete": true,
+    "configDrift": null
+  },
+  "decision": {
+    "restart": false,
+    "configurationChanged": false,
+    "marketSetChanged": false,
+    "candidateLaunched": false,
+    "reason": "Keep the active owner intact while its strict paper position is open. The benchmark gate and candidate preflight remain closed; report the eventual close and audit its existing cost markers and config slippage before interpreting net PnL."
+  }
+}

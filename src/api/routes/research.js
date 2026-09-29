@@ -62,6 +62,8 @@ const MOMENTUM_SHADOW_QUOTE_HISTORY_WINDOW_LIMIT = Math.ceil(
   (MOMENTUM_SHADOW_QUOTE_HISTORY_WINDOW_HOURS * 60 * 60) /
     MOMENTUM_SHADOW_QUOTE_HISTORY_INTERVAL_SECONDS
 );
+const DEFAULT_MOMENTUM_SHADOW_PROJECTION_CACHE_MS = 1_000;
+const MAX_MOMENTUM_SHADOW_PROJECTION_CACHE_MS = 60_000;
 const DEFAULT_SCALP_QUOTE_COMPATIBILITY_MARKETS = [
   'KRW-BTC', 'KRW-ETH', 'KRW-XRP', 'KRW-SOL'
 ];
@@ -1204,8 +1206,22 @@ function resolveReportFile(server) {
  * truthy value; research artifacts never authorize orders.
  */
 export default function createResearchRoutes(server, {
-  paperForwardCohortRootDir = PROJECT_ROOT
+  paperForwardCohortRootDir = PROJECT_ROOT,
+  momentumShadowProjectionCacheMs = DEFAULT_MOMENTUM_SHADOW_PROJECTION_CACHE_MS,
+  projectionClock = () => Date.now()
 } = {}) {
+  const projectionCacheMs = Number(momentumShadowProjectionCacheMs);
+  if (!Number.isFinite(projectionCacheMs) || projectionCacheMs < 0 ||
+    projectionCacheMs > MAX_MOMENTUM_SHADOW_PROJECTION_CACHE_MS) {
+    throw new TypeError(
+      `momentumShadowProjectionCacheMs must be between 0 and ${MAX_MOMENTUM_SHADOW_PROJECTION_CACHE_MS}`
+    );
+  }
+  if (typeof projectionClock !== 'function') {
+    throw new TypeError('projectionClock must be a function');
+  }
+  let cachedMomentumShadowProjection = null;
+  let cachedMomentumShadowProjectionAt = null;
   const router = express.Router();
 
   const getLiveExecutionEvidenceStatus = (fileSnapshot = null) => projectLiveExecutionEvidenceStatus({
@@ -1222,7 +1238,24 @@ export default function createResearchRoutes(server, {
     return res.json(getLiveExecutionEvidenceStatus(createRequestLocalFileSnapshot()));
   });
 
+  // This diagnostic-only route reads many local ledgers synchronously. A
+  // bounded per-router cache shares dashboard refresh bursts; it never feeds
+  // the trading gate, and the response reports the projection's age.
   router.get('/momentum-shadow', (req, res) => {
+    const observedAt = Number(projectionClock());
+    const now = Number.isFinite(observedAt) ? observedAt : Date.now();
+    const cacheAgeMs = cachedMomentumShadowProjectionAt === null
+      ? null
+      : Math.max(0, now - cachedMomentumShadowProjectionAt);
+    if (projectionCacheMs > 0 && cachedMomentumShadowProjection &&
+      cacheAgeMs !== null && cacheAgeMs < projectionCacheMs) {
+      return res.json({
+        ...cachedMomentumShadowProjection,
+        projectionFetchedAt: new Date(cachedMomentumShadowProjectionAt).toISOString(),
+        projectionAgeMs: cacheAgeMs
+      });
+    }
+
     const fileSnapshot = createRequestLocalFileSnapshot();
     const fallbackInitialBalance = Number(process.env.MOMO_SHADOW_INITIAL_BALANCE) || 100_000_000;
     const quoteHistorySource = readMomentumShadowQuoteHistoryRecords(server, fileSnapshot);
@@ -1288,7 +1321,7 @@ export default function createResearchRoutes(server, {
         readiness: projectMomentumShadowFixedHoldReadiness(server, { quoteCross: true }, fileSnapshot)
       }
     ];
-    return res.json({
+    const projection = {
       available: books.some(book => book.available),
       researchOnly: true,
       promoted: false,
@@ -1299,6 +1332,14 @@ export default function createResearchRoutes(server, {
       candidateReadiness,
       candidateReadinessVariants,
       books
+    };
+    const completedAtValue = Number(projectionClock());
+    cachedMomentumShadowProjectionAt = Number.isFinite(completedAtValue) ? completedAtValue : Date.now();
+    cachedMomentumShadowProjection = projectionCacheMs > 0 ? projection : null;
+    return res.json({
+      ...projection,
+      projectionFetchedAt: new Date(cachedMomentumShadowProjectionAt).toISOString(),
+      projectionAgeMs: 0
     });
   });
 

@@ -1,0 +1,80 @@
+{
+  "schema": "coinpilot.paper.best-level-depth-sensitivity.v1",
+  "generatedAt": "2026-09-29T13:40:47.131Z",
+  "researchOnly": true,
+  "promoted": false,
+  "paperSession": {
+    "sessionId": "paper-1790604243722",
+    "processId": 11906,
+    "activeAtRead": true,
+    "heartbeatAt": "2026-09-29T13:26:58.303Z",
+    "strictClosedTrades": 8,
+    "medianEntryNotionalKrw": 199876.01,
+    "configuredTradingFeeRatePerSide": 0.0005,
+    "configuredSlippageRatePerSide": 0.001,
+    "actualFillsObserved": false
+  },
+  "quoteHistoryWindow": {
+    "hours": 24,
+    "reports": 139,
+    "completeReports": 139,
+    "reportsWithErrors": 0,
+    "samplesPerReport": 5,
+    "latestReportAt": "2026-09-29T13:39:56.800Z",
+    "latestReportAgeSecondsAtAnalysis": 46,
+    "gapsOver900Seconds": 2,
+    "maxCadenceGapSecondsOver900": 1285.042,
+    "targetOrderNotionalKrw": 199870,
+    "roundTripFeeAndConfiguredSlippagePercentBeforeSpread": 0.3
+  },
+  "markets": {
+    "KRW-BTC": {
+      "reportsWithAnySampleMinimumBidBelowTarget": 69,
+      "reportsWithAnySampleMinimumAskBelowTarget": 33,
+      "reportsWhereBothMinimumSidesBelowTarget": 21,
+      "p05OfReportMinimumBidNotionalKrw": 5000.56,
+      "medianOfReportMinimumBidNotionalKrw": 200306.14,
+      "p05OfReportMinimumAskNotionalKrw": 4849.39,
+      "medianOfReportMinimumAskNotionalKrw": 1822576.78
+    },
+    "KRW-ETH": {
+      "reportsWithAnySampleMinimumBidBelowTarget": 17,
+      "reportsWithAnySampleMinimumAskBelowTarget": 8,
+      "reportsWhereBothMinimumSidesBelowTarget": 3,
+      "p05OfReportMinimumBidNotionalKrw": 42018.05,
+      "medianOfReportMinimumBidNotionalKrw": 3659347.11,
+      "p05OfReportMinimumAskNotionalKrw": 93816.23,
+      "medianOfReportMinimumAskNotionalKrw": 8390168.27
+    },
+    "KRW-XRP": {
+      "reportsWithAnySampleMinimumBidBelowTarget": 16,
+      "reportsWithAnySampleMinimumAskBelowTarget": 13,
+      "reportsWhereBothMinimumSidesBelowTarget": 2,
+      "p05OfReportMinimumBidNotionalKrw": 20000,
+      "medianOfReportMinimumBidNotionalKrw": 6678760.59,
+      "p05OfReportMinimumAskNotionalKrw": 30000,
+      "medianOfReportMinimumAskNotionalKrw": 11645196.91
+    },
+    "KRW-SOL": {
+      "reportsWithAnySampleMinimumBidBelowTarget": 13,
+      "reportsWithAnySampleMinimumAskBelowTarget": 6,
+      "reportsWhereBothMinimumSidesBelowTarget": 0,
+      "p05OfReportMinimumBidNotionalKrw": 60000,
+      "medianOfReportMinimumBidNotionalKrw": 6983332.08,
+      "p05OfReportMinimumAskNotionalKrw": 303772.94,
+      "medianOfReportMinimumAskNotionalKrw": 15748373.21
+    }
+  },
+  "interpretation": {
+    "metricDefinition": "Each quote-history depth minimum is the smallest best-level notional among five samples in one report. A report counted below target means at least one of those samples had less top-level notional than the r5 median entry amount.",
+    "limitations": [
+      "Best quote only; deeper order-book levels are not retained.",
+      "Report windows are periodic, not matched to strict entry/exit timestamps.",
+      "Notional coverage is not a fill, slippage, or market-impact estimate."
+    ],
+    "nextEvidenceRequirement": "Persist timestamped multi-level book depth at intended size around paper entry/exit before applying any depth-based order-sizing rule.",
+    "runtimeSettingsChanged": false,
+    "marketListChanged": false,
+    "candidateLaunched": false
+  }
+}

@@ -7,6 +7,11 @@ const STORE_SCHEMA = 'coinpilot.manual-order-idempotency.v1';
 const WRITER_LOCK_SCHEMA = 'coinpilot.manual-order-writer-lock.v1';
 const VALID_MODES = new Set(['DRY_RUN', 'LIVE']);
 const VALID_STATES = new Set(['pending', 'unknown', 'completed']);
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function isUuid(value) {
+  return typeof value === 'string' && UUID_PATTERN.test(value);
+}
 
 function probeOwnerPid(pid) {
   try {
@@ -177,6 +182,9 @@ function validateRecord(record) {
     !Number.isFinite(Date.parse(record.updatedAt))) {
     throw new Error('manual order idempotency record is incomplete');
   }
+  if (record.clientIntentId !== undefined && !isUuid(record.clientIntentId)) {
+    throw new Error('manual order idempotency client intent id is invalid');
+  }
   if (record.state === 'completed' &&
     (!Number.isInteger(record.responseStatus) ||
       record.responseStatus < 100 || record.responseStatus > 599 ||
@@ -301,6 +309,41 @@ export class ManualOrderIdempotencyStore {
       current.owner.lockId !== this.writerLock.lockId ||
       !sameFile(current.stat, this.writerLock.stat)) {
       throw writerLockError(this.writerLockPath, 'ambiguous', 'this process no longer owns the profile lock');
+    }
+    return true;
+  }
+
+  adoptWriterLockFrom(sourceStore) {
+    if (!(sourceStore instanceof ManualOrderIdempotencyStore)) {
+      throw new TypeError('Writer-lock ownership can only be adopted from another manual-order store.');
+    }
+    if (sourceStore === this) {
+      if (!this.writerLock) {
+        throw writerLockError(this.writerLockPath, 'ambiguous', 'store does not own a profile lock');
+      }
+      this.verifyWriterLock();
+      return true;
+    }
+    if (this.writerLock) {
+      throw writerLockError(this.writerLockPath, 'ambiguous', 'target store already owns a profile lock');
+    }
+    if (!sourceStore.writerLock) {
+      throw writerLockError(sourceStore.writerLockPath, 'ambiguous', 'source store does not own a profile lock');
+    }
+    if (this.writerLockPath !== sourceStore.writerLockPath || this.hostname !== sourceStore.hostname) {
+      throw writerLockError(this.writerLockPath, 'ambiguous', 'profile lock path or host does not match');
+    }
+
+    sourceStore.verifyWriterLock();
+    const ownership = sourceStore.writerLock;
+    this.writerLock = ownership;
+    sourceStore.writerLock = null;
+    try {
+      this.verifyWriterLock();
+    } catch (error) {
+      this.writerLock = null;
+      sourceStore.writerLock = ownership;
+      throw error;
     }
     return true;
   }
@@ -480,7 +523,7 @@ export class ManualOrderIdempotencyStore {
     };
   }
 
-  async reserve({ profileId, idempotencyKey, method, endpoint, body, mode } = {}) {
+  async reserve({ profileId, idempotencyKey, method, endpoint, body, mode, clientIntentId = null } = {}) {
     await this.initialize();
     return this.exclusive(async () => {
       const identity = this.getRecordId(profileId, idempotencyKey);
@@ -488,6 +531,9 @@ export class ManualOrderIdempotencyStore {
       const normalizedEndpoint = String(endpoint || '');
       if (!normalizedMethod || !normalizedEndpoint || !VALID_MODES.has(mode)) {
         throw new TypeError('manual order idempotency request is incomplete');
+      }
+      if (clientIntentId !== null && (mode !== 'LIVE' || !isUuid(clientIntentId))) {
+        throw new TypeError('manual order client intent id is invalid');
       }
       const bodyHash = sha256(canonicalize(body));
       const requestHash = sha256(canonicalize({ method: normalizedMethod, endpoint: normalizedEndpoint, bodyHash }));
@@ -528,6 +574,7 @@ export class ManualOrderIdempotencyStore {
         operation: `${normalizedMethod} ${normalizedEndpoint}`,
         mode,
         state: 'pending',
+        ...(clientIntentId ? { clientIntentId } : {}),
         createdAt: now,
         updatedAt: now
       };
@@ -577,6 +624,36 @@ export class ManualOrderIdempotencyStore {
         await this.persistJournal(nextRecords);
         this.records = nextRecords;
       }
+      return cloneJson(completed);
+    });
+  }
+
+  async completeRecovered(recordId, { status, body } = {}) {
+    await this.initialize();
+    return this.exclusive(async () => {
+      const existing = this.records.get(recordId);
+      if (!existing) throw new Error('manual order idempotency reservation is missing');
+      if (existing.state === 'completed') return cloneJson(existing);
+      if (!['pending', 'unknown'].includes(existing.state) || existing.mode !== 'LIVE' ||
+        !isUuid(existing.clientIntentId)) {
+        throw new Error('manual order idempotency reservation is not recoverable');
+      }
+      if (!Number.isInteger(status) || status < 100 || status > 599) {
+        throw new TypeError('manual order response status is invalid');
+      }
+      const completed = {
+        ...existing,
+        state: 'completed',
+        responseStatus: status,
+        responseBody: cloneJson(body),
+        recovered: true,
+        updatedAt: this.now()
+      };
+      delete completed.reasonCode;
+      const nextRecords = new Map(this.records);
+      nextRecords.set(recordId, completed);
+      await this.persistJournal(nextRecords);
+      this.records = nextRecords;
       return cloneJson(completed);
     });
   }
@@ -785,8 +862,16 @@ function requestResponsePromise(req, res, next, reservation, store, tradingSyste
 }
 
 /** Middleware factory shared by manual trade and virtual-wallet routes only. */
-export function createManualOrderIdempotencyMiddleware(server, { paths } = {}) {
+export function createManualOrderIdempotencyMiddleware(server, {
+  paths,
+  liveReconciliationPaths,
+  recoverLiveRequest
+} = {}) {
   const supportedPaths = paths instanceof Set ? paths : new Set(paths || []);
+  const recoverablePaths = liveReconciliationPaths instanceof Set
+    ? liveReconciliationPaths
+    : new Set(liveReconciliationPaths || []);
+  const inFlightRecordIds = new Set();
   return async function manualOrderIdempotencyMiddleware(req, res, next) {
     if (req.method !== 'POST' || !supportedPaths.has(req.path)) return next();
 
@@ -822,6 +907,7 @@ export function createManualOrderIdempotencyMiddleware(server, { paths } = {}) {
     }
 
     const mode = tradingSystem?.dryRun === true ? 'DRY_RUN' : 'LIVE';
+    const clientIntentId = mode === 'LIVE' && recoverablePaths.has(req.path) ? randomUUID() : null;
     let reservation;
     try {
       reservation = await store.reserve({
@@ -830,7 +916,8 @@ export function createManualOrderIdempotencyMiddleware(server, { paths } = {}) {
         method: req.method,
         endpoint: canonicalManualRequestEndpoint(req),
         body: req.body ?? null,
-        mode
+        mode,
+        clientIntentId
       });
     } catch (error) {
       if (String(error?.code || '').startsWith('MANUAL_ORDER_WRITER_LOCK_')) {
@@ -846,11 +933,53 @@ export function createManualOrderIdempotencyMiddleware(server, { paths } = {}) {
       return respondWithIdempotencyStatus(res, reservation.responseStatus, reservation.responseBody, 'completed');
     }
     if (reservation.kind === 'pending') {
+      if (inFlightRecordIds.has(reservation.record.recordId)) {
+        return respondWithIdempotencyStatus(res, 202, pendingResponse('pending'), 'pending');
+      }
+      const canReconcile = reservation.record.mode === 'LIVE' && mode === 'LIVE' &&
+        recoverablePaths.has(req.path) && isUuid(reservation.record.clientIntentId) &&
+        typeof recoverLiveRequest === 'function' && typeof store.completeRecovered === 'function';
+      if (canReconcile) {
+        try {
+          const recovered = await recoverLiveRequest({ req, record: reservation.record, tradingSystem });
+          if (recovered && Number.isInteger(recovered.status) && recovered.body !== undefined) {
+            await store.completeRecovered(reservation.record.recordId, recovered);
+            return respondWithIdempotencyStatus(res, recovered.status, recovered.body, 'completed');
+          }
+        } catch {
+          // Readback failures remain unresolved. The route must never be replayed.
+        }
+        try {
+          await store.markUnknown(reservation.record.recordId, 'live_order_reconciliation_incomplete');
+        } catch {
+          // Preserve the pending reservation when the unknown-state write fails.
+        }
+        return respondWithIdempotencyStatus(res, 202, unknownResponse(), 'unknown');
+      }
+      if (reservation.record.mode === 'LIVE' && recoverablePaths.has(req.path) && mode === 'LIVE') {
+        try {
+          await store.markUnknown(reservation.record.recordId, 'live_order_intent_unavailable');
+        } catch {
+          // Keep the durable reservation unresolved when it cannot be updated.
+        }
+        return respondWithIdempotencyStatus(res, 202, unknownResponse(), 'unknown');
+      }
       const status = reservation.state === 'unknown' ? 'unknown' : 'pending';
       return respondWithIdempotencyStatus(res, 202, pendingResponse(reservation.state), status);
     }
     if (reservation.kind !== 'reserved' || reservation.record.mode !== mode) {
       return respondWithIdempotencyStatus(res, 202, unknownResponse(), 'unknown');
+    }
+    if (mode === 'LIVE' && recoverablePaths.has(req.path)) {
+      if (!isUuid(reservation.record.clientIntentId)) {
+        try {
+          await store.markUnknown(reservation.record.recordId, 'live_order_intent_unavailable');
+        } catch {
+          // Do not allow an unlinked manual request to reach an exchange POST.
+        }
+        return respondWithIdempotencyStatus(res, 202, unknownResponse(), 'unknown');
+      }
+      req.manualOrderClientIntentId = reservation.record.clientIntentId;
     }
 
     const execute = transaction => requestResponsePromise(req, res, next, reservation, store, tradingSystem, transaction);
@@ -864,7 +993,10 @@ export function createManualOrderIdempotencyMiddleware(server, { paths } = {}) {
         return respondWithIdempotencyStatus(res, 202, unknownResponse(), 'unknown');
       }
       try {
-        return await tradingSystem.withManualPortfolioTransaction(transaction => execute(transaction));
+        return await tradingSystem.withManualPortfolioTransaction(transaction => {
+          inFlightRecordIds.add(reservation.record.recordId);
+          return execute(transaction).finally(() => inFlightRecordIds.delete(reservation.record.recordId));
+        });
       } catch {
         try {
           await store.markUnknown(reservation.record.recordId, 'portfolio_transaction_failed');
@@ -875,7 +1007,12 @@ export function createManualOrderIdempotencyMiddleware(server, { paths } = {}) {
         return undefined;
       }
     }
-    return execute(null);
+    inFlightRecordIds.add(reservation.record.recordId);
+    try {
+      return await execute(null);
+    } finally {
+      inFlightRecordIds.delete(reservation.record.recordId);
+    }
   };
 }
 

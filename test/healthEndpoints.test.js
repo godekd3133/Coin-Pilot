@@ -20,7 +20,7 @@ async function stopDashboard({ dashboard, trader }) {
   const closed = dashboard.httpServer?.listening
     ? once(dashboard.httpServer, 'close')
     : Promise.resolve();
-  dashboard.stop();
+  await dashboard.stop();
   trader.stop();
   await closed;
 }
@@ -124,18 +124,41 @@ test('/ready blocks a running LIVE service while exchange state is unknown', asy
   }
 });
 
-test('/ready reports 200 with health checks once the trader is running', async () => {
+test('/service-ready stays available while /trading-ready waits for a complete fresh analysis cycle', async () => {
   const ctx = await startDashboard();
   try {
-    ctx.trader.start();
-    const res = await fetch(`${ctx.baseUrl}/ready`);
-    assert.equal(res.status, 200);
-    const body = await res.json();
-    assert.equal(body.ready, true);
-    assert.equal(body.checks.traderRunning, true);
-    assert.equal(body.checks.analysisHealthy, true);
-    assert.equal(body.checks.riskHealthy, true);
-    assert.ok('lastCycleAt' in body.checks);
+    ctx.trader.isRunning = true;
+
+    const serviceReady = await fetch(`${ctx.baseUrl}/service-ready`);
+    assert.equal(serviceReady.status, 200);
+    assert.equal((await serviceReady.json()).ready, true);
+
+    const beforeFirstCycle = await fetch(`${ctx.baseUrl}/trading-ready`);
+    assert.equal(beforeFirstCycle.status, 503);
+    const beforeFirstCycleBody = await beforeFirstCycle.json();
+    assert.equal(beforeFirstCycleBody.ready, false);
+    assert.equal(beforeFirstCycleBody.checks.traderRunning, true);
+    assert.equal(beforeFirstCycleBody.checks.analysisFirstCycleComplete, false);
+    assert.equal(beforeFirstCycleBody.checks.analysisCycleFresh, false);
+
+    const firstCycleAt = new Date().toISOString();
+    ctx.trader.getAnalysisDataHealthStatus = () => ({
+      failClosed: false,
+      lastCompleteAt: firstCycleAt,
+      maxAnalysisDataGapSeconds: 180
+    });
+    ctx.trader.getRiskMonitorStatus = () => ({ failClosed: false });
+
+    const afterFirstCycle = await fetch(`${ctx.baseUrl}/trading-ready`);
+    assert.equal(afterFirstCycle.status, 200);
+    const afterFirstCycleBody = await afterFirstCycle.json();
+    assert.equal(afterFirstCycleBody.ready, true);
+    assert.equal(afterFirstCycleBody.checks.analysisFirstCycleComplete, true);
+    assert.equal(afterFirstCycleBody.checks.analysisCycleFresh, true);
+
+    // Preserve the legacy readiness contract during migration.
+    const legacyReady = await fetch(`${ctx.baseUrl}/ready`);
+    assert.equal(legacyReady.status, 200);
   } finally {
     await stopDashboard(ctx);
   }

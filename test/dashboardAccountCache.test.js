@@ -269,8 +269,9 @@ test('LIVE order preflight account read bypasses the observer account cache', as
   const trader = {
     dryRun: false,
     upbit: {
-      async getTicker(market) {
-        return [{ market, trade_price: 100 }];
+      async getTicker(markets) {
+        const requested = Array.isArray(markets) ? markets : [markets];
+        return requested.map(market => ({ market, trade_price: 100, trade_timestamp: Date.now() }));
       }
     },
     async getAccountInfo() {
@@ -302,7 +303,7 @@ test('LIVE order preflight account read bypasses the observer account cache', as
       body: JSON.stringify({ coin: 'KRW-BTC', amount: 10_000 })
     });
     const result = await response.json();
-    assert.equal(response.status, 503);
+    assert.equal(response.status, 503, JSON.stringify(result));
     assert.equal(result.success, false);
     assert.equal(preflightReads, 1);
     assert.equal(accountReads, 2);

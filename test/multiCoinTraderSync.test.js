@@ -6,6 +6,7 @@ import test from 'node:test';
 import axios from 'axios';
 import UpbitAPI from '../src/api/upbit.js';
 import { executeLiveOrderWithEvidence } from '../src/api/routes/trading.js';
+import { inspectLiveExecutionEvidenceFile } from '../src/research/liveExecutionEvidence.js';
 import MultiCoinTrader from '../src/trader/multiCoinTrader.js';
 
 function makeLiveTrader(root, overrides = {}) {
@@ -88,6 +89,51 @@ test('failed exchange position sync skips analysis and remains due for retry', a
   assert.equal(accountReads, 0);
   assert.equal(trader._lastSyncTime, undefined);
   assert.equal(trader.analysisCycleProgress, null);
+});
+
+test('manual-only LIVE preparation syncs state without starting entries or cancelling existing orders', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'coinpilot-live-manual-prepare-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+
+  const trader = makeLiveTrader(root, {
+    targetCoins: ['KRW-BTC', 'KRW-ETH'],
+    accessKey: 'test-access-key',
+    secretKey: 'test-secret-key',
+    liveManualPrepareOnBoot: true
+  });
+  const staleOrderId = 'owned-stale-order';
+  trader._liveEngineOrderIds.add(staleOrderId);
+  trader._liveEngineOrderMarkets.set(staleOrderId, 'KRW-BTC');
+  let cancelAttempts = 0;
+  trader.upbit.getOrders = async market => market === 'KRW-BTC'
+    ? [{
+        uuid: staleOrderId,
+        state: 'wait',
+        created_at: new Date(Date.now() - 6 * 60 * 1000).toISOString()
+      }]
+    : [];
+  trader.upbit.getAccounts = async () => [
+    { currency: 'KRW', balance: '1000000', locked: '0' }
+  ];
+  trader.upbit.cancelOrder = async () => {
+    cancelAttempts += 1;
+    return { state: 'cancel' };
+  };
+
+  const prepared = await trader.prepareManualLiveSession();
+
+  assert.equal(prepared.ready, true);
+  assert.equal(trader.isRunning, false, 'Manual-only preparation must not start the automated cycle.');
+  assert.equal(trader._entriesPaused, true, 'New automatic entries must remain paused.');
+  assert.equal(trader.stopReason, 'operator_stop', 'A verified manual-only server must report an operator-stopped state.');
+  assert.equal(trader.getRuntimeSafetyStatus().exchangeStateKnown, true);
+  assert.equal(trader.getRuntimeSafetyStatus().runtimeState, 'STOPPED');
+  assert.deepEqual(prepared.pendingOrderMarkets, ['KRW-BTC']);
+  assert.equal(cancelAttempts, 0, 'Reconciliation must leave existing exchange orders untouched.');
+  assert.equal(trader.canExecuteLiveOrder('KRW-BTC', { action: 'BUY' }), false);
+  assert.equal(trader.canExecuteLiveOrder('KRW-ETH', { action: 'BUY' }), true);
+
+  trader.stop();
 });
 
 test('unverified LIVE order state retries reconciliation before the regular sync interval', async t => {
@@ -451,6 +497,74 @@ test('durable intent is fsynced before POST and UUID-less timeout blocks only it
   const resolvedEvents = fs.readFileSync(evidenceFile, 'utf8').trim().split('\n').map(line => JSON.parse(line));
   assert.ok(resolvedEvents.some(event => event.eventType === 'ORDER_SUBMITTED' && event.orderId === 'late-order-response'));
   assert.ok(resolvedEvents.some(event => event.eventType === 'FILL_OBSERVED' && event.orderId === 'late-order-response'));
+});
+
+test('pre-dispatch queue rejection resolves the durable intent without making the market ambiguous', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'coinpilot-live-pre-dispatch-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const evidenceFile = path.join(root, 'live-execution.jsonl');
+  const trader = makeLiveTrader(root, { liveExecutionEvidenceFile: evidenceFile });
+  markLiveTraderExchangeReady(trader);
+  let orderClientCalls = 0;
+  trader.upbit.order = async () => {
+    orderClientCalls += 1;
+    return {
+      success: false,
+      error: {
+        code: 'upbit_request_not_dispatched',
+        message: 'queue full before network dispatch',
+        dispatched: false,
+        schedulerCode: 'UPBIT_QUEUE_FULL'
+      }
+    };
+  };
+
+  const result = await trader.submitLiveOrder('KRW-BTC', 'bid', 100_000, null, 'price');
+
+  assert.equal(orderClientCalls, 1);
+  assert.equal(result.success, false);
+  assert.equal(result.error.code, 'upbit_request_not_dispatched');
+  assert.equal(trader._liveOrderStateUnknownMarkets.has('KRW-BTC'), false);
+  assert.equal(trader._livePendingOrderMarkets.has('KRW-BTC'), false);
+  assert.equal(trader._liveUnresolvedOrderIntents.size, 0);
+  const events = fs.readFileSync(evidenceFile, 'utf8').trim().split('\n').map(line => JSON.parse(line));
+  assert.deepEqual(events.map(event => event.eventType), ['ORDER_INTENT', 'ORDER_REJECTED']);
+  assert.equal(events[1].errorCode, 'upbit_request_not_dispatched');
+  assert.equal(inspectLiveExecutionEvidenceFile(evidenceFile)
+    .reconciliation.unresolvedOrderIntentCount, 0);
+});
+
+test('UI LIVE pre-dispatch rejection is a completed result and does not leave an idempotency lock', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'coinpilot-ui-live-pre-dispatch-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const evidenceFile = path.join(root, 'live-execution.jsonl');
+  const trader = makeLiveTrader(root, { liveExecutionEvidenceFile: evidenceFile });
+  markLiveTraderExchangeReady(trader);
+  trader.upbit.order = async () => ({
+    success: false,
+    error: {
+      code: 'upbit_request_not_dispatched',
+      message: 'queue full before network dispatch',
+      dispatched: false,
+      schedulerCode: 'UPBIT_QUEUE_FULL'
+    }
+  });
+
+  const result = await executeLiveOrderWithEvidence(trader, {
+    market: 'KRW-BTC',
+    side: 'bid',
+    volume: 100_000,
+    orderType: 'price',
+    requested: { amount: 100_000 }
+  });
+
+  assert.equal(result.blocked, false);
+  assert.equal(result.evidenceRecorded, true);
+  assert.equal(result.orderResult.error.code, 'upbit_request_not_dispatched');
+  assert.equal(trader._liveUnresolvedOrderIntents.size, 0);
+  assert.equal(trader._liveEvidenceBlockedMarkets.has('KRW-BTC'), false);
+  const events = fs.readFileSync(evidenceFile, 'utf8').trim().split('\n').map(line => JSON.parse(line));
+  assert.deepEqual(events.map(event => event.eventType), ['ORDER_INTENT', 'ORDER_REJECTED']);
 });
 
 test('DRY_RUN refuses the LIVE submit method without writing evidence or calling the order client', async t => {

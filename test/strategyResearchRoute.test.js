@@ -45,7 +45,7 @@ test('strategy research route exposes a diagnostic report but hard-forces promot
     assert.equal(body.reportFile, path.basename(reportFile));
     assert.equal(body.variants[0].portfolio.metrics.tradeCount, 20);
   } finally {
-    dashboard.stop();
+    await dashboard.stop();
     trader.stop();
     if (fs.existsSync(reportFile)) fs.unlinkSync(reportFile);
   }
@@ -66,7 +66,7 @@ test('strategy research route reports an unconfigured report without inventing r
     assert.equal(body.promoted, false);
     assert.equal(body.reason, 'research_report_not_configured');
   } finally {
-    dashboard.stop();
+    await dashboard.stop();
     trader.stop();
   }
 });
@@ -124,7 +124,7 @@ test('strategy research route projects same-window scalping variants and invalid
     assert.equal(staleBody.reportFreshness.fresh, false);
     assert.equal(staleBody.reportFreshness.reason, 'stale');
   } finally {
-    dashboard.stop();
+    await dashboard.stop();
     trader.stop();
     if (fs.existsSync(reportFile)) fs.unlinkSync(reportFile);
   }
@@ -266,7 +266,7 @@ test('momentum shadow route projects the latest quote snapshot as read-only evid
     assert.equal(body.quoteQualitySnapshot.allObservedMarketCostCompatibility.rows.length, 2);
     assert.equal(body.quoteQualitySnapshot.allObservedMarketCostCompatibility.rows.find(row => row.market === 'KRW-DOGE').status, 'P95_ABOVE_ADVERSE_SLIPPAGE_BUDGET');
   } finally {
-    dashboard.stop();
+    await dashboard.stop();
     trader.stop();
     if (fs.existsSync(quoteFile)) fs.unlinkSync(quoteFile);
     if (fs.existsSync(historyFile)) fs.unlinkSync(historyFile);
@@ -286,7 +286,10 @@ test('momentum shadow quote snapshot marks stale and future reports as not curre
   const trader = createMockTrader();
   trader.config.momentumShadowQuoteReportFile = quoteFile;
   trader.config.momentumShadowQuoteMaxAgeSeconds = 60;
-  const dashboard = new DashboardServer(trader, 0, { env: { ...process.env, DASHBOARD_TOKEN: '' } });
+  const dashboard = new DashboardServer(trader, 0, {
+    env: { ...process.env, DASHBOARD_TOKEN: '' },
+    momentumShadowProjectionCacheMs: 0
+  });
   const httpServer = await dashboard.start();
   const port = httpServer.address().port;
   try {
@@ -308,7 +311,7 @@ test('momentum shadow quote snapshot marks stale and future reports as not curre
     assert.equal(futureBody.candidateReadiness.quoteSampler.ready, false);
     assert.ok(futureBody.candidateReadiness.blockers.includes('quote_quality_report_timestamp_invalid'));
   } finally {
-    dashboard.stop();
+    await dashboard.stop();
     trader.stop();
     if (fs.existsSync(quoteFile)) fs.unlinkSync(quoteFile);
   }
@@ -584,7 +587,7 @@ test('momentum shadow route projects marked equity as read-only research evidenc
     assert.equal(body.books[9].label, '2일 보유 · 매수·매도 호가 기준');
     assert.equal(body.books[9].available, false);
   } finally {
-    dashboard.stop();
+    await dashboard.stop();
     trader.stop();
     if (fs.existsSync(historyFile)) fs.unlinkSync(historyFile);
     fs.rmSync(fixedDir, { recursive: true, force: true });
@@ -628,7 +631,7 @@ test('momentum shadow route accepts an isolated paper-forward cohort root', asyn
   const app = express();
   app.use('/api', createResearchRoutes({
     tradingSystem: { config, dryRun: true, liveExecutionEvidenceFile: liveEvidenceFile }
-  }, { paperForwardCohortRootDir: cohortRoot }));
+  }, { paperForwardCohortRootDir: cohortRoot, momentumShadowProjectionCacheMs: 0 }));
   const server = app.listen(0, '127.0.0.1');
   try {
     process.env.MOMO_SHADOW_OWNER_DIRS = bookDirs.join(',');
@@ -765,7 +768,7 @@ test('momentum shadow route blocks a negative trade-return confidence bound', as
     assert.ok(body.books[0].promotionBlockers.some(blocker => blocker.includes('기록된 모의 거래 수익률이 0% 이하')));
     assert.ok(body.books[0].promotionBlockers.some(blocker => blocker.includes('관찰을 실행하는 프로그램이 실행 중 상태가 아닙니다')));
   } finally {
-    dashboard.stop();
+    await dashboard.stop();
     trader.stop();
     fs.rmSync(fixedDir, { recursive: true, force: true });
   }
@@ -823,7 +826,7 @@ test('momentum shadow route does not treat zero realized return as paper profit'
     assert.equal(body.books[0].realizedTradeConfidence.lowerBoundPercent, 0);
     assert.ok(body.books[0].promotionBlockers.some(blocker => blocker.includes('기록된 모의 거래 수익률이 0% 이하')));
   } finally {
-    dashboard.stop();
+    await dashboard.stop();
     trader.stop();
     fs.rmSync(fixedDir, { recursive: true, force: true });
   }
@@ -897,7 +900,7 @@ test('momentum shadow route reports modeled quote boundary evidence separately f
     assert.ok(body.books[0].promotionBlockers.some(blocker => blocker.includes('매수·매도 호가 기록이 1/2건뿐이라 예상 거래 비용을 계산할 자료가 부족')));
     assert.match(body.books[0].quoteExecution.note, /not an observed fill/);
   } finally {
-    dashboard.stop();
+    await dashboard.stop();
     trader.stop();
     fs.rmSync(fixedDir, { recursive: true, force: true });
   }
@@ -958,7 +961,7 @@ test('momentum shadow variant readiness is sealed against ambient candidate env'
     assert.equal(variants.fixed_2d_quote_cross.executionModel, 'quote_cross');
     assert.equal(variants.fixed_2d_quote_cross.maxSpreadPercent, 0.5);
   } finally {
-    dashboard.stop();
+    await dashboard.stop();
     trader.stop();
     for (const key of pollutedKeys) {
       if (saved[key] === undefined) delete process.env[key];

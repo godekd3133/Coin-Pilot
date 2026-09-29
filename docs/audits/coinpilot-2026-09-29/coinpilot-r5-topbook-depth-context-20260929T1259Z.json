@@ -1,0 +1,69 @@
+{
+  "schema": "coinpilot.paper.top-of-book-depth-context.v1",
+  "generatedAt": "2026-09-29T12:59:20.491Z",
+  "researchOnly": true,
+  "promoted": false,
+  "paperSession": {
+    "sessionId": "paper-1790604243722",
+    "processId": 11906,
+    "activeAtRead": true,
+    "heartbeatAt": "2026-09-29T12:59:22.345Z",
+    "strictClosedTradeCount": 8,
+    "medianEntryNotionalKrw": 199876.01,
+    "actualFillsObserved": false
+  },
+  "quoteReport": {
+    "file": ".coinpilot-runtime/momentum-shadow/quote-quality.json",
+    "generatedAt": "2026-09-29T12:59:20.491Z",
+    "complete": true,
+    "sampleCount": 5,
+    "requestedSampleCount": 5,
+    "marketCount": 12,
+    "errors": 0,
+    "spreadCeilingPercent": 0.5,
+    "comparisonNotionalKrw": 199870,
+    "depthScope": "best bid/ask level only; not the full order book"
+  },
+  "currentFourMarkets": {
+    "KRW-BTC": {
+      "minBidNotionalKrw": 5404.13,
+      "minAskNotionalKrw": 25242.2,
+      "samplesWithBestBidCoveringNotional": 1,
+      "samplesWithBestAskCoveringNotional": 3,
+      "spreadPercentRange": [0.01843, 0.0193],
+      "illustrativeOneSpreadCostKrwAtNotional": [35.07, 38.58]
+    },
+    "KRW-ETH": {
+      "minBidNotionalKrw": 3598880.14,
+      "minAskNotionalKrw": 10116072.12,
+      "samplesWithBestBidCoveringNotional": 5,
+      "samplesWithBestAskCoveringNotional": 5,
+      "spreadPercentRange": [0.02705, 0.02705],
+      "illustrativeOneSpreadCostKrwAtNotional": [54.06, 54.07]
+    },
+    "KRW-XRP": {
+      "minBidNotionalKrw": 299787.2,
+      "minAskNotionalKrw": 2944413.4,
+      "samplesWithBestBidCoveringNotional": 5,
+      "samplesWithBestAskCoveringNotional": 5,
+      "spreadPercentRange": [0.04788, 0.0479],
+      "illustrativeOneSpreadCostKrwAtNotional": [95.7, 95.75]
+    },
+    "KRW-SOL": {
+      "minBidNotionalKrw": 294811.74,
+      "minAskNotionalKrw": 41845387.35,
+      "samplesWithBestBidCoveringNotional": 5,
+      "samplesWithBestAskCoveringNotional": 5,
+      "spreadPercentRange": [0.06126, 0.06126],
+      "illustrativeOneSpreadCostKrwAtNotional": [122.43, 122.43]
+    }
+  },
+  "interpretation": {
+    "depthCaveat": "If best-level notional is below the target, a marketable order would need deeper levels. This report does not observe those levels and does not imply the order would fail.",
+    "spreadCaveat": "One-spread costs are illustrative snapshots, not trade-time costs, fills, impact estimates, or wallet-settled P&L. Do not add them mechanically to configured slippage because the components may overlap.",
+    "nextEvidenceNeeded": "Capture timestamped multi-level order books at simulated entry and exit before calibrating size-dependent slippage or promoting any execution-cost model.",
+    "runtimeSettingsChanged": false,
+    "marketListChanged": false,
+    "candidateLaunched": false
+  }
+}

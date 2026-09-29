@@ -1,0 +1,188 @@
+- generic [active] [ref=e1]:
+  - text: / AUTO PILOT
+  - generic [ref=e3]:
+    - complementary [ref=e4]:
+      - generic [ref=e6]:
+        - generic [aria-hidden] [ref=e8]: 
+        - generic [ref=e9]: CoinPilot
+      - navigation "주 메뉴" [ref=e10]:
+        - generic [ref=e11]: 메뉴
+        - button "대시보드" [ref=e12] [cursor=pointer]:
+          - generic [aria-hidden] [ref=e13]: 
+        - button "거래" [ref=e15] [cursor=pointer]:
+          - generic [aria-hidden] [ref=e16]: 
+        - button "포트폴리오" [ref=e18] [cursor=pointer]:
+          - generic [aria-hidden] [ref=e19]: 
+        - button "시장 현황" [ref=e21] [cursor=pointer]:
+          - generic [aria-hidden] [ref=e22]: 
+        - button "전략 분석" [ref=e24] [cursor=pointer]:
+          - generic [aria-hidden] [ref=e25]: 
+        - button "의견" [ref=e27] [cursor=pointer]:
+          - generic [aria-hidden] [ref=e28]: 
+        - button "뉴스" [ref=e30] [cursor=pointer]:
+          - generic [aria-hidden] [ref=e31]: 
+        - generic [ref=e33]: 관리
+        - button "설정" [ref=e34] [cursor=pointer]:
+          - generic [aria-hidden] [ref=e35]: 
+        - button "주문 전 점검" [ref=e37] [cursor=pointer]:
+          - generic [aria-hidden] [ref=e38]: 
+        - text: 
+      - text:      
+    - generic [ref=e40]:
+      - banner [ref=e41]:
+        - group "투자 모드" [ref=e42]:
+          - button "모의투자" [ref=e43] [cursor=pointer]:
+            - generic [aria-hidden] [ref=e44]: 
+          - button "실거래" [ref=e46] [cursor=pointer]:
+            - generic [aria-hidden] [ref=e47]: 
+        - generic [ref=e49]:
+          - generic [ref=e50]: 연결 확인 중
+          - generic [ref=e53]: 09. 29. 오후 07:50
+          - text: 
+      - generic [ref=e54]:
+        - generic [ref=e55]:
+          - generic [aria-hidden] [ref=e56]: 
+          - generic [ref=e57]:
+            - strong [ref=e58]: 실거래 주문 잠금
+            - generic [ref=e59]: 실제 주문 전 점검을 마칠 때까지 주문할 수 없습니다.
+        - generic [ref=e60]:
+          - generic [ref=e61]: 설치 확인 중
+          - button "설치 방법" [ref=e62] [cursor=pointer]
+          - button "주문 전 점검 보기" [ref=e63] [cursor=pointer]:
+            - text: 주문 전 점검 보기
+            - generic [aria-hidden] [ref=e64]: 
+      - text:  
+      - main [ref=e65]:
+        - generic [ref=e66]:
+          - generic [ref=e67]:
+            - heading "대시보드" [level=1] [ref=e69]
+            - generic [ref=e70]:
+              - generic [ref=e71]: 마지막 동기화 -
+              - button "새로고침" [ref=e72] [cursor=pointer]:
+                - generic [aria-hidden] [ref=e73]: 
+                - text: 새로고침
+          - generic [ref=e74]:
+            - button "주문 전 점검 확인 중" [ref=e75] [cursor=pointer]:
+              - generic [aria-hidden] [ref=e77]: 
+              - generic [ref=e78]:
+                - strong [ref=e79]: 주문 전 점검
+                - generic [ref=e80]: 확인 중
+              - generic [aria-hidden] [ref=e81]: 
+            - button "모의투자 실행 실행 상태 확인 중" [ref=e82] [cursor=pointer]:
+              - generic [aria-hidden] [ref=e84]: 
+              - generic [ref=e85]:
+                - strong [ref=e86]: 모의투자 실행
+                - generic [ref=e87]: 실행 상태 확인 중
+              - generic [aria-hidden] [ref=e88]: 
+            - button "데이터 상태 수집 상태 확인 중" [ref=e89] [cursor=pointer]:
+              - generic [aria-hidden] [ref=e91]: 
+              - generic [ref=e92]:
+                - strong [ref=e93]: 데이터 상태
+                - generic [ref=e94]: 수집 상태 확인 중
+              - generic [aria-hidden] [ref=e95]: 
+          - generic [ref=e96]:
+            - generic [ref=e97]:
+              - generic [ref=e98]:
+                - heading "자산 추이" [level=2] [ref=e100]
+                - generic [ref=e101]:
+                  - generic [ref=e102]:
+                    - generic [ref=e103]: 총 자산 평가액
+                    - generic [ref=e105]: 시작 자산
+                  - generic [ref=e107]:
+                    - button "1시간" [ref=e108] [cursor=pointer]
+                    - button "1일" [ref=e109] [cursor=pointer]
+                    - button "1주" [ref=e110] [cursor=pointer]
+                    - button "1개월" [ref=e111] [cursor=pointer]
+              - generic "총 자산 평가액 추이 차트" [ref=e113]
+              - generic [ref=e114]:
+                - generic [ref=e115]: 24시간 기준
+                - generic [ref=e116]: "-"
+              - generic [ref=e117]:
+                - generic [ref=e118]:
+                  - generic [ref=e119]: 총 자산 평가액
+                  - strong [ref=e120]: "-"
+                  - generic [ref=e121]: "-"
+                - generic [ref=e122]:
+                  - generic [ref=e123]: 오늘의 손익
+                  - strong [ref=e124]: "-"
+                  - generic [ref=e125]: "-"
+                - generic [ref=e126]:
+                  - generic [ref=e127]: 누적 손익
+                  - strong [ref=e128]: "-"
+                  - generic [ref=e129]: "-"
+                - generic [ref=e130]:
+                  - generic [ref=e131]: 승률
+                  - strong [ref=e132]: "-"
+                  - generic [ref=e133]: "-"
+            - complementary [ref=e134]:
+              - generic [ref=e135]:
+                - heading "거래하기" [level=2] [ref=e137]
+                - generic [ref=e138]: 모의투자
+              - generic [ref=e139]:
+                - generic [aria-hidden] [ref=e140]: 
+                - generic [ref=e141]: 모의투자 주문입니다.
+              - tablist "거래 방향" [ref=e142]:
+                - button "매수" [ref=e143] [cursor=pointer]
+                - button "매도" [ref=e144] [cursor=pointer]
+              - generic [ref=e145]:
+                - generic [ref=e146]:
+                  - generic [ref=e147]:
+                    - text: 자산
+                    - generic [ref=e148]: 시장가 기준
+                  - combobox "거래 자산" [ref=e149]
+                - generic [ref=e150]:
+                  - generic [ref=e151]:
+                    - generic [ref=e152]: 주문 금액 (KRW)
+                    - generic [ref=e153]: 잔액 -
+                  - spinbutton "주문 금액" [ref=e154]: "50000"
+                - generic "주문 금액 빠른 선택" [ref=e155]:
+                  - button "25%" [ref=e156] [cursor=pointer]
+                  - button "50%" [ref=e157] [cursor=pointer]
+                  - button "75%" [ref=e158] [cursor=pointer]
+                  - button "전액" [ref=e159] [cursor=pointer]
+                - generic [ref=e160]:
+                  - generic [ref=e161]:
+                    - generic [ref=e162]: 현재가
+                    - strong [ref=e163]: "-"
+                  - generic [ref=e164]:
+                    - generic [ref=e165]: 예상 수량
+                    - strong [ref=e166]: "-"
+                  - generic [ref=e167]:
+                    - generic [ref=e168]: 보유 평가
+                    - strong [ref=e169]: "-"
+                  - generic [ref=e170]:
+                    - generic [ref=e171]: 예상 수수료
+                    - strong [ref=e172]: "-"
+                - button "모의 주문 실행" [disabled] [ref=e173]
+                - generic [ref=e174]: 주문 전 자산·수량·모드를 다시 확인하세요.
+          - generic [ref=e176]:
+            - generic [ref=e177]:
+              - heading "보유 포지션" [level=2] [ref=e179]
+              - button "전체 포트폴리오 보기" [ref=e180] [cursor=pointer]:
+                - text: 전체 포트폴리오 보기
+                - generic [aria-hidden] [ref=e181]: 
+            - table [ref=e183]:
+              - rowgroup [ref=e184]:
+                - row [ref=e185]:
+                  - columnheader "자산" [ref=e186]
+                  - columnheader "수량" [ref=e187]
+                  - columnheader "평균 진입가" [ref=e188]
+                  - columnheader "현재가" [ref=e189]
+                  - columnheader "평가액" [ref=e190]
+                  - columnheader "평가손익" [ref=e191]
+                  - columnheader "상태" [ref=e192]
+              - rowgroup
+          - generic [ref=e194]:
+            - generic [ref=e196]:
+              - generic [ref=e197]:
+                - heading "최근 거래" [level=2] [ref=e198]
+                - paragraph [ref=e199]: 서버에 저장된 거래 기록
+              - button "전체 기록" [ref=e200] [cursor=pointer]:
+                - text: 전체 기록
+                - generic [aria-hidden] [ref=e201]: 
+            - generic [ref=e204]:
+              - heading "리스크 상태" [level=2] [ref=e206]
+              - generic [aria-hidden] [ref=e207]: 
+        - text:                   
+      - contentinfo [ref=e209]:
+        - strong [ref=e211]: CoinPilot

@@ -1,11 +1,16 @@
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import dotenv from 'dotenv';
 import MultiCoinTrader from './trader/multiCoinTrader.js';
 import DashboardServer from './api/dashboardServer.js';
+import { createPublicMarketDataSource as createDefaultPublicMarketDataSource } from './api/publicMarketDataSource.js';
 import Logger from './utils/logger.js';
 import { loadEnv, formatEnvErrors, formatEnvWarnings } from './config/envLoader.js';
-import { runAfterDashboardReady } from './runtime/dashboardStartup.js';
+import { runAfterDashboardReady as runAfterDashboardReadyDefault } from './runtime/dashboardStartup.js';
+import { acquireHeadlessRuntimeWriterLock, setupExitHandlers } from './runtime/exitHandlers.js';
+import { createProfileWriterStartup } from './runtime/profileWriterStartup.js';
 
-dotenv.config();
+let activeExitHandlers = null;
 
 function createConfig(env) {
   return {
@@ -53,6 +58,8 @@ function createConfig(env) {
 }
 
 async function main() {
+  dotenv.config();
+
   // 스키마 검증: 필수 env 누락/형식 오류는 부팅 시점에 실패시킨다.
   const { values: env, errors: envErrors, warnings: envWarnings } = loadEnv();
   if (envErrors.length > 0) {
@@ -78,7 +85,7 @@ async function main() {
 
   const config = createConfig(env);
   config.strategyMode = strategyMode;
-  new Logger(config.logLevel);
+  const logger = new Logger(config.logLevel);
 
   console.log('\n⚙️  설정:');
   console.log(`  모드: ${config.dryRun ? '🧪 모의투자' : '💰 실전투자'}`);
@@ -86,39 +93,110 @@ async function main() {
   console.log(`  최대 동시 포지션: ${config.maxPositions}`);
   console.log(`  포트폴리오 할당: ${(config.portfolioAllocation * 100).toFixed(0)}%`);
 
-  const trader = new MultiCoinTrader(config);
-
-  // 대시보드 시작
-  let dashboardServer = null;
-  if (config.enableDashboard) {
-    dashboardServer = new DashboardServer(trader, config.dashboardPort);
-  }
-
-  await runAfterDashboardReady(dashboardServer, async () => {
-    // 종료 핸들러
-    const gracefulShutdown = () => {
-      console.log('\n\n⏹️  시스템 종료 중...');
-      trader.stop();
-
-      if (dashboardServer) {
-        dashboardServer.stop();
-      }
-
-      console.log('\n👋 프로그램을 종료합니다.\n');
-      process.exit(0);
-    };
-
-    process.on('SIGINT', gracefulShutdown);
-    process.on('SIGTERM', gracefulShutdown);
-
-    console.log('\n⏱️  3초 후 시작합니다...');
-    await new Promise(resolve => setTimeout(resolve, 3000));
-
-    await trader.start();
-  });
+  await runLegacyMultiCoinRuntime(config, { logger });
 }
 
-main().catch(error => {
-  console.error('❌ 시작 실패:', error);
-  process.exit(1);
-});
+/**
+ * Start the legacy entry with profile ownership established before trader
+ * construction. Dependencies are injectable so startup and shutdown ownership
+ * can be verified with temporary files and fake traders.
+ */
+export async function runLegacyMultiCoinRuntime(config, dependencies = {}) {
+  const profileWriterStartup = createProfileWriterStartup(
+    config,
+    dependencies.profileWriterStartupOptions
+  );
+  const createTrader = dependencies.createTrader || (() => new MultiCoinTrader(config));
+  const createDashboard = dependencies.createDashboard ||
+    ((trader, port, options) => new DashboardServer(trader, port, options));
+  const createPublicMarketDataSource = dependencies.createPublicMarketDataSource ||
+    createDefaultPublicMarketDataSource;
+  const runAfterDashboardReady = dependencies.runAfterDashboardReady || runAfterDashboardReadyDefault;
+  const createExitHandlers = dependencies.createExitHandlers || setupExitHandlers;
+  const processApi = dependencies.processApi || dependencies.exitHandlerOptions?.processApi || process;
+  const consoleApi = dependencies.consoleApi || dependencies.exitHandlerOptions?.consoleApi || console;
+  const logger = dependencies.logger || null;
+  let trader = null;
+  let manualOrderIdempotencyStore = null;
+  let dashboardServer = null;
+  let exitHandlers = null;
+  let runtimeLifecycleInstalled = false;
+
+  try {
+    const runtime = profileWriterStartup.createTraderAndStore(createTrader);
+    trader = runtime.trader;
+    manualOrderIdempotencyStore = runtime.manualOrderIdempotencyStore;
+
+    if (config.enableDashboard) {
+      const publicMarketDataSource = createPublicMarketDataSource();
+      dashboardServer = createDashboard(trader, config.dashboardPort, {
+        publicMarketDataSource,
+        manualOrderIdempotencyStore
+      });
+    }
+
+    await runAfterDashboardReady(dashboardServer, async () => {
+      await acquireHeadlessRuntimeWriterLock({
+        config,
+        trader,
+        createStore: () => manualOrderIdempotencyStore
+      });
+      const runtimeWriterLockOwner = {
+        releaseWriterLock: () => profileWriterStartup.releaseWriterLock()
+      };
+
+      exitHandlers = createExitHandlers(trader, dashboardServer, null, null, logger, {
+        ...(dependencies.exitHandlerOptions || {}),
+        processApi,
+        consoleApi,
+        runtimeWriterLockStore: runtimeWriterLockOwner
+      });
+      activeExitHandlers = exitHandlers;
+      runtimeLifecycleInstalled = true;
+
+      consoleApi.log('\n⏱️  3초 후 시작합니다...');
+      const waitBeforeTraderStart = dependencies.waitBeforeTraderStart ||
+        (() => new Promise(resolve => setTimeout(resolve, 3000)));
+      try {
+        await waitBeforeTraderStart();
+        await trader.start();
+      } catch (error) {
+        consoleApi.error('\n❌ 치명적 오류:', error);
+        logger?.error?.('Fatal Error', { error: error.message, stack: error.stack });
+        processApi.exitCode = Math.max(Number(processApi.exitCode) || 0, 1);
+        await exitHandlers.gracefulShutdown(1, { reason: 'startup_failure' });
+      }
+    });
+
+    return { trader, dashboardServer, manualOrderIdempotencyStore, exitHandlers };
+  } catch (error) {
+    if (!runtimeLifecycleInstalled) {
+      try {
+        if (dashboardServer) await dashboardServer.stop();
+      } catch (cleanupError) {
+        if (error && typeof error === 'object') error.dashboardStartupCleanupError = cleanupError;
+      }
+      try {
+        profileWriterStartup.releaseWriterLock();
+      } catch (releaseError) {
+        if (error && typeof error === 'object') error.writerLockReleaseError = releaseError;
+      }
+    }
+    throw error;
+  }
+}
+
+const entryPath = process.argv[1] ? path.resolve(process.argv[1]) : null;
+if (entryPath === fileURLToPath(import.meta.url)) {
+  main().catch(async error => {
+    console.error('❌ 시작 실패:', error);
+    process.exitCode = Math.max(Number(process.exitCode) || 0, 1);
+    if (activeExitHandlers?.gracefulShutdown) {
+      try {
+        await activeExitHandlers.gracefulShutdown(1, { reason: 'startup_failure' });
+      } catch (shutdownError) {
+        console.error('시작 실패 정리 중 오류:', shutdownError);
+      }
+    }
+  });
+}

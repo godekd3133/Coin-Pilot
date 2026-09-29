@@ -1,0 +1,97 @@
+{
+  "schema": "coinpilot.paper-forward-eligibility-audit.v1",
+  "observedAt": "2026-09-29T15:27:01.408Z",
+  "researchOnly": true,
+  "promoted": false,
+  "source": {
+    "cohortReport": "/private/tmp/coinpilot-paper-forward-cohort.json",
+    "cohortReportSha256": "3b93f167fbe3d66005291e33bc3b90a4ee09ed2db9493e5ead6e16ed0b53f44f",
+    "profitabilityEvidenceProfitBasis": "per_trade_cost_audit_adjusted_net_pnl",
+    "thresholds": {
+      "minimumObservationDays": 7,
+      "minimumStrictTradesPerSession": 20,
+      "minimumReturnPercent": 0.2,
+      "maximumDrawdownPercent": 15
+    }
+  },
+  "cohort": {
+    "sessions": 95,
+    "strictTradeSessions": 25,
+    "strictTrades": 60,
+    "diagnosticTrades": 779,
+    "completeConfigSnapshots": 88,
+    "activeSessions": 1,
+    "endedSessions": 91,
+    "strictCohortEligibleSessions": 0,
+    "profitabilityEvidenceEligibleSessions": 0,
+    "profitabilityEvidenceEligibleTrades": 0,
+    "actualFillsObserved": false,
+    "strictCostUnverifiedTrades": 2,
+    "mixedRecordedStrictProfitKrw": -147.11486992689333,
+    "mixedRecordedStrictProfitComparable": false,
+    "perSessionCoverage": {
+      "maxStrictTradesInAnySession": 10,
+      "sessionsWithAtLeastSevenDays": 0,
+      "sessionsWithAtLeastTwentyStrictTrades": 0
+    },
+    "strictCohortExclusionsMutuallyExclusive": {
+      "no_strict_trades": 63,
+      "diagnostic_trades_present": 18,
+      "config_snapshot_incomplete": 7,
+      "continuity_ineligible": 3,
+      "session_not_ended": 3,
+      "session_still_active": 1
+    },
+    "profitabilityExclusionsOverlapping": {
+      "strict_cohort_ineligible": 95,
+      "trade_count_below_minimum": 95,
+      "observation_days_below_minimum": 91,
+      "observation_window_unverifiable": 4
+    },
+    "stopReasons": {
+      "none": 35,
+      "stopped_cleanly": 35,
+      "risk_data_gap": 10,
+      "stopped_with_unsettled_diagnostic_positions": 9,
+      "analysis_data_gap": 5,
+      "owner_process_missing": 1
+    }
+  },
+  "currentScalpingOwner": {
+    "directory": ".paper-forward-sealed-rsi-20260928-r5",
+    "pid": 11906,
+    "active": true,
+    "heartbeatAt": "2026-09-29T15:26:51.911Z",
+    "cycles": 16380,
+    "configSnapshotComplete": true,
+    "analysisContinuity": true,
+    "riskContinuity": true,
+    "strictCloses": 10,
+    "strictOpenPositions": 0,
+    "recordedStrictNetProfitKrw": -3638.994884541925,
+    "latestStrictCloseAt": "2026-09-29T15:25:06.993Z",
+    "configSlippageRatePerSide": 0.001,
+    "configTradingFeeRate": 0.0005,
+    "stopReason": null,
+    "configDrift": null,
+    "actualFillsObserved": false
+  },
+  "candidatePreflight": {
+    "launchAllowed": false,
+    "blockers": [
+      "existing_live_owner_count:2",
+      "benchmark_gate_closed"
+    ],
+    "benchmarkTrendPercent": -3.095890644877607,
+    "benchmarkRequiredTrendPercent": 2,
+    "quoteReportComplete": true,
+    "quoteReportErrors": 0
+  },
+  "decision": {
+    "launchBaselineOrCandidate": false,
+    "changeParametersOrMarketSet": false,
+    "promote": false,
+    "restartOwner": false,
+    "interpretation": "The new XRP stop close increased the current strict sample to 10 and moved the heterogeneous cohort mixed recorded total from positive to -147.11 KRW. The mixed total remains incomparable and no session qualifies: maximum 10 strict closes in one session, no session reaches 20 trades or seven days, and actual fills remain unobserved. Keep the active configuration unchanged."
+  }
+}

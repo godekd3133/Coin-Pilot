@@ -1,8 +1,8 @@
 import dotenv from 'dotenv';
 import fs from 'node:fs';
 import path from 'node:path';
-import axios from 'axios';
 import UpbitAPI from '../api/upbit.js';
+import { pathToFileURL } from 'node:url';
 import {
   analyzeHistoricalCandleContinuity,
   historicalTimestampForCandle
@@ -32,30 +32,27 @@ const maxFillIntervals = Math.max(0, Math.floor(number(
   4
 )));
 
-async function fetchMarketCandles(upbit, market, asOfTimestamp) {
+export async function fetchMarketCandles(upbit, market, asOfTimestamp, options = {}) {
+  const candleUnit = options.baseCandleUnit ?? baseCandleUnit;
+  const targetCandleCount = options.requestedCandleCount ?? requestedCandleCount;
+  const wait = options.sleepFn || sleep;
   const byTimestamp = new Map();
   let to = null;
   let requestCount = 0;
   let discardedPartialCount = 0;
 
-  while (byTimestamp.size < requestedCandleCount) {
-    const count = Math.min(200, requestedCandleCount - byTimestamp.size);
+  while (byTimestamp.size < targetCandleCount) {
+    const count = Math.min(200, targetCandleCount - byTimestamp.size);
     const batch = to
-      ? await upbit.requestWithRetry(async () => {
-        const response = await axios.get(
-          `https://api.upbit.com/v1/candles/minutes/${baseCandleUnit}`,
-          upbit.getRequestConfig({ params: { market, count, to } })
-        );
-        return response.data;
-      })
-      : await upbit.getMinuteCandles(market, baseCandleUnit, count);
+      ? await upbit.getMinuteCandles(market, candleUnit, count, { to })
+      : await upbit.getMinuteCandles(market, candleUnit, count);
     requestCount += 1;
     if (!Array.isArray(batch) || batch.length === 0) break;
 
     for (const candle of batch) {
       const timestamp = historicalTimestampForCandle(candle);
       if (timestamp === null) continue;
-      if (timestamp + baseCandleUnit * 60 * 1000 > asOfTimestamp) {
+      if (timestamp + candleUnit * 60 * 1000 > asOfTimestamp) {
         discardedPartialCount += 1;
         continue;
       }
@@ -72,14 +69,14 @@ async function fetchMarketCandles(upbit, market, asOfTimestamp) {
     if (oldestIso === null || oldestIso === to) break;
     to = oldestIso;
     if (batch.length < count) break;
-    await sleep(180);
+    await wait(180);
   }
 
   const candles = [...byTimestamp.entries()]
     .sort(([left], [right]) => left - right)
-    .slice(-requestedCandleCount)
+    .slice(-targetCandleCount)
     .map(([, candle]) => candle);
-  const continuity = analyzeHistoricalCandleContinuity(candles, baseCandleUnit);
+  const continuity = analyzeHistoricalCandleContinuity(candles, candleUnit);
   return {
     candles,
     requestCount,
@@ -152,7 +149,9 @@ async function main() {
   console.log(`saved: ${outputFile}`);
 }
 
-main().catch(error => {
-  console.error(error.message);
-  process.exitCode = 1;
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch(error => {
+    console.error(error.message);
+    process.exitCode = 1;
+  });
+}

@@ -1,0 +1,59 @@
+{
+  "schema": "coinpilot.paper-forward-position-risk-mark.v1",
+  "observedAt": "2026-09-29T15:23:44.253Z",
+  "researchOnly": true,
+  "promoted": false,
+  "source": {
+    "ledger": ".paper-forward-sealed-rsi-20260928-r5/paper_validation.json",
+    "processId": 11906,
+    "active": true,
+    "heartbeatAt": "2026-09-29T15:23:44.253Z",
+    "cycles": 16347
+  },
+  "position": {
+    "market": "KRW-XRP",
+    "entryTime": "2026-09-29T15:10:04.310Z",
+    "entryPriceKrw": 2075,
+    "amount": 96.32723397590361,
+    "lowestPriceSinceEntryKrw": 2054,
+    "highestPriceSinceEntryKrw": 2080,
+    "paperPathMaePercent": -1.0120481927710843,
+    "paperPathMfePercent": 0.24096385542168677,
+    "configuredStopLossPercent": 1.2,
+    "nominalStopPriceKrw": 2050.1,
+    "observedLowAboveNominalStopKrw": 3.9,
+    "ageAtObservationSeconds": 819.943,
+    "configuredMaximumHoldMinutes": 30
+  },
+  "comparison": {
+    "previousObservationAt": "2026-09-29T15:21:37.769Z",
+    "previousMaePercent": -0.9638554216867471,
+    "currentMaePercent": -1.0120481927710843,
+    "adverseExcursionChangePercentagePoints": -0.04819277108433718
+  },
+  "sessionHealth": {
+    "strictClosedTrades": 9,
+    "strictRecordedNetProfitKrw": -1032.1391150690336,
+    "strictOpenPositions": 1,
+    "analysisContinuity": true,
+    "riskContinuity": true,
+    "stopReason": null,
+    "configDrift": null
+  },
+  "executionBoundary": {
+    "paperExecutionCostModel": null,
+    "paperExecutionSlippageRate": null,
+    "paperExecutionTradingFeeRate": null,
+    "paperObservedEntryPrice": null,
+    "paperObservedExitPrice": null,
+    "actualExchangeFillObserved": false,
+    "interpretation": "The low and MAE are simulated candle-path observations, not a current live quote or actual holding. The owner still reports the position open and its risk monitor continuous."
+  },
+  "decision": {
+    "restart": false,
+    "parametersChanged": false,
+    "marketSetChanged": false,
+    "candidateLaunched": false,
+    "interpretation": "The adverse excursion is now 1.012% against the configured 1.2% stop, with the recorded low 3.9 KRW above the nominal stop-price calculation. Preserve the active risk monitor and configuration; do not infer a stop event or intervene from this snapshot."
+  }
+}

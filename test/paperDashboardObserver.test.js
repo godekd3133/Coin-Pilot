@@ -4,6 +4,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import DashboardServer from '../src/api/dashboardServer.js';
+import { FixtureMarketDataAdapter } from '../src/market-data/marketDataAdapters.js';
 import {
   attachReadOnlyPaperLedger,
   createMockTrader
@@ -132,7 +133,7 @@ test('읽기 전용 paper dashboard는 최신 ledger를 표시하고 원본을 �
         path.resolve('portfolio_history.json')
       );
     } finally {
-      dashboard.stop();
+      await dashboard.stop();
     }
   } finally {
     trader.stop();
@@ -140,6 +141,98 @@ test('읽기 전용 paper dashboard는 최신 ledger를 표시하고 원본을 �
       if (fs.existsSync(file)) fs.unlinkSync(file);
     }
   }
+});
+
+test('portfolio analysis does not substitute average price when the market snapshot is incomplete', async t => {
+  const adapter = new FixtureMarketDataAdapter({
+    markets: ['KRW-BTC'],
+    candleSets: [{ market: 'KRW-BTC', unit: 1, candles: [] }]
+  });
+  const trader = {
+    dryRun: true,
+    initialSeedMoney: 1000,
+    virtualPortfolio: {
+      krwBalance: 1000,
+      holdings: new Map([['KRW-BTC', { amount: 2, avgPrice: 100 }]])
+    },
+    marketDataAdapter: adapter,
+    upbit: {},
+    getKRWBalance: portfolio => portfolio?.krwBalance ?? 0
+  };
+  const logger = { debug() {}, info() {}, warn() {}, error() {} };
+  const dashboard = new DashboardServer(trader, 0, {
+    env: { ...process.env, DASHBOARD_TOKEN: '' },
+    logger,
+    manualOrderIdempotencyStore: {
+      async initialize() {},
+      releaseWriterLock() {}
+    }
+  });
+  t.after(() => dashboard.stop());
+  const httpServer = await dashboard.start();
+  const response = await fetch(`http://127.0.0.1:${httpServer.address().port}/api/portfolio-analysis`);
+  const analysis = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(analysis.summary.valuationAvailable, false);
+  assert.equal(analysis.summary.valuationStatus, 'unavailable');
+  assert.equal(analysis.summary.totalValue, null);
+  assert.equal(analysis.summary.totalProfit, null);
+  assert.equal(analysis.summary.totalAssets, null);
+  assert.deepEqual(analysis.summary.unavailableMarkets, ['KRW-BTC']);
+  assert.equal(analysis.holdings[0].currentPrice, null);
+  assert.equal(analysis.holdings[0].currentValue, null);
+  assert.equal(analysis.holdings[0].profit, null);
+  assert.equal(analysis.holdings[0].profitPercent, null);
+  assert.equal(analysis.holdings[0].weight, null);
+  assert.equal(analysis.holdings[0].valuationAvailable, false);
+});
+
+test('portfolio analysis exposes source time and calculates values from a complete fixture snapshot', async t => {
+  const sourceAsOf = new Date('2026-09-29T12:00:00.000Z').toISOString();
+  const adapter = new FixtureMarketDataAdapter({
+    markets: ['KRW-BTC'],
+    tickers: [{ market: 'KRW-BTC', trade_price: 120, trade_timestamp: sourceAsOf }]
+  });
+  const trader = {
+    dryRun: true,
+    initialSeedMoney: 1000,
+    virtualPortfolio: {
+      krwBalance: 1000,
+      holdings: new Map([['KRW-BTC', { amount: 2, avgPrice: 100 }]])
+    },
+    marketDataAdapter: adapter,
+    upbit: {},
+    getKRWBalance: portfolio => portfolio?.krwBalance ?? 0
+  };
+  const logger = { debug() {}, info() {}, warn() {}, error() {} };
+  const dashboard = new DashboardServer(trader, 0, {
+    env: { ...process.env, DASHBOARD_TOKEN: '' },
+    logger,
+    manualOrderIdempotencyStore: {
+      async initialize() {},
+      releaseWriterLock() {}
+    }
+  });
+  t.after(() => dashboard.stop());
+  const httpServer = await dashboard.start();
+  const response = await fetch(`http://127.0.0.1:${httpServer.address().port}/api/portfolio-analysis`);
+  const analysis = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(analysis.summary.valuationAvailable, true);
+  assert.equal(analysis.summary.totalValue, 240);
+  assert.equal(analysis.summary.totalCost, 200);
+  assert.equal(analysis.summary.totalProfit, 40);
+  assert.equal(analysis.summary.totalAssets, 1240);
+  assert.equal(analysis.summary.valuationAsOf, sourceAsOf);
+  assert.equal(analysis.summary.fetchedAt, null);
+  assert.equal(analysis.holdings[0].currentPrice, 120);
+  assert.equal(analysis.holdings[0].currentValue, 240);
+  assert.equal(analysis.holdings[0].profit, 40);
+  assert.equal(analysis.holdings[0].profitPercent, '20.00');
+  assert.equal(analysis.holdings[0].change24h, null);
+  assert.equal(analysis.holdings[0].valuationAvailable, true);
 });
 
 test('읽기 전용 observer는 orphan 미청산 ledger를 UI에서도 fail-closed로 표시한다', async () => {
@@ -190,7 +283,7 @@ test('읽기 전용 observer는 orphan 미청산 ledger를 UI에서도 fail-clos
       assert.deepEqual(body.strictEvaluation.positions.map(position => position.coin), ['KRW-BTC']);
       assert.deepEqual(body.diagnosticOpenPositions.map(position => position.coin), ['KRW-BTC']);
     } finally {
-      dashboard.stop();
+      await dashboard.stop();
     }
   } finally {
     trader.stop();
@@ -308,7 +401,7 @@ test('읽기 전용 observer의 계좌·보유·구성 API는 paper ledger를 �
       assert.equal(mockAccountReads, 0);
       assert.equal(fs.readFileSync(ledgerFile, 'utf8'), ledgerBytes);
     } finally {
-      dashboard.stop();
+      await dashboard.stop();
     }
   } finally {
     trader.stop();

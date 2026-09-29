@@ -10,15 +10,100 @@ enum CoinPilotScreenPhase: Equatable {
     case dashboard
 }
 
+enum CoinPilotAuthScope: String, Equatable {
+    case unauthenticated
+    case readOnly = "read_only"
+    case mobileOperator = "mobile_operator"
+    case operatorFull = "operator"
+
+    var canOperate: Bool {
+        self == .mobileOperator
+    }
+}
+
+enum CoinPilotWorkspaceMode: String, CaseIterable, Identifiable, Equatable, Hashable {
+    case paper
+    case live
+
+    var id: String { rawValue }
+
+    var title: String { self == .live ? "실거래" : "모의투자" }
+    var serverMode: String { self == .live ? "LIVE" : "DRY_RUN" }
+    var addressDefaultsKey: String { "coinpilot.dashboardUrl.\(rawValue)" }
+}
+
+struct CoinPilotAutomationPresentation: Equatable {
+    let sectionTitle: String
+    let stateLabel: String
+    let explanation: String
+    let showsControls: Bool
+
+    init(isBundledPreview: Bool, isRunning: Bool?) {
+        if isBundledPreview {
+            sectionTitle = "자동매매 예시"
+            stateLabel = "예시 상태"
+            explanation = "앱에 포함된 예시 상태예요. 실제 서버에서 자동매매를 실행하지 않습니다."
+            showsControls = false
+            return
+        }
+
+        sectionTitle = "자동매매"
+        stateLabel = isRunning == true ? "실행 중" : isRunning == false ? "중지" : "확인 불가"
+        explanation = isRunning == true
+            ? "서버에서 자동매매를 실행 중입니다."
+            : isRunning == false
+                ? "서버에서 자동매매가 중지되어 있습니다."
+                : "서버 실행 상태를 확인할 수 없습니다."
+        showsControls = true
+    }
+}
+
+struct CoinPilotOrderReviewPresentation: Equatable {
+    let sectionTitle: String
+    let accountTitle: String
+    let buttonTitle: String
+    let isEnabled: Bool
+    let showsWalletControls: Bool
+
+    init(
+        isBundledPreview: Bool,
+        workspace: CoinPilotWorkspaceMode,
+        draftIsValid: Bool,
+        blockReason: String?,
+        isSubmitting: Bool
+    ) {
+        if isBundledPreview {
+            sectionTitle = "주문 미리보기"
+            accountTitle = "예시 계좌"
+            buttonTitle = "예시에서는 주문할 수 없어요"
+            isEnabled = false
+            showsWalletControls = false
+            return
+        }
+
+        sectionTitle = "직접 주문"
+        accountTitle = workspace == .live ? "Upbit · 실계정" : "가상 계좌"
+        buttonTitle = workspace == .live ? "실거래 주문 검토" : "모의 주문 검토"
+        isEnabled = draftIsValid && blockReason == nil && !isSubmitting
+        showsWalletControls = workspace == .paper
+    }
+}
+
 enum CoinPilotResourceState: Equatable {
     case notRequested
     case loading
     case current(at: Date)
     case stale(lastSuccessfulAt: Date)
     case unavailable
+
+    var isCurrent: Bool {
+        if case .current = self { return true }
+        return false
+    }
 }
 
 enum CoinPilotHistoryPeriod: String, CaseIterable, Identifiable {
+    case hour = "1h"
     case day = "24h"
     case week = "7d"
     case month = "30d"
@@ -27,6 +112,7 @@ enum CoinPilotHistoryPeriod: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
+        case .hour: return "1시간"
         case .day: return "24시간"
         case .week: return "7일"
         case .month: return "30일"
@@ -44,6 +130,45 @@ protocol CoinPilotAPIProviding {
     func authenticationStatus(at serverURL: URL) async throws -> CoinPilotHTTPResponse
     func login(token: String, at serverURL: URL) async throws -> CoinPilotHTTPResponse
     func read(path: String, at serverURL: URL, token: String?) async throws -> CoinPilotHTTPResponse
+    func mobileRead(path: String, at serverURL: URL, token: String) async throws -> CoinPilotHTTPResponse
+    func registerLiveCredentials(
+        accessKey: String,
+        secretKey: String,
+        at serverURL: URL,
+        token: String
+    ) async throws -> CoinPilotHTTPResponse
+    func mutate(
+        path: String,
+        at serverURL: URL,
+        token: String,
+        body: [String: Any],
+        idempotencyKey: String?
+    ) async throws -> CoinPilotHTTPResponse
+}
+
+extension CoinPilotAPIProviding {
+    func mobileRead(path: String, at serverURL: URL, token: String) async throws -> CoinPilotHTTPResponse {
+        throw CoinPilotAPIError.forbidden
+    }
+
+    func registerLiveCredentials(
+        accessKey: String,
+        secretKey: String,
+        at serverURL: URL,
+        token: String
+    ) async throws -> CoinPilotHTTPResponse {
+        throw CoinPilotAPIError.forbidden
+    }
+
+    func mutate(
+        path: String,
+        at serverURL: URL,
+        token: String,
+        body: [String: Any],
+        idempotencyKey: String?
+    ) async throws -> CoinPilotHTTPResponse {
+        throw CoinPilotAPIError.forbidden
+    }
 }
 
 protocol CoinPilotTokenProviding {
@@ -52,9 +177,75 @@ protocol CoinPilotTokenProviding {
     func delete(for serverURL: URL)
 }
 
+struct CoinPilotPendingManualOrder: Codable, Equatable, Identifiable {
+    let idempotencyKey: String
+    let endpoint: String
+    let requestBody: Data
+    let market: String
+    let side: String
+    let displayAmount: String
+    let mode: String
+    let createdAt: Date
+
+    var id: String { idempotencyKey }
+
+    func bodyDictionary() -> [String: Any]? {
+        (try? JSONSerialization.jsonObject(with: requestBody)) as? [String: Any]
+    }
+}
+
+struct CoinPilotTuningField: Identifiable {
+    let key: String
+    let label: String
+    let description: String
+    let category: String
+    let value: Double?
+    let booleanValue: Bool?
+    let minimum: Double?
+    let maximum: Double?
+    let step: Double?
+    let displayMultiplier: Double
+
+    var id: String { key }
+    var displayValue: Double? { value.map { $0 * displayMultiplier } }
+}
+
+enum CoinPilotPendingOrderRead {
+    case missing
+    case saved(Data)
+    case unavailable
+}
+
+protocol CoinPilotPendingOrderProviding {
+    func read(for serverURL: URL) -> CoinPilotPendingOrderRead
+    func save(_ data: Data, for serverURL: URL) -> Bool
+    func clear(for serverURL: URL) -> Bool
+}
+
+#if targetEnvironment(simulator) || COINPILOT_TEST_SIMULATOR_TOKEN_STORE
+final class CoinPilotMemoryPendingOrderStore: CoinPilotPendingOrderProviding {
+    private var values: [String: Data] = [:]
+
+    func read(for serverURL: URL) -> CoinPilotPendingOrderRead {
+        values[serverURL.absoluteString].map(CoinPilotPendingOrderRead.saved) ?? .missing
+    }
+
+    func save(_ data: Data, for serverURL: URL) -> Bool {
+        values[serverURL.absoluteString] = data
+        return true
+    }
+
+    func clear(for serverURL: URL) -> Bool {
+        values.removeValue(forKey: serverURL.absoluteString)
+        return true
+    }
+}
+#endif
+
 enum CoinPilotAPIError: Error, Sendable {
     case invalidAddress
     case connection
+    case cancelled
     case invalidResponse
     case unauthorized
     case forbidden
@@ -69,6 +260,8 @@ enum CoinPilotAPIError: Error, Sendable {
             return "서버 주소를 확인해 주세요."
         case .connection:
             return "서버에 연결하지 못했습니다. 인터넷 연결과 서버 주소를 확인해 주세요."
+        case .cancelled:
+            return "요청이 취소되었습니다."
         case .invalidResponse:
             return "서버 응답을 받지 못했습니다. 잠시 후 다시 시도해 주세요."
         case .unauthorized:
@@ -121,12 +314,73 @@ final class CoinPilotAPIClient: CoinPilotAPIProviding, @unchecked Sendable {
         return try await send(path: path, method: "GET", at: serverURL, token: token, body: nil)
     }
 
+    func mobileRead(path: String, at serverURL: URL, token: String) async throws -> CoinPilotHTTPResponse {
+        guard Self.isAllowedMobileReadPath(path) else { throw CoinPilotAPIError.forbidden }
+        return try await send(path: path, method: "GET", at: serverURL, token: token, body: nil)
+    }
+
+    func registerLiveCredentials(
+        accessKey: String,
+        secretKey: String,
+        at serverURL: URL,
+        token: String
+    ) async throws -> CoinPilotHTTPResponse {
+        guard serverURL.scheme?.lowercased() == "https",
+              accessKey == accessKey.trimmingCharacters(in: .whitespacesAndNewlines),
+              secretKey == secretKey.trimmingCharacters(in: .whitespacesAndNewlines),
+              !accessKey.isEmpty,
+              !secretKey.isEmpty,
+              accessKey.utf8.count <= 4096,
+              secretKey.utf8.count <= 4096 else {
+            throw CoinPilotAPIError.forbidden
+        }
+        return try await send(
+            path: "/api/live/credentials",
+            method: "POST",
+            at: serverURL,
+            token: token,
+            body: ["accessKey": accessKey, "secretKey": secretKey]
+        )
+    }
+
+    func mutate(
+        path: String,
+        at serverURL: URL,
+        token: String,
+        body: [String: Any],
+        idempotencyKey: String? = nil
+    ) async throws -> CoinPilotHTTPResponse {
+        guard Self.isAllowedMobileMutation(path, body: body) else { throw CoinPilotAPIError.forbidden }
+        var headers: [String: String] = [:]
+        if let idempotencyKey {
+            guard UUID(uuidString: idempotencyKey) != nil else { throw CoinPilotAPIError.invalidData }
+            headers["Idempotency-Key"] = idempotencyKey
+        }
+        if [
+            "/api/trade/buy", "/api/trade/sell", "/api/trade/quick", "/api/trade/execute",
+            "/api/trade/execute-bundle", "/api/trade/smart-buy", "/api/trade/smart-sell",
+            "/api/virtual/deposit", "/api/virtual/withdraw", "/api/virtual/reset"
+        ].contains(path),
+           idempotencyKey == nil {
+            throw CoinPilotAPIError.invalidData
+        }
+        return try await send(
+            path: path,
+            method: "POST",
+            at: serverURL,
+            token: token,
+            body: body,
+            additionalHeaders: headers
+        )
+    }
+
     private func send(
         path: String,
         method: String,
         at serverURL: URL,
         token: String?,
-        body: [String: String]?
+        body: Any?,
+        additionalHeaders: [String: String] = [:]
     ) async throws -> CoinPilotHTTPResponse {
         guard let url = Self.requestURL(path: path, serverURL: serverURL) else {
             throw CoinPilotAPIError.invalidAddress
@@ -138,6 +392,9 @@ final class CoinPilotAPIClient: CoinPilotAPIProviding, @unchecked Sendable {
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         if let token {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        for (name, value) in additionalHeaders {
+            request.setValue(value, forHTTPHeaderField: name)
         }
         if let body {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -153,13 +410,19 @@ final class CoinPilotAPIClient: CoinPilotAPIProviding, @unchecked Sendable {
             return CoinPilotHTTPResponse(statusCode: http.statusCode, headers: headers, body: data)
         } catch let error as CoinPilotAPIError {
             throw error
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch let error as URLError where error.code == .cancelled {
+            throw CancellationError()
         } catch {
             throw CoinPilotAPIError.connection
         }
     }
 
-    private static func requestURL(path: String, serverURL: URL) -> URL? {
+    static func requestURL(path: String, serverURL: URL) -> URL? {
         guard path.hasPrefix("/api/"),
+              ServerAddressPolicy.allows(serverURL),
+              serverURL.path.isEmpty || serverURL.path == "/" || serverURL.path == "/live",
               let requested = URLComponents(string: "https://coinpilot.invalid\(path)"),
               requested.host == "coinpilot.invalid",
               requested.fragment == nil,
@@ -167,7 +430,8 @@ final class CoinPilotAPIClient: CoinPilotAPIProviding, @unchecked Sendable {
             return nil
         }
 
-        server.path = requested.path
+        let prefix = serverURL.path == "/live" ? "/live" : ""
+        server.path = "\(prefix)\(requested.path)"
         server.query = requested.query
         server.fragment = nil
         return server.url
@@ -182,7 +446,7 @@ final class CoinPilotAPIClient: CoinPilotAPIProviding, @unchecked Sendable {
 
         let queryItems = components.queryItems ?? []
         switch components.path {
-        case "/api/status", "/api/account", "/api/cumulative-pnl", "/api/today-summary", "/api/market/prices", "/api/paper-validation/summary":
+        case "/api/status", "/api/account", "/api/cumulative-pnl", "/api/today-summary", "/api/market/prices", "/api/market/prices/snapshot", "/api/paper-validation/summary", "/api/positions", "/api/parameter-ranges", "/api/investment-config", "/api/investment-presets":
             return queryItems.isEmpty
         case "/api/portfolio/history":
             guard queryItems.count == 1, queryItems.first?.name == "period",
@@ -196,6 +460,139 @@ final class CoinPilotAPIClient: CoinPilotAPIProviding, @unchecked Sendable {
             return true
         default:
             return false
+        }
+    }
+
+    static func isAllowedMobileReadPath(_ path: String) -> Bool {
+        if isAllowedReadPath(path) { return true }
+        guard let components = URLComponents(string: "https://coinpilot.invalid\(path)"),
+              components.host == "coinpilot.invalid",
+              components.fragment == nil else { return false }
+        let simplePaths: Set<String> = [
+            "/api/statistics", "/api/portfolio-analysis", "/api/paper-validation",
+            "/api/target-coins",
+            "/api/parameter-ranges",
+            "/api/investment-config",
+            "/api/investment-presets",
+            "/api/scalping-validation",
+            "/api/strategy-readiness", "/api/coin-analysis", "/api/all-coin-scores",
+            "/api/trading-recommendations", "/api/bundle-suggestions", "/api/news",
+            "/api/news-stats", "/api/live-execution-evidence", "/api/momentum-shadow",
+            "/api/strategy-research", "/api/backtest/results", "/api/optimal-config",
+            "/api/optimization-history", "/api/optimization/settings", "/api/ai/providers",
+            "/api/ai/monitoring", "/api/ai/events", "/api/ai/consultations",
+            "/api/ai/effectiveness", "/api/ai/sessions", "/api/logs"
+        ]
+        if simplePaths.contains(components.path) && (components.queryItems?.isEmpty ?? true) { return true }
+
+        let queryItems = components.queryItems ?? []
+        func hasOnlyQuery(_ allowed: Set<String>, required: Set<String> = []) -> Bool {
+            let names = queryItems.map(\.name)
+            return Set(names).count == names.count &&
+                Set(names).isSubset(of: allowed) &&
+                required.isSubset(of: Set(names))
+        }
+        func integerQuery(_ name: String, _ range: ClosedRange<Int>, fallback: Bool = false) -> Bool {
+            guard let raw = components.queryItems?.first(where: { $0.name == name })?.value else { return fallback }
+            guard let value = Int(raw), String(value) == raw else { return false }
+            return range.contains(value)
+        }
+        let pathValue = components.path
+        if pathValue.range(of: "^/api/market/candles/KRW-[A-Z0-9]{2,15}$", options: .regularExpression) != nil {
+            guard hasOnlyQuery(["unit", "count"], required: ["unit", "count"]),
+                  let unit = components.queryItems?.first(where: { $0.name == "unit" })?.value,
+                  let count = components.queryItems?.first(where: { $0.name == "count" })?.value else { return false }
+            return ["1", "5", "15", "60"].contains(unit) && ["30", "60", "100"].contains(count)
+        }
+        if pathValue == "/api/all-coin-scores" {
+            return hasOnlyQuery(["limit"], required: ["limit"]) && integerQuery("limit", 1...100)
+        }
+        if pathValue == "/api/news" {
+            guard hasOnlyQuery(["limit", "source"], required: ["limit"]),
+                  integerQuery("limit", 1...200) else { return false }
+            return components.queryItems?.first(where: { $0.name == "source" })?.value.map { ["general", "system"].contains($0) } ?? true
+        }
+        if pathValue.range(of: "^/api/news/KRW-[A-Z0-9]{2,15}$", options: .regularExpression) != nil {
+            return hasOnlyQuery(["limit"]) && integerQuery("limit", 1...100, fallback: true)
+        }
+        if pathValue == "/api/ai/providers" {
+            guard hasOnlyQuery(["refresh"]) else { return false }
+            return components.queryItems?.first(where: { $0.name == "refresh" })?.value.map { $0 == "true" } ?? true
+        }
+        if ["/api/ai/monitoring", "/api/ai/events", "/api/ai/consultations", "/api/ai/effectiveness"].contains(pathValue) {
+            guard hasOnlyQuery(["limit", "sessionId"]) else { return false }
+            if components.queryItems?.contains(where: { $0.name == "limit" }) == true && !integerQuery("limit", 1...100) { return false }
+            if let sessionId = components.queryItems?.first(where: { $0.name == "sessionId" })?.value {
+                return sessionId.range(of: "^[A-Za-z0-9_-]{1,128}$", options: .regularExpression) != nil
+            }
+            return true
+        }
+        if pathValue.range(of: "^/api/ai/sessions/[A-Za-z0-9_-]{1,128}$", options: .regularExpression) != nil {
+            return hasOnlyQuery(["limit"]) &&
+                (components.queryItems?.contains(where: { $0.name == "limit" }) != true || integerQuery("limit", 1...100))
+        }
+        if pathValue.range(of: "^/api/backtest/results/[A-Z0-9_-]{1,40}$", options: .regularExpression) != nil {
+            return queryItems.isEmpty
+        }
+        if pathValue == "/api/logs" {
+            guard hasOnlyQuery(["type", "lines"]) else { return false }
+            if let type = components.queryItems?.first(where: { $0.name == "type" })?.value,
+               !["trading", "error", "trades"].contains(type) { return false }
+            return components.queryItems?.contains(where: { $0.name == "lines" }) != true || integerQuery("lines", 1...500)
+        }
+        return false
+    }
+
+    static func isAllowedMobileMutation(_ path: String, body: [String: Any]) -> Bool {
+        guard let components = URLComponents(string: "https://coinpilot.invalid\(path)"),
+              components.host == "coinpilot.invalid",
+              components.queryItems?.isEmpty ?? true,
+              components.fragment == nil else { return false }
+        let keys = Set(body.keys)
+        if components.path.range(of: "^/api/ai/sessions/[A-Za-z0-9_-]{1,128}/(pause|resume|stop)$", options: .regularExpression) != nil {
+            return keys.isEmpty
+        }
+        switch components.path {
+        case "/api/trade/buy": return keys == ["coin", "amount"]
+        case "/api/trade/sell": return keys == ["coin", "quantity"]
+        case "/api/trade/quick", "/api/trade/execute": return keys == ["coin", "action", "amount"] || keys == ["coin", "action"]
+        case "/api/trade/smart-buy": return keys == ["totalAmount", "minScore", "maxCoins"] || keys == ["totalAmount"]
+        case "/api/trade/smart-sell": return keys == ["targetAmount", "strategy"] || keys == ["targetAmount"]
+        case "/api/trade/execute-bundle":
+            return keys.isSubset(of: ["sellCoin", "sellAmount", "buyCoin", "buyAmount"]) &&
+                keys.contains("sellCoin") && keys.contains("buyCoin")
+        case "/api/investment-config/update": return keys == ["investmentRatio"]
+        case "/api/config/update":
+            let allowed: Set<String> = [
+                "investmentRatio",
+                "rsiPeriod", "rsiOversold", "rsiOverbought", "oversoldLookback", "macdFast", "macdSlow",
+                "macdSignal", "bbPeriod", "bbStdDev", "emaShort", "emaMid", "emaLong", "stopLossPercent",
+                "takeProfitPercent", "buyThreshold", "sellThreshold", "volumeMultiplier", "volumePeriod",
+                "minReboundPercent", "maxReboundPercent", "minRsiRecovery", "minVolumeRatio", "minCloseStrength",
+                "trendPeriod", "trendSlopeLookback", "minTrendSlopePercent", "maxSignalRangePercent",
+                "minSignalRangePercent", "positionRiskCheckIntervalMs", "entryDelayMinMs", "entryDelayMaxMs",
+                "maxEntryRetracePercent", "maxEntryChasePercent", "maxHoldMinutes",
+                "breakEvenTriggerPercent", "breakEvenOffsetPercent", "trailingActivationPercent",
+                "trailingStopPercent", "maxLosingHoldMinutes", "winnerExtendMinutes",
+                "winnerExtendMinProfitPercent", "maxEntriesPerSignalWindow", "marketRegimeEnabled",
+                "marketRegimeLookback", "marketRegimeMinBreadth", "marketRegimeMinReturnPercent",
+                "requireReboundBelowOverbought", "lossCircuitBreakerCount",
+                "lossCircuitBreakerWindowMinutes", "lossCircuitBreakerCooldownMinutes",
+                "maxRiskDataGapSeconds", "maxAnalysisDataGapSeconds", "maxCandleAgeSeconds"
+            ]
+            return !keys.isEmpty && keys.isSubset(of: allowed)
+        case "/api/control/start", "/api/control/stop", "/api/paper-validation/stop", "/api/portfolio/snapshot", "/api/optimization/run-now":
+            return keys.isEmpty
+        case "/api/virtual/reset": return keys == ["seedMoney"]
+        case "/api/paper-validation/start":
+            return keys.isEmpty || (keys == ["reset"] && body["reset"] is Bool)
+        case "/api/virtual/deposit", "/api/virtual/withdraw": return keys == ["amount"]
+        case "/api/investment-presets/apply": return keys == ["presetId"]
+        case "/api/optimization/toggle": return keys == ["enabled"] && body["enabled"] is Bool
+        case "/api/optimization/interval": return keys == ["interval"]
+        case "/api/ai/sessions": return keys.isSubset(of: ["name", "providers", "eventTypes", "autoConsultEventTypes", "autoConsult", "coins", "cooldownSeconds", "evaluationMinutes"]) && keys.contains("eventTypes")
+        case "/api/ai/consult": return keys.isSubset(of: ["eventId", "event", "provider", "providers", "sessionId"]) && !keys.isEmpty
+        default: return false
         }
     }
 }
@@ -239,6 +636,47 @@ private final class CoinPilotTokenStore: CoinPilotTokenProviding {
     }
 }
 
+private final class CoinPilotKeychainPendingOrderStore: CoinPilotPendingOrderProviding {
+    private let service = "\(Bundle.main.bundleIdentifier ?? "com.godekd3133.coinpilot").pending-order"
+
+    func read(for serverURL: URL) -> CoinPilotPendingOrderRead {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: serverURL.absoluteString,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne
+        ]
+        var result: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        if status == errSecItemNotFound { return .missing }
+        guard status == errSecSuccess, let data = result as? Data else { return .unavailable }
+        return .saved(data)
+    }
+
+    func save(_ data: Data, for serverURL: URL) -> Bool {
+        guard clear(for: serverURL) else { return false }
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: serverURL.absoluteString,
+            kSecValueData as String: data,
+            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+        ]
+        return SecItemAdd(query as CFDictionary, nil) == errSecSuccess
+    }
+
+    func clear(for serverURL: URL) -> Bool {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: serverURL.absoluteString
+        ]
+        let status = SecItemDelete(query as CFDictionary)
+        return status == errSecSuccess || status == errSecItemNotFound
+    }
+}
+
 #if targetEnvironment(simulator) || COINPILOT_TEST_SIMULATOR_TOKEN_STORE
 /// Ad-hoc simulator builds lack the physical app's Keychain entitlement. Keep
 /// simulator test tokens in process memory only; never fall back to a file or
@@ -259,6 +697,7 @@ final class CoinPilotSimulatorTokenStore: CoinPilotTokenProviding {
         values.removeValue(forKey: serverURL.absoluteString)
     }
 }
+
 #endif
 
 struct CoinPilotPosition: Identifiable {
@@ -377,7 +816,11 @@ struct CoinPilotStatus {
     let protectiveMonitorActive: Bool?
     let stopReason: String?
     let exchangeStateKnown: Bool?
+    let liveManualPrepared: Bool?
+    let liveManualPrepareOnBoot: Bool?
+    let upbitCredentialsConfigured: Bool?
     let lastUpdate: String?
+    let maxCandleAgeSeconds: Double?
 
     init(_ object: [String: Any]) {
         isRunning = object["isRunning"] as? Bool
@@ -388,7 +831,13 @@ struct CoinPilotStatus {
         protectiveMonitorActive = object["protectiveMonitorActive"] as? Bool
         stopReason = object["stopReason"] as? String
         exchangeStateKnown = object["exchangeStateKnown"] as? Bool
+        liveManualPrepared = object["liveManualPrepared"] as? Bool
+        liveManualPrepareOnBoot = object["liveManualPrepareOnBoot"] as? Bool
+        upbitCredentialsConfigured = object["upbitCredentialsConfigured"] as? Bool
         lastUpdate = object["lastUpdate"] as? String
+        let configuredMaxAge = (object["maxCandleAgeSeconds"] as? NSNumber)?.doubleValue
+            ?? (object["maxCandleAgeSeconds"] as? String).flatMap(Double.init)
+        maxCandleAgeSeconds = configuredMaxAge.flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
     }
 }
 
@@ -450,15 +899,44 @@ struct CoinPilotMarketPrice: Identifiable {
     let coin: String?
     let price: Double?
     let change: Double?
+    let high: Double?
+    let low: Double?
+    let volumeKrw: Double?
     let sourceAsOf: String?
     let fetchedAt: String?
 
     var id: String { coin ?? "unknown-\(price ?? 0)" }
 
+    var sourceAsOfDate: Date? {
+        CoinPilotMarketSnapshotMetadata.parseDate(sourceAsOf)
+    }
+
+    var fetchedAtDate: Date? {
+        CoinPilotMarketSnapshotMetadata.parseDate(fetchedAt)
+    }
+
+    func freshnessIssue(at now: Date, maximumAgeSeconds: TimeInterval) -> String? {
+        guard let price, price.isFinite, price > 0 else {
+            return "현재가를 확인할 수 없어요"
+        }
+        guard let sourceAsOfDate else {
+            return "최근 체결 시각을 확인할 수 없어요"
+        }
+        return CoinPilotTimestampFreshness.issue(
+            sourceAsOfDate,
+            label: "최근 체결",
+            at: now,
+            maximumAgeSeconds: maximumAgeSeconds
+        )
+    }
+
     init(_ object: [String: Any]) {
         coin = object["coin"] as? String
         price = Self.number(object["price"])
         change = Self.number(object["change"])
+        high = Self.number(object["high"])
+        low = Self.number(object["low"])
+        volumeKrw = Self.number(object["volumeKrw"])
         sourceAsOf = object["sourceAsOf"] as? String
         fetchedAt = object["fetchedAt"] as? String
     }
@@ -467,6 +945,92 @@ struct CoinPilotMarketPrice: Identifiable {
         guard let value, !(value is NSNull) else { return nil }
         if let number = value as? NSNumber { return number.doubleValue }
         if let string = value as? String { return Double(string) }
+        return nil
+    }
+}
+
+struct CoinPilotMarketSnapshotMetadata: Equatable {
+    let complete: Bool?
+    let missingMarkets: [String]?
+    let marketListStale: Bool?
+    let sourceAsOf: String?
+    let fetchedAt: String?
+
+    init(_ object: [String: Any]) {
+        complete = object["complete"] as? Bool
+        missingMarkets = object["missingMarkets"] as? [String]
+        marketListStale = object["marketListStale"] as? Bool
+        sourceAsOf = object["sourceAsOf"] as? String
+        fetchedAt = object["fetchedAt"] as? String
+    }
+
+    var fetchedAtDate: Date? {
+        Self.parseDate(fetchedAt)
+    }
+
+    var sourceAsOfDate: Date? {
+        Self.parseDate(sourceAsOf)
+    }
+
+    static func parseDate(_ value: String?) -> Date? {
+        guard let value else { return nil }
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = fractional.date(from: value) { return date }
+        let plain = ISO8601DateFormatter()
+        plain.formatOptions = [.withInternetDateTime]
+        return plain.date(from: value)
+    }
+
+    var freshnessIssue: String? {
+        if marketListStale == true {
+            return "시세 종목 목록 갱신이 필요해요"
+        }
+        if complete == false || missingMarkets?.isEmpty == false {
+            if let missingCount = missingMarkets?.count, missingCount > 0 {
+                return "종목 \(missingCount)개 시세 누락"
+            }
+            return "일부 종목 시세 누락"
+        }
+        guard complete == true, missingMarkets?.isEmpty == true, marketListStale == false else {
+            return "시세 상태를 확인할 수 없어요"
+        }
+        guard sourceAsOfDate != nil else {
+            return "원본 시세 시각을 확인할 수 없어요"
+        }
+        guard fetchedAtDate != nil else {
+            return "시세 수집 시각을 확인할 수 없어요"
+        }
+        return nil
+    }
+
+    func currentFetchedAt(at _: Date, maximumAgeSeconds _: TimeInterval) -> Date? {
+        guard complete == true,
+              missingMarkets?.isEmpty == true,
+              marketListStale == false,
+              sourceAsOfDate != nil,
+              let fetchedAtDate else { return nil }
+        return fetchedAtDate
+    }
+}
+
+private enum CoinPilotTimestampFreshness {
+    static let futureToleranceSeconds: TimeInterval = 5
+
+    static func issue(
+        _ date: Date?,
+        label: String,
+        at now: Date,
+        maximumAgeSeconds: TimeInterval
+    ) -> String? {
+        guard let date else { return "\(label) 시각을 확인할 수 없어요" }
+        let ageSeconds = now.timeIntervalSince(date)
+        if ageSeconds < -futureToleranceSeconds {
+            return "\(label) 시각이 현재보다 앞서 있어요"
+        }
+        if ageSeconds > maximumAgeSeconds {
+            return "\(label) 시각이 오래됐어요"
+        }
         return nil
     }
 }
@@ -510,6 +1074,196 @@ struct CoinPilotTrade: Identifiable {
     private static func symbol(_ value: String) -> String? {
         let symbol = value.replacingOccurrences(of: "KRW-", with: "")
         return symbol.isEmpty ? nil : symbol
+    }
+
+    private static func number(_ value: Any?) -> Double? {
+        guard let value, !(value is NSNull) else { return nil }
+        if let number = value as? NSNumber { return number.doubleValue }
+        if let string = value as? String { return Double(string) }
+        return nil
+    }
+}
+
+struct CoinPilotCandle: Identifiable {
+    let id: String
+    let time: String?
+    let open: Double?
+    let high: Double?
+    let low: Double?
+    let close: Double?
+    let volume: Double?
+
+    init(_ object: [String: Any], index: Int) {
+        time = object["time"] as? String
+        open = Self.number(object["open"])
+        high = Self.number(object["high"])
+        low = Self.number(object["low"])
+        close = Self.number(object["close"])
+        volume = Self.number(object["volume"])
+        id = time ?? "candle-\(index)"
+    }
+
+    private static func number(_ value: Any?) -> Double? {
+        guard let value, !(value is NSNull) else { return nil }
+        if let number = value as? NSNumber { return number.doubleValue }
+        if let string = value as? String { return Double(string) }
+        return nil
+    }
+}
+
+struct CoinPilotAnalysisResult: Identifiable {
+    let coin: String
+    let currentPrice: Double?
+    let change24h: Double?
+    let volume24h: Double?
+    let rsi: Double?
+    let macdSignal: String?
+    let bollingerPercent: Double?
+    let buyScore: Double?
+    let sellScore: Double?
+    let totalScore: Double?
+    let recommendation: String?
+    let signalStrength: String?
+    let signals: [String]
+
+    var id: String { coin }
+
+    init(_ object: [String: Any]) {
+        coin = object["coin"] as? String ?? "UNKNOWN"
+        currentPrice = Self.number(object["currentPrice"] ?? object["price"])
+        change24h = Self.number(object["change24h"])
+        volume24h = Self.number(object["volume24h"])
+        let indicators = object["indicators"] as? [String: Any] ?? [:]
+        rsi = Self.number(indicators["rsi"])
+        macdSignal = indicators["macdSignal"] as? String
+        bollingerPercent = Self.number(indicators["bbPercent"])
+        buyScore = Self.number(object["buyScore"])
+        sellScore = Self.number(object["sellScore"])
+        totalScore = Self.number(object["totalScore"] ?? object["score"])
+        recommendation = object["recommendation"] as? String ?? object["action"] as? String
+        signalStrength = object["signalStrength"] as? String
+        signals = (object["signals"] as? [String]) ?? []
+    }
+
+    private static func number(_ value: Any?) -> Double? {
+        guard let value, !(value is NSNull) else { return nil }
+        if let number = value as? NSNumber { return number.doubleValue }
+        if let string = value as? String { return Double(string) }
+        return nil
+    }
+}
+
+struct CoinPilotRecommendation: Identifiable {
+    let coin: String
+    let action: String
+    let price: Double?
+    let reason: String?
+    let confidence: Double?
+    let hasPosition: Bool
+    let averagePrice: Double?
+    let profitPercent: Double?
+    let suggestedAmount: Double?
+
+    var id: String { "\(coin)-\(action)" }
+
+    init(_ object: [String: Any]) {
+        coin = object["coin"] as? String ?? "UNKNOWN"
+        action = object["action"] as? String ?? object["recommendation"] as? String ?? "WAIT"
+        price = Self.number(object["currentPrice"] ?? object["price"])
+        reason = object["reason"] as? String
+        confidence = Self.number(object["confidence"] ?? object["score"])
+        hasPosition = object["hasPosition"] as? Bool ?? false
+        averagePrice = Self.number(object["avgPrice"] ?? object["averagePrice"])
+        profitPercent = Self.number(object["profitPercent"])
+        suggestedAmount = Self.number(object["suggestedAmount"] ?? object["investmentAmount"] ?? object["amount"])
+    }
+
+    private static func number(_ value: Any?) -> Double? {
+        guard let value, !(value is NSNull) else { return nil }
+        if let number = value as? NSNumber { return number.doubleValue }
+        if let string = value as? String { return Double(string) }
+        return nil
+    }
+}
+
+struct CoinPilotNewsArticle: Identifiable {
+    let id: String
+    let title: String
+    let summary: String?
+    let source: String?
+    let url: URL?
+    let timestamp: String?
+    let sentiment: String?
+
+    init(_ object: [String: Any], index: Int) {
+        title = object["title"] as? String ?? "제목 없음"
+        summary = object["description"] as? String ?? object["content"] as? String
+        source = object["source"] as? String
+        let rawURL = object["url"] as? String ?? object["link"] as? String
+        url = rawURL.flatMap(URL.init(string:)).flatMap { $0.scheme == "https" || $0.scheme == "http" ? $0 : nil }
+        timestamp = object["timestamp"] as? String ?? object["pubDate"] as? String ?? object["publishedAt"] as? String
+        sentiment = object["sentiment"] as? String ?? object["mood"] as? String
+        id = (object["id"] as? String) ?? "\(timestamp ?? "news")-\(index)-\(title.hashValue)"
+    }
+}
+
+struct CoinPilotAISession: Identifiable {
+    let id: String
+    let name: String
+    let status: String
+    let eventTypes: [String]
+    let providers: [String]
+    let coins: [String]
+    let autoConsult: Bool
+    let evaluationMinutes: Int?
+    let eventCount: Int?
+    let consultationCount: Int?
+    let lastEventAt: String?
+
+    init(_ object: [String: Any]) {
+        id = object["id"] as? String ?? object["sessionId"] as? String ?? UUID().uuidString
+        name = object["name"] as? String ?? "시장 신호 알림"
+        status = object["status"] as? String ?? "UNKNOWN"
+        eventTypes = object["eventTypes"] as? [String] ?? []
+        providers = object["providers"] as? [String] ?? []
+        coins = object["coins"] as? [String] ?? []
+        autoConsult = object["autoConsult"] as? Bool ?? false
+        evaluationMinutes = Self.integer(object["evaluationMinutes"])
+        eventCount = Self.integer(object["eventCount"])
+        consultationCount = Self.integer(object["consultationCount"])
+        lastEventAt = object["lastEventAt"] as? String
+    }
+
+    private static func integer(_ value: Any?) -> Int? {
+        if let number = value as? NSNumber { return number.intValue }
+        if let string = value as? String { return Int(string) }
+        return nil
+    }
+}
+
+struct CoinPilotAIEvent: Identifiable {
+    let id: String
+    let type: String
+    let coin: String?
+    let action: String?
+    let price: Double?
+    let signalStrength: String?
+    let title: String
+    let detail: String?
+    let timestamp: String?
+    let consultationId: String?
+
+    init(_ object: [String: Any], index: Int) {
+        type = object["type"] as? String ?? object["eventType"] as? String ?? "MARKET_SIGNAL"
+        coin = object["coin"] as? String ?? object["market"] as? String
+        action = object["action"] as? String
+        price = Self.number(object["price"])
+        signalStrength = object["signalStrength"] as? String
+        title = object["title"] as? String ?? object["message"] as? String ?? type
+        detail = object["reason"] as? String ?? object["summary"] as? String
+        timestamp = object["timestamp"] as? String ?? object["createdAt"] as? String
+        consultationId = object["consultationId"] as? String ?? (object["consultation"] as? [String: Any])?["id"] as? String
+        id = (object["id"] as? String) ?? (object["eventId"] as? String) ?? "event-\(index)-\(timestamp ?? "unknown")"
     }
 
     private static func number(_ value: Any?) -> Double? {
@@ -742,8 +1496,25 @@ struct CoinPilotPaperValidationSummary {
 @MainActor
 final class CoinPilotStore: ObservableObject {
     private static let serverDefaultsKey = "coinpilot.dashboardUrl"
+    private static let activeWorkspaceDefaultsKey = "coinpilot.native.activeWorkspace"
     private static let legacyDataModeDefaultsKey = "coinpilot.native.dataMode"
     private static let dataModeDefaultsKeyPrefix = "coinpilot.native.dataMode.profile."
+    private static let maximumBundledLocalChartCandles = 200
+    private static let mobileTuningKeyOrder = [
+        "investmentRatio", "rsiPeriod", "rsiOversold", "rsiOverbought", "oversoldLookback",
+        "macdFast", "macdSlow", "macdSignal", "bbPeriod", "bbStdDev", "emaShort", "emaMid", "emaLong",
+        "stopLossPercent", "takeProfitPercent", "trailingStopPercent", "buyThreshold", "sellThreshold",
+        "volumeMultiplier", "volumePeriod", "minReboundPercent", "maxReboundPercent", "minRsiRecovery",
+        "minVolumeRatio", "minCloseStrength", "trendPeriod", "trendSlopeLookback", "minTrendSlopePercent",
+        "maxSignalRangePercent", "minSignalRangePercent", "marketRegimeEnabled", "marketRegimeLookback",
+        "marketRegimeMinBreadth", "marketRegimeMinReturnPercent", "positionRiskCheckIntervalMs",
+        "maxRiskDataGapSeconds", "maxAnalysisDataGapSeconds", "maxCandleAgeSeconds", "entryDelayMinMs",
+        "entryDelayMaxMs", "maxEntryRetracePercent", "maxEntryChasePercent", "breakEvenTriggerPercent",
+        "breakEvenOffsetPercent", "trailingActivationPercent", "maxHoldMinutes", "maxLosingHoldMinutes",
+        "winnerExtendMinutes", "winnerExtendMinProfitPercent", "maxEntriesPerSignalWindow",
+        "lossCircuitBreakerCount", "lossCircuitBreakerWindowMinutes", "lossCircuitBreakerCooldownMinutes",
+        "requireReboundBelowOverbought"
+    ]
     private static let resourceNames = [
         "status", "account", "cumulative-pnl", "today-summary",
         "portfolio-history", "market-prices", "trades", "paper-validation-summary"
@@ -760,12 +1531,17 @@ final class CoinPilotStore: ObservableObject {
     @Published private(set) var todayRealizedProfit: Double?
     @Published private(set) var history: [CoinPilotHistoryPoint] = []
     @Published private(set) var markets: [CoinPilotMarketPrice] = []
+    @Published private(set) var marketSnapshotMetadata: CoinPilotMarketSnapshotMetadata?
     @Published private(set) var trades: [CoinPilotTrade] = []
     @Published private(set) var paperValidationSummary: CoinPilotPaperValidationSummary?
     @Published private(set) var rawResponses: [String: CoinPilotHTTPResponse] = [:]
     @Published private(set) var serverAddress: String
     @Published var serverDraft: String
     @Published var tokenDraft = ""
+    @Published var liveAccessKeyDraft = ""
+    @Published var liveSecretKeyDraft = ""
+    @Published private(set) var isSubmittingLiveCredentials = false
+    @Published private(set) var liveCredentialMessage: String?
     @Published private(set) var connectionMessage: String?
     @Published private(set) var dashboardMessage: String?
     @Published private(set) var isRefreshing = false
@@ -774,37 +1550,109 @@ final class CoinPilotStore: ObservableObject {
     @Published private(set) var lastCheckedAt: Date?
     @Published private(set) var historyPeriod: CoinPilotHistoryPeriod = .day
     @Published private(set) var authenticationRequired = false
+    @Published private(set) var authenticationScope: CoinPilotAuthScope = .unauthenticated
+    @Published private(set) var activeWorkspace: CoinPilotWorkspaceMode = .paper
+    @Published private(set) var serverModeMatchesWorkspace = true
     @Published private(set) var isBundledPreview = false
+    @Published private(set) var isBundledLocalMarketData = false
     @Published private(set) var canUseBundledPreview = false
+    @Published private(set) var localMarketData: CoinPilotBundledMarketData?
+    @Published private(set) var localMarketDataError: String?
+    @Published private(set) var isLoadingLocalMarketData = false
     @Published private(set) var resourceStates: [String: CoinPilotResourceState] = [:]
+    @Published private(set) var pendingManualOrder: CoinPilotPendingManualOrder?
+    @Published private(set) var pendingManualOrderLocked = false
+    @Published private(set) var isSubmittingManualOrder = false
+    @Published private(set) var orderMessage: String?
+    @Published private(set) var tuningValues: [String: Any] = [:]
+    @Published private(set) var tuningRanges: [String: [String: Any]] = [:]
+    @Published private(set) var tuningMessage: String?
+    @Published private(set) var isSavingTuning = false
+    @Published private(set) var isLoadingTuning = false
+    @Published private(set) var tuningMutationLocked = false
+    @Published private(set) var tuningMutationReason: String?
+    @Published private(set) var investmentPresets: [[String: Any]] = []
+    @Published var selectedMarket = "KRW-BTC"
+    @Published private(set) var selectedCandleInterval = 5
+    @Published private(set) var candles: [CoinPilotCandle] = []
+    @Published private(set) var analysisResults: [CoinPilotAnalysisResult] = []
+    @Published private(set) var analysisSummary: [String: Any] = [:]
+    @Published private(set) var buyRecommendations: [CoinPilotRecommendation] = []
+    @Published private(set) var sellRecommendations: [CoinPilotRecommendation] = []
+    @Published private(set) var bundleSuggestions: [[String: Any]] = []
+    @Published private(set) var newsArticles: [CoinPilotNewsArticle] = []
+    @Published private(set) var newsSentiment: [String: Any] = [:]
+    @Published private(set) var aiProviderStatus: [String: Any] = [:]
+    @Published private(set) var aiEffectiveness: [String: Any] = [:]
+    @Published private(set) var aiSessions: [CoinPilotAISession] = []
+    @Published private(set) var aiEvents: [CoinPilotAIEvent] = []
+    @Published private(set) var aiConsultations: [[String: Any]] = []
+    @Published private(set) var aiConsultationMessage: String?
+    @Published private(set) var strategyResearch: [String: Any] = [:]
+    @Published private(set) var strategyReadiness: [String: Any] = [:]
+    @Published private(set) var scalpingValidation: [String: Any] = [:]
+    @Published private(set) var paperValidationState: [String: Any] = [:]
+    @Published private(set) var momentumShadow: [String: Any] = [:]
+    @Published private(set) var liveExecutionEvidence: [String: Any] = [:]
+    @Published private(set) var portfolioAnalysis: [String: Any] = [:]
+    @Published private(set) var statistics: [[String: Any]] = []
+    @Published private(set) var optimizationSettings: [String: Any] = [:]
+    @Published private(set) var optimizationHistory: [[String: Any]] = []
+    @Published private(set) var backtestResults: [String: Any] = [:]
+    @Published private(set) var optimalConfig: [String: Any] = [:]
+    @Published private(set) var featureMessages: [String: String] = [:]
+    @Published private(set) var loadingFeatures: Set<String> = []
+    @Published private(set) var isRunningFeatureAction = false
+    @Published private(set) var isRecordingSnapshot = false
 
     private let api: CoinPilotAPIProviding
     private let tokens: CoinPilotTokenProviding
+    private let now: () -> Date
+    private let pendingOrders: CoinPilotPendingOrderProviding
     private let bundledPreview: CoinPilotBundledPreviewDataSource
+    private let localMarketDataSource: CoinPilotBundledMarketDataLoading?
     private let dataModeDefaultsKey: String
     private var currentServerURL: URL?
     private var requestGeneration = 0
     private var lastSuccessfulResourceAt: [String: Date] = [:]
     private var bootstrapped = false
+    private var shouldInferWorkspaceFromLegacyURL = false
+    private var localMarketDataLoadGeneration = 0
+    private var mobileFeatureRequestGenerations: [String: Int] = [:]
 
     init(
         api: CoinPilotAPIProviding = CoinPilotAPIClient(),
         tokens: CoinPilotTokenProviding? = nil,
         bundledPreview: CoinPilotBundledPreviewDataSource = CoinPilotBundledPreviewDataSource(),
-        configuredDataMode: String? = nil
+        localMarketDataSource suppliedLocalMarketDataSource: CoinPilotBundledMarketDataLoading? = nil,
+        configuredDataMode: String? = nil,
+        pendingOrderStore: CoinPilotPendingOrderProviding? = nil,
+        now: @escaping () -> Date = Date.init
     ) {
         self.api = api
+        self.now = now
 #if targetEnvironment(simulator) || COINPILOT_TEST_SIMULATOR_TOKEN_STORE
         self.tokens = tokens ?? CoinPilotSimulatorTokenStore()
+        self.pendingOrders = pendingOrderStore ?? CoinPilotMemoryPendingOrderStore()
 #else
         self.tokens = tokens ?? CoinPilotTokenStore()
+        self.pendingOrders = pendingOrderStore ?? CoinPilotKeychainPendingOrderStore()
 #endif
         self.bundledPreview = bundledPreview
-        let stored = UserDefaults.standard.string(forKey: Self.serverDefaultsKey)
-        let url = stored.flatMap(URL.init(string:)).flatMap { ServerAddressPolicy.allows($0) ? $0 : nil }
+        let savedWorkspaceName = UserDefaults.standard.string(forKey: Self.activeWorkspaceDefaultsKey)
+        let workspace = CoinPilotWorkspaceMode(rawValue: savedWorkspaceName ?? "") ?? .paper
+        let savedProfileAddress = UserDefaults.standard.string(forKey: workspace.addressDefaultsKey)
+        let legacyAddress = UserDefaults.standard.string(forKey: Self.serverDefaultsKey)
+        let storedAddress = savedProfileAddress ?? (savedWorkspaceName == nil ? legacyAddress : nil)
+        let url = storedAddress.flatMap(URL.init(string:)).flatMap { ServerAddressPolicy.allows($0) ? $0 : nil }
+        shouldInferWorkspaceFromLegacyURL = savedWorkspaceName == nil && savedProfileAddress == nil && legacyAddress != nil
         let requestedMode = configuredDataMode ??
             (Bundle.main.object(forInfoDictionaryKey: "CoinPilotDataMode") as? String ?? "server")
-        let configuredMode = requestedMode == "bundled-preview" ? "bundled-preview" : "server"
+        let configuredMode: String
+        switch requestedMode {
+        case "bundled-preview", "bundled-local": configuredMode = requestedMode
+        default: configuredMode = "server"
+        }
         let profileDefaultsKey = "\(Self.dataModeDefaultsKeyPrefix)\(configuredMode)"
         dataModeDefaultsKey = profileDefaultsKey
         let savedMode = UserDefaults.standard.string(forKey: profileDefaultsKey)
@@ -814,12 +1662,20 @@ final class CoinPilotStore: ObservableObject {
         }
         let selectedMode = savedMode ?? (legacyMode == configuredMode ? legacyMode : configuredMode)
         let bundledPreviewAvailable = bundledPreview.isAvailable
+        let usesBundledPreview = selectedMode == "bundled-preview"
         canUseBundledPreview = bundledPreviewAvailable
-        isBundledPreview = bundledPreviewAvailable && selectedMode == "bundled-preview"
+        isBundledPreview = usesBundledPreview
+        activeWorkspace = usesBundledPreview ? .paper : workspace
+        let usesBundledLocalMarketData = configuredMode == "bundled-local"
+        isBundledLocalMarketData = usesBundledLocalMarketData
+        localMarketDataSource = usesBundledLocalMarketData
+            ? (suppliedLocalMarketDataSource ?? CoinPilotBundledMarketDataSource())
+            : nil
         currentServerURL = url
         serverAddress = url.map(Self.displayAddress) ?? ""
         serverDraft = url?.absoluteString ?? ""
         resourceStates = Dictionary(uniqueKeysWithValues: Self.resourceNames.map { ($0, .notRequested) })
+        if !isBundledLocalMarketData, !usesBundledPreview, let url { restorePendingManualOrder(for: url) }
     }
 
     func state(for resource: String) -> CoinPilotResourceState {
@@ -827,9 +1683,38 @@ final class CoinPilotStore: ObservableObject {
     }
 
     func freshnessLabel(for resource: String) -> String {
+        if resource == "market-prices", isBundledLocalMarketData {
+            guard let localMarketData else {
+                return localMarketDataError == nil ? "로컬 공개 시세 자료 불러오는 중" : "로컬 공개 시세 자료를 사용할 수 없어요"
+            }
+            return "앱 저장 자료 생성 · \(CoinPilotFormatting.utcMarketTimestamp(localMarketData.generatedAt))"
+        }
         let isMarketPrices = resource == "market-prices"
         let isMarketPreview = isMarketPrices && isBundledPreview
         let checkedLabel = isMarketPreview ? "예시 자료 기준" : isMarketPrices ? "앱 확인" : "확인"
+        if isMarketPrices, let issue = marketSnapshotMetadata?.freshnessIssue {
+            switch state(for: resource) {
+            case .loading:
+                if let lastSuccess = lastSuccessfulResourceAt[resource] {
+                    return "\(issue) · \(checkedLabel) \(CoinPilotFormatting.time(lastSuccess)) · 새로 확인 중"
+                }
+                return "\(issue) · 새로 확인 중"
+            case .current(let date):
+                return "\(issue) · \(checkedLabel) \(CoinPilotFormatting.time(date))"
+            case .stale(let date):
+                return "\(issue) · 마지막 정상 시세 \(CoinPilotFormatting.time(date))"
+            case .notRequested, .unavailable:
+                return issue
+            }
+        }
+        if isMarketPrices, !isMarketPreview {
+            let staleMarketCount = markets.filter {
+                $0.freshnessIssue(at: now(), maximumAgeSeconds: marketPriceMaximumAgeSeconds) != nil
+            }.count
+            if staleMarketCount > 0 {
+                return "종목 \(staleMarketCount)개 시세가 오래됐어요 · 서버 수집 \(CoinPilotFormatting.time(marketSnapshotMetadata?.fetchedAtDate))"
+            }
+        }
         switch state(for: resource) {
         case .notRequested:
             if isMarketPreview { return "예시 시세 자료 미제공" }
@@ -857,7 +1742,7 @@ final class CoinPilotStore: ObservableObject {
     }
 
     var marketSnapshotFetchedAt: String? {
-        Self.marketSnapshotFetchedAt(from: markets)
+        marketSnapshotMetadata?.fetchedAt
     }
 
     static func marketSnapshotFetchedAt(from markets: [CoinPilotMarketPrice]) -> String? {
@@ -902,7 +1787,7 @@ final class CoinPilotStore: ObservableObject {
     }
 
     var runtimeSafetyMessage: String? {
-        guard !isBundledPreview else { return nil }
+        guard !isBundledPreview, !isBundledLocalMarketData else { return nil }
         if status?.runtimeState == "SYNC_REQUIRED" || status?.exchangeStateKnown == false {
             return "설정한 시장의 거래소 잔고와 미체결 주문을 확인하고 있어요. 확인이 끝날 때까지 신규 주문을 잠급니다."
         }
@@ -943,9 +1828,244 @@ final class CoinPilotStore: ObservableObject {
         status?.mode ?? account?.mode
     }
 
+    var canOperate: Bool {
+        !isBundledPreview && !isBundledLocalMarketData &&
+            authenticationRequired &&
+            authenticationScope.canOperate &&
+            !isObserverAccount &&
+            serverModeMatchesWorkspace
+    }
+
+    var showsLiveCredentialSetup: Bool {
+        activeWorkspace == .live &&
+            phase == .dashboard &&
+            !isBundledPreview && !isBundledLocalMarketData &&
+            serverModeMatchesWorkspace && status?.mode == "LIVE" &&
+            status?.upbitCredentialsConfigured == false
+    }
+
+    var showsLiveCredentialSyncPending: Bool {
+        activeWorkspace == .live &&
+            phase == .dashboard &&
+            !isBundledPreview && !isBundledLocalMarketData &&
+            serverModeMatchesWorkspace && status?.mode == "LIVE" &&
+            status?.upbitCredentialsConfigured == true &&
+            !isLiveCredentialSetupReady
+    }
+
+    var isLiveCredentialSetupReady: Bool {
+        guard status?.upbitCredentialsConfigured == true,
+              status?.exchangeStateKnown == true else { return false }
+        return status?.liveManualPrepareOnBoot != true || status?.liveManualPrepared == true
+    }
+
+    var canSubmitLiveCredentials: Bool {
+        canUseLiveCredentialRegistration &&
+            !isSubmittingLiveCredentials &&
+            !liveAccessKeyDraft.isEmpty && !liveSecretKeyDraft.isEmpty
+    }
+
+    var currentLiveCredentialTransportIsSecure: Bool? {
+        guard let currentServerURL else { return nil }
+        return currentServerURL.scheme?.lowercased() == "https"
+    }
+
+    var canUseLiveCredentialRegistration: Bool {
+        showsLiveCredentialSetup &&
+            currentLiveCredentialTransportIsSecure == true &&
+            authenticationRequired && authenticationScope == .mobileOperator
+    }
+
+    var canViewTuning: Bool {
+        phase == .dashboard && !isBundledPreview && !isBundledLocalMarketData && serverModeMatchesWorkspace &&
+            tradingMode == activeWorkspace.serverMode &&
+            (!authenticationRequired || authenticationScope != .unauthenticated)
+    }
+
+    var workspaceModeMismatchMessage: String? {
+        guard let serverMode = tradingMode, serverMode != activeWorkspace.serverMode else { return nil }
+        let actual = serverMode == "LIVE" ? "실거래" : serverMode == "DRY_RUN" ? "모의투자" : "확인 불가"
+        let nextStep = activeWorkspace == .live
+            ? "같은 IP를 쓸 수 있지만 LIVE 서버의 다른 포트나 주소로 연결해야 합니다."
+            : "모의투자 서버 주소를 확인해 주세요."
+        return "현재 주소는 \(actual)(\(serverMode)) 서버입니다. \(activeWorkspace.serverMode) 모드가 필요합니다. \(nextStep)"
+    }
+
+    var tuningFields: [CoinPilotTuningField] {
+        Self.mobileTuningKeyOrder.compactMap { key in
+            let metadata = tuningRanges[key] ?? [:]
+            let value = tuningValues[key]
+            let fallback = Self.tuningFallbackMetadata[key] ?? [:]
+            let label = (metadata["label"] as? String) ?? fallback["label"] ?? key
+            let description = (metadata["description"] as? String) ?? fallback["description"] ?? ""
+            let category = (metadata["category"] as? String) ?? fallback["category"] ?? "전략"
+
+            if ["marketRegimeEnabled", "requireReboundBelowOverbought"].contains(key),
+               let booleanValue = value as? Bool {
+                return CoinPilotTuningField(
+                    key: key, label: label, description: description, category: category,
+                    value: nil, booleanValue: booleanValue, minimum: nil, maximum: nil,
+                    step: nil, displayMultiplier: 1
+                )
+            }
+            guard let numericValue = Self.number(value) else { return nil }
+            return CoinPilotTuningField(
+                key: key,
+                label: label,
+                description: description,
+                category: category,
+                value: numericValue,
+                booleanValue: nil,
+                minimum: Self.number(metadata["min"]),
+                maximum: Self.number(metadata["max"]),
+                step: Self.number(metadata["step"]),
+                displayMultiplier: Self.number(metadata["displayMultiplier"]) ?? 1
+            )
+        }
+    }
+
+    var manualOrderBlockReason: String? {
+        if isBundledLocalMarketData { return "로컬 공개 시세 조회 전용 모드에서는 계좌·주문 작업을 사용할 수 없습니다." }
+        guard phase == .dashboard, !isBundledPreview else { return "서버 작업공간에서만 주문할 수 있습니다." }
+        guard serverModeMatchesWorkspace, status?.mode == activeWorkspace.serverMode,
+              account?.mode == activeWorkspace.serverMode else { return "선택한 실거래/모의투자 서버를 확인해 주세요." }
+        guard authenticationRequired, authenticationScope.canOperate else { return "조회 전용 토큰입니다. 모바일 운영 토큰을 연결해야 주문할 수 있습니다." }
+        guard !isObserverAccount else { return "읽기 전용 서버에서는 주문할 수 없습니다." }
+        guard !pendingManualOrderLocked else { return "이전 주문 결과를 확인한 뒤에 새 주문을 보낼 수 있습니다." }
+        guard !isSubmittingManualOrder else { return "주문 결과를 확인하고 있습니다." }
+        if status?.runtimeState == "PROTECTIVE_ONLY" { return runtimeSafetyMessage ?? "위험 감시 상태에서는 새 주문을 보낼 수 없습니다." }
+        if status?.runtimeState == "SYNC_REQUIRED" || status?.exchangeStateKnown == false {
+            return runtimeSafetyMessage ?? "거래소 잔고와 미체결 주문을 확인할 때까지 주문을 잠급니다."
+        }
+        if activeWorkspace == .live,
+           status?.isRunning == false,
+           !["operator_stop", "operator_shutdown"].contains(status?.stopReason ?? "") {
+            return "실거래 안전 상태를 확인할 때까지 주문을 잠급니다."
+        }
+        if activeWorkspace == .paper && paperValidationSummary?.active == true {
+            return "모의투자 성과 점검 중에는 계좌를 변경할 수 없습니다."
+        }
+#if targetEnvironment(simulator)
+        if activeWorkspace == .live { return "실거래 주문은 Simulator에서 잠겨 있습니다. 실제 기기의 TestFlight 앱을 사용하세요." }
+#endif
+        guard state(for: "account").isCurrent, state(for: "market-prices").isCurrent else {
+            return "계좌와 시세를 새로 확인한 뒤 주문할 수 있습니다."
+        }
+        return nil
+    }
+
+    var marketPriceMaximumAgeSeconds: TimeInterval {
+        guard let value = status?.maxCandleAgeSeconds, value.isFinite, value > 0 else { return 90 }
+        return value
+    }
+
+    func marketQuoteFreshnessIssue(for marketCode: String) -> String? {
+        if isBundledLocalMarketData || isBundledPreview { return nil }
+        guard let market = markets.first(where: { $0.coin == marketCode }) else {
+            return "이 종목의 시세를 확인할 수 없어요"
+        }
+        return market.freshnessIssue(at: now(), maximumAgeSeconds: marketPriceMaximumAgeSeconds)
+    }
+
+    func marketQuoteFreshnessMessage(for marketCode: String) -> String {
+        if isBundledLocalMarketData {
+            return "앱에 포함된 공개 시세 자료입니다. 최신성 자동 확인은 제공되지 않습니다."
+        }
+        if isBundledPreview {
+            return "화면 구성 확인용 예시 시세입니다."
+        }
+        return marketQuoteFreshnessIssue(for: marketCode) ?? "최근 체결 시각을 확인했습니다."
+    }
+
+    func marketCandleOriginLabel(candleCount: Int) -> String {
+        if isBundledLocalMarketData {
+            return "앱에 포함된 공개 자료 · 캔들 \(candleCount)개"
+        }
+        if isBundledPreview {
+            return "화면 구성용 예시 자료 · 캔들 \(candleCount)개"
+        }
+        return "캔들 \(candleCount)개 · 서버가 수집한 시세"
+    }
+
+    func manualOrderBlockReason(for market: String) -> String? {
+        if let baseReason = manualOrderBlockReason { return baseReason }
+        guard let price = markets.first(where: { $0.coin == market }) else {
+            return "선택한 종목의 현재 시세를 확인할 수 없습니다."
+        }
+        return price.freshnessIssue(at: now(), maximumAgeSeconds: marketPriceMaximumAgeSeconds)
+    }
+
+    func freshMarketPrice(for market: String) -> Double? {
+        guard let price = markets.first(where: { $0.coin == market }),
+              price.freshnessIssue(at: now(), maximumAgeSeconds: marketPriceMaximumAgeSeconds) == nil else {
+            return nil
+        }
+        return price.price
+    }
+
+    func manualOrderBlockReason(forMarkets marketCodes: [String]) -> String? {
+        if let baseReason = manualOrderBlockReason { return baseReason }
+        guard !marketCodes.isEmpty else { return "주문할 종목을 확인할 수 없습니다." }
+        var checkedMarkets = Set<String>()
+        for market in marketCodes where checkedMarkets.insert(market).inserted {
+            if let reason = manualOrderBlockReason(for: market) { return reason }
+        }
+        return nil
+    }
+
+    var tuningBlockReason: String? {
+        guard !isBundledLocalMarketData else { return "로컬 공개 시세 조회 전용 모드에서는 설정을 바꿀 수 없습니다." }
+        guard phase == .dashboard, !isBundledPreview else { return "서버 작업공간에서만 설정을 바꿀 수 있습니다." }
+        guard authenticationRequired, authenticationScope.canOperate else { return "모바일 운영 토큰이 있어야 설정을 변경할 수 있습니다." }
+        guard serverModeMatchesWorkspace, status?.mode == activeWorkspace.serverMode else { return "선택한 서버 모드를 확인해 주세요." }
+        if status?.isRunning == true { return "자동매매를 중지한 뒤 튜닝값을 바꿀 수 있습니다." }
+        if tuningMutationLocked || paperValidationSummary?.active == true {
+            return tuningMutationReason ?? "모의투자 성과 점검 중에는 설정을 바꿀 수 없습니다."
+        }
+        return nil
+    }
+
+    var optimizationBlockReason: String? {
+        guard !isBundledLocalMarketData else { return "로컬 공개 시세 조회 전용 모드에서는 후보 비교를 사용할 수 없습니다." }
+        guard phase == .dashboard, !isBundledPreview else { return "서버 작업공간에서만 후보 비교를 사용할 수 있습니다." }
+        guard canOperate else { return "모바일 운영 토큰이 있어야 후보 비교를 바꿀 수 있습니다." }
+        guard serverModeMatchesWorkspace, status?.mode == activeWorkspace.serverMode else { return "선택한 서버 모드를 확인해 주세요." }
+        if tuningMutationLocked || paperValidationSummary?.active == true {
+            return tuningMutationReason ?? "모의투자 성과 점검 중에는 후보 비교를 바꿀 수 없습니다."
+        }
+        return nil
+    }
+
+    var paperWalletBlockReason: String? {
+        guard activeWorkspace == .paper, tradingMode == "DRY_RUN", !isObserverAccount else {
+            return "모의 지갑은 연결된 모의투자 서버에서만 변경할 수 있습니다."
+        }
+        guard canOperate else { return "모바일 운영 토큰이 있어야 모의 지갑을 변경할 수 있습니다." }
+        if pendingManualOrderLocked { return "이전 지갑 변경 결과를 확인한 뒤 다시 시도해 주세요." }
+        if status?.isRunning == true { return "모의 자동매매를 중지한 뒤 가상 잔액을 바꿀 수 있습니다." }
+        if paperValidationSummary?.active == true || tuningMutationLocked {
+            return tuningMutationReason ?? "성과 점검 세션 중에는 모의 지갑을 바꿀 수 없습니다."
+        }
+        return nil
+    }
+
+    private var storePaperWalletLocked: Bool { paperWalletBlockReason != nil }
+    private var storePaperWalletLockedReason: String { paperWalletBlockReason ?? "모의 지갑을 변경할 수 없습니다." }
+
+    private static let tuningFallbackMetadata: [String: [String: String]] = [
+        "marketRegimeEnabled": ["label": "시장 방향 필터", "description": "시장 방향과 맞지 않는 신규 진입을 제한합니다.", "category": "Risk"],
+        "requireReboundBelowOverbought": ["label": "과매수 구간 진입 제한", "description": "과매수 구간의 반등 신호로 신규 진입하지 않습니다.", "category": "Risk"]
+    ]
+
     func bootstrap() async {
         guard !bootstrapped else { return }
         bootstrapped = true
+        if isBundledLocalMarketData {
+            phase = .dashboard
+            didFinishInitialConnect = true
+            await loadBundledLocalMarketData()
+            return
+        }
         if isBundledPreview {
             phase = .dashboard
             await refresh()
@@ -970,24 +2090,85 @@ final class CoinPilotStore: ObservableObject {
         }
     }
 
+    func selectWorkspace(_ workspace: CoinPilotWorkspaceMode) {
+        guard !isBundledLocalMarketData else { return }
+        guard workspace != activeWorkspace else { return }
+        guard !isWorking && !isSavingTuning && !isSubmittingManualOrder && !isSubmittingLiveCredentials && !isRunningFeatureAction && !isRecordingSnapshot else {
+            dashboardMessage = isSubmittingManualOrder
+                ? "주문 결과를 확인하는 동안에는 작업공간을 전환할 수 없습니다."
+                : isSubmittingLiveCredentials
+                    ? "Upbit API 키 등록이 끝난 뒤 작업공간을 전환할 수 있습니다."
+                : "서버 작업을 마친 뒤 작업공간을 전환할 수 있습니다."
+            return
+        }
+        if let currentServerURL, serverModeMatchesWorkspace {
+            UserDefaults.standard.set(currentServerURL.absoluteString, forKey: activeWorkspace.addressDefaultsKey)
+        }
+        activeWorkspace = workspace
+        UserDefaults.standard.set(workspace.rawValue, forKey: Self.activeWorkspaceDefaultsKey)
+        shouldInferWorkspaceFromLegacyURL = false
+        _ = beginRequestGeneration()
+        clearLoadedData()
+        isBundledPreview = false
+        authenticationRequired = false
+        authenticationScope = .unauthenticated
+        serverModeMatchesWorkspace = true
+        connectionMessage = nil
+        dashboardMessage = nil
+        tokenDraft = ""
+        liveCredentialMessage = nil
+        liveAccessKeyDraft = ""
+        liveSecretKeyDraft = ""
+        pendingManualOrder = nil
+        pendingManualOrderLocked = false
+        orderMessage = nil
+
+        guard let stored = UserDefaults.standard.string(forKey: workspace.addressDefaultsKey),
+              let url = URL(string: stored), ServerAddressPolicy.allows(url) else {
+            currentServerURL = nil
+            serverAddress = ""
+            serverDraft = ""
+            serverModeMatchesWorkspace = false
+            phase = .setup
+            didFinishInitialConnect = true
+            return
+        }
+        currentServerURL = url
+        serverAddress = Self.displayAddress(url)
+        serverDraft = url.absoluteString
+        restorePendingManualOrder(for: url)
+        serverModeMatchesWorkspace = false
+        phase = .connecting
+        Task { _ = await connect(using: url.absoluteString) }
+    }
+
     func useBundledPreview() {
+        guard !isBundledLocalMarketData else {
+            connectionMessage = "이 앱 빌드는 로컬 공개 시세 조회 전용입니다."
+            return
+        }
         guard bundledPreview.isAvailable else {
             connectionMessage = "예시 데이터가 포함된 앱 빌드에서만 미리보기를 사용할 수 있어요."
             return
         }
         _ = beginRequestGeneration()
         isBundledPreview = true
+        activeWorkspace = .paper
+        UserDefaults.standard.set(CoinPilotWorkspaceMode.paper.rawValue, forKey: Self.activeWorkspaceDefaultsKey)
         UserDefaults.standard.set("bundled-preview", forKey: dataModeDefaultsKey)
         authenticationRequired = false
+        authenticationScope = .unauthenticated
         connectionMessage = nil
         tokenDraft = ""
         clearLoadedData()
+        serverModeMatchesWorkspace = true
         phase = .dashboard
         didFinishInitialConnect = true
         Task { await refresh() }
     }
 
     func useServerMode() {
+        guard !isBundledLocalMarketData else { return }
         _ = beginRequestGeneration()
         isBundledPreview = false
         UserDefaults.standard.set("server", forKey: dataModeDefaultsKey)
@@ -1004,6 +2185,8 @@ final class CoinPilotStore: ObservableObject {
     }
 
     func connect(using rawAddress: String) async -> Bool {
+        guard !isBundledLocalMarketData else { return false }
+        guard !isSubmittingLiveCredentials else { return false }
         guard let url = validatedServerURL(rawAddress) else {
             phase = .setup
             connectionMessage = "같은 Wi-Fi의 서버는 내부 주소로 연결하고, 외부 서버는 HTTPS 주소를 입력해 주세요."
@@ -1019,10 +2202,13 @@ final class CoinPilotStore: ObservableObject {
         isBundledPreview = false
         UserDefaults.standard.set("server", forKey: dataModeDefaultsKey)
         connectionMessage = nil
+        authenticationScope = .unauthenticated
+        serverModeMatchesWorkspace = false
 
         currentServerURL = url
         serverDraft = url.absoluteString
         serverAddress = Self.displayAddress(url)
+        restorePendingManualOrder(for: url)
         UserDefaults.standard.set(url.absoluteString, forKey: Self.serverDefaultsKey)
         if changed { clearLoadedData() }
         phase = .connecting
@@ -1037,13 +2223,33 @@ final class CoinPilotStore: ObservableObject {
             }
             authenticationRequired = authRequired
             guard authRequired else {
+                authenticationScope = .unauthenticated
                 phase = .dashboard
                 await refresh()
-                return generation == requestGeneration
+                return generation == requestGeneration && serverModeMatchesWorkspace
             }
 
             guard let token = tokens.token(for: url) else {
+                authenticationScope = .unauthenticated
                 phase = .login
+                return false
+            }
+            let loginResponse = try await api.login(token: token, at: url)
+            guard generation == requestGeneration, currentServerURL == url else { return false }
+            guard (200..<300).contains(loginResponse.statusCode),
+                  (try? Self.jsonObject(loginResponse.body) as? [String: Any])?["success"] as? Bool == true else {
+                if loginResponse.statusCode == 401 {
+                    tokens.delete(for: url)
+                    authenticationScope = .unauthenticated
+                    phase = .login
+                    connectionMessage = "서버 인증을 확인할 수 없습니다. 서버 토큰을 다시 입력해 주세요."
+                    return false
+                }
+                throw CoinPilotAPIError.forStatusCode(loginResponse.statusCode)
+            }
+            authenticationScope = Self.authScope(from: loginResponse)
+            guard authenticationScope != .operatorFull else {
+                rejectFullOperatorScope(for: url)
                 return false
             }
             let protectedResponse = try await api.read(path: "/api/status", at: url, token: token)
@@ -1051,6 +2257,7 @@ final class CoinPilotStore: ObservableObject {
             guard (200..<300).contains(protectedResponse.statusCode) else {
                 if protectedResponse.statusCode == 401 {
                     tokens.delete(for: url)
+                    authenticationScope = .unauthenticated
                     phase = .login
                     connectionMessage = "서버 인증을 확인할 수 없습니다. 서버 토큰을 다시 입력해 주세요."
                     return false
@@ -1059,7 +2266,7 @@ final class CoinPilotStore: ObservableObject {
             }
             phase = .dashboard
             await refresh()
-            return generation == requestGeneration
+            return generation == requestGeneration && serverModeMatchesWorkspace
         } catch let error as CoinPilotAPIError {
             guard generation == requestGeneration else { return false }
             phase = .connecting
@@ -1074,6 +2281,8 @@ final class CoinPilotStore: ObservableObject {
     }
 
     func signIn() async -> Bool {
+        guard !isBundledLocalMarketData else { return false }
+        guard !isSubmittingLiveCredentials else { return false }
         let generation = beginRequestGeneration()
         isWorking = true
         defer {
@@ -1097,7 +2306,10 @@ final class CoinPilotStore: ObservableObject {
         currentServerURL = url
         serverDraft = url.absoluteString
         serverAddress = Self.displayAddress(url)
+        restorePendingManualOrder(for: url)
         UserDefaults.standard.set(url.absoluteString, forKey: Self.serverDefaultsKey)
+        authenticationScope = .unauthenticated
+        serverModeMatchesWorkspace = false
         if changed { clearLoadedData() }
         phase = .connecting
 
@@ -1110,18 +2322,27 @@ final class CoinPilotStore: ObservableObject {
                 throw CoinPilotAPIError.forStatusCode(statusResponse.statusCode)
             }
             authenticationRequired = authRequired
-            if authRequired {
-                let loginResponse = try await api.login(token: token, at: url)
-                guard generation == requestGeneration, currentServerURL == url else { return false }
-                guard (200..<300).contains(loginResponse.statusCode) else {
-                    throw CoinPilotAPIError.forStatusCode(loginResponse.statusCode)
-                }
-                guard tokens.save(token, for: url) else { throw CoinPilotAPIError.keychain }
+        if authRequired {
+            let loginResponse = try await api.login(token: token, at: url)
+            guard generation == requestGeneration, currentServerURL == url else { return false }
+            guard (200..<300).contains(loginResponse.statusCode),
+                  let loginBody = try? Self.jsonObject(loginResponse.body) as? [String: Any],
+                  loginBody["success"] as? Bool == true else {
+                throw CoinPilotAPIError.forStatusCode(loginResponse.statusCode)
             }
+            authenticationScope = Self.authScope(from: loginResponse)
+            guard authenticationScope != .operatorFull else {
+                rejectFullOperatorScope(for: url)
+                return false
+            }
+            guard tokens.save(token, for: url) else { throw CoinPilotAPIError.keychain }
+        } else {
+            authenticationScope = .unauthenticated
+        }
             tokenDraft = ""
-            phase = .dashboard
-            await refresh()
-            return generation == requestGeneration
+        phase = .dashboard
+        await refresh()
+        return generation == requestGeneration && serverModeMatchesWorkspace
         } catch let error as CoinPilotAPIError {
             guard generation == requestGeneration else { return false }
             phase = .login
@@ -1135,12 +2356,169 @@ final class CoinPilotStore: ObservableObject {
         }
     }
 
+    @discardableResult
+    func submitLiveCredentials() async -> Bool {
+        guard !isSubmittingLiveCredentials else {
+            liveAccessKeyDraft = ""
+            liveSecretKeyDraft = ""
+            return false
+        }
+
+        let accessKey = liveAccessKeyDraft
+        let secretKey = liveSecretKeyDraft
+        defer {
+            liveAccessKeyDraft = ""
+            liveSecretKeyDraft = ""
+            isSubmittingLiveCredentials = false
+        }
+        liveCredentialMessage = nil
+
+        guard showsLiveCredentialSetup,
+              let serverURL = currentServerURL,
+              serverURL.scheme?.lowercased() == "https",
+              serverModeMatchesWorkspace,
+              status?.mode == "LIVE",
+              activeWorkspace == .live else {
+            liveCredentialMessage = "실거래 모드가 확인된 HTTPS 서버에서만 키를 등록할 수 있어요."
+            return false
+        }
+        guard authenticationRequired, authenticationScope == .mobileOperator,
+              let token = tokens.token(for: serverURL), !token.isEmpty else {
+            liveCredentialMessage = "모바일 운영 권한이 있는 서버 토큰으로 로그인해 주세요."
+            return false
+        }
+        guard accessKey == accessKey.trimmingCharacters(in: .whitespacesAndNewlines),
+              secretKey == secretKey.trimmingCharacters(in: .whitespacesAndNewlines),
+              !accessKey.isEmpty,
+              !secretKey.isEmpty,
+              accessKey.utf8.count <= 4096,
+              secretKey.utf8.count <= 4096 else {
+            liveCredentialMessage = "Upbit Access Key와 Secret Key를 확인해 주세요."
+            return false
+        }
+
+        isSubmittingLiveCredentials = true
+        do {
+            let response = try await api.registerLiveCredentials(
+                accessKey: accessKey,
+                secretKey: secretKey,
+                at: serverURL,
+                token: token
+            )
+            liveAccessKeyDraft = ""
+            liveSecretKeyDraft = ""
+            guard currentServerURL == serverURL, activeWorkspace == .live,
+                  serverModeMatchesWorkspace, status?.mode == "LIVE" else {
+                return false
+            }
+            guard (200..<300).contains(response.statusCode),
+                  (try? Self.jsonObject(response.body) as? [String: Any])?["success"] as? Bool == true else {
+                throw CoinPilotAPIError.forStatusCode(response.statusCode)
+            }
+
+            liveCredentialMessage = "Upbit 키 등록 요청을 보냈어요. 서버의 등록 상태와 거래소 계좌 동기화를 확인하고 있습니다."
+            await refresh()
+            if isLiveCredentialSetupReady {
+                liveCredentialMessage = "Upbit 키 등록과 거래소 계좌 동기화가 확인됐어요."
+            } else if status?.upbitCredentialsConfigured == true {
+                liveCredentialMessage = "Upbit 키가 등록됐어요. 잔고와 미체결 주문 확인이 끝날 때까지 실거래 주문은 잠겨 있습니다."
+            } else {
+                liveCredentialMessage = "서버에서 키 등록 상태를 확인하지 못했어요. 키는 입력란에서 지웠습니다."
+            }
+            return true
+        } catch let error as CoinPilotAPIError {
+            liveCredentialMessage = error.message
+            return false
+        } catch {
+            liveCredentialMessage = CoinPilotAPIError.connection.message
+            return false
+        }
+    }
+
     func updateServerAddress(_ rawAddress: String) async -> Bool {
+        guard !isBundledLocalMarketData else { return false }
+        guard !isSubmittingLiveCredentials else {
+            liveCredentialMessage = "Upbit 키 등록이 끝난 뒤 서버 주소를 바꿀 수 있습니다."
+            return false
+        }
         guard let url = validatedServerURL(rawAddress) else {
             connectionMessage = "같은 Wi-Fi의 서버는 내부 주소로 연결하고, 외부 서버는 HTTPS 주소를 입력해 주세요."
             return false
         }
         return await connect(using: url.absoluteString)
+    }
+
+    func updateServerToken(_ rawToken: String) async -> String? {
+        guard !isBundledLocalMarketData else {
+            return "로컬 공개 시세 조회 전용 모드에서는 서버 토큰을 입력할 수 없습니다."
+        }
+        guard !isBundledPreview else {
+            return "예시 데이터 화면에서는 토큰을 입력할 수 없습니다. 실제 서버에 연결해 주세요."
+        }
+        guard let serverURL = currentServerURL else {
+            return "먼저 실제 서버에 연결해 주세요."
+        }
+        guard !isWorking, !isSubmittingManualOrder, !isRunningFeatureAction,
+              !isRecordingSnapshot, !isSavingTuning else {
+            return "진행 중인 서버 작업이 끝난 뒤 토큰을 변경해 주세요."
+        }
+
+        let token = rawToken.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !token.isEmpty, token.utf8.count <= 4096 else {
+            return "서버 토큰을 입력해 주세요."
+        }
+
+        let generation = beginRequestGeneration()
+        isWorking = true
+        defer {
+            if generation == requestGeneration { isWorking = false }
+        }
+
+        do {
+            let statusResponse = try await api.authenticationStatus(at: serverURL)
+            guard generation == requestGeneration, currentServerURL == serverURL else { return "서버 연결 정보가 변경되었습니다. 다시 시도해 주세요." }
+            guard (200..<300).contains(statusResponse.statusCode),
+                  let statusBody = try? Self.jsonObject(statusResponse.body) as? [String: Any],
+                  let authRequired = statusBody["authRequired"] as? Bool else {
+                throw CoinPilotAPIError.forStatusCode(statusResponse.statusCode)
+            }
+            guard authRequired else {
+                authenticationRequired = false
+                authenticationScope = .unauthenticated
+                await refresh()
+                return "이 서버는 토큰 인증을 사용하지 않습니다. 서버 인증 설정을 확인해 주세요."
+            }
+
+            let loginResponse = try await api.login(token: token, at: serverURL)
+            guard generation == requestGeneration, currentServerURL == serverURL else { return "서버 연결 정보가 변경되었습니다. 다시 시도해 주세요." }
+            guard (200..<300).contains(loginResponse.statusCode),
+                  let loginBody = try? Self.jsonObject(loginResponse.body) as? [String: Any],
+                  loginBody["success"] as? Bool == true else {
+                throw CoinPilotAPIError.forStatusCode(loginResponse.statusCode)
+            }
+            let scope = Self.authScope(from: loginResponse)
+            authenticationScope = scope
+            authenticationRequired = true
+            guard scope != .operatorFull else {
+                rejectFullOperatorScope(for: serverURL)
+                return connectionMessage ?? "전체 운영자 토큰은 iOS에서 사용할 수 없습니다."
+            }
+            guard tokens.save(token, for: serverURL) else { throw CoinPilotAPIError.keychain }
+
+            await refresh()
+            guard phase == .dashboard else {
+                return connectionMessage ?? "새 토큰으로 서버 정보를 불러오지 못했습니다. 토큰과 서버 설정을 확인해 주세요."
+            }
+            return nil
+        } catch let error as CoinPilotAPIError {
+            guard generation == requestGeneration else { return "서버 연결 정보가 변경되었습니다. 다시 시도해 주세요." }
+            await refresh()
+            return error.message
+        } catch {
+            guard generation == requestGeneration else { return "서버 연결 정보가 변경되었습니다. 다시 시도해 주세요." }
+            await refresh()
+            return CoinPilotAPIError.connection.message
+        }
     }
 
     func logOut() {
@@ -1149,11 +2527,17 @@ final class CoinPilotStore: ObservableObject {
         clearLoadedData()
         connectionMessage = nil
         tokenDraft = ""
+        authenticationScope = .unauthenticated
+        serverModeMatchesWorkspace = true
         phase = currentServerURL == nil ? .setup : .login
     }
 
     func refresh() async {
         guard phase == .dashboard, !isRefreshing else { return }
+        if isBundledLocalMarketData {
+            await loadBundledLocalMarketData()
+            return
+        }
         let generation = requestGeneration
         let serverURL = currentServerURL
         let usesBundledPreview = isBundledPreview
@@ -1170,22 +2554,111 @@ final class CoinPilotStore: ObservableObject {
             ? serverURL.flatMap { tokens.token(for: $0) }
             : nil
         let selectedPeriod = historyPeriod
+        let updatedAt = usesBundledPreview ? bundledPreview.generatedAt ?? now() : now()
         for name in Self.resourceNames { resourceStates[name] = .loading }
 
-        async let statusResult = fetch("/api/status", token: token, at: serverURL, usesBundledPreview: usesBundledPreview)
-        async let accountResult = fetch("/api/account", token: token, at: serverURL, usesBundledPreview: usesBundledPreview)
-        async let pnlResult = fetch("/api/cumulative-pnl", token: token, at: serverURL, usesBundledPreview: usesBundledPreview)
-        async let todayResult = fetch("/api/today-summary", token: token, at: serverURL, usesBundledPreview: usesBundledPreview)
-        async let historyResult = fetch("/api/portfolio/history?period=\(selectedPeriod.rawValue)", token: token, at: serverURL, usesBundledPreview: usesBundledPreview)
-        async let marketResult = fetch("/api/market/prices", token: token, at: serverURL, usesBundledPreview: usesBundledPreview)
-        async let tradesResult = fetch("/api/trades?limit=30", token: token, at: serverURL, usesBundledPreview: usesBundledPreview)
-        async let paperSummaryResult = fetch("/api/paper-validation/summary", token: token, at: serverURL, usesBundledPreview: usesBundledPreview)
-
-        let results = await (statusResult, accountResult, pnlResult, todayResult, historyResult, marketResult, tradesResult, paperSummaryResult)
+        let statusResult = await fetch("/api/status", token: token, at: serverURL, usesBundledPreview: usesBundledPreview)
         guard generation == requestGeneration,
               serverURL == currentServerURL,
               usesBundledPreview == isBundledPreview,
               phase == .dashboard else { return }
+        let preflightCancelled: Bool
+        if case .failure(.cancelled) = statusResult {
+            preflightCancelled = true
+        } else {
+            preflightCancelled = false
+        }
+        if Task.isCancelled || preflightCancelled {
+            for name in Self.resourceNames { markResourceFailed(name) }
+            return
+        }
+        if case .success(let response) = statusResult,
+           response.statusCode == 401,
+           authenticationRequired,
+           let serverURL {
+            tokens.delete(for: serverURL)
+            _ = beginRequestGeneration()
+            clearLoadedData()
+            isRefreshing = false
+            authenticationScope = .unauthenticated
+            phase = .login
+            connectionMessage = "서버 인증을 확인할 수 없습니다. 서버 토큰을 다시 입력해 주세요."
+            return
+        }
+
+        let preflightStatus = decodeDictionary(statusResult).map(CoinPilotStatus.init)
+        if shouldInferWorkspaceFromLegacyURL,
+           let mode = preflightStatus?.mode,
+           let inferredWorkspace = CoinPilotWorkspaceMode.allCases.first(where: { $0.serverMode == mode }) {
+            activeWorkspace = inferredWorkspace
+            UserDefaults.standard.set(inferredWorkspace.rawValue, forKey: Self.activeWorkspaceDefaultsKey)
+            shouldInferWorkspaceFromLegacyURL = false
+        }
+        let statusResponse: CoinPilotHTTPResponse? = {
+            if case .success(let response) = statusResult { return response }
+            return nil
+        }()
+        guard let preflightStatus,
+              preflightStatus.mode == activeWorkspace.serverMode else {
+            clearLoadedData()
+            status = preflightStatus
+            serverModeMatchesWorkspace = false
+            if let statusResponse, (200..<300).contains(statusResponse.statusCode), preflightStatus != nil {
+                rawResponses["status"] = statusResponse
+                markResourceLoaded("status", at: updatedAt)
+            } else {
+                markResourceFailed("status")
+            }
+            for name in Self.resourceNames where name != "status" {
+                resourceStates[name] = .unavailable
+            }
+            dashboardMessage = usesBundledPreview
+                ? "앱에 포함된 예시 자료를 불러오지 못했어요."
+                : preflightStatus == nil
+                    ? "서버 거래 모드를 확인할 수 없어 계좌 정보를 불러오지 않았어요."
+                    : workspaceModeMismatchMessage ?? "서버 거래 모드를 확인할 수 없어 화면을 잠갔습니다."
+            return
+        }
+
+        status = preflightStatus
+        serverModeMatchesWorkspace = true
+        rawResponses["status"] = statusResponse
+        markResourceLoaded("status", at: updatedAt)
+        if !usesBundledPreview, let serverURL {
+            UserDefaults.standard.set(serverURL.absoluteString, forKey: activeWorkspace.addressDefaultsKey)
+            UserDefaults.standard.set(activeWorkspace.rawValue, forKey: Self.activeWorkspaceDefaultsKey)
+            UserDefaults.standard.set(serverURL.absoluteString, forKey: Self.serverDefaultsKey)
+        }
+
+        async let accountResult = fetch("/api/account", token: token, at: serverURL, usesBundledPreview: usesBundledPreview)
+        async let pnlResult = fetch("/api/cumulative-pnl", token: token, at: serverURL, usesBundledPreview: usesBundledPreview)
+        async let todayResult = fetch("/api/today-summary", token: token, at: serverURL, usesBundledPreview: usesBundledPreview)
+        async let historyResult = fetch("/api/portfolio/history?period=\(selectedPeriod.rawValue)", token: token, at: serverURL, usesBundledPreview: usesBundledPreview)
+        async let marketResult = fetch("/api/market/prices/snapshot", token: token, at: serverURL, usesBundledPreview: usesBundledPreview)
+        async let tradesResult = fetch("/api/trades?limit=30", token: token, at: serverURL, usesBundledPreview: usesBundledPreview)
+        async let paperSummaryResult = fetch("/api/paper-validation/summary", token: token, at: serverURL, usesBundledPreview: usesBundledPreview)
+
+        let featureResults = await (accountResult, pnlResult, todayResult, historyResult, marketResult, tradesResult, paperSummaryResult)
+        guard generation == requestGeneration,
+              serverURL == currentServerURL,
+              usesBundledPreview == isBundledPreview,
+              phase == .dashboard,
+              !Task.isCancelled else {
+            if generation == requestGeneration {
+                for name in Self.resourceNames.dropFirst() { markResourceFailed(name) }
+            }
+            return
+        }
+        let results = (
+            statusResult,
+            featureResults.0,
+            featureResults.1,
+            featureResults.2,
+            featureResults.3,
+            featureResults.4,
+            featureResults.5,
+            featureResults.6
+        )
         let responses: [Result<CoinPilotHTTPResponse, CoinPilotAPIError>] = [
             results.0, results.1, results.2, results.3, results.4, results.5, results.6, results.7
         ]
@@ -1205,6 +2678,7 @@ final class CoinPilotStore: ObservableObject {
                 tokens.delete(for: serverURL)
                 _ = beginRequestGeneration()
                 clearLoadedData()
+                authenticationScope = .unauthenticated
                 phase = .login
                 connectionMessage = "서버 인증을 확인할 수 없습니다. 서버 토큰을 다시 입력해 주세요."
                 return
@@ -1213,18 +2687,50 @@ final class CoinPilotStore: ObservableObject {
 
         var failures = 0
         var successes = 0
-        let updatedAt = usesBundledPreview ? bundledPreview.generatedAt ?? Date() : Date()
-
         if let object = decodeDictionary(results.0) {
-            status = CoinPilotStatus(object)
+            let newStatus = CoinPilotStatus(object)
+            if shouldInferWorkspaceFromLegacyURL,
+               let mode = newStatus.mode,
+               let inferredWorkspace = CoinPilotWorkspaceMode.allCases.first(where: { $0.serverMode == mode }) {
+                activeWorkspace = inferredWorkspace
+                UserDefaults.standard.set(inferredWorkspace.rawValue, forKey: Self.activeWorkspaceDefaultsKey)
+                shouldInferWorkspaceFromLegacyURL = false
+            }
+            guard newStatus.mode == activeWorkspace.serverMode else {
+                clearLoadedData()
+                status = newStatus
+                serverModeMatchesWorkspace = false
+                dashboardMessage = workspaceModeMismatchMessage ?? "서버 거래 모드를 확인할 수 없어 화면을 잠갔습니다."
+                markResourceLoaded("status", at: updatedAt)
+                return
+            }
+            serverModeMatchesWorkspace = true
+            if !usesBundledPreview, let serverURL {
+                UserDefaults.standard.set(serverURL.absoluteString, forKey: activeWorkspace.addressDefaultsKey)
+                UserDefaults.standard.set(activeWorkspace.rawValue, forKey: Self.activeWorkspaceDefaultsKey)
+                UserDefaults.standard.set(serverURL.absoluteString, forKey: Self.serverDefaultsKey)
+            }
+            status = newStatus
             markResourceLoaded("status", at: updatedAt)
             successes += 1
-        } else { markResourceFailed("status"); failures += 1 }
+        } else {
+            serverModeMatchesWorkspace = false
+            markResourceFailed("status")
+            failures += 1
+        }
 
         if let object = decodeDictionary(results.1) {
-            account = CoinPilotAccount(object)
-            markResourceLoaded("account", at: updatedAt)
-            successes += 1
+            let decodedAccount = CoinPilotAccount(object)
+            if decodedAccount.mode == tradingMode {
+                account = decodedAccount
+                markResourceLoaded("account", at: updatedAt)
+                successes += 1
+            } else {
+                account = nil
+                markResourceFailed("account")
+                failures += 1
+                dashboardMessage = "계좌 모드와 서버 모드가 일치하지 않아 자산·주문 화면을 잠갔습니다."
+            }
         } else { markResourceFailed("account"); failures += 1 }
 
         if let object = decodeDictionary(results.2) {
@@ -1246,10 +2752,27 @@ final class CoinPilotStore: ObservableObject {
             successes += 1
         } else { markResourceFailed("portfolio-history"); failures += 1 }
 
-        if let values = decodeArray(results.5) {
-            markets = values.map(CoinPilotMarketPrice.init)
-            markResourceLoaded("market-prices", at: updatedAt)
-            successes += 1
+        if let object = decodeDictionary(results.5) {
+            marketSnapshotMetadata = CoinPilotMarketSnapshotMetadata(object)
+            if let values = object["prices"] as? [[String: Any]] {
+                markets = values.map(CoinPilotMarketPrice.init)
+            } else {
+                markets = []
+            }
+            if !markets.contains(where: { $0.coin == selectedMarket }) {
+                selectedMarket = markets.first?.coin ?? "KRW-BTC"
+            }
+            if object["prices"] is [[String: Any]],
+               let currentFetchedAt = marketSnapshotMetadata?.currentFetchedAt(
+                at: updatedAt,
+                maximumAgeSeconds: marketPriceMaximumAgeSeconds
+               ) {
+                markResourceLoaded("market-prices", at: currentFetchedAt)
+                successes += 1
+            } else {
+                markResourceFailed("market-prices")
+                failures += 1
+            }
         } else { markResourceFailed("market-prices"); failures += 1 }
 
         if let values = decodeArray(results.6) {
@@ -1279,7 +2802,401 @@ final class CoinPilotStore: ObservableObject {
         }
     }
 
+    func loadMarketDetail(coin: String? = nil, interval: Int? = nil) async {
+        let requestedMarket = coin?.uppercased() ?? selectedMarket
+        let requestedInterval = interval.flatMap { [1, 5, 15, 60].contains($0) ? $0 : nil } ?? selectedCandleInterval
+        let selectionChanged = requestedMarket != selectedMarket || requestedInterval != selectedCandleInterval
+        selectedMarket = requestedMarket
+        selectedCandleInterval = requestedInterval
+        if selectionChanged {
+            candles = []
+            featureMessages.removeValue(forKey: "market")
+        }
+        guard selectedMarket.range(of: "^KRW-[A-Z0-9]{2,15}$", options: .regularExpression) != nil else {
+            featureMessages["market"] = "시장 코드를 확인해 주세요."
+            candles = []
+            return
+        }
+        if isBundledLocalMarketData {
+            guard localMarketDataError == nil, let market = localMarketData?.markets.first(where: { $0.market == selectedMarket }) else {
+                featureMessages["market"] = localMarketDataError ?? "선택한 공개 원화 시장 자료가 없습니다."
+                candles = []
+                return
+            }
+            let availableIntervals = Array(Set(market.candles.map(\.intervalMinutes))).sorted()
+            guard let resolvedInterval = availableIntervals.contains(selectedCandleInterval)
+                ? selectedCandleInterval
+                : availableIntervals.first else {
+                featureMessages["market"] = "이 시장의 캔들 자료가 없습니다."
+                candles = []
+                return
+            }
+            selectedCandleInterval = resolvedInterval
+            let rows = market.candles.filter { $0.intervalMinutes == resolvedInterval }
+            let visibleRows = Array(rows.suffix(Self.maximumBundledLocalChartCandles))
+            candles = visibleRows.enumerated().map { index, candle in
+                CoinPilotCandle([
+                    "time": candle.timestamp,
+                    "open": candle.open,
+                    "high": candle.high,
+                    "low": candle.low,
+                    "close": candle.close,
+                    "volume": candle.volume
+                ], index: index)
+            }
+            featureMessages.removeValue(forKey: "market")
+            return
+        }
+        guard markets.contains(where: { $0.coin == selectedMarket }) || !markets.isEmpty else {
+            featureMessages["market"] = "현재 작업공간의 시세 목록을 먼저 불러와 주세요."
+            return
+        }
+        let path = "/api/market/candles/\(selectedMarket)?unit=\(selectedCandleInterval)&count=100"
+        guard let payload = await loadMobileFeature("market", path: path),
+              let values = payload as? [[String: Any]] else { return }
+        candles = values.enumerated().map { CoinPilotCandle($0.element, index: $0.offset) }
+    }
+
+    func loadAnalysisFeatures() async {
+        guard let payload = await loadMobileFeature("analysis", path: "/api/all-coin-scores?limit=60"),
+              let object = payload as? [String: Any] else { return }
+        analysisSummary = object
+        analysisResults = (object["coins"] as? [[String: Any]] ?? []).map(CoinPilotAnalysisResult.init)
+    }
+
+    func loadRecommendations() async {
+        guard let payload = await loadMobileFeature("recommendations", path: "/api/trading-recommendations"),
+              let object = payload as? [String: Any] else { return }
+        buyRecommendations = (object["buyRecommendations"] as? [[String: Any]] ?? []).map(CoinPilotRecommendation.init)
+        sellRecommendations = (object["sellRecommendations"] as? [[String: Any]] ?? []).map(CoinPilotRecommendation.init)
+    }
+
+    func loadBundleSuggestions() async {
+        guard let payload = await loadMobileFeature("bundles", path: "/api/bundle-suggestions"),
+              let object = payload as? [String: Any] else { return }
+        bundleSuggestions = object["bundles"] as? [[String: Any]] ?? []
+    }
+
+    func loadNews() async {
+        guard let payload = await loadMobileFeature("news", path: "/api/news?limit=80"),
+              let object = payload as? [String: Any] else { return }
+        newsArticles = (object["news"] as? [[String: Any]] ?? []).enumerated().map {
+            CoinPilotNewsArticle($0.element, index: $0.offset)
+        }
+        newsSentiment = object["sentiment"] as? [String: Any] ?? [:]
+    }
+
+    func loadAIDesk() async {
+        guard canOperate else {
+            featureMessages["ai"] = "AI 자문을 사용하려면 모바일 운영 토큰으로 로그인해 주세요."
+            return
+        }
+        if let providers = await loadMobileFeature("ai-providers", path: "/api/ai/providers") as? [String: Any] {
+            aiProviderStatus = providers
+        }
+        if let monitor = await loadMobileFeature("ai-monitoring", path: "/api/ai/monitoring?limit=40") as? [String: Any] {
+            aiEvents = (monitor["events"] as? [[String: Any]] ?? []).enumerated().map {
+                CoinPilotAIEvent($0.element, index: $0.offset)
+            }
+            aiConsultations = monitor["consultations"] as? [[String: Any]] ?? []
+            aiEffectiveness = monitor["effectiveness"] as? [String: Any] ?? [:]
+        }
+        if let sessions = await loadMobileFeature("ai-sessions", path: "/api/ai/sessions") as? [String: Any] {
+            aiSessions = (sessions["sessions"] as? [[String: Any]] ?? []).map(CoinPilotAISession.init)
+        }
+    }
+
+    func loadResearchDesk() async {
+        if let value = await loadMobileFeature("strategy-research", path: "/api/strategy-research") as? [String: Any] {
+            strategyResearch = value
+        }
+        if let value = await loadMobileFeature("strategy-readiness", path: "/api/strategy-readiness") as? [String: Any] {
+            strategyReadiness = value
+        }
+        if let value = await loadMobileFeature("validation", path: "/api/scalping-validation") as? [String: Any] {
+            scalpingValidation = value
+        }
+        if let value = await loadMobileFeature("paper-validation", path: "/api/paper-validation") as? [String: Any] {
+            paperValidationState = value
+        }
+        if let value = await loadMobileFeature("momentum-shadow", path: "/api/momentum-shadow") as? [String: Any] {
+            momentumShadow = value
+        }
+        if let value = await loadMobileFeature("live-execution-evidence", path: "/api/live-execution-evidence") as? [String: Any] {
+            liveExecutionEvidence = value
+        }
+        _ = await loadOptimization()
+    }
+
+    func loadAccountAnalytics() async {
+        if let value = await loadMobileFeature("portfolio-analysis", path: "/api/portfolio-analysis") as? [String: Any] {
+            portfolioAnalysis = value
+        }
+        if let value = await loadMobileFeature("statistics", path: "/api/statistics") as? [[String: Any]] {
+            statistics = value
+        }
+    }
+
+    @discardableResult
+    func loadOptimization() async -> Bool {
+        guard let settings = await loadMobileFeature("optimization", path: "/api/optimization/settings") as? [String: Any] else { return false }
+        optimizationSettings = settings
+        if let history = await loadMobileFeature("optimization-history", path: "/api/optimization-history") {
+            if let values = history as? [[String: Any]] { optimizationHistory = values }
+            else if let object = history as? [String: Any] { optimizationHistory = object["history"] as? [[String: Any]] ?? [] }
+        }
+        if let resultPayload = await loadMobileFeature("backtest", path: "/api/backtest/results") {
+            if let results = resultPayload as? [String: Any] {
+                backtestResults = results
+            } else if let results = resultPayload as? [[String: Any]] {
+                backtestResults = ["entries": results]
+            }
+        }
+        if let config = await loadMobileFeature("optimal-config", path: "/api/optimal-config") as? [String: Any] {
+            optimalConfig = config
+        }
+        if let presets = await loadMobileFeature("investment-presets", path: "/api/investment-presets") as? [String: Any] {
+            investmentPresets = presets["presets"] as? [[String: Any]] ?? []
+        }
+        return true
+    }
+
+    func recordPortfolioSnapshot() async -> Bool {
+        guard !isRecordingSnapshot, canOperate else {
+            featureMessages["snapshot"] = canOperate ? "자산 기록을 이미 저장하고 있습니다." : "모바일 운영 토큰이 필요합니다."
+            return false
+        }
+        isRecordingSnapshot = true
+        defer { isRecordingSnapshot = false }
+        guard let response = await performFeatureMutation("snapshot", path: "/api/portfolio/snapshot", body: [:]) else { return false }
+        guard response["success"] as? Bool == true else { return false }
+        featureMessages["snapshot"] = response["message"] as? String ?? "현재 자산 기록을 저장했습니다."
+        await setHistoryPeriod(historyPeriod)
+        return true
+    }
+
+    func startPaperValidation(reset: Bool = false) async -> Bool {
+        guard activeWorkspace == .paper, tradingMode == "DRY_RUN", canOperate else {
+            featureMessages["paper-validation"] = "모의투자 점검은 운영 권한이 있는 모의투자 서버에서만 시작할 수 있습니다."
+            return false
+        }
+        let body: [String: Any] = reset ? ["reset": true] : [:]
+        guard let response = await performFeatureMutation("paper-validation", path: "/api/paper-validation/start", body: body) else { return false }
+        guard response["success"] as? Bool == true else { return false }
+        return await reloadPaperValidation()
+    }
+
+    func stopPaperValidation() async -> Bool {
+        guard activeWorkspace == .paper, tradingMode == "DRY_RUN", canOperate else {
+            featureMessages["paper-validation"] = "모의투자 점검은 모의투자 운영 권한이 필요합니다."
+            return false
+        }
+        guard let response = await performFeatureMutation("paper-validation", path: "/api/paper-validation/stop", body: [:]),
+              response["success"] as? Bool == true else { return false }
+        return await reloadPaperValidation()
+    }
+
+    func applyInvestmentPreset(id: String) async -> Bool {
+        guard !id.isEmpty, canOperate, tuningBlockReason == nil else {
+            tuningMessage = tuningBlockReason ?? "현재 작업공간에서 프리셋을 적용할 수 없습니다."
+            return false
+        }
+        guard let response = await performFeatureMutation("preset", path: "/api/investment-presets/apply", body: ["presetId": id]),
+              response["success"] as? Bool == true else { return false }
+        tuningMessage = "선택한 설정을 적용했습니다."
+        _ = await loadTuning()
+        return true
+    }
+
+    func setOptimizationEnabled(_ enabled: Bool) async -> Bool {
+        guard optimizationBlockReason == nil else {
+            featureMessages["optimization"] = optimizationBlockReason
+            return false
+        }
+        guard let response = await performFeatureMutation("optimization", path: "/api/optimization/toggle", body: ["enabled": enabled]),
+              response["success"] as? Bool == true else { return false }
+        return await loadOptimization()
+    }
+
+    func setOptimizationInterval(_ interval: Int) async -> Bool {
+        guard [3_600_000, 7_200_000, 10_800_000, 21_600_000, 43_200_000, 86_400_000].contains(interval),
+              optimizationBlockReason == nil else {
+            featureMessages["optimization"] = optimizationBlockReason ?? "비교 간격을 확인해 주세요."
+            return false
+        }
+        guard let response = await performFeatureMutation("optimization", path: "/api/optimization/interval", body: ["interval": interval]),
+              response["success"] as? Bool == true else { return false }
+        return await loadOptimization()
+    }
+
+    func runOptimizationNow() async -> Bool {
+        guard optimizationBlockReason == nil else {
+            featureMessages["optimization"] = optimizationBlockReason
+            return false
+        }
+        guard let response = await performFeatureMutation("optimization", path: "/api/optimization/run-now", body: [:]),
+              response["success"] as? Bool == true else { return false }
+        featureMessages["optimization"] = response["message"] as? String ?? "설정 후보 비교를 시작했습니다."
+        return await loadOptimization()
+    }
+
+    func createAISession(
+        name: String,
+        providers: [String],
+        eventTypes: [String],
+        autoConsultEventTypes: [String],
+        autoConsult: Bool,
+        coins: String,
+        cooldownSeconds: Int,
+        evaluationMinutes: Int?
+    ) async -> Bool {
+        let allowedTypes: Set<String> = ["BUY_SIGNAL", "SELL_SIGNAL", "REBOUND_CANDIDATE", "BREAKING_NEWS", "BUNDLE_SUGGESTION", "TRADE_EXECUTED"]
+        let selectedTypes = Array(Set(eventTypes.filter(allowedTypes.contains))).sorted()
+        let selectedProviders = Array(Set(providers.map { $0.lowercased() }.filter { ["gpt", "claude"].contains($0) })).sorted()
+        guard !selectedTypes.isEmpty else {
+            featureMessages["ai"] = "관심 신호를 하나 이상 선택해 주세요."
+            return false
+        }
+        guard !selectedProviders.isEmpty else {
+            featureMessages["ai"] = "의견을 받을 서비스를 하나 이상 선택해 주세요."
+            return false
+        }
+        var body: [String: Any] = [
+            "name": String(name.prefix(80)), "eventTypes": selectedTypes,
+            "providers": selectedProviders,
+            "autoConsultEventTypes": Array(Set(autoConsultEventTypes.filter(selectedTypes.contains))).sorted(),
+            "autoConsult": autoConsult, "coins": String(coins.prefix(1000)),
+            "cooldownSeconds": min(max(cooldownSeconds, 30), 86_400)
+        ]
+        if let evaluationMinutes { body["evaluationMinutes"] = min(max(evaluationMinutes, 1), 1_440) }
+        guard let response = await performFeatureMutation("ai", path: "/api/ai/sessions", body: body),
+              response["success"] as? Bool == true else { return false }
+        await loadAIDesk()
+        return true
+    }
+
+    func updateAISession(id: String, action: String) async -> Bool {
+        guard ["pause", "resume", "stop"].contains(action),
+              id.range(of: "^[A-Za-z0-9_-]{1,128}$", options: .regularExpression) != nil else { return false }
+        guard let response = await performFeatureMutation("ai", path: "/api/ai/sessions/\(id)/\(action)", body: [:]),
+              response["success"] as? Bool == true else { return false }
+        await loadAIDesk()
+        return true
+    }
+
+    func requestAIConsultation(eventId: String, provider: String? = nil) async -> Bool {
+        guard !eventId.isEmpty else {
+            aiConsultationMessage = "의견을 요청할 시장 신호를 선택해 주세요."
+            return false
+        }
+        var body: [String: Any] = ["eventId": eventId]
+        if let provider, !provider.isEmpty { body["provider"] = provider }
+        guard let response = await performFeatureMutation("ai", path: "/api/ai/consult", body: body) else { return false }
+        aiConsultationMessage = response["success"] as? Bool == true
+            ? "선택한 시장 신호에 대한 자문을 받았습니다."
+            : Self.message(from: response) ?? "AI 자문을 완료하지 못했습니다."
+        await loadAIDesk()
+        return response["success"] as? Bool == true
+    }
+
+    private func reloadPaperValidation() async -> Bool {
+        guard let value = await loadMobileFeature("paper-validation", path: "/api/paper-validation") as? [String: Any] else { return false }
+        paperValidationState = value
+        return true
+    }
+
+    private func loadMobileFeature(_ key: String, path: String) async -> Any? {
+        guard canOperate, let serverURL = currentServerURL, let token = tokens.token(for: serverURL) else {
+            featureMessages[key] = "이 화면의 서버 권한을 확인할 수 없습니다. 모바일 운영 토큰으로 로그인해 주세요."
+            return nil
+        }
+        let generation = requestGeneration
+        let workspace = activeWorkspace
+        let featureGeneration = mobileFeatureRequestGenerations[key, default: 0] + 1
+        mobileFeatureRequestGenerations[key] = featureGeneration
+        loadingFeatures.insert(key)
+        featureMessages.removeValue(forKey: key)
+        let isCurrentRequest = {
+            !Task.isCancelled &&
+                generation == self.requestGeneration &&
+                self.currentServerURL == serverURL &&
+                self.activeWorkspace == workspace &&
+                self.mobileFeatureRequestGenerations[key] == featureGeneration
+        }
+        defer {
+            if generation == requestGeneration,
+               mobileFeatureRequestGenerations[key] == featureGeneration {
+                loadingFeatures.remove(key)
+            }
+        }
+        do {
+            let response = try await api.mobileRead(path: path, at: serverURL, token: token)
+            guard isCurrentRequest() else { return nil }
+            guard (200..<300).contains(response.statusCode),
+                  let object = try? Self.jsonObject(response.body),
+                  (object as? [String: Any])?["error"] == nil else {
+                let body = (try? Self.jsonObject(response.body)) as? [String: Any] ?? [:]
+                featureMessages[key] = Self.message(from: body) ?? CoinPilotAPIError.forStatusCode(response.statusCode).message
+                return nil
+            }
+            featureMessages.removeValue(forKey: key)
+            return object
+        } catch is CancellationError {
+            return nil
+        } catch let error as URLError where error.code == .cancelled {
+            return nil
+        } catch let error as CoinPilotAPIError {
+            guard isCurrentRequest() else { return nil }
+            if case .cancelled = error { return nil }
+            featureMessages[key] = error.message
+            return nil
+        } catch {
+            guard isCurrentRequest() else { return nil }
+            featureMessages[key] = CoinPilotAPIError.connection.message
+            return nil
+        }
+    }
+
+    private func performFeatureMutation(_ key: String, path: String, body: [String: Any]) async -> [String: Any]? {
+        guard canOperate, let serverURL = currentServerURL, let token = tokens.token(for: serverURL) else {
+            featureMessages[key] = "모바일 운영 토큰으로 로그인해 주세요."
+            return nil
+        }
+        guard !isRunningFeatureAction else {
+            featureMessages[key] = "다른 변경 요청을 처리하고 있습니다."
+            return nil
+        }
+        guard CoinPilotAPIClient.isAllowedMobileMutation(path, body: body) else {
+            featureMessages[key] = "앱에서 허용하지 않은 변경 요청입니다."
+            return nil
+        }
+        let generation = requestGeneration
+        let workspace = activeWorkspace
+        isRunningFeatureAction = true
+        defer { isRunningFeatureAction = false }
+        do {
+            let response = try await api.mutate(path: path, at: serverURL, token: token, body: body, idempotencyKey: nil)
+            guard generation == requestGeneration, currentServerURL == serverURL, activeWorkspace == workspace else { return nil }
+            let value = (try? Self.jsonObject(response.body)) as? [String: Any] ?? [:]
+            guard (200..<300).contains(response.statusCode), value["success"] as? Bool != false else {
+                let message = Self.message(from: value) ?? CoinPilotAPIError.forStatusCode(response.statusCode).message
+                featureMessages[key] = message
+                if response.statusCode == 401 { logOut() }
+                return nil
+            }
+            featureMessages.removeValue(forKey: key)
+            return value
+        } catch let error as CoinPilotAPIError {
+            featureMessages[key] = error.message
+            return nil
+        } catch {
+            featureMessages[key] = CoinPilotAPIError.connection.message
+            return nil
+        }
+    }
+
     func setHistoryPeriod(_ period: CoinPilotHistoryPeriod) async {
+        guard !isBundledLocalMarketData else { return }
         guard period != historyPeriod else { return }
         historyPeriod = period
         guard phase == .dashboard else { return }
@@ -1322,12 +3239,572 @@ final class CoinPilotStore: ObservableObject {
         }
     }
 
+    func submitManualBuy(coin: String, amount: Double) async -> Bool {
+        guard manualOrderBlockReason(for: coin) == nil else {
+            orderMessage = manualOrderBlockReason(for: coin)
+            return false
+        }
+        guard amount.isFinite, amount >= 5_000 else {
+            orderMessage = "최소 매수 금액은 5,000원입니다."
+            return false
+        }
+        let requestURL = currentServerURL
+        let requestWorkspace = activeWorkspace
+        let generation = requestGeneration
+        await refresh()
+        guard requestGeneration == generation, currentServerURL == requestURL, activeWorkspace == requestWorkspace else {
+            orderMessage = "작업공간이 바뀌어 주문을 보내지 않았습니다. 새 화면에서 다시 확인해 주세요."
+            return false
+        }
+        guard manualOrderBlockReason(for: coin) == nil else {
+            orderMessage = manualOrderBlockReason(for: coin)
+            return false
+        }
+        guard let cash = account?.krwBalance, cash.isFinite, amount <= cash else {
+            orderMessage = "현재 계좌 잔액보다 큰 금액은 주문할 수 없습니다."
+            return false
+        }
+        guard markets.contains(where: { $0.coin == coin && ($0.price ?? 0) > 0 }) else {
+            orderMessage = "선택한 종목의 현재 시세를 확인할 수 없습니다."
+            return false
+        }
+        let body: [String: Any] = ["coin": coin, "amount": floor(amount)]
+        return await beginPendingManualOrder(
+            endpoint: "/api/trade/buy",
+            body: body,
+            market: coin,
+            side: "매수",
+            displayAmount: CoinPilotFormatting.won(floor(amount))
+        )
+    }
+
+    func submitManualSell(coin: String, quantity: Double) async -> Bool {
+        guard manualOrderBlockReason(for: coin) == nil else {
+            orderMessage = manualOrderBlockReason(for: coin)
+            return false
+        }
+        guard quantity.isFinite, quantity > 0 else {
+            orderMessage = "매도 수량을 확인해 주세요."
+            return false
+        }
+        let requestURL = currentServerURL
+        let requestWorkspace = activeWorkspace
+        let generation = requestGeneration
+        await refresh()
+        guard requestGeneration == generation, currentServerURL == requestURL, activeWorkspace == requestWorkspace else {
+            orderMessage = "작업공간이 바뀌어 주문을 보내지 않았습니다. 새 화면에서 다시 확인해 주세요."
+            return false
+        }
+        guard manualOrderBlockReason(for: coin) == nil else {
+            orderMessage = manualOrderBlockReason(for: coin)
+            return false
+        }
+        guard let position = account?.positions.first(where: { $0.coin == coin }),
+              let available = position.amount, available.isFinite, available > 0 else {
+            orderMessage = "현재 보유 수량을 확인할 수 없습니다."
+            return false
+        }
+        guard quantity <= available else {
+            orderMessage = "입력한 수량이 현재 보유량보다 많습니다. 새로고침 후 다시 입력해 주세요."
+            return false
+        }
+        let price = position.currentPrice ?? markets.first(where: { $0.coin == coin })?.price
+        let estimate = price.map { CoinPilotFormatting.won($0 * quantity) } ?? "예상 금액 확인 불가"
+        return await beginPendingManualOrder(
+            endpoint: "/api/trade/sell",
+            body: ["coin": coin, "quantity": quantity],
+            market: coin,
+            side: "매도",
+            displayAmount: "\(quantity)개 · \(estimate)"
+        )
+    }
+
+    func submitSmartBuy(totalAmount: Double, minimumScore: Int, maximumCoins: Int) async -> Bool {
+        guard manualOrderBlockReason == nil else { orderMessage = manualOrderBlockReason; return false }
+        guard totalAmount.isFinite, totalAmount >= 5_000,
+              (0...100).contains(minimumScore), (1...30).contains(maximumCoins) else {
+            orderMessage = "금액, 최소 점수, 최대 종목 수를 확인해 주세요."
+            return false
+        }
+        let requestURL = currentServerURL
+        let requestWorkspace = activeWorkspace
+        let generation = requestGeneration
+        await refresh()
+        guard requestGeneration == generation, currentServerURL == requestURL, activeWorkspace == requestWorkspace,
+              manualOrderBlockReason == nil else {
+            orderMessage = manualOrderBlockReason ?? "서버 상태가 바뀌어 조건 매수를 보내지 않았습니다."
+            return false
+        }
+        guard let cash = account?.krwBalance, cash.isFinite, totalAmount <= cash else {
+            orderMessage = "현재 계좌 잔액보다 큰 금액은 조건 매수에 사용할 수 없습니다."
+            return false
+        }
+        let amount = floor(totalAmount)
+        return await beginPendingManualOrder(
+            endpoint: "/api/trade/smart-buy",
+            body: ["totalAmount": amount, "minScore": minimumScore, "maxCoins": maximumCoins],
+            market: "조건 매수",
+            side: "매수",
+            displayAmount: CoinPilotFormatting.won(amount)
+        )
+    }
+
+    func submitSmartSell(targetAmount: Double, strategy: String) async -> Bool {
+        guard manualOrderBlockReason == nil else { orderMessage = manualOrderBlockReason; return false }
+        guard targetAmount.isFinite, targetAmount >= 1_000,
+              ["worst", "best", "overbought"].contains(strategy) else {
+            orderMessage = "매도 목표 금액과 우선순위를 확인해 주세요."
+            return false
+        }
+        let requestURL = currentServerURL
+        let requestWorkspace = activeWorkspace
+        let generation = requestGeneration
+        await refresh()
+        guard requestGeneration == generation, currentServerURL == requestURL, activeWorkspace == requestWorkspace,
+              manualOrderBlockReason == nil else {
+            orderMessage = manualOrderBlockReason ?? "서버 상태가 바뀌어 조건 매도를 보내지 않았습니다."
+            return false
+        }
+        let currentHoldingValue = account?.positions.reduce(0) { $0 + ($1.currentValue ?? 0) } ?? 0
+        guard currentHoldingValue > 0, targetAmount <= currentHoldingValue else {
+            orderMessage = "현재 보유 자산 평가액보다 큰 금액은 조건 매도에 사용할 수 없습니다."
+            return false
+        }
+        let amount = floor(targetAmount)
+        return await beginPendingManualOrder(
+            endpoint: "/api/trade/smart-sell",
+            body: ["targetAmount": amount, "strategy": strategy],
+            market: "조건 매도",
+            side: "매도",
+            displayAmount: CoinPilotFormatting.won(amount)
+        )
+    }
+
+    func submitBundle(sellCoin: String, sellAmount: Double? = nil, buyCoin: String, buyAmount: Double? = nil) async -> Bool {
+        let marketCodes = [sellCoin, buyCoin]
+        guard manualOrderBlockReason(forMarkets: marketCodes) == nil else {
+            orderMessage = manualOrderBlockReason(forMarkets: marketCodes)
+            return false
+        }
+        guard sellCoin != buyCoin,
+              sellCoin.range(of: "^KRW-[A-Z0-9]{2,15}$", options: .regularExpression) != nil,
+              buyCoin.range(of: "^KRW-[A-Z0-9]{2,15}$", options: .regularExpression) != nil else {
+            orderMessage = "매도·매수 종목을 확인해 주세요."
+            return false
+        }
+        let requestURL = currentServerURL
+        let requestWorkspace = activeWorkspace
+        let generation = requestGeneration
+        await refresh()
+        let refreshedMarketCodes = [sellCoin, buyCoin]
+        guard requestGeneration == generation, currentServerURL == requestURL, activeWorkspace == requestWorkspace,
+              manualOrderBlockReason(forMarkets: refreshedMarketCodes) == nil else {
+            orderMessage = manualOrderBlockReason(forMarkets: refreshedMarketCodes) ?? "서버 상태가 바뀌어 묶음 거래를 보내지 않았습니다."
+            return false
+        }
+        guard let holding = account?.positions.first(where: { $0.coin == sellCoin }),
+              let available = holding.amount, available > 0,
+              let destination = markets.first(where: { $0.coin == buyCoin }),
+              let destinationPrice = destination.price, destinationPrice > 0 else {
+            orderMessage = "매도할 보유량과 매수 종목의 시세를 다시 확인해 주세요."
+            return false
+        }
+        if let sellAmount, (!sellAmount.isFinite || sellAmount <= 0 || sellAmount > available) {
+            orderMessage = "매도 수량이 현재 보유량을 넘었습니다. 새로고침 후 다시 확인해 주세요."
+            return false
+        }
+        if let buyAmount, (!buyAmount.isFinite || buyAmount < 5_000 || buyAmount > (holding.currentValue ?? 0)) {
+            orderMessage = "매수 금액을 확인해 주세요. 매도 예상 금액 안에서 5,000원 이상이어야 합니다."
+            return false
+        }
+        var body: [String: Any] = ["sellCoin": sellCoin, "buyCoin": buyCoin]
+        if let sellAmount { body["sellAmount"] = sellAmount }
+        if let buyAmount { body["buyAmount"] = buyAmount }
+        let sellDisplay = CoinPilotFormatting.won((holding.currentValue ?? 0))
+        return await beginPendingManualOrder(
+            endpoint: "/api/trade/execute-bundle",
+            body: body,
+            market: "\(CoinPilotFormatting.ticker(sellCoin)) → \(CoinPilotFormatting.ticker(buyCoin))",
+            side: "묶음 거래",
+            displayAmount: sellDisplay
+        )
+    }
+
+    func submitRecommendation(_ recommendation: CoinPilotRecommendation, amount: Double? = nil) async -> Bool {
+        guard manualOrderBlockReason(for: recommendation.coin) == nil else {
+            orderMessage = manualOrderBlockReason(for: recommendation.coin)
+            return false
+        }
+        let action = recommendation.action.uppercased()
+        guard ["BUY", "SELL"].contains(action) else {
+            orderMessage = "현재 추천은 주문 가능한 매수·매도 신호가 아닙니다."
+            return false
+        }
+        let requestURL = currentServerURL
+        let requestWorkspace = activeWorkspace
+        let generation = requestGeneration
+        await refresh()
+        guard requestGeneration == generation, currentServerURL == requestURL, activeWorkspace == requestWorkspace,
+              manualOrderBlockReason(for: recommendation.coin) == nil else {
+            orderMessage = manualOrderBlockReason(for: recommendation.coin) ?? "서버 상태가 바뀌어 추천 주문을 보내지 않았습니다."
+            return false
+        }
+        var body: [String: Any] = ["coin": recommendation.coin, "action": action]
+        var displayAmount = "보유량 전체"
+        if action == "BUY" {
+            let requested = amount ?? recommendation.suggestedAmount ?? 50_000
+            guard requested.isFinite, requested >= 5_000,
+                  let cash = account?.krwBalance, requested <= cash else {
+                orderMessage = "매수 금액이 최소 주문 금액보다 작거나 현재 잔액을 초과합니다."
+                return false
+            }
+            body["amount"] = floor(requested)
+            displayAmount = CoinPilotFormatting.won(floor(requested))
+        } else if !(account?.positions.contains(where: { $0.coin == recommendation.coin && ($0.amount ?? 0) > 0 }) ?? false) {
+            orderMessage = "현재 보유 수량이 없어 추천 매도를 실행할 수 없습니다."
+            return false
+        }
+        return await beginPendingManualOrder(
+            endpoint: "/api/trade/execute",
+            body: body,
+            market: recommendation.coin,
+            side: action == "BUY" ? "매수" : "매도",
+            displayAmount: displayAmount
+        )
+    }
+
+    func retryPendingManualOrder() async -> Bool {
+        guard pendingManualOrderLocked else { return false }
+        guard canOperate else {
+            orderMessage = "저장된 주문 결과를 확인하려면 모바일 운영 토큰이 필요합니다."
+            return false
+        }
+        guard let pendingManualOrder else {
+            orderMessage = "주문 기록을 읽지 못해 안전 확인이 필요합니다. 새 주문은 잠겨 있습니다."
+            return false
+        }
+        return await sendPendingManualOrder(pendingManualOrder)
+    }
+
+    func updatePaperWallet(amount: Double, deposit: Bool) async -> Bool {
+        guard activeWorkspace == .paper, tradingMode == "DRY_RUN", !isObserverAccount else {
+            orderMessage = "모의 지갑은 연결된 모의투자 서버에서만 변경할 수 있습니다."
+            return false
+        }
+        guard canOperate else {
+            orderMessage = "모의 지갑을 변경하려면 모바일 운영 토큰이 필요합니다."
+            return false
+        }
+        guard amount.isFinite, amount >= 1_000 else {
+            orderMessage = "최소 1,000원 이상 입력해 주세요."
+            return false
+        }
+        if storePaperWalletLocked {
+            orderMessage = storePaperWalletLockedReason
+            return false
+        }
+        let requestURL = currentServerURL
+        let requestGeneration = self.requestGeneration
+        await refresh()
+        guard self.requestGeneration == requestGeneration,
+              currentServerURL == requestURL,
+              activeWorkspace == .paper, tradingMode == "DRY_RUN", serverModeMatchesWorkspace else {
+            orderMessage = "모의투자 서버가 바뀌어 지갑 변경을 취소했습니다."
+            return false
+        }
+        if let lock = paperWalletBlockReason {
+            orderMessage = lock
+            return false
+        }
+        if !deposit, let cash = account?.krwBalance, amount > cash {
+            orderMessage = "출금 금액이 현재 가상 잔액보다 많습니다."
+            return false
+        }
+        return await beginPendingManualOrder(
+            endpoint: "/api/virtual/\(deposit ? "deposit" : "withdraw")",
+            body: ["amount": floor(amount)],
+            market: "가상 지갑",
+            side: deposit ? "입금" : "출금",
+            displayAmount: CoinPilotFormatting.won(floor(amount))
+        )
+    }
+
+    func resetPaperWallet(seedMoney: Double) async -> Bool {
+        guard activeWorkspace == .paper, tradingMode == "DRY_RUN", canOperate, !isObserverAccount else {
+            orderMessage = "모의 계좌 초기화는 운영 권한이 있는 모의투자 서버에서만 할 수 있습니다."
+            return false
+        }
+        guard seedMoney.isFinite, seedMoney >= 100_000 else {
+            orderMessage = "초기 금액은 100,000원 이상으로 입력해 주세요."
+            return false
+        }
+        if storePaperWalletLocked {
+            orderMessage = storePaperWalletLockedReason
+            return false
+        }
+        let requestURL = currentServerURL
+        let requestGeneration = self.requestGeneration
+        await refresh()
+        guard self.requestGeneration == requestGeneration,
+              currentServerURL == requestURL,
+              activeWorkspace == .paper, tradingMode == "DRY_RUN", serverModeMatchesWorkspace,
+              paperWalletBlockReason == nil else {
+            orderMessage = paperWalletBlockReason ?? "모의투자 서버 상태가 바뀌어 초기화를 취소했습니다."
+            return false
+        }
+        return await beginPendingManualOrder(
+            endpoint: "/api/virtual/reset",
+            body: ["seedMoney": floor(seedMoney)],
+            market: "가상 지갑",
+            side: "초기화",
+            displayAmount: CoinPilotFormatting.won(floor(seedMoney))
+        )
+    }
+
+    private func beginPendingManualOrder(
+        endpoint: String,
+        body: [String: Any],
+        market: String,
+        side: String,
+        displayAmount: String
+    ) async -> Bool {
+        guard let serverURL = currentServerURL,
+              let token = tokens.token(for: serverURL),
+              let requestBody = try? JSONSerialization.data(withJSONObject: body) else {
+            orderMessage = "서버 인증 또는 주문 요청을 준비하지 못했습니다."
+            return false
+        }
+        guard !pendingManualOrderLocked, !isSubmittingManualOrder else {
+            orderMessage = "이전 요청의 결과를 확인한 뒤 새 주문을 보낼 수 있습니다."
+            return false
+        }
+        let record = CoinPilotPendingManualOrder(
+            idempotencyKey: UUID().uuidString.lowercased(),
+            endpoint: endpoint,
+            requestBody: requestBody,
+            market: market,
+            side: side,
+            displayAmount: displayAmount,
+            mode: activeWorkspace.serverMode,
+            createdAt: Date()
+        )
+        guard let encoded = try? JSONEncoder().encode(record),
+              pendingOrders.save(encoded, for: serverURL) else {
+            orderMessage = "주문 중복 방지 기록을 기기의 보안 저장소에 남기지 못해 주문을 보내지 않았습니다."
+            return false
+        }
+        pendingManualOrder = record
+        pendingManualOrderLocked = true
+        orderMessage = "\(side) 요청을 거래 서버에 안전하게 전달하고 있습니다."
+        return await sendPendingManualOrder(record, token: token, serverURL: serverURL)
+    }
+
+    private func sendPendingManualOrder(
+        _ record: CoinPilotPendingManualOrder,
+        token suppliedToken: String? = nil,
+        serverURL suppliedURL: URL? = nil
+    ) async -> Bool {
+        guard let serverURL = suppliedURL ?? currentServerURL,
+              let token = suppliedToken ?? tokens.token(for: serverURL),
+              let body = record.bodyDictionary() else {
+            orderMessage = "저장된 주문을 다시 확인할 서버 연결이 없습니다."
+            return false
+        }
+        guard serverURL == currentServerURL,
+              record.mode == activeWorkspace.serverMode,
+              tradingMode == record.mode,
+              serverModeMatchesWorkspace else {
+            orderMessage = "이전 주문이 시작된 서버 모드와 현재 작업공간이 다릅니다. 원래 작업공간으로 돌아가 결과를 확인하세요."
+            return false
+        }
+
+        isSubmittingManualOrder = true
+        defer { isSubmittingManualOrder = false }
+        do {
+            let response = try await api.mutate(
+                path: record.endpoint,
+                at: serverURL,
+                token: token,
+                body: body,
+                idempotencyKey: record.idempotencyKey
+            )
+            let responseBody = (try? Self.jsonObject(response.body)) as? [String: Any] ?? [:]
+            let state = response.headers.first { $0.key.caseInsensitiveCompare("Idempotency-Status") == .orderedSame }?.value.lowercased()
+            let serverMessage = Self.message(from: responseBody)
+
+            if state == "pending" || state == "unknown" || state == "conflict" || response.statusCode == 202 {
+                pendingManualOrderLocked = true
+                orderMessage = serverMessage ?? "거래 결과를 아직 확인할 수 없습니다. 같은 요청으로 결과 확인을 반복하세요. 새 주문은 잠겨 있습니다."
+                return false
+            }
+
+            if response.statusCode == 401 || response.statusCode == 403 || response.statusCode == 429 {
+                if clearPendingManualOrder(for: serverURL) {
+                    orderMessage = serverMessage ?? CoinPilotAPIError.forStatusCode(response.statusCode).message
+                }
+                return false
+            }
+
+            let succeeded = (200..<300).contains(response.statusCode) && responseBody["success"] as? Bool == true
+            if state == "completed" || state == "rejected" || succeeded {
+                guard clearPendingManualOrder(for: serverURL) else {
+                    orderMessage = "서버는 결과를 기록했지만 기기의 중복 방지 기록을 정리하지 못했습니다. 새 주문은 계속 잠겨 있습니다."
+                    return false
+                }
+                if succeeded {
+                    orderMessage = serverMessage ?? "\(record.market) \(record.side) 요청을 처리했습니다. 체결·정산 상태를 새로 확인합니다."
+                    await refresh()
+                    return true
+                }
+                orderMessage = serverMessage ?? "주문 요청이 완료되지 않았습니다. 잔액·거래소 상태를 확인해 주세요."
+                await refresh()
+                return false
+            }
+
+            pendingManualOrderLocked = true
+            orderMessage = serverMessage ?? "주문 응답을 확인하지 못했습니다. 중복 주문 방지를 위해 같은 요청만 재확인할 수 있습니다."
+            return false
+        } catch {
+            pendingManualOrderLocked = true
+            orderMessage = "서버 응답이 끊겨 주문 결과를 확정하지 못했습니다. 같은 요청으로 결과를 확인하세요. 새 주문은 잠겨 있습니다."
+            return false
+        }
+    }
+
+    private func clearPendingManualOrder(for serverURL: URL) -> Bool {
+        guard pendingOrders.clear(for: serverURL) else {
+            pendingManualOrderLocked = true
+            return false
+        }
+        pendingManualOrder = nil
+        pendingManualOrderLocked = false
+        return true
+    }
+
+    func setAutomationRunning(_ shouldRun: Bool) async -> Bool {
+        guard canOperate else {
+            dashboardMessage = "조회 전용 연결에서는 자동매매를 변경할 수 없습니다. 모바일 운영 토큰을 연결해 주세요."
+            return false
+        }
+        guard !isWorking, let serverURL = currentServerURL,
+              let token = tokens.token(for: serverURL) else { return false }
+        let path = shouldRun ? "/api/control/start" : "/api/control/stop"
+        let requestURL = serverURL
+        let requestWorkspace = activeWorkspace
+        let generation = requestGeneration
+        isWorking = true
+        defer { isWorking = false }
+        do {
+            let response = try await api.mutate(path: path, at: requestURL, token: token, body: [:], idempotencyKey: nil)
+            guard requestGeneration == generation, currentServerURL == requestURL, activeWorkspace == requestWorkspace else { return false }
+            let body = (try? Self.jsonObject(response.body)) as? [String: Any] ?? [:]
+            guard (200..<300).contains(response.statusCode), body["success"] as? Bool == true else {
+                dashboardMessage = Self.message(from: body) ?? CoinPilotAPIError.forStatusCode(response.statusCode).message
+                return false
+            }
+            dashboardMessage = Self.message(from: body)
+            await refresh()
+            return true
+        } catch {
+            dashboardMessage = CoinPilotAPIError.connection.message
+            return false
+        }
+    }
+
+    func loadTuning() async -> Bool {
+        guard canViewTuning, let serverURL = currentServerURL else {
+            tuningMessage = "서버에 연결하면 현재 작업공간의 튜닝값을 확인할 수 있습니다."
+            return false
+        }
+        let token = authenticationRequired ? tokens.token(for: serverURL) : nil
+        if authenticationRequired && token == nil {
+            tuningMessage = "서버 토큰을 다시 입력해 주세요."
+            return false
+        }
+        guard !isLoadingTuning else { return false }
+        let requestURL = serverURL
+        let requestWorkspace = activeWorkspace
+        let generation = requestGeneration
+        isLoadingTuning = true
+        defer { isLoadingTuning = false }
+        do {
+            async let configResponse = api.read(path: "/api/investment-config", at: requestURL, token: token)
+            async let rangeResponse = api.read(path: "/api/parameter-ranges", at: requestURL, token: token)
+            let (config, ranges) = try await (configResponse, rangeResponse)
+            guard requestGeneration == generation, currentServerURL == requestURL, activeWorkspace == requestWorkspace else { return false }
+            guard (200..<300).contains(config.statusCode), (200..<300).contains(ranges.statusCode),
+                  let configBody = (try? Self.jsonObject(config.body)) as? [String: Any],
+                  let rangeBody = (try? Self.jsonObject(ranges.body)) as? [String: Any] else {
+                tuningMessage = "서버에서 튜닝값을 불러오지 못했습니다."
+                return false
+            }
+            var values = configBody["scalping"] as? [String: Any] ?? [:]
+            values["investmentRatio"] = configBody["investmentRatio"]
+            tuningValues = values
+            tuningRanges = rangeBody.reduce(into: [:]) { result, item in
+                if let value = item.value as? [String: Any] { result[item.key] = value }
+            }
+            if let lock = configBody["evidenceMutationLock"] as? [String: Any] {
+                tuningMutationLocked = lock["locked"] as? Bool == true
+                tuningMutationReason = lock["reason"] as? String
+            } else {
+                tuningMutationLocked = false
+                tuningMutationReason = nil
+            }
+            tuningMessage = nil
+            return true
+        } catch {
+            tuningMessage = CoinPilotAPIError.connection.message
+            return false
+        }
+    }
+
+    func saveTuning(_ updates: [String: Any]) async -> Bool {
+        guard tuningBlockReason == nil, let serverURL = currentServerURL,
+              let token = tokens.token(for: serverURL) else {
+            tuningMessage = tuningBlockReason ?? "모바일 운영 토큰을 연결해야 튜닝값을 저장할 수 있습니다."
+            return false
+        }
+        guard !updates.isEmpty,
+              CoinPilotAPIClient.isAllowedMobileMutation("/api/config/update", body: updates) else {
+            tuningMessage = "변경할 설정 항목을 확인해 주세요."
+            return false
+        }
+        isSavingTuning = true
+        let requestURL = serverURL
+        let requestWorkspace = activeWorkspace
+        let generation = requestGeneration
+        defer { isSavingTuning = false }
+        do {
+            let response = try await api.mutate(
+                path: "/api/config/update",
+                at: requestURL,
+                token: token,
+                body: updates,
+                idempotencyKey: nil
+            )
+            guard requestGeneration == generation, currentServerURL == requestURL, activeWorkspace == requestWorkspace else { return false }
+            let body = (try? Self.jsonObject(response.body)) as? [String: Any] ?? [:]
+            guard (200..<300).contains(response.statusCode), body["success"] as? Bool == true else {
+                tuningMessage = Self.message(from: body) ?? CoinPilotAPIError.forStatusCode(response.statusCode).message
+                return false
+            }
+            tuningMessage = "설정을 저장했습니다. 서버의 다음 점검부터 반영됩니다."
+            _ = await loadTuning()
+            return true
+        } catch {
+            tuningMessage = CoinPilotAPIError.connection.message
+            return false
+        }
+    }
+
     private func fetch(
         _ path: String,
         token: String?,
         at serverURL: URL?,
         usesBundledPreview: Bool
     ) async -> Result<CoinPilotHTTPResponse, CoinPilotAPIError> {
+        guard !isBundledLocalMarketData else { return .failure(.forbidden) }
         if usesBundledPreview {
             do {
                 return .success(try bundledPreview.response(for: path))
@@ -1340,6 +3817,8 @@ final class CoinPilotStore: ObservableObject {
         guard let serverURL else { return .failure(.invalidAddress) }
         do {
             return .success(try await api.read(path: path, at: serverURL, token: token))
+        } catch is CancellationError {
+            return .failure(.cancelled)
         } catch let error as CoinPilotAPIError {
             return .failure(error)
         } catch {
@@ -1362,6 +3841,56 @@ final class CoinPilotStore: ObservableObject {
         return object
     }
 
+    private static func authScope(from response: CoinPilotHTTPResponse) -> CoinPilotAuthScope {
+        guard let body = try? jsonObject(response.body) as? [String: Any],
+              let rawScope = body["tokenScope"] as? String,
+              let scope = CoinPilotAuthScope(rawValue: rawScope) else {
+            // Older servers can still provide safe account reads. They never
+            // silently gain mobile trading rights from an unlabelled login.
+            return .readOnly
+        }
+        return scope
+    }
+
+    private func rejectFullOperatorScope(for serverURL: URL) {
+        tokens.delete(for: serverURL)
+        tokenDraft = ""
+        authenticationRequired = true
+        clearLoadedData()
+        phase = .login
+        connectionMessage = "전체 운영자 토큰은 iOS에서 사용할 수 없습니다. 서버의 DASHBOARD_MOBILE_TOKEN을 입력해 주세요."
+    }
+
+    private func restorePendingManualOrder(for serverURL: URL) {
+        switch pendingOrders.read(for: serverURL) {
+        case .missing:
+            pendingManualOrder = nil
+            pendingManualOrderLocked = false
+            orderMessage = nil
+        case .saved(let data):
+            pendingManualOrderLocked = true
+            if let order = try? JSONDecoder().decode(CoinPilotPendingManualOrder.self, from: data) {
+                pendingManualOrder = order
+                orderMessage = "\(order.market) \(order.side) 요청이 미확정 상태로 저장되어 있습니다. 같은 요청으로 결과를 확인할 때까지 새 주문은 잠겨 있습니다."
+            } else {
+                pendingManualOrder = nil
+                orderMessage = "이전 주문 결과 기록을 읽을 수 없어 새 주문을 잠갔습니다. 서버의 주문 기록을 먼저 확인해 주세요."
+            }
+        case .unavailable:
+            pendingManualOrder = nil
+            pendingManualOrderLocked = true
+            orderMessage = "이 기기에서 이전 주문 기록을 읽을 수 없어 새 주문을 잠갔습니다. 기기 잠금을 해제한 뒤 다시 시도해 주세요."
+        }
+    }
+
+    private static func message(from body: [String: Any]) -> String? {
+        if let message = body["message"] as? String, !message.isEmpty { return message }
+        if let error = body["error"] as? String, !error.isEmpty { return error }
+        if let error = body["error"] as? [String: Any],
+           let message = error["message"] as? String, !message.isEmpty { return message }
+        return nil
+    }
+
     private func clearLoadedData() {
         account = nil
         status = nil
@@ -1369,13 +3898,136 @@ final class CoinPilotStore: ObservableObject {
         todayRealizedProfit = nil
         history = []
         markets = []
+        marketSnapshotMetadata = nil
         trades = []
         paperValidationSummary = nil
+        candles = []
+        analysisResults = []
+        analysisSummary = [:]
+        buyRecommendations = []
+        sellRecommendations = []
+        bundleSuggestions = []
+        newsArticles = []
+        newsSentiment = [:]
+        aiProviderStatus = [:]
+        aiEffectiveness = [:]
+        aiSessions = []
+        aiEvents = []
+        aiConsultations = []
+        aiConsultationMessage = nil
+        strategyResearch = [:]
+        strategyReadiness = [:]
+        scalpingValidation = [:]
+        paperValidationState = [:]
+        momentumShadow = [:]
+        liveExecutionEvidence = [:]
+        portfolioAnalysis = [:]
+        statistics = []
+        optimizationSettings = [:]
+        optimizationHistory = []
+        backtestResults = [:]
+        optimalConfig = [:]
+        investmentPresets = []
+        featureMessages = [:]
+        loadingFeatures = []
+        mobileFeatureRequestGenerations = [:]
+        isRunningFeatureAction = false
+        isRecordingSnapshot = false
         rawResponses = [:]
+        localMarketData = nil
+        localMarketDataError = nil
+        liveAccessKeyDraft = ""
+        liveSecretKeyDraft = ""
+        liveCredentialMessage = nil
+        isLoadingLocalMarketData = false
+        localMarketDataLoadGeneration += 1
         lastCheckedAt = nil
         dashboardMessage = nil
         lastSuccessfulResourceAt = [:]
         resourceStates = Dictionary(uniqueKeysWithValues: Self.resourceNames.map { ($0, .notRequested) })
+        serverModeMatchesWorkspace = false
+    }
+
+    private func loadBundledLocalMarketData() async {
+        guard !isLoadingLocalMarketData else { return }
+        guard let localMarketDataSource else {
+            localMarketData = nil
+            localMarketDataError = CoinPilotBundledMarketDataError.missingResource.localizedDescription
+            return
+        }
+
+        localMarketDataLoadGeneration += 1
+        let loadGeneration = localMarketDataLoadGeneration
+        let requestGenerationAtStart = requestGeneration
+        let requestedMode = isBundledLocalMarketData
+        isLoadingLocalMarketData = true
+        localMarketDataError = nil
+
+        let result = await localMarketDataSource.load()
+        guard localMarketDataLoadGeneration == loadGeneration else { return }
+        guard requestGeneration == requestGenerationAtStart,
+              isBundledLocalMarketData == requestedMode,
+              requestedMode else {
+            isLoadingLocalMarketData = false
+            return
+        }
+
+        isLoadingLocalMarketData = false
+        guard case .success(let dataset) = result else {
+            localMarketData = nil
+            if case .failure(let error) = result {
+                localMarketDataError = error.localizedDescription
+            } else {
+                localMarketDataError = CoinPilotBundledMarketDataError.malformed.localizedDescription
+            }
+            return
+        }
+
+        localMarketData = dataset
+        localMarketDataError = nil
+        if !dataset.markets.contains(where: { $0.market == selectedMarket }) {
+            selectedMarket = dataset.markets.first?.market ?? ""
+        }
+    }
+
+    func localMarketIntervals(for marketCode: String) -> [Int] {
+        guard isBundledLocalMarketData,
+              let market = localMarketData?.markets.first(where: { $0.market == marketCode }) else { return [] }
+        return Array(Set(market.candles.map(\.intervalMinutes))).sorted()
+    }
+
+    func localMarketLatestCandle(for marketCode: String, interval: Int? = nil) -> CoinPilotBundledMarketData.Candle? {
+        guard isBundledLocalMarketData,
+              let market = localMarketData?.markets.first(where: { $0.market == marketCode }) else { return nil }
+        if let interval {
+            return market.candles.last(where: { $0.intervalMinutes == interval })
+        }
+        for preferredInterval in [5, 1, 15, 60] {
+            if let latest = market.candles.last(where: { $0.intervalMinutes == preferredInterval }) {
+                return latest
+            }
+        }
+        return market.candles.last
+    }
+
+    func localMarketTimestampLabel(for marketCode: String, interval: Int? = nil) -> String {
+        guard let timestamp = localMarketLatestCandle(for: marketCode, interval: interval)?.timestamp else {
+            return "원본 캔들 시각 미제공"
+        }
+        return "원본 캔들 · \(CoinPilotFormatting.utcMarketTimestamp(timestamp))"
+    }
+
+    func localMarketChartWindowLabel(for marketCode: String, interval: Int) -> String? {
+        guard let market = localMarketData?.markets.first(where: { $0.market == marketCode }) else { return nil }
+        let rows = market.candles.filter { $0.intervalMinutes == interval }
+        guard let firstVisible = rows.suffix(Self.maximumBundledLocalChartCandles).first,
+              let lastVisible = rows.last else { return nil }
+        let visibleCount = min(rows.count, Self.maximumBundledLocalChartCandles)
+        let range = "\(CoinPilotFormatting.utcMarketTimestamp(firstVisible.timestamp)) – \(CoinPilotFormatting.utcMarketTimestamp(lastVisible.timestamp))"
+        if rows.count > Self.maximumBundledLocalChartCandles {
+            return "최근 \(visibleCount) / 전체 \(rows.count)개 캔들 · \(range)"
+        }
+        return "전체 \(rows.count)개 캔들 · \(range)"
     }
 
     private func beginRequestGeneration() -> Int {
@@ -1403,7 +4055,7 @@ final class CoinPilotStore: ObservableObject {
         guard let parsed = URL(string: value),
               ServerAddressPolicy.allows(parsed),
               var components = URLComponents(url: parsed, resolvingAgainstBaseURL: false) else { return nil }
-        components.path = ""
+        components.path = parsed.path == "/live" ? "/live" : ""
         components.query = nil
         components.fragment = nil
         return components.url
@@ -1411,7 +4063,7 @@ final class CoinPilotStore: ObservableObject {
 
     private static func displayAddress(_ url: URL) -> String {
         guard let host = url.host else { return url.absoluteString }
-        return host + (url.port.map { ":\($0)" } ?? "")
+        return host + (url.port.map { ":\($0)" } ?? "") + (url.path == "/live" ? "/live" : "")
     }
 
     private static func jsonObject(_ data: Data) throws -> Any {
@@ -1471,6 +4123,32 @@ enum CoinPilotFormatting {
         formatter.locale = Locale(identifier: "ko_KR")
         formatter.dateFormat = "M월 d일 a h:mm:ss"
         return "\(label) \(formatter.string(from: date))"
+    }
+
+    static func utcMarketTimestamp(_ value: String) -> String {
+        let characters = Array(value)
+        guard characters.count >= 20,
+              characters[4] == "-",
+              characters[7] == "-",
+              characters[10] == "T",
+              characters[13] == ":",
+              characters[16] == ":",
+              characters.last == "Z" else { return "시각 형식 오류" }
+
+        let year = String(characters[0..<4])
+        let month = String(characters[5..<7])
+        let day = String(characters[8..<10])
+        let hour = String(characters[11..<13])
+        let minute = String(characters[14..<16])
+        let seconds = String(characters[17..<19])
+        let fraction: String
+        if characters.count > 21, characters[19] == "." {
+            let digits = String(characters[20..<(characters.count - 1)])
+            fraction = digits.contains(where: { $0 != "0" }) ? ".\(digits)" : ""
+        } else {
+            fraction = ""
+        }
+        return "\(year). \(month). \(day). \(hour):\(minute):\(seconds)\(fraction) UTC"
     }
 
     static func time(_ date: Date?) -> String {

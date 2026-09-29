@@ -121,6 +121,9 @@ test('robustness CLI sweeps explicit round-trip costs without changing the scala
   assert.equal(report.variants.length, 2);
   assert.deepEqual(report.variants.map(variant => variant.config.costPercent), [0.3, 0.5]);
   assert.notEqual(report.variants[0].name, report.variants[1].name);
+  for (const variant of report.variants) {
+    assert.equal(variant.marketAttribution.basis, 'simulated_closed_trade_pnl_after_configured_round_trip_cost');
+  }
   assert.equal(report.promoted, false);
 });
 

@@ -1,6 +1,5 @@
 import dotenv from 'dotenv';
 import fs from 'fs';
-import axios from 'axios';
 import UpbitAPI from '../api/upbit.js';
 import { walkForwardValidate } from '../backtest/scalpingBacktest.js';
 import { resolveMaxCandleAgeSeconds } from '../risk/candleFreshness.js';
@@ -8,26 +7,21 @@ import {
   loadPaperValidationConfigSnapshot,
   mergePaperValidationConfig
 } from '../research/scalpingValidationConfig.js';
+import { pathToFileURL } from 'node:url';
 
 dotenv.config();
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const number = (value, fallback) => Number.isFinite(Number(value)) ? Number(value) : fallback;
 
-async function getHistoricalCandles(upbit, market, unit, totalCount) {
+export async function getHistoricalCandles(upbit, market, unit, totalCount) {
   const candles = [];
   let to = null;
 
   while (candles.length < totalCount) {
     const count = Math.min(200, totalCount - candles.length);
     const batch = to
-      ? await upbit.requestWithRetry(async () => {
-              const response = await axios.get(
-            `https://api.upbit.com/v1/candles/minutes/${unit}`,
-            upbit.getRequestConfig({ params: { market, count, to } })
-              );
-          return response.data;
-        })
+      ? await upbit.getMinuteCandles(market, unit, count, { to })
       : await upbit.getMinuteCandles(market, unit, count);
 
     if (!Array.isArray(batch) || batch.length === 0) break;
@@ -315,7 +309,9 @@ async function main() {
   }
 }
 
-main().catch(error => {
-  console.error('❌ 스캘핑 검증 오류:', error.message);
-  process.exitCode = 1;
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch(error => {
+    console.error('❌ 스캘핑 검증 오류:', error.message);
+    process.exitCode = 1;
+  });
+}

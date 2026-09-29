@@ -19,7 +19,7 @@ async function startDashboard(t) {
   const server = await dashboard.start();
   t.after(async () => {
     const closed = once(server, 'close');
-    dashboard.stop();
+    await dashboard.stop();
     trader.stop();
     await closed;
   });
@@ -115,7 +115,7 @@ test('virtual wallet persistence failure leaves balances, positions, and history
   const server = await dashboard.start();
   t.after(async () => {
     const closed = once(server, 'close');
-    dashboard.stop();
+    await dashboard.stop();
     trader.stop();
     await closed;
   });

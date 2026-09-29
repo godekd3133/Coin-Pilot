@@ -1,0 +1,61 @@
+{
+  "schema": "coinpilot.ios.bundled-resource-integrity.v1",
+  "generatedAt": "2026-09-29T13:18:55Z",
+  "researchOnly": true,
+  "productionRelease": false,
+  "sourcePack": {
+    "path": "/private/tmp/coinpilot-public-market-pack-20260929T0948Z.json",
+    "schemaVersion": 1,
+    "source": "upbit-public-market-api",
+    "generatedAt": "2026-09-29T09:50:39.278Z",
+    "byteCount": 780371,
+    "sha256": "e960d8693e2496d34b101c6697dc31fd36ae51e5afa3143c513325c6712f005c",
+    "markets": [
+      {"market": "KRW-BTC", "candles": 800},
+      {"market": "KRW-ETH", "candles": 800},
+      {"market": "KRW-XRP", "candles": 800},
+      {"market": "KRW-SOL", "candles": 800}
+    ]
+  },
+  "simulatorBuilds": {
+    "bundled-local": {
+      "result": "BUILD SUCCEEDED",
+      "codeSigningAllowed": false,
+      "localMarketPackPresent": true,
+      "digestSidecarPresent": true,
+      "previewResourcePresent": false,
+      "packagedByteCount": 780371,
+      "packagedSha256": "e960d8693e2496d34b101c6697dc31fd36ae51e5afa3143c513325c6712f005c",
+      "sidecarMatchesPackagedBytes": true,
+      "dataModeMarker": "bundled-local"
+    },
+    "server": {
+      "result": "BUILD SUCCEEDED",
+      "localMarketPackPresent": false,
+      "digestSidecarPresent": false,
+      "previewResourcePresent": false,
+      "dataModeMarker": "server"
+    },
+    "bundled-preview": {
+      "result": "BUILD SUCCEEDED",
+      "localMarketPackPresent": false,
+      "digestSidecarPresent": false,
+      "previewResourcePresent": true,
+      "previewResourceBytes": 7484,
+      "dataModeMarker": "bundled-preview"
+    }
+  },
+  "verification": {
+    "swiftStoreTest": "32 scenarios passed",
+    "integrityMethod": "SHA-256 of the exact bundled JSON bytes compared with the packaged 64-character sidecar",
+    "runtimeInstallOrLaunch": false,
+    "physicalDeviceTest": false,
+    "realMarketDataSourceAuthentication": false,
+    "actualFillsObserved": false
+  },
+  "interpretation": {
+    "proved": "The bundled-local simulator build carries the expected four-market pack and matching digest; server and fictional preview profiles do not carry that local pack or sidecar.",
+    "notProved": "This verifies integrity against accidental byte changes, not data authenticity, freshness, replay behavior, automatic operation, TestFlight signing, or physical-device behavior.",
+    "sourceOrRuntimeConfigurationChanged": false
+  }
+}
