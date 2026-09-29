@@ -3,6 +3,7 @@ import MultiCoinTrader from './trader/multiCoinTrader.js';
 import DashboardServer from './api/dashboardServer.js';
 import Logger from './utils/logger.js';
 import { loadEnv, formatEnvErrors, formatEnvWarnings } from './config/envLoader.js';
+import { runAfterDashboardReady } from './runtime/dashboardStartup.js';
 
 dotenv.config();
 
@@ -91,29 +92,30 @@ async function main() {
   let dashboardServer = null;
   if (config.enableDashboard) {
     dashboardServer = new DashboardServer(trader, config.dashboardPort);
-    dashboardServer.start();
   }
 
-  // 종료 핸들러
-  const gracefulShutdown = () => {
-    console.log('\n\n⏹️  시스템 종료 중...');
-    trader.stop();
+  await runAfterDashboardReady(dashboardServer, async () => {
+    // 종료 핸들러
+    const gracefulShutdown = () => {
+      console.log('\n\n⏹️  시스템 종료 중...');
+      trader.stop();
 
-    if (dashboardServer) {
-      dashboardServer.stop();
-    }
+      if (dashboardServer) {
+        dashboardServer.stop();
+      }
 
-    console.log('\n👋 프로그램을 종료합니다.\n');
-    process.exit(0);
-  };
+      console.log('\n👋 프로그램을 종료합니다.\n');
+      process.exit(0);
+    };
 
-  process.on('SIGINT', gracefulShutdown);
-  process.on('SIGTERM', gracefulShutdown);
+    process.on('SIGINT', gracefulShutdown);
+    process.on('SIGTERM', gracefulShutdown);
 
-  console.log('\n⏱️  3초 후 시작합니다...');
-  await new Promise(resolve => setTimeout(resolve, 3000));
+    console.log('\n⏱️  3초 후 시작합니다...');
+    await new Promise(resolve => setTimeout(resolve, 3000));
 
-  await trader.start();
+    await trader.start();
+  });
 }
 
 main().catch(error => {

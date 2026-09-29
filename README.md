@@ -742,6 +742,7 @@ benchmark를 gate 전용으로 두고 tradable entry에서 제외하는 `exclude
 | `DAILY_MOMENTUM_ROBUSTNESS_ENTRY_EXECUTION` | `close` | robustness 연구의 entry 체결 경계; `next_open`은 다음 일봉 opening price를 사용 |
 | `DAILY_MOMENTUM_ROBUSTNESS_EXIT_EXECUTION` | `close` | robustness 연구의 exit 체결 경계; `next_open`은 exit signal 다음 일봉 opening price를 사용 |
 | `DAILY_MOMENTUM_ROBUSTNESS_COST_PERCENT` | `0.2` | robustness 연구에서 사용할 왕복 거래비용 stress 값 (%) |
+| `DAILY_MOMENTUM_ROBUSTNESS_COST_PERCENT_GRID` | unset | optional 왕복 비용 sensitivity 축; 설정 시 각 variant의 scalar 비용을 덮어쓰며 기본 실행과 runtime 설정은 그대로 유지 |
 | `MOMO_SHADOW_BENCHMARK_MARKET` | unset | daily shadow 신규 진입을 허용할 benchmark 시장; 미설정이면 기존 계약 유지 |
 | `MOMO_SHADOW_BENCHMARK_TREND_MIN_PERCENT` | 0 | benchmark 7일 추세가 이 값보다 커야 gate open |
 | `MOMO_SHADOW_RELATIVE_TREND_MIN_PERCENT` | unset | benchmark 대비 종목의 추가 7일 추세 요구치; 설정 시 benchmark/상대추세 미확인 데이터를 fail-closed |

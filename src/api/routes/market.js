@@ -1,4 +1,5 @@
 import express from 'express';
+import { getMarketDataProvider } from '../marketDataProvider.js';
 
 // 업비트 전체 KRW 마켓 캐시
 let allKrwMarketsCache = null;
@@ -57,9 +58,9 @@ export default function createMarketRoutes(server) {
   router.get('/market/prices', async (req, res) => {
     try {
       const coins = await getAllKrwMarkets();
-      const tickers = await server.getCachedTicker(coins);
+      const snapshot = await getMarketDataProvider(server).getSnapshot(coins);
 
-      const prices = tickers.map(t => ({
+      const prices = snapshot.tickers.map(t => ({
         coin: t.market,
         price: t.trade_price,
         change: t.signed_change_rate * 100,
@@ -67,7 +68,9 @@ export default function createMarketRoutes(server) {
         high: t.high_price,
         low: t.low_price,
         volume: t.acc_trade_volume_24h,
-        volumeKrw: t.acc_trade_price_24h
+        volumeKrw: t.acc_trade_price_24h,
+        sourceAsOf: snapshot.sourceAsOfByMarket.get(t.market) ?? null,
+        fetchedAt: snapshot.fetchedAt
       }));
 
       res.json(prices);

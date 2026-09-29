@@ -41,17 +41,18 @@
 
     const style = document.createElement('style');
     style.textContent = `
-      #cp-auth-gate{position:fixed;inset:0;z-index:99999;display:flex;align-items:center;justify-content:center;background:rgba(10,12,20,.92);backdrop-filter:blur(6px);font-family:inherit}
+      #cp-auth-gate{position:fixed;inset:0;z-index:99999;display:flex;align-items:center;justify-content:center;padding:24px;background:#f9fafb;font-family:inherit;color:#191f28}
       #cp-auth-gate[hidden]{display:none}
-      #cp-auth-gate .cp-auth-card{width:min(92vw,360px);background:#171a26;border:1px solid #2a2f45;border-radius:14px;padding:28px 24px;box-shadow:0 18px 60px rgba(0,0,0,.5);color:#e8eaf2}
-      #cp-auth-gate h1{font-size:18px;margin:0 0 6px;font-weight:700}
-      #cp-auth-gate p{font-size:13px;line-height:1.5;color:#9aa1b8;margin:0 0 16px}
-      #cp-auth-gate input{width:100%;box-sizing:border-box;padding:11px 12px;border-radius:9px;border:1px solid #343a55;background:#10131e;color:#e8eaf2;font-size:14px;outline:none}
-      #cp-auth-gate input:focus{border-color:#5b8cff}
-      #cp-auth-gate button{width:100%;margin-top:12px;padding:11px 12px;border:0;border-radius:9px;background:#5b8cff;color:#fff;font-size:14px;font-weight:600;cursor:pointer}
+      #cp-auth-gate .cp-auth-card{width:min(100%,400px);background:#fff;border:1px solid #e5e8eb;border-top:2px solid #027648;border-radius:10px;padding:24px;box-shadow:none;color:#191f28}
+      #cp-auth-gate h1{font-size:22px;margin:0 0 8px;font-weight:680;letter-spacing:-.035em}
+      #cp-auth-gate p{font-size:14px;line-height:1.55;color:#6b7684;margin:0 0 16px}
+      #cp-auth-gate label{display:block;margin:0 0 8px;color:#191f28;font-size:12px;font-weight:650}
+      #cp-auth-gate input{width:100%;box-sizing:border-box;min-height:50px;padding:11px 12px;border-radius:8px;border:1px solid #d1d6db;background:#fff;color:#191f28;font-size:14px;outline:none}
+      #cp-auth-gate input:focus{border-color:#1b64da;box-shadow:0 0 0 2px rgba(27,100,218,.12)}
+      #cp-auth-gate button{width:100%;min-height:48px;margin-top:12px;padding:11px 12px;border:0;border-radius:8px;background:#1b64da;color:#fff;font-size:14px;font-weight:650;cursor:pointer}
       #cp-auth-gate button:disabled{opacity:.5;cursor:default}
-      #cp-auth-gate .cp-auth-error{min-height:18px;margin-top:10px;font-size:12px;color:#ff7b72}
-      #cp-auth-gate .cp-auth-hint{margin-top:14px;font-size:11px;color:#6b7191;line-height:1.5;word-break:break-all}
+      #cp-auth-gate .cp-auth-error{min-height:18px;margin-top:10px;font-size:12px;color:#a51926}
+      #cp-auth-gate .cp-auth-hint{margin-top:14px;font-size:12px;color:#6b7684;line-height:1.5}
     `;
     document.head.appendChild(style);
 
@@ -60,12 +61,13 @@
     overlay.hidden = true;
     overlay.innerHTML = `
       <form class="cp-auth-card" novalidate>
-        <h1>CoinPilot 접속</h1>
-        <p>대시보드에 접속하려면 서버 토큰이 필요합니다.<br>서버 <code>.env</code> 파일의 <code>DASHBOARD_TOKEN</code> 값을 입력하세요.</p>
-        <input type="password" name="token" autocomplete="off" placeholder="DASHBOARD_TOKEN" aria-label="대시보드 토큰">
-        <button type="submit">확인</button>
+        <h1>서버에 연결</h1>
+        <p>서버 토큰을 입력해 주세요. 토큰이 없으면 관리자에게 요청해 주세요.</p>
+        <label for="cp-auth-token">서버 접속 토큰</label>
+        <input id="cp-auth-token" type="password" name="token" autocomplete="off" placeholder="접속 토큰">
+        <button type="submit">접속</button>
         <div class="cp-auth-error" role="alert"></div>
-        <div class="cp-auth-hint">토큰은 이 브라우저에 저장되고, 대시보드가 서버로 보내는 요청에 함께 전송됩니다.</div>
+        <div class="cp-auth-hint">입력한 토큰은 이 브라우저에 저장되어 서버 접속에 사용됩니다.</div>
       </form>`;
     document.body.appendChild(overlay);
 
@@ -78,7 +80,7 @@
       event.preventDefault();
       const token = input.value.trim();
       if (!token) {
-        errorBox.textContent = '토큰을 입력하세요.';
+        errorBox.textContent = '접속 토큰을 입력해 주세요.';
         return;
       }
       button.disabled = true;
@@ -94,12 +96,11 @@
           window.location.reload();
           return;
         }
-        const data = await response.json().catch(() => ({}));
         errorBox.textContent = response.status === 429
-          ? (data?.error || '시도가 너무 많습니다. 잠시 후 다시 시도하세요.')
-          : '토큰이 올바르지 않습니다.';
+          ? '접속 시도가 많습니다. 잠시 후 다시 시도해 주세요.'
+          : '접속 토큰이 맞지 않습니다. 다시 확인해 주세요.';
       } catch {
-        errorBox.textContent = '서버에 연결할 수 없습니다.';
+        errorBox.textContent = '서버에 연결하지 못했습니다. 인터넷 연결을 확인해 주세요.';
       } finally {
         button.disabled = false;
       }
@@ -115,12 +116,12 @@
     window.setTimeout(() => gate.querySelector('input')?.focus(), 50);
   }
 
-  function showAuthenticationFailure(message) {
+  function showAuthenticationFailure() {
     const hadSavedToken = Boolean(getToken());
     if (hadSavedToken) clearToken();
     // A first connection has no token to reject. Keep the prompt, but reserve
     // the red error state for a token that was actually sent and refused.
-    showLogin(hadSavedToken ? message : '');
+    showLogin(hadSavedToken ? '저장된 접속 토큰이 맞지 않습니다. 다시 입력해 주세요.' : '');
   }
 
   // ------------------------------------------------------------- fetch patch
@@ -136,7 +137,7 @@
     }
     const response = await rawFetch(input, { ...init, headers });
     if (onApi && response.status === 401) {
-      showAuthenticationFailure('인증에 실패했습니다. 서버 토큰을 확인하고 다시 입력하세요.');
+      showAuthenticationFailure();
     }
     return response;
   };
@@ -158,7 +159,7 @@
         : rawIo(url, { ...opts, auth: { ...(opts.auth || {}), token: getToken() } });
       socket.on('connect_error', error => {
         if (/unauthor/i.test(String(error && error.message))) {
-          showAuthenticationFailure('실시간 연결 인증에 실패했습니다. 서버 토큰을 확인하세요.');
+          showAuthenticationFailure();
         }
       });
       return socket;

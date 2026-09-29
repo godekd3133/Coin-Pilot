@@ -9,6 +9,7 @@ logs/
 # Portfolio & trading data (sensitive)
 .secrets/
 dry_portfolio.json
+/dry_portfolio.json*
 paper_validation.json
 .paper-*/
 .paper-session.lock

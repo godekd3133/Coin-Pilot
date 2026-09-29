@@ -101,7 +101,7 @@ test('a saved token rejected by the API is cleared and shown as an error', async
 
   assert.equal(client.token(), '');
   assert.equal(client.gate()?.hidden, false);
-  assert.equal(client.error(), '인증에 실패했습니다. 서버 토큰을 확인하고 다시 입력하세요.');
+  assert.equal(client.error(), '저장된 접속 토큰이 맞지 않습니다. 다시 입력해 주세요.');
 });
 
 test('an unauthenticated first socket connection does not show a false rejection error', async () => {
@@ -122,7 +122,7 @@ test('an unauthorized socket clears and reports a saved token', async () => {
 
   assert.equal(client.token(), '');
   assert.equal(client.gate()?.hidden, false);
-  assert.equal(client.error(), '실시간 연결 인증에 실패했습니다. 서버 토큰을 확인하세요.');
+  assert.equal(client.error(), '저장된 접속 토큰이 맞지 않습니다. 다시 입력해 주세요.');
 });
 
 test('valid saved tokens continue to be sent on same-origin API calls', async () => {

@@ -3,7 +3,6 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { once } from 'node:events';
 import DashboardServer from '../src/api/dashboardServer.js';
 import MultiCoinTrader from '../src/trader/multiCoinTrader.js';
 import { createLiveExecutionEvidenceEvent } from '../src/research/liveExecutionEvidence.js';
@@ -14,8 +13,7 @@ function authOffEnv() {
 
 async function startDashboard(trader) {
   const dashboard = new DashboardServer(trader, 0, { env: authOffEnv() });
-  const httpServer = dashboard.start();
-  await once(httpServer, 'listening');
+  const httpServer = await dashboard.start();
   return {
     dashboard,
     baseUrl: `http://127.0.0.1:${httpServer.address().port}`

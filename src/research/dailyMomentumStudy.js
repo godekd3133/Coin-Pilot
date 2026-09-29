@@ -85,6 +85,13 @@ function optionalFinite(value, fallback = null) {
     : finite(value, fallback);
 }
 
+function boundaryMarketNames(records = []) {
+  return [...new Set((Array.isArray(records) ? records : [])
+    .map(record => String(record?.market || '').trim())
+    .filter(Boolean))]
+    .sort((left, right) => left.localeCompare(right));
+}
+
 function closeOf(candle) {
   return finite(candle?.trade_price ?? candle?.close ?? candle?.c);
 }
@@ -279,10 +286,13 @@ function failureResult(options, dataQuality) {
     openPositions: [],
     unknownBoundaryPositions: [],
     unknownBoundaryPositionCount: 0,
+    unknownBoundaryPositionMarkets: [],
     unknownBoundaryEntries: [],
     unknownBoundaryEntryCount: 0,
+    unknownBoundaryEntryMarkets: [],
     unknownBoundaryExits: [],
     unknownBoundaryExitCount: 0,
+    unknownBoundaryExitMarkets: [],
     entryCount: 0,
     blockedSignalCount: 0,
     entryWindowBlockedSignalCount: 0,
@@ -793,6 +803,7 @@ export function simulateDailyMomentumPortfolio(rawCandlesByMarket, config = {}) 
     openPositions,
     unknownBoundaryPositions: openPositions,
     unknownBoundaryPositionCount: openPositions.length,
+    unknownBoundaryPositionMarkets: boundaryMarketNames(openPositions),
     unknownBoundaryEntries: pendingEntries.map(entry => ({
       market: entry.market,
       signalTimestamp: new Date(entry.signalTimestamp).toISOString(),
@@ -800,6 +811,7 @@ export function simulateDailyMomentumPortfolio(rawCandlesByMarket, config = {}) 
       reason: 'entry_after_study_boundary'
     })),
     unknownBoundaryEntryCount: pendingEntries.length,
+    unknownBoundaryEntryMarkets: boundaryMarketNames(pendingEntries),
     unknownBoundaryExits: pendingExits.map(exit => ({
       market: exit.market,
       signalTimestamp: new Date(exit.signalTimestamp).toISOString(),
@@ -807,6 +819,7 @@ export function simulateDailyMomentumPortfolio(rawCandlesByMarket, config = {}) 
       reason: 'exit_after_study_boundary'
     })),
     unknownBoundaryExitCount: pendingExits.length,
+    unknownBoundaryExitMarkets: boundaryMarketNames(pendingExits),
     entryCount: trades.length + openPositions.length,
     blockedSignalCount,
     entryWindowBlockedSignalCount,
@@ -856,8 +869,11 @@ export function evaluateDailyMomentumVariants(rawCandlesByMarket, {
         available: result.available,
         metrics: result.metrics,
         unknownBoundaryPositionCount: result.unknownBoundaryPositionCount,
+        unknownBoundaryPositionMarkets: result.unknownBoundaryPositionMarkets,
         unknownBoundaryEntryCount: result.unknownBoundaryEntryCount,
+        unknownBoundaryEntryMarkets: result.unknownBoundaryEntryMarkets,
         unknownBoundaryExitCount: result.unknownBoundaryExitCount,
+        unknownBoundaryExitMarkets: result.unknownBoundaryExitMarkets,
         dataQuality: result.dataQuality
       };
     });
@@ -876,8 +892,11 @@ export function evaluateDailyMomentumVariants(rawCandlesByMarket, {
         metrics: full.metrics,
         entryWindowBlockedSignalCount: full.entryWindowBlockedSignalCount,
         unknownBoundaryPositionCount: full.unknownBoundaryPositionCount,
+        unknownBoundaryPositionMarkets: full.unknownBoundaryPositionMarkets,
         unknownBoundaryEntryCount: full.unknownBoundaryEntryCount,
+        unknownBoundaryEntryMarkets: full.unknownBoundaryEntryMarkets,
         unknownBoundaryExitCount: full.unknownBoundaryExitCount,
+        unknownBoundaryExitMarkets: full.unknownBoundaryExitMarkets,
         dataQuality: full.dataQuality,
         drawdownStopTriggered: full.drawdownStopTriggered === true,
         drawdownStopAt: full.drawdownStopAt || null

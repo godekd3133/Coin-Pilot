@@ -4,6 +4,7 @@ import path from 'node:path';
 import { assessScalpingValidationReportFreshness } from '../../research/scalpingValidationFreshness.js';
 import { projectLiveAccountReadback } from '../../research/liveExecutionEvidence.js';
 import { getStrategyReadiness } from '../../research/strategyReadiness.js';
+import { createManualOrderIdempotencyMiddleware } from '../manualOrderIdempotencyStore.js';
 
 function projectLiveFillResult(fillResult, orderId = null) {
   const order = fillResult?.order;
@@ -32,6 +33,57 @@ export function hasCompleteObservedLiveFill(liveExecution) {
     hasObservedNumber(fill?.averagePrice) && Number(fill.averagePrice) > 0 &&
     hasObservedNumber(fill?.paidFee) && Number(fill.paidFee) >= 0 &&
     hasObservedNumber(fill?.remainingVolume) && Number(fill.remainingVolume) >= 0;
+}
+
+function markLiveMarketOrderUnresolved(tradingSystem, market) {
+  if (typeof tradingSystem?.markLiveMarketOrderUnresolved === 'function') {
+    tradingSystem.markLiveMarketOrderUnresolved(market);
+    return;
+  }
+  tradingSystem._liveRecoveredManagedMarkets?.add?.(market);
+  tradingSystem._liveOrderStateUnknownMarkets?.add?.(market);
+  tradingSystem._livePendingOrderMarkets?.add?.(market);
+  tradingSystem._liveExchangeStateKnown = false;
+}
+
+function liveOrderBlockedResult(reason) {
+  const messages = {
+    live_order_in_progress: '진행 중인 주문이 끝날 때까지 LIVE 주문을 잠갔습니다.',
+    protective_only: '보유 포지션 보호 감시 중에는 화면에서 새 LIVE 주문을 보낼 수 없습니다.',
+    trading_paused: '자동매매가 중지 또는 보호 상태라 LIVE 주문을 잠갔습니다.',
+    exchange_state_unverified: '거래소 계좌와 미체결 주문 상태를 확인할 때까지 LIVE 주문을 잠갔습니다.',
+    live_order_gate_unavailable: 'LIVE 주문 안전 상태를 확인할 수 없어 주문을 잠갔습니다.'
+  };
+  const message = messages[reason] || 'LIVE 주문을 안전하게 확인하지 못해 요청을 차단했습니다.';
+  return {
+    blocked: true,
+    reason,
+    blockedMessage: message,
+    orderResult: { success: false, error: { code: reason, message } },
+    fillResult: { filled: false, error: reason },
+    fill: projectLiveFillResult(null)
+  };
+}
+
+function liveOrderGateReason(tradingSystem, market, side) {
+  const safety = tradingSystem?.getRuntimeSafetyStatus?.() || {};
+  if (tradingSystem?._riskMonitorProtectiveOnly === true || safety.runtimeState === 'PROTECTIVE_ONLY') {
+    return 'protective_only';
+  }
+  if (safety.runtimeState === 'SYNC_REQUIRED' || safety.exchangeStateKnown === false) {
+    return 'exchange_state_unverified';
+  }
+  if (tradingSystem?._gracefulShutdownPromise) return 'trading_paused';
+  const operatorStopped = ['operator_stop', 'operator_shutdown'].includes(tradingSystem?.stopReason);
+  if (!operatorStopped && (tradingSystem?._entriesPaused === true || tradingSystem?._stopRequested === true)) {
+    return 'trading_paused';
+  }
+  if (typeof tradingSystem?.canExecuteLiveOrder !== 'function') return 'live_order_gate_unavailable';
+  const action = side === 'bid' ? 'BUY' : side === 'ask' ? 'SELL' : null;
+  if (!action || !tradingSystem.canExecuteLiveOrder(market, { action })) {
+    return 'exchange_state_unverified';
+  }
+  return null;
 }
 
 async function recordLiveSettlementReadback(tradingSystem, evidenceOptions, fillResult) {
@@ -109,95 +161,144 @@ export async function executeLiveOrderWithEvidence(tradingSystem, {
       fill: projectLiveFillResult(null)
     };
   }
-  if (tradingSystem.liveExecutionEvidenceWriteError || tradingSystem.liveExecutionEvidenceDataError) {
-    const evidenceError = tradingSystem.liveExecutionEvidenceWriteError || tradingSystem.liveExecutionEvidenceDataError;
-    return {
-      blocked: true,
-      reason: 'live_execution_evidence_unavailable',
-      orderResult: { success: false, error: { message: evidenceError } },
-      fillResult: { filled: false, error: evidenceError },
-      fill: projectLiveFillResult(null)
-    };
-  }
-  if (typeof tradingSystem.createLiveExecutionEvidence !== 'function' ||
-    typeof tradingSystem.recordLiveExecutionEvidence !== 'function') {
-    return {
-      blocked: true,
-      reason: 'live_execution_evidence_recorder_unavailable',
-      orderResult: { success: false, error: { message: 'live execution evidence recorder unavailable' } },
-      fillResult: { filled: false, error: 'live execution evidence recorder unavailable' },
-      fill: projectLiveFillResult(null)
-    };
-  }
+  if (tradingSystem._orderInProgress === true) return liveOrderBlockedResult('live_order_in_progress');
 
-  const orderResult = await tradingSystem.upbit.order(market, side, volume, price, orderType);
-  const orderId = orderResult?.data?.uuid || null;
-  const evidenceOptions = {
-    orderId,
-    market,
-    side,
-    orderType,
-    requested,
-    referencePrice,
-    signal
-  };
-  const submissionEvidenceRecorded = tradingSystem.recordLiveExecutionEvidence(tradingSystem.createLiveExecutionEvidence({
-    ...evidenceOptions,
-    eventType: orderResult?.success === true ? 'ORDER_SUBMITTED' : 'ORDER_REJECTED',
-    error: orderResult?.success === true ? null : orderResult?.error?.message
-  }));
-
-  if (orderResult?.success !== true || !orderId) {
-    return {
-      blocked: submissionEvidenceRecorded !== true,
-      evidenceRecorded: submissionEvidenceRecorded,
-      reason: submissionEvidenceRecorded ? null : 'live_execution_evidence_write_failed',
-      orderResult,
-      fillResult: { filled: false, error: orderResult?.error?.message || 'order_uuid_missing' },
-      fill: projectLiveFillResult(null, orderId)
-    };
-  }
-
-  const fillResult = await tradingSystem.upbit.waitForOrderFill(orderId, 30_000, 1_000);
-  const fillEvidenceRecorded = tradingSystem.recordLiveExecutionEvidence(tradingSystem.createLiveExecutionEvidence({
-    ...evidenceOptions,
-    eventType: fillResult?.filled === true
-      ? fillResult.partial === true ? 'FILL_PARTIAL' : 'FILL_OBSERVED'
-      : 'FILL_NOT_OBSERVED',
-    order: fillResult?.order,
-    fillResult,
-    error: fillResult?.error
-  }));
-  let settlementEvidence = {
-    recorded: true,
-    observed: false,
-    settlement: null
-  };
-  if (fillResult?.filled === true && fillEvidenceRecorded) {
-    settlementEvidence = await recordLiveSettlementReadback(tradingSystem, evidenceOptions, fillResult);
-  }
-  const orderState = fillResult?.order?.state;
-  if (fillResult?.filled !== true && !['cancel', 'done'].includes(orderState)) {
-    try {
-      await tradingSystem.upbit.cancelOrder(orderId);
-    } catch (error) {
-      // A failed cancellation leaves the exchange order outcome unresolved;
-      // callers still fail closed and the evidence stream remains explicit.
-      fillResult.cancelError = `주문 취소 실패: ${error.message}`;
+  tradingSystem._orderInProgress = true;
+  try {
+    if (tradingSystem.liveExecutionEvidenceWriteError || tradingSystem.liveExecutionEvidenceDataError) {
+      const evidenceError = tradingSystem.liveExecutionEvidenceWriteError || tradingSystem.liveExecutionEvidenceDataError;
+      return {
+        blocked: true,
+        reason: 'live_execution_evidence_unavailable',
+        blockedMessage: 'LIVE 주문 기록을 안전하게 저장할 수 없어 주문을 잠갔습니다.',
+        orderResult: { success: false, error: { message: evidenceError } },
+        fillResult: { filled: false, error: evidenceError },
+        fill: projectLiveFillResult(null)
+      };
     }
+    if (typeof tradingSystem.createLiveExecutionEvidence !== 'function' ||
+      typeof tradingSystem.recordLiveExecutionEvidence !== 'function' ||
+      typeof tradingSystem.submitLiveOrder !== 'function' ||
+      typeof tradingSystem.ensureLiveOrderMarketStateVerified !== 'function') {
+      return liveOrderBlockedResult('live_order_gate_unavailable');
+    }
+
+    let orderMarketVerified = false;
+    try {
+      orderMarketVerified = await tradingSystem.ensureLiveOrderMarketStateVerified(market);
+    } catch {
+      orderMarketVerified = false;
+    }
+    if (!orderMarketVerified) return liveOrderBlockedResult('exchange_state_unverified');
+
+    const gateReason = liveOrderGateReason(tradingSystem, market, side);
+    if (gateReason) return liveOrderBlockedResult(gateReason);
+
+    let orderResult;
+    try {
+      orderResult = await tradingSystem.submitLiveOrder(market, side, volume, price, orderType);
+    } catch (error) {
+      markLiveMarketOrderUnresolved(tradingSystem, market);
+      const message = '주문 응답을 확인하지 못했습니다. 거래소 상태를 다시 확인할 때까지 이 시장의 주문을 잠갔습니다.';
+      return {
+        blocked: true,
+        reason: 'order_submission_unknown',
+        blockedMessage: message,
+        orderResult: { success: false, error: { code: 'order_submission_unknown', message } },
+        fillResult: { filled: false, error: error?.message || 'order_submission_unknown' },
+        fill: projectLiveFillResult(null)
+      };
+    }
+
+    const orderId = orderResult?.data?.uuid || null;
+    const evidenceOptions = { orderId, market, side, orderType, requested, referencePrice, signal };
+    const submissionEvidenceRecorded = tradingSystem.recordLiveExecutionEvidence(tradingSystem.createLiveExecutionEvidence({
+      ...evidenceOptions,
+      eventType: orderResult?.success === true ? 'ORDER_SUBMITTED' : 'ORDER_REJECTED',
+      error: orderResult?.success === true ? null : orderResult?.error?.message
+    }));
+    if (!submissionEvidenceRecorded && orderResult?.success === true) {
+      markLiveMarketOrderUnresolved(tradingSystem, market);
+    }
+
+    if (orderResult?.success !== true || !orderId) {
+      if (orderResult?.success === true || orderId) markLiveMarketOrderUnresolved(tradingSystem, market);
+      return {
+        blocked: submissionEvidenceRecorded !== true,
+        evidenceRecorded: submissionEvidenceRecorded,
+        reason: submissionEvidenceRecorded ? null : 'live_execution_evidence_write_failed',
+        blockedMessage: submissionEvidenceRecorded ? null : 'LIVE 주문 기록을 저장하지 못해 거래소 상태를 다시 확인해야 합니다.',
+        orderResult,
+        fillResult: { filled: false, error: orderResult?.error?.message || 'order_uuid_missing' },
+        fill: projectLiveFillResult(null, orderId)
+      };
+    }
+
+    let fillResult;
+    try {
+      fillResult = typeof tradingSystem.waitForLiveOrderFill === 'function'
+        ? await tradingSystem.waitForLiveOrderFill(market, orderId, 30_000, 1_000)
+        : await tradingSystem.upbit.waitForOrderFill(orderId, 30_000, 1_000);
+    } catch (error) {
+      fillResult = { filled: false, error: error?.message || 'fill_state_unresolved' };
+      markLiveMarketOrderUnresolved(tradingSystem, market);
+    }
+    const fillEvidenceRecorded = tradingSystem.recordLiveExecutionEvidence(tradingSystem.createLiveExecutionEvidence({
+      ...evidenceOptions,
+      eventType: fillResult?.filled === true
+        ? fillResult.partial === true ? 'FILL_PARTIAL' : 'FILL_OBSERVED'
+        : 'FILL_NOT_OBSERVED',
+      order: fillResult?.order,
+      fillResult,
+      error: fillResult?.error
+    }));
+    if (!submissionEvidenceRecorded || !fillEvidenceRecorded) {
+      markLiveMarketOrderUnresolved(tradingSystem, market);
+    }
+    if (fillResult?.filled !== true || fillResult?.partial === true) {
+      markLiveMarketOrderUnresolved(tradingSystem, market);
+    }
+    let settlementEvidence = {
+      recorded: true,
+      observed: false,
+      settlement: null
+    };
+    if (fillResult?.filled === true && fillEvidenceRecorded) {
+      settlementEvidence = await recordLiveSettlementReadback(tradingSystem, evidenceOptions, fillResult);
+      if (settlementEvidence.observed !== true || settlementEvidence.recorded !== true) {
+        markLiveMarketOrderUnresolved(tradingSystem, market);
+      }
+    }
+    const orderState = fillResult?.order?.state;
+    if (fillResult?.filled !== true && !['cancel', 'done'].includes(orderState)) {
+      try {
+        await tradingSystem.upbit.cancelOrder(orderId);
+      } catch (error) {
+        fillResult.cancelError = `주문 취소 실패: ${error.message}`;
+      }
+    } else if (fillResult?.partial === true) {
+      try {
+        await tradingSystem.upbit.cancelOrder(orderId);
+      } catch (error) {
+        fillResult.cancelError = `주문 취소 실패: ${error.message}`;
+      }
+    }
+    const evidenceRecorded = submissionEvidenceRecorded && fillEvidenceRecorded && settlementEvidence.recorded;
+    return {
+      blocked: evidenceRecorded !== true,
+      evidenceRecorded,
+      reason: evidenceRecorded
+        ? fillResult?.cancelError || settlementEvidence.error || null
+        : 'live_execution_evidence_write_failed',
+      blockedMessage: evidenceRecorded ? null : 'LIVE 주문 기록을 저장하지 못해 거래소 상태를 다시 확인해야 합니다.',
+      orderResult,
+      fillResult,
+      fill: projectLiveFillResult(fillResult, orderId),
+      settlement: settlementEvidence.settlement
+    };
+  } finally {
+    tradingSystem._orderInProgress = false;
   }
-  const evidenceRecorded = submissionEvidenceRecorded && fillEvidenceRecorded && settlementEvidence.recorded;
-  return {
-    blocked: evidenceRecorded !== true,
-    evidenceRecorded,
-    reason: evidenceRecorded
-      ? fillResult?.cancelError || settlementEvidence.error || null
-      : 'live_execution_evidence_write_failed',
-    orderResult,
-    fillResult,
-    fill: projectLiveFillResult(fillResult, orderId),
-    settlement: settlementEvidence.settlement
-  };
 }
 
 /**
@@ -205,6 +306,17 @@ export async function executeLiveOrderWithEvidence(tradingSystem, {
  */
 export default function createTradingRoutes(server) {
   const router = express.Router();
+  router.use(createManualOrderIdempotencyMiddleware(server, {
+    paths: new Set([
+      '/trade/execute-bundle',
+      '/trade/execute',
+      '/trade/smart-buy',
+      '/trade/smart-sell',
+      '/trade/quick',
+      '/trade/buy',
+      '/trade/sell'
+    ])
+  }));
 
   // 마지막 읽기 전용 스캘핑 워크포워드 검증 결과
   router.get('/scalping-validation', (req, res) => {
@@ -943,7 +1055,7 @@ export default function createTradingRoutes(server) {
             success: false,
             mode: 'LIVE',
             message: liveExecution.blocked
-              ? '실제 주문을 차단했습니다. 체결 evidence 저장 상태를 확인하세요.'
+              ? liveExecution.blockedMessage || '실제 주문을 차단했습니다. 체결 evidence 저장 상태를 확인하세요.'
               : '번들 매도가 실제 체결되지 않아 매수로 진행하지 않았습니다.',
             results,
             reason: liveExecution.reason || liveExecution.fill?.error || 'fill_not_observed'
@@ -1052,7 +1164,7 @@ export default function createTradingRoutes(server) {
             success: false,
             mode: 'LIVE',
             message: liveExecution.blocked
-              ? '실제 주문을 차단했습니다. 체결 evidence 저장 상태를 확인하세요.'
+              ? liveExecution.blockedMessage || '실제 주문을 차단했습니다. 체결 evidence 저장 상태를 확인하세요.'
               : '번들 매수가 실제 체결되지 않았습니다. 매도 체결은 results.sell에서 확인하세요.',
             results,
             reason: liveExecution.reason || liveExecution.fill?.error || 'fill_not_observed'
@@ -1206,7 +1318,7 @@ export default function createTradingRoutes(server) {
               success: false,
               mode: 'LIVE',
               message: liveExecution.blocked
-                ? '실제 주문을 차단했습니다. 체결 evidence 저장 상태를 확인하세요.'
+                ? liveExecution.blockedMessage || '실제 주문을 차단했습니다. 체결 evidence 저장 상태를 확인하세요.'
                 : '주문이 실제 체결되지 않아 전략 포지션을 반영하지 않았습니다.',
               order: liveExecution.orderResult,
               fill: liveExecution.fill,
@@ -1298,7 +1410,7 @@ export default function createTradingRoutes(server) {
               success: false,
               mode: 'LIVE',
               message: liveExecution.blocked
-                ? '실제 주문을 차단했습니다. 체결 evidence 저장 상태를 확인하세요.'
+                ? liveExecution.blockedMessage || '실제 주문을 차단했습니다. 체결 evidence 저장 상태를 확인하세요.'
                 : '주문이 실제 체결되지 않아 전략 포지션을 반영하지 않았습니다.',
               order: liveExecution.orderResult,
               fill: liveExecution.fill,
@@ -1645,8 +1757,13 @@ export default function createTradingRoutes(server) {
       const isDryRunMode = server.tradingSystem.dryRun;
 
       if (isDryRunMode) {
-        // 드라이 모드: 가상 포트폴리오에서 조회
-        holdings = server.tradingSystem.virtualPortfolio?.holdings || new Map();
+        // Analysis awaits ticker/candle reads. Keep a value snapshot for the
+        // ranking pass and re-read the shared holding immediately before each
+        // mutation so a concurrent portfolio update cannot over-credit KRW.
+        const portfolioHoldings = server.tradingSystem.virtualPortfolio?.holdings;
+        holdings = portfolioHoldings instanceof Map
+          ? new Map(Array.from(portfolioHoldings.entries(), ([coin, holding]) => [coin, { ...holding }]))
+          : new Map();
       } else {
         // 실전 모드: 실제 계좌에서 보유 코인 조회
         const accounts = await server.tradingSystem.getAccountInfo();
@@ -1736,33 +1853,43 @@ export default function createTradingRoutes(server) {
       for (const data of coinAnalysis) {
         if (remainingTarget <= 0) break;
 
-        // 이 코인에서 얼마나 매도할지 결정
-        let sellAmount;
-        if (data.currentValue <= remainingTarget) {
-          // 전량 매도
-          sellAmount = data.currentValue;
-        } else {
-          // 일부만 매도
-          sellAmount = remainingTarget;
-        }
+        const currentHolding = isDryRun
+          ? server.tradingSystem.virtualPortfolio?.holdings?.get(data.coin)
+          : data.holding;
+        const currentHoldingAmount = Number(currentHolding?.amount);
+        const currentPrice = Number(data.currentPrice);
+        if (!Number.isFinite(currentHoldingAmount) || currentHoldingAmount <= 0 ||
+          !Number.isFinite(currentPrice) || currentPrice <= 0) continue;
+
+        // The analysis snapshot may predate an automatic or manual holding
+        // change. Clamp its planned value to the holding that exists now.
+        const analyzedSellAmount = Math.min(data.currentValue, remainingTarget);
+        const currentHoldingValue = currentHoldingAmount * currentPrice;
+        const sellAmount = Math.min(analyzedSellAmount, currentHoldingValue);
 
         if (sellAmount < 1000) continue; // 최소 금액
 
-        const sellRatio = sellAmount / data.currentValue;
-        const sellVolume = data.holding.amount * sellRatio;
+        const sellVolume = Math.min(currentHoldingAmount, sellAmount / currentPrice);
+        const actualGrossSellAmount = sellVolume * currentPrice;
+        const sellRatio = sellVolume / currentHoldingAmount;
 
         // 수수료 적용 (0.05%)
         const FEE_RATE = 0.0005;
-        const fee = sellAmount * FEE_RATE;
-        const netSellAmount = sellAmount - fee;
-        let executedPrice = data.currentPrice;
+        const fee = actualGrossSellAmount * FEE_RATE;
+        const netSellAmount = actualGrossSellAmount - fee;
+        let executedPrice = currentPrice;
         let executedVolume = sellVolume;
         let executedFee = fee;
-        let executedSellAmount = sellAmount;
+        let executedSellAmount = actualGrossSellAmount;
         let executedNetSellAmount = netSellAmount;
         let executedSellRatio = sellRatio;
-        let executedProfit = (data.profit * executedSellRatio) - executedFee;
-        let executedProfitPercent = data.profitPercent;
+        const averageEntryPrice = Number(currentHolding.avgPrice);
+        let executedProfit = Number.isFinite(averageEntryPrice) && averageEntryPrice > 0
+          ? (currentPrice - averageEntryPrice) * sellVolume - executedFee
+          : (data.profit * executedSellRatio) - executedFee;
+        let executedProfitPercent = Number.isFinite(averageEntryPrice) && averageEntryPrice > 0
+          ? ((currentPrice / averageEntryPrice) - 1) * 100
+          : data.profitPercent;
         let executionFill = null;
 
         if (isDryRun) {
@@ -1770,9 +1897,9 @@ export default function createTradingRoutes(server) {
           if (server.tradingSystem.virtualPortfolio) {
             server.tradingSystem.virtualPortfolio.krwBalance += netSellAmount;
             const holding = server.tradingSystem.virtualPortfolio.holdings.get(data.coin);
-            const isFullSell = holding && (holding.amount - sellVolume) <= 0.00000001;
+            const isFullSell = holding && (Number(holding.amount) - sellVolume) <= 0.00000001;
             if (holding) {
-              holding.amount -= sellVolume;
+              holding.amount = Math.max(0, Number(holding.amount) - sellVolume);
               if (holding.amount <= 0.00000001) {
                 server.tradingSystem.virtualPortfolio.holdings.delete(data.coin);
               }
@@ -1784,10 +1911,10 @@ export default function createTradingRoutes(server) {
             if (strategy && strategy.currentPosition) {
               if (isFullSell) {
                 // 전량 매도 시 포지션 종료 (수익 계산 포함)
-                strategy.closePosition(data.currentPrice, '스마트 매도');
+                strategy.closePosition(currentPrice, '스마트 매도');
               } else {
                 // 부분 매도 시 recordPartialSell 사용 (수익 기록 포함)
-                strategy.recordPartialSell(data.currentPrice, sellVolume, '스마트 매도');
+                strategy.recordPartialSell(currentPrice, sellVolume, '스마트 매도');
               }
             }
           }
@@ -1799,7 +1926,7 @@ export default function createTradingRoutes(server) {
             volume: sellVolume,
             orderType: 'market',
             requested: { volume: sellVolume },
-            referencePrice: data.currentPrice
+            referencePrice: currentPrice
           });
           executionFill = liveExecution.fill;
           if (!hasCompleteObservedLiveFill(liveExecution)) {
@@ -1818,7 +1945,7 @@ export default function createTradingRoutes(server) {
           executedSellRatio = data.holding.amount > 0
             ? executedVolume / data.holding.amount
             : sellRatio;
-          const averageEntryPrice = Number(data.holding.avgPrice);
+          const averageEntryPrice = Number(currentHolding.avgPrice);
           executedProfit = Number.isFinite(averageEntryPrice) && averageEntryPrice > 0
             ? (executedPrice - averageEntryPrice) * executedVolume - executedFee
             : (data.profit * executedSellRatio) - executedFee;
@@ -1827,7 +1954,7 @@ export default function createTradingRoutes(server) {
             : data.profitPercent;
 
           // 실제 체결된 수량/가격만 전략 포지션에 반영한다.
-          const isFullSell = (data.holding.amount - executedVolume) <= 0.00000001;
+          const isFullSell = (currentHolding.amount - executedVolume) <= 0.00000001;
           const strategyObj = server.tradingSystem.strategies?.get(data.coin) ||
                            server.tradingSystem.getStrategy?.(data.coin);
           if (strategyObj && strategyObj.currentPosition) {
@@ -1841,7 +1968,7 @@ export default function createTradingRoutes(server) {
         }
 
         totalSellAmount += isDryRun ? netSellAmount : executedNetSellAmount;
-        remainingTarget -= isDryRun ? sellAmount : executedSellAmount; // 실제 gross 체결액 기준으로 차감
+        remainingTarget -= executedSellAmount; // 실제 gross 체결액 기준으로 차감
 
         const tradeRecord = {
           coin: data.coin,
@@ -2010,7 +2137,7 @@ export default function createTradingRoutes(server) {
               success: false,
               mode: 'LIVE',
               message: liveExecution.blocked
-                ? '실제 주문을 차단했습니다. 체결 evidence 저장 상태를 확인하세요.'
+                ? liveExecution.blockedMessage || '실제 주문을 차단했습니다. 체결 evidence 저장 상태를 확인하세요.'
                 : '주문이 실제 체결되지 않아 전략 포지션을 반영하지 않았습니다.',
               order: liveExecution.orderResult,
               fill: liveExecution.fill,
@@ -2135,7 +2262,7 @@ export default function createTradingRoutes(server) {
               success: false,
               mode: 'LIVE',
               message: liveExecution.blocked
-                ? '실제 주문을 차단했습니다. 체결 evidence 저장 상태를 확인하세요.'
+                ? liveExecution.blockedMessage || '실제 주문을 차단했습니다. 체결 evidence 저장 상태를 확인하세요.'
                 : '주문이 실제 체결되지 않아 전략 포지션을 반영하지 않았습니다.',
               order: liveExecution.orderResult,
               fill: liveExecution.fill,
@@ -2271,7 +2398,7 @@ export default function createTradingRoutes(server) {
             mode: 'LIVE',
             coin,
             message: liveExecution.blocked
-              ? '실제 주문을 차단했습니다. 체결 evidence 저장 상태를 확인하세요.'
+              ? liveExecution.blockedMessage || '실제 주문을 차단했습니다. 체결 evidence 저장 상태를 확인하세요.'
               : '주문이 실제 체결되지 않아 전략 포지션을 반영하지 않았습니다.',
             order: liveExecution.orderResult,
             fill: liveFill,
@@ -2405,7 +2532,7 @@ export default function createTradingRoutes(server) {
             mode: 'LIVE',
             coin,
             message: liveExecution.blocked
-              ? '실제 주문을 차단했습니다. 체결 evidence 저장 상태를 확인하세요.'
+              ? liveExecution.blockedMessage || '실제 주문을 차단했습니다. 체결 evidence 저장 상태를 확인하세요.'
               : '주문이 실제 체결되지 않아 전략 포지션을 반영하지 않았습니다.',
             order: liveExecution.orderResult,
             fill: liveFill,

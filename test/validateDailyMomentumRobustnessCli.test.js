@@ -74,3 +74,69 @@ test('robustness CLI maps allocation and protection axes into one reproducible v
   assert.match(report.note, /기존 포지션의 청산만 추적/);
   assert.equal(report.promoted, false);
 });
+
+test('robustness CLI sweeps explicit round-trip costs without changing the scalar default', t => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'coinpilot-daily-robustness-cost-cli-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const candlesFile = path.join(directory, 'candles.json');
+  const reportFile = path.join(directory, 'report.json');
+  fs.writeFileSync(candlesFile, JSON.stringify({
+    'KRW-BTC': daily(),
+    'KRW-ETH': daily()
+  }));
+
+  const result = spawnSync(process.execPath, ['src/scripts/validateDailyMomentumRobustness.js'], {
+    cwd: process.cwd(),
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      DAILY_MOMENTUM_MARKETS: 'KRW-BTC,KRW-ETH',
+      DAILY_MOMENTUM_CANDLES_FILE: candlesFile,
+      DAILY_MOMENTUM_ROBUSTNESS_REPORT_FILE: reportFile,
+      DAILY_MOMENTUM_ROBUSTNESS_SEGMENTS: '2',
+      DAILY_MOMENTUM_ROBUSTNESS_MIN_TRADES: '1',
+      DAILY_MOMENTUM_ROBUSTNESS_TREND_MIN_PERCENT: '2',
+      DAILY_MOMENTUM_ROBUSTNESS_BREADTH_MIN: '2',
+      DAILY_MOMENTUM_ROBUSTNESS_POSITION_FRACTION: '0.125',
+      DAILY_MOMENTUM_ROBUSTNESS_MAX_POSITIONS: '2',
+      DAILY_MOMENTUM_ROBUSTNESS_COOLDOWN_AFTER_LOSS_DAYS: '3',
+      DAILY_MOMENTUM_ROBUSTNESS_MAX_PORTFOLIO_DRAWDOWN_PERCENT: '15',
+      DAILY_MOMENTUM_ROBUSTNESS_MODES: 'fixed',
+      DAILY_MOMENTUM_ROBUSTNESS_MAX_HOLD_DAYS: '1',
+      DAILY_MOMENTUM_ROBUSTNESS_BENCHMARK_THRESHOLDS: '2',
+      DAILY_MOMENTUM_ROBUSTNESS_MIN_UP_BARS: '1',
+      DAILY_MOMENTUM_ROBUSTNESS_BENCHMARK_EXIT_CONFIRMATION_BARS: '1',
+      DAILY_MOMENTUM_ROBUSTNESS_REGIME_EXIT_CONFIRMATION_BARS: '1',
+      DAILY_MOMENTUM_ROBUSTNESS_VOLATILITY_LOOKBACK_DAYS: '14',
+      DAILY_MOMENTUM_ROBUSTNESS_STOP_LOSS_PERCENT: '0',
+      DAILY_MOMENTUM_ROBUSTNESS_COST_PERCENT: '0.2',
+      DAILY_MOMENTUM_ROBUSTNESS_COST_PERCENT_GRID: '0.3,0.5'
+    }
+  });
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  const report = JSON.parse(fs.readFileSync(reportFile, 'utf8'));
+  assert.equal(report.variants.length, 2);
+  assert.deepEqual(report.variants.map(variant => variant.config.costPercent), [0.3, 0.5]);
+  assert.notEqual(report.variants[0].name, report.variants[1].name);
+  assert.equal(report.promoted, false);
+});
+
+test('robustness CLI rejects negative cost assumptions before producing a report', t => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'coinpilot-daily-robustness-invalid-cost-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const reportFile = path.join(directory, 'report.json');
+  const result = spawnSync(process.execPath, ['src/scripts/validateDailyMomentumRobustness.js'], {
+    cwd: process.cwd(),
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      DAILY_MOMENTUM_ROBUSTNESS_REPORT_FILE: reportFile,
+      DAILY_MOMENTUM_ROBUSTNESS_COST_PERCENT_GRID: '0.3,-0.1'
+    }
+  });
+
+  assert.notEqual(result.status, 0);
+  assert.match(`${result.stderr}\n${result.stdout}`, /COST_PERCENT_GRID/);
+  assert.equal(fs.existsSync(reportFile), false);
+});

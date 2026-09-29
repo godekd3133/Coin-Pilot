@@ -87,7 +87,8 @@ function inspectQuoteQualityReadiness({
   reportFile,
   expectedMarkets = [],
   maxAgeSeconds = 15 * 60,
-  now = Date.now()
+  now = Date.now(),
+  fileSnapshot = null
 } = {}) {
   const resolvedFile = path.resolve(reportFile || resolveMomentumShadowQuoteRuntimeFile('quote-quality.json'));
   const result = {
@@ -106,13 +107,15 @@ function inspectQuoteQualityReadiness({
     missingMarkets: [],
     overCeilingMarkets: []
   };
-  if (!fs.existsSync(resolvedFile)) {
+  const existsSync = fileSnapshot?.existsSync || fs.existsSync;
+  const readJsonSnapshot = fileSnapshot?.readJson || readJson;
+  if (!existsSync(resolvedFile)) {
     result.reason = 'quote_quality_report_missing';
     return result;
   }
   let report;
   try {
-    report = readJson(resolvedFile);
+    report = readJsonSnapshot(resolvedFile);
   } catch {
     result.reason = 'quote_quality_report_invalid';
     return result;
@@ -180,11 +183,15 @@ export function inspectMomentumShadowCandidate({
   quoteMaxAgeSeconds = 15 * 60,
   minimumPollMs = 15 * 60 * 1000,
   candidateSlotFile = DEFAULT_MOMENTUM_SHADOW_CANDIDATE_SLOT_FILE,
-  now = Date.now()
+  now = Date.now(),
+  fileSnapshot = null
 } = {}) {
   const blockers = [];
   const warnings = [];
-  const candidateSlot = inspectMomentumShadowCandidateSlot(candidateSlotFile);
+  const readJsonSnapshot = fileSnapshot?.readJson || readJson;
+  const candidateSlot = inspectMomentumShadowCandidateSlot(candidateSlotFile, {
+    readFileSync: fileSnapshot?.readText || fs.readFileSync
+  });
   if (!candidateSlot.valid) {
     blockers.push('candidate_slot_unverifiable');
   } else if (candidateSlot.occupied) {
@@ -195,8 +202,8 @@ export function inspectMomentumShadowCandidate({
   const target = path.resolve(targetDir || '.paper-momentum-shadow-candidate');
   const targetLedgerFile = path.join(target, 'ledger.json');
   const targetLockFile = path.join(target, '.momentum-shadow.lock');
-  const targetLedger = readJson(targetLedgerFile);
-  const targetLock = readJson(targetLockFile);
+  const targetLedger = readJsonSnapshot(targetLedgerFile);
+  const targetLock = readJsonSnapshot(targetLockFile);
   if (targetLock?.pid && ownerAlive(targetLock.pid)) blockers.push('target_owner_already_running');
   if (targetLock && !ownerAlive(targetLock.pid)) warnings.push('target_lock_is_stale');
   if (targetLedger) {
@@ -213,7 +220,7 @@ export function inspectMomentumShadowCandidate({
   const resolvedBenchmarkDir = path.resolve(benchmarkDir || '');
   const owners = ownerDirs.map(directory => {
     const resolved = path.resolve(directory);
-    const ledger = readJson(path.join(resolved, 'ledger.json'));
+    const ledger = readJsonSnapshot(path.join(resolved, 'ledger.json'));
     const alive = ownerAlive(ledger?.ownerPid);
     return {
       directory: resolved,
@@ -236,7 +243,7 @@ export function inspectMomentumShadowCandidate({
   const expectedBenchmarkThreshold = Number.isFinite(Number(expectedConfig?.benchmarkTrendMinPercent))
     ? Number(expectedConfig.benchmarkTrendMinPercent)
     : null;
-  const benchmark = readJson(path.join(path.resolve(benchmarkDir || ''), 'ledger.json'));
+  const benchmark = readJsonSnapshot(path.join(path.resolve(benchmarkDir || ''), 'ledger.json'));
   let benchmarkHeartbeatAgeSeconds = null;
   let benchmarkHeartbeatFresh = false;
   let benchmarkPollMs = null;
@@ -401,24 +408,30 @@ export function inspectMomentumShadowCandidate({
 
   const quoteExecutionRequired = requireQuoteQuality ||
     candidateConfig.executionModel === 'quote_cross';
+  const quoteSampler = inspectQuoteQualityReadiness({
+    reportFile: quoteReportFile,
+    expectedMarkets: candidateConfig.markets,
+    maxAgeSeconds: quoteMaxAgeSeconds,
+    now,
+    fileSnapshot
+  });
   const quoteQuality = quoteExecutionRequired
-    ? inspectQuoteQualityReadiness({
-      reportFile: quoteReportFile,
-      expectedMarkets: candidateConfig.markets,
-      maxAgeSeconds: quoteMaxAgeSeconds,
-      now
-    })
+    ? quoteSampler
     : {
       required: false,
       ready: true,
       reportFile: null,
       reason: 'quote_quality_not_required_for_candle_close_contract'
     };
-  if (quoteExecutionRequired && !quoteQuality.ready) {
-    blockers.push(quoteQuality.reason);
+  // Every forward candidate consumes the sampler's continuity contract even
+  // when its modeled entry/exit price is a candle close. Quote crossing is a
+  // separate execution-quality requirement; freshness/completeness/errors
+  // are prerequisites for all candidate runs.
+  if (!quoteSampler.ready) {
+    blockers.push(quoteSampler.reason);
   }
-  if (quoteExecutionRequired && quoteQuality.overCeilingMarkets?.length) {
-    warnings.push(`quote_quality_over_ceiling_markets:${quoteQuality.overCeilingMarkets.join(',')}`);
+  if (quoteExecutionRequired && quoteSampler.overCeilingMarkets?.length) {
+    warnings.push(`quote_quality_over_ceiling_markets:${quoteSampler.overCeilingMarkets.join(',')}`);
   }
 
   return {
@@ -435,6 +448,7 @@ export function inspectMomentumShadowCandidate({
     },
     candidateConfig,
     executionCost,
+    quoteSampler,
     quoteQuality,
     benchmark: benchmark ? {
       ownerPid: benchmark.ownerPid || null,

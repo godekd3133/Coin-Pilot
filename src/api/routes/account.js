@@ -1,5 +1,14 @@
 import express from 'express';
+import { accountValuationMarkets, readCurrentMarketPrices } from '../marketValuation.js';
 import { projectReadOnlyPaperAccount, projectReadOnlyPaperPositions } from '../readOnlyPaperPortfolio.js';
+
+async function getObserverAccountInfo(server) {
+  if (typeof server.getObserverCachedAccountInfo === 'function') {
+    return server.getObserverCachedAccountInfo();
+  }
+  // Preserve direct reads for legacy route adapters that predate DashboardServer's cache.
+  return server.tradingSystem.getAccountInfo();
+}
 
 /**
  * 계좌/포지션/통계 관련 라우트
@@ -10,9 +19,13 @@ export default function createAccountRoutes(server) {
   // 시스템 상태 조회
   router.get('/status', (req, res) => {
     try {
+      const runtimeSafety = typeof server.tradingSystem.getRuntimeSafetyStatus === 'function'
+        ? server.tradingSystem.getRuntimeSafetyStatus()
+        : {};
       res.json({
         isRunning: server.tradingSystem.isRunning,
         mode: server.tradingSystem.dryRun ? 'DRY_RUN' : 'LIVE',
+        ...runtimeSafety,
         readOnlyObserver: server.tradingSystem.readOnlyObserver === true,
         strategyMode: server.tradingSystem.strategyMode,
         maxPositions: server.tradingSystem.maxPositions,
@@ -42,7 +55,7 @@ export default function createAccountRoutes(server) {
         return res.json(projectReadOnlyPaperAccount(paperStatus));
       }
 
-      const accounts = await server.tradingSystem.getAccountInfo();
+      const accounts = await getObserverAccountInfo(server);
       const krwBalance = server.tradingSystem.getKRWBalance(accounts);
 
       const positions = [];
@@ -104,45 +117,47 @@ export default function createAccountRoutes(server) {
         }
       }
 
-      // totalAssets는 calculateTotalAssets()로 통일 (cumulative-pnl과 동일한 계산)
-      const totalAssets = await server.tradingSystem.calculateTotalAssets();
+      const valuationMarkets = accountValuationMarkets(server.tradingSystem, accounts, positionCoins);
+      const marketSnapshot = await readCurrentMarketPrices(server, valuationMarkets);
+      const totalAssets = await server.tradingSystem.calculateTotalAssets(marketSnapshot.priceMap, {
+        allowAveragePriceFallback: false,
+        accountsOverride: accounts
+      });
+      const valuationAvailable = Number.isFinite(totalAssets);
 
-      // 실시간 현재가 조회 (positions 표시용)
-      if (positionCoins.length > 0 && server.tradingSystem.upbit) {
-        try {
-          const tickers = await server.getCachedTicker(positionCoins);
-          const priceMap = {};
-          tickers.forEach(t => {
-            priceMap[t.market] = t.trade_price;
-          });
+      positions.forEach(pos => {
+        const currentPrice = marketSnapshot.priceMap.get(pos.coin);
+        const amount = Number(pos.amount);
+        const averagePrice = Number(pos.avgPrice ?? pos.entryPrice);
+        const costBasis = Number.isFinite(amount) && Number.isFinite(averagePrice) && averagePrice > 0
+          ? Math.round(amount * averagePrice)
+          : null;
 
-          positions.forEach(pos => {
-            if (priceMap[pos.coin]) {
-              pos.currentPrice = priceMap[pos.coin];
-              const positionValue = pos.amount * pos.currentPrice;
-
-              // avgPrice (평균단가)를 우선 사용 - 추가 매수 반영된 값
-              const avgPrice = pos.avgPrice || pos.entryPrice || pos.currentPrice;
-              const costBasis = pos.amount * avgPrice;
-              pos.currentValue = Math.round(positionValue);
-              pos.costBasis = Math.round(costBasis);
-              pos.profit = Math.round(positionValue - costBasis);
-              pos.profitPercent = costBasis > 0 ? (((positionValue / costBasis) - 1) * 100).toFixed(2) : '0.00';
-            }
-          });
-        } catch (tickerError) {
-          console.error('Failed to fetch current prices:', tickerError.message);
-          positions.forEach(pos => {
-            const entryPrice = pos.entryPrice || pos.avgPrice || 0;
-            const positionValue = pos.amount * entryPrice;
-            pos.currentPrice = entryPrice;
-            pos.currentValue = Math.round(positionValue);
-            pos.costBasis = Math.round(positionValue);
-            pos.profit = 0;
-            pos.profitPercent = '0.00';
-          });
+        if (Number.isFinite(currentPrice) && Number.isFinite(amount) && amount >= 0) {
+          const positionValue = amount * currentPrice;
+          pos.currentPrice = currentPrice;
+          pos.currentValue = Math.round(positionValue);
+          pos.costBasis = costBasis;
+          pos.profit = costBasis === null ? null : Math.round(positionValue - costBasis);
+          pos.profitPercent = costBasis > 0
+            ? (((positionValue / costBasis) - 1) * 100).toFixed(2)
+            : null;
+          pos.valuationAvailable = true;
+          pos.valuationAsOf = marketSnapshot.asOf;
+          pos.sourceAsOf = marketSnapshot.sourceAsOf;
+          pos.fetchedAt = marketSnapshot.fetchedAt;
+        } else {
+          pos.currentPrice = null;
+          pos.currentValue = null;
+          pos.costBasis = costBasis;
+          pos.profit = null;
+          pos.profitPercent = null;
+          pos.valuationAvailable = false;
+          pos.valuationAsOf = null;
+          pos.sourceAsOf = marketSnapshot.sourceAsOf;
+          pos.fetchedAt = marketSnapshot.fetchedAt;
         }
-      }
+      });
 
       const initialSeedMoney = server.tradingSystem.initialSeedMoney || 10000000;
       const mode = server.tradingSystem.dryRun ? 'DRY_RUN' : 'LIVE';
@@ -152,7 +167,12 @@ export default function createAccountRoutes(server) {
 
       res.json({
         krwBalance: effectiveKrwBalance,
-        totalAssets: Math.round(totalAssets),
+        totalAssets: valuationAvailable ? Math.round(totalAssets) : null,
+        valuationAvailable,
+        valuationStatus: valuationAvailable ? 'available' : 'unavailable',
+        valuationAsOf: marketSnapshot.asOf,
+        sourceAsOf: marketSnapshot.sourceAsOf,
+        fetchedAt: marketSnapshot.fetchedAt,
         initialSeedMoney,
         positions,
         accounts,
@@ -203,7 +223,7 @@ export default function createAccountRoutes(server) {
           }
         }
       } else {
-        const accounts = await server.tradingSystem.getAccountInfo();
+        const accounts = await getObserverAccountInfo(server);
         for (const acc of accounts) {
           if (acc.currency !== 'KRW' && parseFloat(acc.balance) > 0) {
             coinList.push({

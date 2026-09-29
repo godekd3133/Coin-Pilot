@@ -13,7 +13,7 @@ export async function main() {
   const port = parseInt(process.env.DASHBOARD_PORT) || 3000;
   const trader = attachReadOnlyPaperLedger(createMockTrader(), ledgerFile);
   const server = new DashboardServer(trader, port);
-  server.start();
+  await server.start();
 
   console.log('\n📊 읽기 전용 forward paper 대시보드');
   console.log(`   ledger: ${trader.paperValidationFile}`);

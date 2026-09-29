@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import DashboardServer from '../src/api/dashboardServer.js';
+import { assessScalpingValidationReportFreshness } from '../src/research/scalpingValidationFreshness.js';
 import { createMockTrader } from '../src/scripts/runDashboard.js';
 
 test('strategy readiness reports current configured report, live gate result, and freshness separately', async () => {
@@ -15,13 +16,16 @@ test('strategy readiness reports current configured report, live gate result, an
   trader.config.requireValidationPassForLive = true;
   let gateError = null;
   let gateCalls = 0;
-  trader.validatePromotionReport = () => {
+  trader.validatePromotionReport = (report, options = {}) => {
     gateCalls += 1;
     if (gateError) throw gateError;
+    const freshness = assessScalpingValidationReportFreshness(report.generatedAt, options);
+    if (!freshness.fresh) {
+      throw Object.assign(new Error('Validation report is not current.'), { code: 'report_not_current' });
+    }
   };
   const dashboard = new DashboardServer(trader, 0, { env: { ...process.env, DASHBOARD_TOKEN: '' } });
-  const httpServer = dashboard.start();
-  await new Promise(resolve => httpServer.once('listening', resolve));
+  const httpServer = await dashboard.start();
   const url = `http://127.0.0.1:${httpServer.address().port}/api/strategy-readiness`;
   const writeReport = generatedAt => fs.writeFileSync(reportFile, JSON.stringify({
     generatedAt,
@@ -44,12 +48,45 @@ test('strategy readiness reports current configured report, live gate result, an
     assert.equal(ready.report.freshness.fresh, true);
     assert.equal(ready.liveGate.checked, true);
     assert.equal(ready.liveGate.passed, true);
-    assert.equal(ready.liveGate.enforcedFreshness, false);
+    assert.equal(ready.liveGate.enforcedFreshness, true);
     assert.equal(ready.runtime.dryRun, true);
     assert.equal(ready.runtime.readinessMeaning, 'virtual_validation_evidence');
     assert.equal(ready.runtime.applies, false);
     assert.equal(ready.currentEvidence, true);
     assert.equal(gateCalls, 1);
+
+    trader.dryRun = false;
+    trader.isScalpingMode = true;
+    trader.strategyMode = 'oversold_reaction_scalping';
+    trader.config.requireValidationPassForLive = false;
+    const bypassResponse = await fetch(url);
+    const bypass = await bypassResponse.json();
+    assert.equal(bypass.status, 'BLOCKED');
+    assert.equal(bypass.currentEvidence, false);
+    assert.equal(bypass.runtime.applies, true);
+    assert.equal(bypass.liveGate.checked, true);
+    assert.equal(bypass.liveGate.passed, false);
+    assert.equal(bypass.liveGate.code, 'live_validation_bypass_not_supported');
+    assert.match(bypass.blockers.join(' '), /cannot be disabled/i);
+
+    trader.dryRun = true;
+    const paperBypassResponse = await fetch(url);
+    const paperBypass = await paperBypassResponse.json();
+    assert.equal(paperBypass.status, 'READY');
+    assert.equal(paperBypass.runtime.applies, false);
+    assert.equal(paperBypass.liveGate.passed, true);
+
+    trader.dryRun = false;
+    trader.isScalpingMode = false;
+    const nonScalpingBypassResponse = await fetch(url);
+    const nonScalpingBypass = await nonScalpingBypassResponse.json();
+    assert.equal(nonScalpingBypass.status, 'READY');
+    assert.equal(nonScalpingBypass.runtime.applies, false);
+    assert.equal(nonScalpingBypass.liveGate.passed, true);
+
+    trader.isScalpingMode = true;
+    trader.config.requireValidationPassForLive = true;
+    trader.dryRun = false;
 
     gateError = new Error('실전 스캘핑 차단: validation report와 현재 runtime 설정이 다릅니다 (/private/path with sensitive value).');
     const driftResponse = await fetch(url);
@@ -66,8 +103,9 @@ test('strategy readiness reports current configured report, live gate result, an
     assert.equal(stale.status, 'BLOCKED');
     assert.equal(stale.currentEvidence, false);
     assert.equal(stale.report.freshness.reason, 'stale');
-    assert.equal(stale.liveGate.passed, true);
-    assert.equal(stale.liveGate.enforcedFreshness, false);
+    assert.equal(stale.liveGate.passed, false);
+    assert.equal(stale.liveGate.enforcedFreshness, true);
+    assert.equal(stale.liveGate.code, 'report_not_current');
 
     writeReport(new Date(Date.now() + 60_000).toISOString());
     const futureResponse = await fetch(url);
@@ -113,8 +151,7 @@ test('strategy readiness uses the actual MultiCoinTrader validator and blocks in
   const trader = createMockTrader();
   trader.config.scalpingValidationOutputFile = reportFile;
   const dashboard = new DashboardServer(trader, 0, { env: { ...process.env, DASHBOARD_TOKEN: '' } });
-  const httpServer = dashboard.start();
-  await new Promise(resolve => httpServer.once('listening', resolve));
+  const httpServer = await dashboard.start();
 
   try {
     const response = await fetch(`http://127.0.0.1:${httpServer.address().port}/api/strategy-readiness`);
@@ -144,8 +181,7 @@ test('strategy readiness stays blocked when the runtime promotion validator is u
   trader.config.scalpingValidationOutputFile = reportFile;
   trader.validatePromotionReport = undefined;
   const dashboard = new DashboardServer(trader, 0, { env: { ...process.env, DASHBOARD_TOKEN: '' } });
-  const httpServer = dashboard.start();
-  await new Promise(resolve => httpServer.once('listening', resolve));
+  const httpServer = await dashboard.start();
 
   try {
     const response = await fetch(`http://127.0.0.1:${httpServer.address().port}/api/strategy-readiness`);

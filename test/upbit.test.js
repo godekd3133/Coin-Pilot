@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import axios from 'axios';
+import jwt from 'jsonwebtoken';
 import UpbitAPI from '../src/api/upbit.js';
 
 test('Upbit 네트워크 스트림 오류는 재시도 후 성공할 수 있다', async () => {
@@ -102,4 +104,37 @@ test('ticker 호출은 risk priority 옵션을 requestWithRetry까지 전달한�
   await api.getTicker('KRW-BTC', { priority: 'risk' });
 
   assert.deepEqual(requestOptions, { priority: 'risk' });
+});
+
+test('open-order query includes wait and watch states with a matching JWT query hash', async () => {
+  const api = new UpbitAPI('mock-access', 'mock-secret');
+  api.requestWithRetry = async request => request();
+  api.waitForRateLimit = async () => {};
+  let requestConfig;
+  const originalGet = axios.get;
+  axios.get = async (_url, config) => {
+    requestConfig = config;
+    return { data: [] };
+  };
+
+  try {
+    await api.getOrders('KRW-BTC', ['wait', 'watch']);
+  } finally {
+    axios.get = originalGet;
+  }
+
+  assert.deepEqual(requestConfig.params, {
+    market: 'KRW-BTC',
+    'states[]': ['wait', 'watch']
+  });
+  assert.equal(
+    axios.getUri({ url: '/orders', params: requestConfig.params }),
+    '/orders?market=KRW-BTC&states%5B%5D=wait&states%5B%5D=watch'
+  );
+  const authorization = requestConfig.headers.Authorization;
+  const tokenPayload = jwt.decode(authorization.replace(/^Bearer /, ''));
+  const expectedHash = crypto.createHash('sha512')
+    .update('market=KRW-BTC&states[]=wait&states[]=watch', 'utf8')
+    .digest('hex');
+  assert.equal(tokenPayload.query_hash, expectedHash);
 });

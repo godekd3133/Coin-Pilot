@@ -62,6 +62,16 @@ function asOptionalFiniteArray(value, fallback) {
     .filter(item => item === null || Number.isFinite(item));
 }
 
+function costPercentAxis(grid) {
+  if (!Object.prototype.hasOwnProperty.call(grid || {}, 'costPercent')) return [null];
+  if (!Array.isArray(grid.costPercent) || grid.costPercent.length === 0 ||
+    grid.costPercent.some(value => value === null || value === undefined || String(value).trim() === '' ||
+      !Number.isFinite(Number(value)) || Number(value) < 0)) {
+    throw new TypeError('daily momentum costPercent grid must contain non-negative finite values');
+  }
+  return grid.costPercent.map(Number);
+}
+
 function safeName(value) {
   const parsed = Number(value);
   const text = Number.isInteger(parsed)
@@ -116,7 +126,8 @@ export function buildDailyMomentumRobustnessVariants(grid = DEFAULT_GRID, baseCo
     maxEntryGapPercent: asFiniteArray(
       grid.maxEntryGapPercent,
       DEFAULT_GRID.maxEntryGapPercent
-    )
+    ),
+    costPercent: costPercentAxis(grid)
   };
   const variants = [];
   for (const mode of axes.mode) {
@@ -136,6 +147,7 @@ export function buildDailyMomentumRobustnessVariants(grid = DEFAULT_GRID, baseCo
                               for (const volatilityTargetPercent of axes.volatilityTargetPercent) {
                                 for (const stopLossPercent of axes.stopLossPercent) {
                                   for (const maxEntryGapPercent of axes.maxEntryGapPercent) {
+                                    for (const costPercent of axes.costPercent) {
                               const config = {
                                 ...baseConfig,
                                 mode,
@@ -156,7 +168,8 @@ export function buildDailyMomentumRobustnessVariants(grid = DEFAULT_GRID, baseCo
                                 positionFraction,
                                 maxPositions,
                                 cooldownAfterLossDays,
-                                maxPortfolioDrawdownPercent
+                                maxPortfolioDrawdownPercent,
+                                ...(costPercent === null ? {} : { costPercent })
                               };
                               const confirmationSuffix = benchmarkExitConfirmationBars === 1 &&
                                 regimeExitConfirmationBars === 1
@@ -174,14 +187,18 @@ export function buildDailyMomentumRobustnessVariants(grid = DEFAULT_GRID, baseCo
                               const gapSuffix = maxEntryGapPercent === 0
                                 ? ''
                                 : `_gap${safeName(maxEntryGapPercent)}`;
+                              const costSuffix = costPercent === null
+                                ? ''
+                                : `_cost${safeName(costPercent)}`;
                               const modeName = mode === 'regime' ? 'regime' : 'fixed';
                               const holdSuffix = mode === 'regime' && maxHoldDays === 3650
                                 ? ''
                                 : `_h${safeName(maxHoldDays)}`;
                               variants.push({
-                                name: `${modeName}${holdSuffix}_g${safeName(benchmarkTrendMinPercent)}_u${safeName(minUpBars)}_t${safeName(trendMinPercent)}_b${safeName(breadthMin)}_f${safeName(positionFraction)}_p${safeName(maxPositions)}_c${safeName(cooldownAfterLossDays)}_dd${safeName(maxPortfolioDrawdownPercent)}${confirmationSuffix}${relativeSuffix}${volatilitySuffix}${stopSuffix}${gapSuffix}`,
+                                name: `${modeName}${holdSuffix}_g${safeName(benchmarkTrendMinPercent)}_u${safeName(minUpBars)}_t${safeName(trendMinPercent)}_b${safeName(breadthMin)}_f${safeName(positionFraction)}_p${safeName(maxPositions)}_c${safeName(cooldownAfterLossDays)}_dd${safeName(maxPortfolioDrawdownPercent)}${confirmationSuffix}${relativeSuffix}${volatilitySuffix}${stopSuffix}${gapSuffix}${costSuffix}`,
                                 config
                               });
+                                    }
                                   }
                                 }
                               }
@@ -286,8 +303,11 @@ function evaluateContinuousSegments(rawCandlesByMarket, config, segmentCount) {
         available: false,
         metrics: null,
         unknownBoundaryPositionCount: 0,
+        unknownBoundaryPositionMarkets: [],
         unknownBoundaryEntryCount: 0,
+        unknownBoundaryEntryMarkets: [],
         unknownBoundaryExitCount: 0,
+        unknownBoundaryExitMarkets: [],
         dataQuality: { ...dataQuality, segmentRange: range }
       };
     }
@@ -313,6 +333,7 @@ function evaluateContinuousSegments(rawCandlesByMarket, config, segmentCount) {
     const unknownBoundaryExitCount = endIndex === timestamps.length - 1
       ? Number(full.unknownBoundaryExitCount) || 0
       : 0;
+    const isFinalBoundary = endIndex === timestamps.length - 1;
     return {
       segment,
       range,
@@ -325,8 +346,17 @@ function evaluateContinuousSegments(rawCandlesByMarket, config, segmentCount) {
         trades: segmentTrades
       }),
       unknownBoundaryPositionCount,
+      unknownBoundaryPositionMarkets: isFinalBoundary
+        ? (Array.isArray(full.unknownBoundaryPositionMarkets) ? full.unknownBoundaryPositionMarkets : [])
+        : [],
       unknownBoundaryEntryCount,
+      unknownBoundaryEntryMarkets: isFinalBoundary
+        ? (Array.isArray(full.unknownBoundaryEntryMarkets) ? full.unknownBoundaryEntryMarkets : [])
+        : [],
       unknownBoundaryExitCount,
+      unknownBoundaryExitMarkets: isFinalBoundary
+        ? (Array.isArray(full.unknownBoundaryExitMarkets) ? full.unknownBoundaryExitMarkets : [])
+        : [],
       dataQuality: { ...dataQuality, segmentRange: range }
     };
   });
@@ -342,6 +372,23 @@ function evaluateContinuousSegments(rawCandlesByMarket, config, segmentCount) {
 
 function summarizeVariant(variant, criteria) {
   const fullMetrics = variant.full?.metrics || {};
+  const boundaryMarketList = (marketKey, countKey) => {
+    const markets = variant.full?.[marketKey];
+    if (Array.isArray(markets)) return [...new Set(markets)].sort((left, right) => left.localeCompare(right));
+    return Number(variant.full?.[countKey]) > 0 ? null : [];
+  };
+  const unknownBoundaryPositionMarkets = boundaryMarketList(
+    'unknownBoundaryPositionMarkets',
+    'unknownBoundaryPositionCount'
+  );
+  const unknownBoundaryEntryMarkets = boundaryMarketList(
+    'unknownBoundaryEntryMarkets',
+    'unknownBoundaryEntryCount'
+  );
+  const unknownBoundaryExitMarkets = boundaryMarketList(
+    'unknownBoundaryExitMarkets',
+    'unknownBoundaryExitCount'
+  );
   const segmentReturns = (variant.segments || [])
     .filter(segment => segment.available && segment.metrics)
     .map(segment => finite(segment.metrics.totalReturnPercent, null))
@@ -387,6 +434,9 @@ function summarizeVariant(variant, criteria) {
     allSegmentsAvailable,
     allSegmentsNonNegative: variant.allSegmentsNonNegative === true,
     noUnknownBoundary,
+    unknownBoundaryPositionMarkets,
+    unknownBoundaryEntryMarkets,
+    unknownBoundaryExitMarkets,
     maturityTailDiagnosticOnly,
     worstSegmentReturnPercent,
     positiveSegmentCount,
@@ -440,8 +490,11 @@ export function evaluateDailyMomentumRobustness(rawCandlesByMarket, options = {}
           metrics: continuous.full.metrics,
           entryWindowBlockedSignalCount: continuous.full.entryWindowBlockedSignalCount,
           unknownBoundaryPositionCount: continuous.full.unknownBoundaryPositionCount,
+          unknownBoundaryPositionMarkets: continuous.full.unknownBoundaryPositionMarkets,
           unknownBoundaryEntryCount: continuous.full.unknownBoundaryEntryCount,
+          unknownBoundaryEntryMarkets: continuous.full.unknownBoundaryEntryMarkets,
           unknownBoundaryExitCount: continuous.full.unknownBoundaryExitCount,
+          unknownBoundaryExitMarkets: continuous.full.unknownBoundaryExitMarkets,
           dataQuality: continuous.full.dataQuality,
           drawdownStopTriggered: continuous.full.drawdownStopTriggered === true,
           drawdownStopAt: continuous.full.drawdownStopAt || null
@@ -471,6 +524,9 @@ export function evaluateDailyMomentumRobustness(rawCandlesByMarket, options = {}
       positiveSegmentCount: variant.positiveSegmentCount,
       segmentCount: variant.segmentCount,
       noUnknownBoundary: variant.noUnknownBoundary,
+      unknownBoundaryPositionMarkets: variant.unknownBoundaryPositionMarkets,
+      unknownBoundaryEntryMarkets: variant.unknownBoundaryEntryMarkets,
+      unknownBoundaryExitMarkets: variant.unknownBoundaryExitMarkets,
       drawdownStopTriggered: variant.drawdownStopTriggered,
       drawdownStopAt: variant.drawdownStopAt,
       riskFlags: variant.riskFlags
@@ -490,6 +546,9 @@ export function evaluateDailyMomentumRobustness(rawCandlesByMarket, options = {}
       positiveSegmentCount: variant.positiveSegmentCount,
       segmentCount: variant.segmentCount,
       noUnknownBoundary: variant.noUnknownBoundary,
+      unknownBoundaryPositionMarkets: variant.unknownBoundaryPositionMarkets,
+      unknownBoundaryEntryMarkets: variant.unknownBoundaryEntryMarkets,
+      unknownBoundaryExitMarkets: variant.unknownBoundaryExitMarkets,
       eligibilityBlockers: variant.eligibilityBlockers,
       drawdownStopTriggered: variant.drawdownStopTriggered,
       drawdownStopAt: variant.drawdownStopAt,

@@ -207,6 +207,7 @@ export const ENV_SCHEMA = {
   // --- SERVER SETTINGS ---
   DASHBOARD_PORT: { type: 'int', min: 0, max: 65535 },
   DASHBOARD_TOKEN: { type: 'string', secret: true },
+  DASHBOARD_READ_ONLY_TOKEN: { type: 'string', secret: true },
   DASHBOARD_ALLOW_INSECURE: { type: 'bool' },
   DASHBOARD_HOST: { type: 'string' },
   DASHBOARD_CORS_ORIGINS: { type: 'string' },

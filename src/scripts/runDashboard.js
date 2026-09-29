@@ -311,7 +311,7 @@ export async function main() {
   const mockTrader = createMockTrader();
 
   const server = new DashboardServer(mockTrader, port);
-  server.start();
+  await server.start();
 
   console.log('\n📊 대시보드에 접속하세요:');
   console.log(`   ${server.protocol}://localhost:${port}`);

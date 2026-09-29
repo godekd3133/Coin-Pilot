@@ -28,12 +28,14 @@
     "research:quote-cost-compatibility": "node src/scripts/checkQuoteExecutionCostCompatibility.js",
     "research:quote-cost-history": "node src/scripts/summarizeMomentumShadowQuoteCostHistory.js",
     "research:momentum-shadow:trade-cost-audit": "node src/scripts/auditMomentumShadowTradeCosts.js",
+    "benchmark:momentum-shadow": "node src/scripts/benchmarkMomentumShadowProjection.js",
     "research:live-execution-evidence": "node src/scripts/reconcileLiveExecutionEvidence.js",
     "research:paper:cohort": "node src/scripts/summarizePaperForwardCohort.js",
     "research:paper:exit-evidence": "node src/scripts/analyzePaperExitEvidence.js",
     "research:paper:strict-only-preflight": "node src/scripts/preflightStrictOnlyForward.js",
     "research:momentum-shadow:start-if-ready": "node src/scripts/startMomentumShadowCandidateIfReady.js",
     "research:momentum-shadow:start-quote-cross-if-ready": "MOMO_SHADOW_CANDIDATE_PROFILE=quote_cross node src/scripts/startMomentumShadowCandidateIfReady.js",
+    "benchmark:portfolio-history": "node src/scripts/benchmarkPortfolioHistory.js",
     "verify:pwa": "node src/scripts/verifyPwaShell.js",
     "validate:scalping:portfolio": "node src/scripts/validatePortfolio.js",
     "compare:scalping": "node src/scripts/compareScalpingVariants.js",
@@ -48,7 +50,7 @@
     "ai:smoke": "node src/scripts/runAiAdvisorSmoke.js",
     "ai:replay": "node src/scripts/runAiHistoricalReplay.js",
     "ai:robustness": "node src/scripts/runAiReplayRobustness.js",
-    "test": "NODE_ENV=test node --test && npm --prefix mobile run test:auto-connect",
+    "test": "NODE_ENV=test node --test && npm --prefix mobile run test:auto-connect && npm --prefix mobile run test:server-policy && npm --prefix mobile run test:store",
     "lint": "eslint ."
   },
   "keywords": [

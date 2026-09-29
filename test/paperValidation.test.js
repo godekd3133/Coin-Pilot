@@ -106,7 +106,7 @@ test('데이터 공백 중지 원인과 미청산 shadow 상태는 다음 paper 
     resumedTrader.calculateTotalAssets = async () => 1_000_000;
     await assert.rejects(
       () => resumedTrader.startPaperValidationSession(),
-      /미청산.*(?:shadow|진단)/i
+      /비교 기록에 정리되지 않은 포지션 2개/
     );
     resumedTrader.stopPositionRiskMonitor();
   } finally {
@@ -268,7 +268,7 @@ test('미청산 strict 포지션으로 끝난 session은 명시적 resume/reset 
     assert.deepEqual(stopped.strictEvaluation.positions.map(position => position.coin), ['KRW-BTC']);
     await assert.rejects(
       () => trader.startPaperValidationSession(),
-      /strict 미청산 포지션/
+      /정리되지 않은 포지션: KRW-BTC/
     );
   } finally {
     for (const file of [ledger, portfolio]) {
@@ -2212,7 +2212,8 @@ test('promoted tuned report는 현재 runtime과 달라도 live 승격에 사용
     /portfolioAllocation/
   );
 
-  assert.doesNotThrow(() => trader.validatePromotionReport({
+  const promotedReport = {
+    generatedAt: new Date().toISOString(),
     validationMode: 'fixed_config',
     strategyMode: 'oversold_reaction_scalping',
     promoted: true,
@@ -2237,7 +2238,24 @@ test('promoted tuned report는 현재 runtime과 달라도 live 승격에 사용
         }
       }
     }]
-  }));
+  };
+  assert.doesNotThrow(() => trader.validatePromotionReport(promotedReport));
+  assert.throws(
+    () => trader.validatePromotionReport({
+      ...promotedReport,
+      generatedAt: new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString()
+    }),
+    /리포트가 오래되었거나/
+  );
+  for (const generatedAt of [new Date(Date.now() + 60_000).toISOString(), undefined]) {
+    const report = { ...promotedReport };
+    if (generatedAt === undefined) delete report.generatedAt;
+    else report.generatedAt = generatedAt;
+    assert.throws(
+      () => trader.validatePromotionReport(report),
+      error => error.code === 'report_not_current'
+    );
+  }
 });
 
 test('구버전 paper telemetry는 새 rejectionCounts 필드를 지연 마이그레이션한다', () => {

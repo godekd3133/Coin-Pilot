@@ -21,8 +21,7 @@ async function startDashboard(env, options = {}) {
     env: { ...authOffEnv(), ...env },
     ...options
   });
-  const httpServer = dashboard.start();
-  await once(httpServer, 'listening');
+  const httpServer = await dashboard.start();
   const address = httpServer.address();
   return { dashboard, trader, httpServer, baseUrl: `http://127.0.0.1:${address.port}` };
 }
@@ -42,6 +41,16 @@ test('DASHBOARD_TOKEN이 있으면 인증 활성 + 기본 0.0.0.0 바인딩', ()
   assert.equal(resolved.enabled, true);
   assert.equal(resolved.host, '0.0.0.0');
   assert.equal(resolved.warnings.length, 0);
+});
+
+test('읽기 전용 토큰만 설정해도 인증이 활성화되고 전체 토큰과 같으면 거부된다', () => {
+  const resolved = resolveDashboardAuth({ DASHBOARD_READ_ONLY_TOKEN: 'monitor-secret' });
+  assert.equal(resolved.enabled, true);
+  assert.equal(resolved.host, '0.0.0.0');
+  assert.throws(
+    () => resolveDashboardAuth({ DASHBOARD_TOKEN: 'same-secret', DASHBOARD_READ_ONLY_TOKEN: 'same-secret' }),
+    error => error.message === 'DASHBOARD_READ_ONLY_TOKEN must differ from DASHBOARD_TOKEN.'
+  );
 });
 
 test('토큰 없으면 루프백 바인딩으로 강제 + 경고', () => {
@@ -115,7 +124,7 @@ test('origin guard는 same-origin과 allowlist만 허용한다', () => {
 
 // ------------------------------------------------------------ socket guard
 test('socket middleware는 토큰 없이 거부하고 올바른 토큰은 통과한다', () => {
-  const auth = createDashboardAuth({ DASHBOARD_TOKEN: 'tok' });
+  const auth = createDashboardAuth({ DASHBOARD_TOKEN: 'tok', DASHBOARD_READ_ONLY_TOKEN: 'monitor-tok' });
   const rejected = new Promise(resolve => {
     auth.socketMiddleware({ handshake: { auth: {}, headers: {} } }, resolve);
   });
@@ -128,11 +137,71 @@ test('socket middleware는 토큰 없이 거부하고 올바른 토큰은 통과
       resolve
     );
   });
-  return Promise.all([rejected, accepted, bearerHeader]).then(([rej, ok, bearer]) => {
+  const readOnlyRejected = new Promise(resolve => {
+    auth.socketMiddleware({ handshake: { auth: { token: 'monitor-tok' }, headers: {} } }, resolve);
+  });
+  return Promise.all([rejected, accepted, bearerHeader, readOnlyRejected]).then(([rej, ok, bearer, readOnly]) => {
     assert.ok(rej instanceof Error);
     assert.equal(ok, undefined);
     assert.equal(bearer, undefined);
+    assert.ok(readOnly instanceof Error);
   });
+});
+
+test('읽기 전용 토큰은 정확한 경로, 메서드, 쿼리만 허용한다', () => {
+  const auth = createDashboardAuth({ DASHBOARD_TOKEN: 'full-token', DASHBOARD_READ_ONLY_TOKEN: 'read-token' });
+  const invoke = (method, url, token = 'read-token') => {
+    let status;
+    let body;
+    let nextCalled = false;
+    const response = {
+      status(value) { status = value; return this; },
+      json(value) { body = value; return this; }
+    };
+    auth.middleware({ method, originalUrl: url, headers: { authorization: `Bearer ${token}` } }, response, () => {
+      nextCalled = true;
+    });
+    return { status, body, nextCalled };
+  };
+
+  for (const url of [
+    '/api/status',
+    '/api/account',
+    '/api/cumulative-pnl',
+    '/api/today-summary',
+    '/api/market/prices',
+    '/api/paper-validation/summary',
+    '/api/portfolio/history?period=24h',
+    '/api/portfolio/history?period=7d',
+    '/api/portfolio/history?period=30d',
+    '/api/trades?limit=1',
+    '/api/trades?limit=50'
+  ]) {
+    assert.equal(invoke('GET', url).nextCalled, true, `${url} should be allowed`);
+  }
+
+  for (const [method, url] of [
+    ['GET', '/api/positions'],
+    ['GET', '/api/paper-validation'],
+    ['GET', '/api/paper-validation/summary?extra=1'],
+    ['GET', '/api/status?extra=1'],
+    ['GET', '/api/portfolio/history?period=1h'],
+    ['GET', '/api/portfolio/history?period=24h&period=7d'],
+    ['GET', '/api/trades'],
+    ['GET', '/api/trades?limit=0'],
+    ['GET', '/api/trades?limit=51'],
+    ['GET', '/api/trades?limit=5&extra=1'],
+    ['POST', '/api/status'],
+    ['POST', '/api/paper-validation/start'],
+    ['POST', '/api/paper-validation/stop'],
+    ['HEAD', '/api/status']
+  ]) {
+    const result = invoke(method, url);
+    assert.equal(result.status, 403, `${method} ${url} should be forbidden`);
+    assert.equal(result.body.success, false);
+  }
+
+  assert.equal(invoke('POST', '/api/control/start', 'full-token').nextCalled, true);
 });
 
 // --------------------------------------------------- integration: auth enabled
@@ -158,6 +227,125 @@ test('인증 활성 서버는 /api/*를 토큰 없이 401로 거부한다', asyn
       headers: { Authorization: 'Bearer test-secret' }
     });
     assert.equal(goodAuth.status, 200);
+  } finally {
+    await stopDashboard(ctx);
+  }
+});
+
+test('읽기 전용 토큰은 네이티브 모니터 경로만 조회하고 전체 토큰은 기존 경로를 유지한다', async () => {
+  const ctx = await startDashboard({
+    DASHBOARD_TOKEN: 'full-secret',
+    DASHBOARD_READ_ONLY_TOKEN: 'monitor-secret'
+  });
+  const readHeaders = { Authorization: 'Bearer monitor-secret' };
+  const adminHeaders = { Authorization: 'Bearer full-secret' };
+  try {
+    ctx.trader.paperValidation = {
+      active: false,
+      processId: 1234,
+      configSnapshotComplete: true,
+      configSnapshot: { strategyMode: 'internal-only', slippage: 0.001 },
+      strictTrades: [{
+        action: 'CLOSE', type: 'CLOSE', entryPrice: 100, exitPrice: 110,
+        amount: 1, profit: 9, exitTime: '2026-09-29T00:00:00.000Z'
+      }]
+    };
+    let summaryStatusOptions;
+    ctx.trader.getPaperValidationStatus = async options => {
+      summaryStatusOptions = options;
+      return {
+      available: true,
+      active: false,
+      state: 'STOPPED',
+      heartbeatAt: '2026-09-29T00:00:00.000Z',
+      stopReason: null,
+      configSnapshotComplete: true,
+      configConsistent: true,
+      continuityEligible: true,
+      heartbeatContinuityEligible: true,
+      interruptionCount: 0,
+      strictEvaluation: { closedTradeCount: 1, realizedProfit: 9, activePositions: 0 },
+      shadowEvaluation: { closedTradeCount: 2, realizedProfit: -20, activePositions: 1 },
+      looseShadowEvaluation: { closedTradeCount: 3, realizedProfit: -30, activePositions: 0 },
+      analysisDataHealth: { continuityEligible: true, totalMissingMarkets: 0 },
+        riskMonitor: { continuityEligible: true }
+      };
+    };
+
+    const allowed = [
+      '/api/status',
+      '/api/account',
+      '/api/cumulative-pnl',
+      '/api/today-summary',
+      '/api/market/prices',
+      '/api/paper-validation/summary',
+      '/api/portfolio/history?period=24h',
+      '/api/portfolio/history?period=7d',
+      '/api/portfolio/history?period=30d',
+      '/api/trades?limit=1',
+      '/api/trades?limit=50'
+    ];
+    for (const route of allowed) {
+      const response = await fetch(`${ctx.baseUrl}${route}`, { headers: readHeaders });
+      assert.equal(response.status, 200, `${route} should be available to the monitor token`);
+    }
+
+    const paperSummaryResponse = await fetch(`${ctx.baseUrl}/api/paper-validation/summary`, { headers: readHeaders });
+    const paperSummary = await paperSummaryResponse.json();
+    assert.equal(paperSummary.schema, 'coinpilot.paper-validation-mobile-summary.v1');
+    assert.equal(paperSummary.researchOnly, true);
+    assert.equal(paperSummary.actualFillsObserved, false);
+    assert.equal(typeof paperSummary.cohort.available, 'boolean');
+    assert.equal(typeof paperSummary.cohort.readErrorCount, 'number');
+    assert.equal(paperSummary.cohort.actualFillsObserved, false);
+    assert.equal('totalStrictProfit' in paperSummary.cohort, false);
+    assert.equal('sessions' in paperSummary.cohort, false);
+    assert.deepEqual(summaryStatusOptions, { includeCurrentAssets: false });
+    assert.deepEqual(paperSummary.strict, {
+      closedTradeCount: 1,
+      realizedProfitKrw: 9,
+      openPositionCount: 0
+    });
+    assert.equal(paperSummary.costAudit.costStressedNetPnlKrw, 8.79);
+    assert.equal('configSnapshot' in paperSummary, false);
+    assert.equal('strictRecentTrades' in paperSummary, false);
+
+    for (const [method, route] of [
+      ['GET', '/api/positions'],
+      ['GET', '/api/paper-validation'],
+      ['GET', '/api/auth/status'],
+      ['GET', '/api/portfolio/history?period=1h'],
+      ['GET', '/api/trades?limit=51'],
+      ['POST', '/api/control/start'],
+      ['POST', '/api/paper-validation/start'],
+      ['POST', '/api/paper-validation/stop'],
+      ['HEAD', '/api/status'],
+      ['OPTIONS', '/api/status']
+    ]) {
+      const response = await fetch(`${ctx.baseUrl}${route}`, {
+        method,
+        headers: { ...readHeaders, Origin: ctx.baseUrl }
+      });
+      assert.equal(response.status, 403, `${method} ${route} should be forbidden to the monitor token`);
+    }
+
+    const adminOnlyRoute = await fetch(`${ctx.baseUrl}/api/positions`, { headers: adminHeaders });
+    assert.equal(adminOnlyRoute.status, 200);
+    const adminPreflight = await fetch(`${ctx.baseUrl}/api/status`, {
+      method: 'OPTIONS',
+      headers: { ...adminHeaders, Origin: ctx.baseUrl }
+    });
+    assert.equal(adminPreflight.status, 204);
+
+    for (const token of ['full-secret', 'monitor-secret']) {
+      const login = await fetch(`${ctx.baseUrl}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token })
+      });
+      assert.equal(login.status, 200);
+      assert.deepEqual(await login.json(), { success: true });
+    }
   } finally {
     await stopDashboard(ctx);
   }

@@ -11,6 +11,12 @@ function resolveReportFile(tradingSystem, env = process.env) {
 
 function describeGateFailure(error) {
   const message = String(error?.message || '');
+  if (error?.code === 'live_validation_bypass_not_supported') {
+    return { code: 'live_validation_bypass_not_supported', message: 'LIVE scalping validation cannot be disabled.' };
+  }
+  if (error?.code === 'report_not_current') {
+    return { code: 'report_not_current', message: 'Validation report is not current.' };
+  }
   if (/설정이 다릅니다/.test(message)) {
     return { code: 'runtime_config_mismatch', message: 'Validation report settings do not match current runtime settings.' };
   }
@@ -35,8 +41,8 @@ function describeGateFailure(error) {
 /**
  * Read and evaluate the configured live-promotion report for dashboard display.
  * This calls the trader's pure validation gate, but never starts trading or
- * submits an order. Freshness is an API evidence rule: the live gate currently
- * does not enforce report age.
+ * submits an order. Report freshness is checked by both readiness and the
+ * runtime validator so stale evidence cannot authorize LIVE startup.
  */
 export function getStrategyReadiness(tradingSystem, {
   env = process.env,
@@ -55,8 +61,7 @@ export function getStrategyReadiness(tradingSystem, {
         ? 'live_validation_evidence'
         : 'runtime_mode_unknown',
     applies: tradingSystem?.dryRun === false &&
-      tradingSystem?.isScalpingMode === true &&
-      tradingSystem?.config?.requireValidationPassForLive !== false
+      tradingSystem?.isScalpingMode === true
   };
   const reportMeta = {
     available: false,
@@ -72,11 +77,25 @@ export function getStrategyReadiness(tradingSystem, {
   const blockers = [];
   const blockerDetails = [];
   const addBlocker = (code, message) => {
+    if (blockerDetails.some(blocker => blocker.code === code)) return;
     blockers.push(message);
     blockerDetails.push({ code, message });
   };
+  const validationBypassRequested = runtime.applies && runtime.requireValidationPassForLive === false;
+  if (validationBypassRequested) {
+    addBlocker('live_validation_bypass_not_supported', 'LIVE scalping validation cannot be disabled.');
+  }
   let report = null;
-  let gate = { checked: false, passed: false, enforced: runtime.applies, enforcedFreshness: false, reason: null };
+  let gate = validationBypassRequested
+    ? {
+        checked: true,
+        passed: false,
+        enforced: true,
+        enforcedFreshness: true,
+        code: 'live_validation_bypass_not_supported',
+        reason: 'LIVE scalping validation cannot be disabled.'
+      }
+    : { checked: false, passed: false, enforced: runtime.applies, enforcedFreshness: false, reason: null };
 
   if (!fs.existsSync(reportFile)) {
     addBlocker('report_missing', `${reportMeta.filename} validation report is missing.`);
@@ -110,7 +129,10 @@ export function getStrategyReadiness(tradingSystem, {
     }
   }
 
-  if (report) {
+  if (validationBypassRequested) {
+    // The explicit runtime bypass is itself a hard blocker for LIVE scalping.
+    // Still read the report above so the response can expose its freshness.
+  } else if (report) {
     if (typeof tradingSystem?.validatePromotionReport !== 'function') {
       gate = {
         checked: false,
@@ -124,15 +146,18 @@ export function getStrategyReadiness(tradingSystem, {
       addBlocker(gate.code, gate.reason);
     } else {
       try {
-        tradingSystem.validatePromotionReport(report);
-        gate = { checked: true, passed: true, enforced: runtime.applies, enforcedFreshness: false, reason: null };
+        tradingSystem.validatePromotionReport(report, {
+          now,
+          ...(maxAgeSeconds === undefined ? {} : { maxAgeSeconds })
+        });
+        gate = { checked: true, passed: true, enforced: runtime.applies, enforcedFreshness: true, reason: null };
       } catch (error) {
         const safeFailure = describeGateFailure(error);
         gate = {
           checked: true,
           passed: false,
           enforced: runtime.applies,
-          enforcedFreshness: false,
+          enforcedFreshness: true,
           code: safeFailure.code,
           reason: safeFailure.message
         };

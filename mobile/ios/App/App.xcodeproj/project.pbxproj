@@ -8,22 +8,30 @@
 
 /* Begin PBXBuildFile section */
 		504EC3081FED79650016851F /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 504EC3071FED79650016851F /* AppDelegate.swift */; };
-		504EC30F1FED79650016851F /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 504EC30E1FED79650016851F /* Assets.xcassets */; };
+		D1CE4A5B6C7D8E9FA0B1C2D3 /* CoinPilotMinimal.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = D1CE4A5B6C7D8E9FA0B1C2D4 /* CoinPilotMinimal.xcassets */; };
 		504EC3121FED79650016851F /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 504EC3101FED79650016851F /* LaunchScreen.storyboard */; };
-		50B271D11FEDC1A000F3C39B /* public in Resources */ = {isa = PBXBuildFile; fileRef = 50B271D01FEDC1A000F3C39B /* public */; };
+		DCA9A1572D6F4A1CB013B2A8 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = DCA9A1572D6F4A1CB013B2A7 /* PrivacyInfo.xcprivacy */; };
 		9582B6832FE993A70072D4E8 /* SceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9582B6822FE993A50072D4E8 /* SceneDelegate.swift */; };
 		A1B2C3D4E5F60718293A4B5C /* ServerAddressPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1C2D3E4F5061728394A5B6C /* ServerAddressPolicy.swift */; };
+		F0501A7B8C2D4E10A1B2C3D4 /* CoinPilotStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0501A7B8C2D4E10A1B2C3D5 /* CoinPilotStore.swift */; };
+		F0501A7B8C2D4E10A1B2C3D6 /* CoinPilotViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0501A7B8C2D4E10A1B2C3D7 /* CoinPilotViews.swift */; };
+		F7101A7B8C2D4E10A1B2C3D4 /* CoinPilotBundledPreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7101A7B8C2D4E10A1B2C3D5 /* CoinPilotBundledPreview.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		504EC3041FED79650016851F /* App.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = App.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		504EC3071FED79650016851F /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		504EC30E1FED79650016851F /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		D1CE4A5B6C7D8E9FA0B1C2D4 /* CoinPilotMinimal.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = CoinPilotMinimal.xcassets; sourceTree = "<group>"; };
 		504EC3111FED79650016851F /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = Base; path = Base.lproj/LaunchScreen.storyboard; sourceTree = "<group>"; };
 		504EC3131FED79650016851F /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
-		50B271D01FEDC1A000F3C39B /* public */ = {isa = PBXFileReference; lastKnownFileType = folder; path = public; sourceTree = "<group>"; };
+		DCA9A1572D6F4A1CB013B2A7 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		9582B6822FE993A50072D4E8 /* SceneDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneDelegate.swift; sourceTree = "<group>"; };
 		B1C2D3E4F5061728394A5B6C /* ServerAddressPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerAddressPolicy.swift; sourceTree = "<group>"; };
+		F0501A7B8C2D4E10A1B2C3D5 /* CoinPilotStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoinPilotStore.swift; sourceTree = "<group>"; };
+		F0501A7B8C2D4E10A1B2C3D7 /* CoinPilotViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoinPilotViews.swift; sourceTree = "<group>"; };
+		F7101A7B8C2D4E10A1B2C3D5 /* CoinPilotBundledPreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoinPilotBundledPreview.swift; sourceTree = "<group>"; };
+		F7101A7B8C2D4E10A1B2C3D7 /* CoinPilotBundledPreview.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = CoinPilotBundledPreview.json; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -57,12 +65,17 @@
 			isa = PBXGroup;
 			children = (
 				9582B6822FE993A50072D4E8 /* SceneDelegate.swift */,
+				F0501A7B8C2D4E10A1B2C3D5 /* CoinPilotStore.swift */,
+				F0501A7B8C2D4E10A1B2C3D7 /* CoinPilotViews.swift */,
+				F7101A7B8C2D4E10A1B2C3D5 /* CoinPilotBundledPreview.swift */,
+				F7101A7B8C2D4E10A1B2C3D7 /* CoinPilotBundledPreview.json */,
 				B1C2D3E4F5061728394A5B6C /* ServerAddressPolicy.swift */,
 				504EC3071FED79650016851F /* AppDelegate.swift */,
 				504EC30E1FED79650016851F /* Assets.xcassets */,
+				D1CE4A5B6C7D8E9FA0B1C2D4 /* CoinPilotMinimal.xcassets */,
 				504EC3101FED79650016851F /* LaunchScreen.storyboard */,
 				504EC3131FED79650016851F /* Info.plist */,
-				50B271D01FEDC1A000F3C39B /* public */,
+				DCA9A1572D6F4A1CB013B2A7 /* PrivacyInfo.xcprivacy */,
 			);
 			path = App;
 			sourceTree = "<group>";
@@ -77,6 +90,7 @@
 				504EC3001FED79650016851F /* Sources */,
 				504EC3011FED79650016851F /* Frameworks */,
 				504EC3021FED79650016851F /* Resources */,
+				F7101A7B8C2D4E10A1B2C3D8 /* Conditional bundled preview data */,
 			);
 			buildRules = (
 			);
@@ -129,12 +143,36 @@
 			buildActionMask = 2147483647;
 			files = (
 				504EC3121FED79650016851F /* LaunchScreen.storyboard in Resources */,
-				50B271D11FEDC1A000F3C39B /* public in Resources */,
-				504EC30F1FED79650016851F /* Assets.xcassets in Resources */,
+				D1CE4A5B6C7D8E9FA0B1C2D3 /* CoinPilotMinimal.xcassets in Resources */,
+				DCA9A1572D6F4A1CB013B2A8 /* PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		F7101A7B8C2D4E10A1B2C3D8 /* Conditional bundled preview data */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"$(SRCROOT)/App/CoinPilotBundledPreview.json",
+			);
+			name = "Bundle preview data only when selected";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(DERIVED_FILE_DIR)/CoinPilotDataMode.txt",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -eu\nPREVIEW_SOURCE=\"${SRCROOT}/App/CoinPilotBundledPreview.json\"\nAPP_RESOURCE_DIR=\"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}\"\nPREVIEW_TARGET=\"${APP_RESOURCE_DIR}/CoinPilotBundledPreview.json\"\nrm -f \"${PREVIEW_TARGET}\"\nif [ \"${COINPILOT_DATA_MODE:-server}\" = \"bundled-preview\" ]; then\n  mkdir -p \"${APP_RESOURCE_DIR}\"\n  cp \"${PREVIEW_SOURCE}\" \"${PREVIEW_TARGET}\"\nfi\nprintf '%s\\n' \"${COINPILOT_DATA_MODE:-server}\" > \"${DERIVED_FILE_DIR}/CoinPilotDataMode.txt\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		504EC3001FED79650016851F /* Sources */ = {
@@ -143,6 +181,9 @@
 			files = (
 				504EC3081FED79650016851F /* AppDelegate.swift in Sources */,
 				9582B6832FE993A70072D4E8 /* SceneDelegate.swift in Sources */,
+				F0501A7B8C2D4E10A1B2C3D4 /* CoinPilotStore.swift in Sources */,
+				F0501A7B8C2D4E10A1B2C3D6 /* CoinPilotViews.swift in Sources */,
+				F7101A7B8C2D4E10A1B2C3D4 /* CoinPilotBundledPreview.swift in Sources */,
 				A1B2C3D4E5F60718293A4B5C /* ServerAddressPolicy.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -271,11 +312,12 @@
 		504EC3171FED79650016851F /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_APPICON_NAME = CoinPilotAppIconGenerated;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 3;
 				DEVELOPMENT_TEAM = A23ZPKGMW9;
 				INFOPLIST_FILE = App/Info.plist;
+				COINPILOT_DATA_MODE = server;
 				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";
 				MARKETING_VERSION = 1.0;
@@ -291,11 +333,12 @@
 		504EC3181FED79650016851F /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_APPICON_NAME = CoinPilotAppIconGenerated;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 3;
 				DEVELOPMENT_TEAM = A23ZPKGMW9;
 				INFOPLIST_FILE = App/Info.plist;
+				COINPILOT_DATA_MODE = server;
 				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";
 				MARKETING_VERSION = 1.0;

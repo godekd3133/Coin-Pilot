@@ -1,0 +1,208 @@
+{
+  "generatedAt": "2026-09-29T00:00:00Z",
+  "status": {
+    "isRunning": true,
+    "mode": "DRY_RUN",
+    "readOnlyObserver": true,
+    "strategyMode": "preview",
+    "lastUpdate": "2026-09-29T00:00:00Z"
+  },
+  "account": {
+    "krwBalance": 4380000,
+    "totalAssets": 4700000,
+    "initialSeedMoney": 4500000,
+    "realizedProfit": 200000,
+    "profit": 200000,
+    "profitPercent": 4.44,
+    "mode": "DRY_RUN",
+    "readOnlyObserver": true,
+    "valuationAvailable": true,
+    "valuationStatus": "available",
+    "valuationAsOf": "2026-09-29T00:00:00Z",
+    "positions": [
+      {
+        "coin": "KRW-BTC",
+        "amount": 0.002,
+        "avgPrice": 55000000,
+        "entryPrice": 55000000,
+        "currentPrice": 60000000,
+        "currentValue": 120000,
+        "costBasis": 110000,
+        "profit": 10000,
+        "profitPercent": "9.09",
+        "source": "paper",
+        "valuationAvailable": true,
+        "valuationAsOf": "2026-09-29T00:00:00Z"
+      },
+      {
+        "coin": "KRW-ETH",
+        "amount": 0.05,
+        "avgPrice": 4000000,
+        "entryPrice": 4200000,
+        "currentPrice": 4000000,
+        "currentValue": 200000,
+        "costBasis": 210000,
+        "profit": -10000,
+        "profitPercent": "-4.76",
+        "source": "paper",
+        "valuationAvailable": true,
+        "valuationAsOf": "2026-09-29T00:00:00Z"
+      }
+    ]
+  },
+  "cumulativePnl": {
+    "initialSeedMoney": 4500000,
+    "totalAssets": 4700000,
+    "profit": 200000,
+    "profitPercent": 4.4444,
+    "valuationAvailable": true,
+    "valuationStatus": "available",
+    "valuationAsOf": "2026-09-29T00:00:00Z",
+    "mode": "DRY_RUN"
+  },
+  "todaySummary": {
+    "realizedProfit": 12500
+  },
+  "paperValidationSummary": {
+    "schema": "coinpilot.paper-validation-mobile-summary.v1",
+    "researchOnly": true,
+    "promoted": false,
+    "actualFillsObserved": false,
+    "available": true,
+    "active": false,
+    "state": "STOPPED",
+    "heartbeatAt": "2026-09-29T00:00:00Z",
+    "stopReason": null,
+    "configSnapshotComplete": true,
+    "configurationConsistent": true,
+    "continuityEligible": true,
+    "heartbeatContinuityEligible": true,
+    "analysisContinuityEligible": true,
+    "analysisMissingMarketCount": 0,
+    "riskContinuityEligible": true,
+    "interruptionCount": 0,
+    "strict": {
+      "closedTradeCount": 8,
+      "realizedProfitKrw": -3250,
+      "openPositionCount": 0
+    },
+    "diagnostic": {
+      "shadowClosedTradeCount": 9,
+      "shadowRealizedProfitKrw": -4820,
+      "shadowOpenPositionCount": 1,
+      "looseClosedTradeCount": 11,
+      "looseRealizedProfitKrw": -6110,
+      "looseOpenPositionCount": 0
+    },
+    "cohort": {
+      "available": true,
+      "complete": true,
+      "fresh": true,
+      "capturedAt": "2026-09-29T00:00:00Z",
+      "readErrorCount": 0,
+      "sessionCount": 5,
+      "activeSessionCount": 0,
+      "endedSessionCount": 5,
+      "strictTradeCount": 8,
+      "strictTradeSessionCount": 3,
+      "eligibleStrictSessionCount": 0,
+      "eligibleStrictTradeCount": 0,
+      "profitabilityEvidenceSessionCount": 0,
+      "profitabilityEvidenceTradeCount": 0,
+      "profitabilityEvidenceProfitKrw": null,
+      "strictCostUnverifiedTradeCount": 2,
+      "sessionsBelowMinimumObservationDays": 5,
+      "sessionsBelowMinimumTradeCount": 5,
+      "totalStrictProfitComparable": false,
+      "actualFillsObserved": false,
+      "promoted": false
+    },
+    "costAudit": {
+      "available": true,
+      "actualFillsObserved": false,
+      "evaluatedTradeCount": 8,
+      "unevaluableTradeCount": 0,
+      "modeledExecutionTradeCount": 0,
+      "unmodeledExecutionTradeCount": 8,
+      "configuredSlippagePercent": 0.1,
+      "recordedNetPnlKrw": -3250,
+      "modeledSlippageDragKrw": 1900,
+      "costStressedNetPnlKrw": -5150,
+      "slippageAppliedToStrictPaperLedger": false,
+      "note": "예시 장부에 설정한 가격 차이를 추가 적용한 참고 계산입니다. 실제 체결 자료가 아닙니다."
+    }
+  },
+  "history": {
+    "24h": {
+      "data": [
+        { "timestamp": "2026-09-28T01:00:00.000Z", "totalAssets": 4660000 },
+        { "timestamp": "2026-09-28T07:00:00.000Z", "totalAssets": 4675000 },
+        { "timestamp": "2026-09-28T13:00:00.000Z", "totalAssets": 4655000 },
+        { "timestamp": "2026-09-28T19:00:00.000Z", "totalAssets": 4690000 },
+        { "timestamp": "2026-09-29T00:00:00.000Z", "totalAssets": 4700000 }
+      ],
+      "period": "24h",
+      "count": 5,
+      "readOnlyObserver": true
+    },
+    "7d": {
+      "data": [
+        { "timestamp": "2026-09-22T00:00:00.000Z", "totalAssets": 4510000 },
+        { "timestamp": "2026-09-23T00:00:00.000Z", "totalAssets": 4580000 },
+        { "timestamp": "2026-09-24T00:00:00.000Z", "totalAssets": 4550000 },
+        { "timestamp": "2026-09-25T00:00:00.000Z", "totalAssets": 4620000 },
+        { "timestamp": "2026-09-26T00:00:00.000Z", "totalAssets": 4610000 },
+        { "timestamp": "2026-09-27T00:00:00.000Z", "totalAssets": 4660000 },
+        { "timestamp": "2026-09-28T00:00:00.000Z", "totalAssets": 4700000 }
+      ],
+      "period": "7d",
+      "count": 7,
+      "readOnlyObserver": true
+    },
+    "30d": {
+      "data": [
+        { "timestamp": "2026-08-31T00:00:00.000Z", "totalAssets": 4320000 },
+        { "timestamp": "2026-09-05T00:00:00.000Z", "totalAssets": 4390000 },
+        { "timestamp": "2026-09-10T00:00:00.000Z", "totalAssets": 4460000 },
+        { "timestamp": "2026-09-15T00:00:00.000Z", "totalAssets": 4410000 },
+        { "timestamp": "2026-09-20T00:00:00.000Z", "totalAssets": 4550000 },
+        { "timestamp": "2026-09-25T00:00:00.000Z", "totalAssets": 4620000 },
+        { "timestamp": "2026-09-29T00:00:00.000Z", "totalAssets": 4700000 }
+      ],
+      "period": "30d",
+      "count": 7,
+      "readOnlyObserver": true
+    }
+  },
+  "marketPrices": [
+    { "coin": "KRW-BTC", "price": 60000000, "change": 1.25, "sourceAsOf": "2026-09-29T00:00:00.000Z", "fetchedAt": "2026-09-29T00:00:03.000Z" },
+    { "coin": "KRW-ETH", "price": 4000000, "change": -0.60, "sourceAsOf": "2026-09-29T00:00:01.000Z", "fetchedAt": "2026-09-29T00:00:03.000Z" },
+    { "coin": "KRW-XRP", "price": 825, "change": 0.38, "sourceAsOf": "2026-09-29T00:00:02.000Z", "fetchedAt": "2026-09-29T00:00:03.000Z" }
+  ],
+  "trades": [
+    {
+      "coin": "KRW-BTC",
+      "type": "CLOSE",
+      "exitTime": "2026-09-29T00:00:00.000Z",
+      "exitPrice": 60000000,
+      "profit": 12500,
+      "source": "paper"
+    },
+    {
+      "coin": "KRW-ETH",
+      "type": "OPEN",
+      "entryTime": "2026-09-28T18:30:00.000Z",
+      "entryPrice": 4000000,
+      "amount": 0.05,
+      "source": "paper"
+    },
+    {
+      "coin": "KRW-XRP",
+      "type": "CLOSE",
+      "exitTime": "2026-09-28T12:10:00.000Z",
+      "exitPrice": 820,
+      "profit": -3200,
+      "source": "paper"
+    }
+  ]
+}

@@ -49,11 +49,19 @@ import { getMomentumShadowConfigDriftChanges } from '../../research/momentumShad
 import {
   projectLiveExecutionEvidenceStatus
 } from '../../research/liveExecutionEvidence.js';
+import { createRequestLocalFileSnapshot } from '../../research/requestLocalFileSnapshot.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const PROJECT_ROOT = path.resolve(__dirname, '..', '..', '..');
 const DEFAULT_MOMENTUM_SHADOW_QUOTE_MAX_AGE_SECONDS = 15 * 60;
+const MOMENTUM_SHADOW_QUOTE_HISTORY_INTERVAL_SECONDS = 600;
+const MOMENTUM_SHADOW_QUOTE_HISTORY_FRESHNESS_SECONDS = 900;
+const MOMENTUM_SHADOW_QUOTE_HISTORY_WINDOW_HOURS = 24;
+const MOMENTUM_SHADOW_QUOTE_HISTORY_WINDOW_LIMIT = Math.ceil(
+  (MOMENTUM_SHADOW_QUOTE_HISTORY_WINDOW_HOURS * 60 * 60) /
+    MOMENTUM_SHADOW_QUOTE_HISTORY_INTERVAL_SECONDS
+);
 const DEFAULT_SCALP_QUOTE_COMPATIBILITY_MARKETS = [
   'KRW-BTC', 'KRW-ETH', 'KRW-XRP', 'KRW-SOL'
 ];
@@ -68,13 +76,15 @@ function resolveMomentumShadowQuoteHistoryFile(server) {
     : path.resolve(PROJECT_ROOT, configuredHistoryFile);
 }
 
-function readMomentumShadowQuoteHistoryRecords(server) {
+function readMomentumShadowQuoteHistoryRecords(server, fileSnapshot = null) {
   const historyFile = resolveMomentumShadowQuoteHistoryFile(server);
-  if (!fs.existsSync(historyFile)) {
+  const existsSync = fileSnapshot?.existsSync || fs.existsSync;
+  const readText = fileSnapshot?.readText || fs.readFileSync;
+  if (!existsSync(historyFile)) {
     return { available: false, records: [], invalidRecordCount: 0, inputReportCount: 0 };
   }
   try {
-    const lines = fs.readFileSync(historyFile, 'utf8').split(/\r?\n/).filter(Boolean);
+    const lines = readText(historyFile, 'utf8').split(/\r?\n/).filter(Boolean);
     const records = [];
     let invalidRecordCount = 0;
     for (const line of lines) {
@@ -187,32 +197,42 @@ function nonNegativeOrFallback(value, fallback) {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
 }
 
-// Project the latest repeated orderbook observation without exposing the
-// local path or raw error messages. This is evidence for the UI only: it
-// never authorizes an order and is deliberately independent of any running
-// spread-guard ledger.
-function projectMomentumShadowQuoteQualitySnapshot(server) {
+function momentumShadowQuotePreflightOptions(server) {
   const config = server?.tradingSystem?.config || {};
   const configuredFile = config.momentumShadowQuoteReportFile ||
     process.env.MOMO_SHADOW_QUOTE_REPORT_FILE ||
     resolveMomentumShadowQuoteRuntimeFile('quote-quality.json');
-  const reportFile = path.isAbsolute(configuredFile)
-    ? configuredFile
-    : path.resolve(PROJECT_ROOT, configuredFile);
   const configuredMaxAge = config.momentumShadowQuoteMaxAgeSeconds ??
     process.env.MOMO_SHADOW_QUOTE_MAX_AGE_SECONDS;
-  const maxAgeSeconds = Number.isFinite(Number(configuredMaxAge)) && Number(configuredMaxAge) >= 60
-    ? Number(configuredMaxAge)
-    : DEFAULT_MOMENTUM_SHADOW_QUOTE_MAX_AGE_SECONDS;
+  return {
+    quoteReportFile: path.isAbsolute(configuredFile)
+      ? configuredFile
+      : path.resolve(PROJECT_ROOT, configuredFile),
+    quoteMaxAgeSeconds: Number.isFinite(Number(configuredMaxAge)) && Number(configuredMaxAge) >= 60
+      ? Number(configuredMaxAge)
+      : DEFAULT_MOMENTUM_SHADOW_QUOTE_MAX_AGE_SECONDS
+  };
+}
+
+// Project the latest repeated orderbook observation without exposing the
+// local path or raw error messages. This is evidence for the UI only: it
+// never authorizes an order and is deliberately independent of any running
+// spread-guard ledger.
+function projectMomentumShadowQuoteQualitySnapshot(server, fileSnapshot = null) {
+  const config = server?.tradingSystem?.config || {};
+  const { quoteReportFile: reportFile, quoteMaxAgeSeconds: maxAgeSeconds } =
+    momentumShadowQuotePreflightOptions(server);
   const historyFile = resolveMomentumShadowQuoteHistoryFile(server);
   const history = projectMomentumShadowQuoteHistory({
     historyFile,
-    maxReports: 48,
+    maxReports: MOMENTUM_SHADOW_QUOTE_HISTORY_WINDOW_LIMIT,
     maxAgeSeconds,
     minimumDepthReports: 30,
     minimumSamplesPerReport: 5,
-    expectedIntervalSeconds: 600,
-    freshnessLimitSeconds: 900
+    expectedIntervalSeconds: MOMENTUM_SHADOW_QUOTE_HISTORY_INTERVAL_SECONDS,
+    freshnessLimitSeconds: MOMENTUM_SHADOW_QUOTE_HISTORY_FRESHNESS_SECONDS,
+    existsSync: fileSnapshot?.existsSync || fs.existsSync,
+    readFileSync: fileSnapshot?.readText || fs.readFileSync
   });
   const unavailable = reason => ({
     available: false,
@@ -223,10 +243,13 @@ function projectMomentumShadowQuoteQualitySnapshot(server) {
     history
   });
 
-  if (!fs.existsSync(reportFile)) return unavailable('quote_quality_report_not_found');
+  const existsSync = fileSnapshot?.existsSync || fs.existsSync;
+  if (!existsSync(reportFile)) return unavailable('quote_quality_report_not_found');
 
   try {
-    const report = JSON.parse(fs.readFileSync(reportFile, 'utf8'));
+    const report = fileSnapshot
+      ? fileSnapshot.readJsonOrThrow(reportFile)
+      : JSON.parse(fs.readFileSync(reportFile, 'utf8'));
     if (!report || typeof report !== 'object' || Array.isArray(report)) {
       return unavailable('quote_quality_report_invalid');
     }
@@ -342,7 +365,7 @@ function projectMomentumShadowQuoteQualitySnapshot(server) {
   }
 }
 
-function projectMomentumShadowCandidateReadiness(server) {
+function projectMomentumShadowCandidateReadiness(server, fileSnapshot = null) {
   const config = server?.tradingSystem?.config || {};
   const benchmarkDir = config.momentumShadowBenchmarkDir ||
     process.env.MOMO_SHADOW_BENCHMARK_DIR ||
@@ -357,13 +380,15 @@ function projectMomentumShadowCandidateReadiness(server) {
     candidateSlotFile: momentumShadowCandidateSlotFile(config),
     expectedConfig: resolveMomentumShadowCandidateConfig(),
     requireBenchmarkOpen: process.env.MOMO_SHADOW_REQUIRE_BENCHMARK_OPEN !== 'false',
+    ...momentumShadowQuotePreflightOptions(server),
     minimumPollMs: Number.isFinite(Number(process.env.MOMO_SHADOW_MIN_POLL_MS))
       ? Number(process.env.MOMO_SHADOW_MIN_POLL_MS)
-      : 15 * 60 * 1000
+      : 15 * 60 * 1000,
+    fileSnapshot
   });
 }
 
-function projectMomentumShadowVolatilityReadiness(server) {
+function projectMomentumShadowVolatilityReadiness(server, fileSnapshot = null) {
   const config = server?.tradingSystem?.config || {};
   const benchmarkDir = config.momentumShadowBenchmarkDir ||
     process.env.MOMO_SHADOW_BENCHMARK_DIR ||
@@ -388,13 +413,15 @@ function projectMomentumShadowVolatilityReadiness(server) {
     candidateSlotFile: momentumShadowCandidateSlotFile(config),
     expectedConfig,
     requireBenchmarkOpen: process.env.MOMO_SHADOW_REQUIRE_BENCHMARK_OPEN !== 'false',
+    ...momentumShadowQuotePreflightOptions(server),
     minimumPollMs: Number.isFinite(Number(process.env.MOMO_SHADOW_MIN_POLL_MS))
       ? Number(process.env.MOMO_SHADOW_MIN_POLL_MS)
-      : 15 * 60 * 1000
+      : 15 * 60 * 1000,
+    fileSnapshot
   });
 }
 
-function projectMomentumShadowNextOpenReadiness(server) {
+function projectMomentumShadowNextOpenReadiness(server, fileSnapshot = null) {
   const config = server?.tradingSystem?.config || {};
   const benchmarkDir = config.momentumShadowBenchmarkDir ||
     process.env.MOMO_SHADOW_BENCHMARK_DIR ||
@@ -427,9 +454,11 @@ function projectMomentumShadowNextOpenReadiness(server) {
     candidateSlotFile: momentumShadowCandidateSlotFile(config),
     expectedConfig,
     requireBenchmarkOpen: process.env.MOMO_SHADOW_REQUIRE_BENCHMARK_OPEN !== 'false',
+    ...momentumShadowQuotePreflightOptions(server),
     minimumPollMs: Number.isFinite(Number(process.env.MOMO_SHADOW_MIN_POLL_MS))
       ? Number(process.env.MOMO_SHADOW_MIN_POLL_MS)
-      : 15 * 60 * 1000
+      : 15 * 60 * 1000,
+    fileSnapshot
   });
 }
 
@@ -439,7 +468,7 @@ function projectMomentumShadowFixedHoldReadiness(server, {
   quoteCross = false,
   stopLossPercent = 0,
   excludeDoge = false
-} = {}) {
+} = {}, fileSnapshot = null) {
   const config = server?.tradingSystem?.config || {};
   const benchmarkDir = config.momentumShadowBenchmarkDir ||
     process.env.MOMO_SHADOW_BENCHMARK_DIR ||
@@ -511,15 +540,11 @@ function projectMomentumShadowFixedHoldReadiness(server, {
     expectedConfig,
     requireBenchmarkOpen: process.env.MOMO_SHADOW_REQUIRE_BENCHMARK_OPEN !== 'false',
     requireQuoteQuality: spreadGuard || quoteCross,
-    quoteReportFile: config.momentumShadowQuoteReportFile ||
-      process.env.MOMO_SHADOW_QUOTE_REPORT_FILE ||
-      resolveMomentumShadowQuoteRuntimeFile('quote-quality.json'),
-    quoteMaxAgeSeconds: Number.isFinite(Number(process.env.MOMO_SHADOW_QUOTE_MAX_AGE_SECONDS))
-      ? Number(process.env.MOMO_SHADOW_QUOTE_MAX_AGE_SECONDS)
-      : 15 * 60,
+    ...momentumShadowQuotePreflightOptions(server),
     minimumPollMs: Number.isFinite(Number(process.env.MOMO_SHADOW_MIN_POLL_MS))
       ? Number(process.env.MOMO_SHADOW_MIN_POLL_MS)
-      : 15 * 60 * 1000
+      : 15 * 60 * 1000,
+    fileSnapshot
   });
 }
 
@@ -663,9 +688,16 @@ function projectMomentumShadowRunnerLifecycle(ledger) {
   };
 }
 
-function projectMomentumShadowBook(definition, fallbackInitialBalance, server, quoteHistorySource) {
+function projectMomentumShadowBook(
+  definition,
+  fallbackInitialBalance,
+  server,
+  quoteHistorySource,
+  fileSnapshot = null
+) {
   const ledgerFile = path.join(definition.directory, 'ledger.json');
-  if (!fs.existsSync(ledgerFile)) {
+  const existsSync = fileSnapshot?.existsSync || fs.existsSync;
+  if (!existsSync(ledgerFile)) {
     return {
       key: definition.key,
       label: definition.label,
@@ -678,7 +710,9 @@ function projectMomentumShadowBook(definition, fallbackInitialBalance, server, q
   }
 
   try {
-    const ledger = JSON.parse(fs.readFileSync(ledgerFile, 'utf8'));
+    const ledger = fileSnapshot
+      ? fileSnapshot.readJsonOrThrow(ledgerFile)
+      : JSON.parse(fs.readFileSync(ledgerFile, 'utf8'));
     const heartbeatMs = Date.parse(ledger.heartbeatAt);
     // A future heartbeat is clock-skewed, not fresh — unverifiable freshness
     // must not keep a book marked as actively observing.
@@ -1169,60 +1203,67 @@ function resolveReportFile(server) {
  * the promotion boundary to false even if a hand-edited report contains a
  * truthy value; research artifacts never authorize orders.
  */
-export default function createResearchRoutes(server) {
+export default function createResearchRoutes(server, {
+  paperForwardCohortRootDir = PROJECT_ROOT
+} = {}) {
   const router = express.Router();
 
-  const getLiveExecutionEvidenceStatus = () => projectLiveExecutionEvidenceStatus({
+  const getLiveExecutionEvidenceStatus = (fileSnapshot = null) => projectLiveExecutionEvidenceStatus({
     filePath: server?.tradingSystem?.liveExecutionEvidenceFile ||
       process.env.LIVE_EXECUTION_EVIDENCE_FILE ||
       '.coinpilot-runtime/live-execution/evidence.jsonl',
     liveMode: server?.tradingSystem?.dryRun === false,
     runtimeWriteError: server?.tradingSystem?.liveExecutionEvidenceWriteError,
-    runtimeDataError: server?.tradingSystem?.liveExecutionEvidenceDataError
+    runtimeDataError: server?.tradingSystem?.liveExecutionEvidenceDataError,
+    fileSnapshot
   });
 
   router.get('/live-execution-evidence', (req, res) => {
-    return res.json(getLiveExecutionEvidenceStatus());
+    return res.json(getLiveExecutionEvidenceStatus(createRequestLocalFileSnapshot()));
   });
 
   router.get('/momentum-shadow', (req, res) => {
+    const fileSnapshot = createRequestLocalFileSnapshot();
     const fallbackInitialBalance = Number(process.env.MOMO_SHADOW_INITIAL_BALANCE) || 100_000_000;
-    const quoteHistorySource = readMomentumShadowQuoteHistoryRecords(server);
+    const quoteHistorySource = readMomentumShadowQuoteHistoryRecords(server, fileSnapshot);
     const books = momentumShadowBookDefinitions(server)
       .map(definition => projectMomentumShadowBook(
         definition,
         fallbackInitialBalance,
         server,
-        quoteHistorySource
+        quoteHistorySource,
+        fileSnapshot
       ));
-    const candidateReadiness = projectMomentumShadowCandidateReadiness(server);
-    const paperForwardCohort = summarizePaperForwardCohort({ rootDir: PROJECT_ROOT });
+    const candidateReadiness = projectMomentumShadowCandidateReadiness(server, fileSnapshot);
+    const paperForwardCohort = summarizePaperForwardCohort({
+      rootDir: paperForwardCohortRootDir
+    });
     const lossCapNoDogeReadiness = projectMomentumShadowFixedHoldReadiness(server, {
       stopLossPercent: 4,
       excludeDoge: true
-    });
+    }, fileSnapshot);
     lossCapNoDogeReadiness.historicalEvidence = getMomentumShadowHistoricalEvidence('loss_cap_no_doge');
     const candidateReadinessVariants = [
       { key: 'baseline', label: '기본 전략', readiness: candidateReadiness },
       {
         key: 'volatility',
         label: '변동성에 따라 비중 조절',
-        readiness: projectMomentumShadowVolatilityReadiness(server)
+        readiness: projectMomentumShadowVolatilityReadiness(server, fileSnapshot)
       },
       {
         key: 'next_open',
         label: '거래 비용 반영 · 다음 날 시가 진입',
-        readiness: projectMomentumShadowNextOpenReadiness(server)
+        readiness: projectMomentumShadowNextOpenReadiness(server, fileSnapshot)
       },
       {
         key: 'fixed_2d',
         label: '2일 뒤 청산',
-        readiness: projectMomentumShadowFixedHoldReadiness(server)
+        readiness: projectMomentumShadowFixedHoldReadiness(server, {}, fileSnapshot)
       },
       {
         key: 'fixed_2d_loss_cap',
         label: '2일 보유 · 종가 기준 손실 제한',
-        readiness: projectMomentumShadowFixedHoldReadiness(server, { stopLossPercent: 4 })
+        readiness: projectMomentumShadowFixedHoldReadiness(server, { stopLossPercent: 4 }, fileSnapshot)
       },
       {
         key: 'fixed_2d_loss_cap_no_doge',
@@ -1234,17 +1275,17 @@ export default function createResearchRoutes(server) {
         label: '2일 보유 · 비트코인 대비 강한 추세',
         readiness: projectMomentumShadowFixedHoldReadiness(server, {
           relativeTrendMinPercent: 0
-        })
+        }, fileSnapshot)
       },
       {
         key: 'fixed_2d_spread',
         label: '2일 보유 · 호가 제한',
-        readiness: projectMomentumShadowFixedHoldReadiness(server, { spreadGuard: true })
+        readiness: projectMomentumShadowFixedHoldReadiness(server, { spreadGuard: true }, fileSnapshot)
       },
       {
         key: 'fixed_2d_quote_cross',
         label: '2일 보유 · 매수·매도 호가 기준',
-        readiness: projectMomentumShadowFixedHoldReadiness(server, { quoteCross: true })
+        readiness: projectMomentumShadowFixedHoldReadiness(server, { quoteCross: true }, fileSnapshot)
       }
     ];
     return res.json({
@@ -1252,8 +1293,8 @@ export default function createResearchRoutes(server) {
       researchOnly: true,
       promoted: false,
       projectionReason: 'momentum_shadow_is_diagnostic_only_and_never_authorizes_orders',
-      liveExecutionEvidence: getLiveExecutionEvidenceStatus(),
-      quoteQualitySnapshot: projectMomentumShadowQuoteQualitySnapshot(server),
+      liveExecutionEvidence: getLiveExecutionEvidenceStatus(fileSnapshot),
+      quoteQualitySnapshot: projectMomentumShadowQuoteQualitySnapshot(server, fileSnapshot),
       paperForwardCohort,
       candidateReadiness,
       candidateReadinessVariants,

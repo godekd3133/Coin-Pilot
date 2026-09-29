@@ -251,10 +251,12 @@ export function projectMomentumShadowQuoteHistory({
   minimumSamplesPerReport = 5,
   expectedIntervalSeconds = 600,
   freshnessLimitSeconds = 900,
-  now = Date.now()
+  now = Date.now(),
+  existsSync = fs.existsSync,
+  readFileSync = fs.readFileSync
 } = {}) {
   const reportFile = path.basename(String(historyFile));
-  if (!fs.existsSync(historyFile)) {
+  if (!existsSync(historyFile)) {
     return {
       available: false,
       usable: false,
@@ -266,7 +268,7 @@ export function projectMomentumShadowQuoteHistory({
   }
 
   try {
-    const lines = fs.readFileSync(historyFile, 'utf8')
+    const lines = readFileSync(historyFile, 'utf8')
       .split(/\r?\n/)
       .filter(Boolean);
     const limit = positiveInteger(maxReports, DEFAULT_MOMENTUM_SHADOW_QUOTE_HISTORY_LIMIT);

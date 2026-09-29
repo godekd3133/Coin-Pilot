@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <meta name="theme-color" content="#f7f4ee">
+    <meta name="theme-color" content="#f9fafb">
     <meta name="description" content="CoinPilot 거래 대시보드. 모의투자 결과와 실제 주문 전 점검, 계좌 잔액과 시장 현황을 확인할 수 있습니다.">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -13,10 +13,7 @@
     <link rel="icon" href="/icon.svg" type="image/svg+xml">
     <link rel="apple-touch-icon" href="/apple-touch-icon.png">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@phosphor-icons/web@2.1.1/src/regular/style.css">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&family=Noto+Sans+KR:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/pilot-redesign.css?v=20260928-01">
+    <link rel="stylesheet" href="/pilot-redesign.css?v=20260929-21">
     <title>CoinPilot | 거래 대시보드</title>
     <style>
         :root {
@@ -2687,31 +2684,22 @@
             display: none;
         }
 
-        /* AI Desk: a focused command-deck layer for read-only consultations. */
+        /* Read-only opinion and signal monitoring panel. */
         .ai-desk {
-            --ai-ink: #f6f0df;
-            --ai-muted: #a9a391;
-            --ai-line: rgba(246, 240, 223, 0.13);
-            --ai-teal: #6fe1bb;
-            --ai-amber: #ffd166;
-            --ai-red: #ff7b72;
+            --ai-ink: var(--text-primary);
+            --ai-muted: var(--text-secondary);
+            --ai-line: var(--border-color);
+            --ai-teal: var(--accent-green);
+            --ai-amber: var(--accent-yellow);
+            --ai-red: var(--accent-red);
             position: relative;
             overflow: hidden;
-            border-color: rgba(111, 225, 187, 0.24);
-            background:
-                radial-gradient(circle at 88% -12%, rgba(111, 225, 187, 0.16), transparent 34%),
-                linear-gradient(135deg, rgba(11, 35, 52, 0.98), rgba(10, 19, 29, 0.98));
+            border-color: var(--border-color);
+            background: var(--bg-card);
         }
 
         .ai-desk::before {
-            content: '';
-            position: absolute;
-            inset: 0;
-            pointer-events: none;
-            opacity: 0.28;
-            background-image: linear-gradient(rgba(246, 240, 223, 0.035) 1px, transparent 1px), linear-gradient(90deg, rgba(246, 240, 223, 0.035) 1px, transparent 1px);
-            background-size: 28px 28px;
-            mask-image: linear-gradient(to bottom, black, transparent 85%);
+            display: none;
         }
 
         .ai-desk > * {
@@ -2729,17 +2717,16 @@
         }
 
         .ai-kicker {
-            color: var(--ai-amber);
-            font: 800 10px/1.2 "SFMono-Regular", Consolas, monospace;
-            letter-spacing: 0.18em;
-            text-transform: uppercase;
+            color: var(--ai-muted);
+            font: 600 12px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            letter-spacing: 0;
         }
 
         .ai-hero h2 {
             margin-top: 7px;
             color: var(--ai-ink);
-            font: 700 clamp(22px, 3vw, 34px)/1.05 "Avenir Next", "Helvetica Neue", sans-serif;
-            letter-spacing: -0.045em;
+            font: 700 clamp(22px, 3vw, 30px)/1.2 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            letter-spacing: -0.02em;
         }
 
         .ai-hero p {
@@ -2751,14 +2738,14 @@
 
         .ai-policy-stamp {
             align-self: start;
-            padding: 10px 12px;
-            border: 1px solid rgba(255, 209, 102, 0.35);
-            border-radius: 8px;
-            color: var(--ai-amber);
-            font: 700 10px/1.4 "SFMono-Regular", Consolas, monospace;
-            letter-spacing: 0.06em;
-            text-align: right;
-            text-transform: uppercase;
+            padding: 9px 12px;
+            border: 1px solid var(--ai-line);
+            border-radius: 999px;
+            color: var(--ai-muted);
+            background: var(--bg-tertiary);
+            font: 600 11px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            letter-spacing: 0;
+            text-align: center;
         }
 
         .ai-desk-grid {
@@ -2771,7 +2758,7 @@
         .ai-desk-column {
             min-width: 0;
             padding: 18px;
-            background: rgba(8, 17, 31, 0.72);
+            background: var(--bg-secondary);
         }
 
         .ai-section-title {
@@ -2781,14 +2768,13 @@
             gap: 10px;
             margin-bottom: 12px;
             color: var(--ai-ink);
-            font: 700 14px/1.2 "Avenir Next", "Helvetica Neue", sans-serif;
+            font: 700 14px/1.3 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
         }
 
         .ai-section-title small {
             color: var(--ai-muted);
-            font: 600 10px/1.2 "SFMono-Regular", Consolas, monospace;
-            letter-spacing: 0.06em;
-            text-transform: uppercase;
+            font: 500 11px/1.3 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            letter-spacing: 0;
         }
 
         .ai-provider-grid {
@@ -2803,14 +2789,14 @@
             padding: 13px;
             border: 1px solid var(--ai-line);
             border-radius: 10px;
-            background: rgba(246, 240, 223, 0.035);
+            background: var(--bg-tertiary);
             transition: border-color 0.2s ease, transform 0.2s ease, background 0.2s ease;
         }
 
         .ai-provider-card:hover {
             transform: translateY(-2px);
-            border-color: rgba(111, 225, 187, 0.42);
-            background: rgba(111, 225, 187, 0.07);
+            border-color: var(--ai-teal);
+            background: var(--bg-card);
         }
 
         .ai-provider-head,
@@ -2831,9 +2817,8 @@
 
         .ai-provider-state {
             color: var(--ai-muted);
-            font: 700 10px/1 "SFMono-Regular", Consolas, monospace;
-            letter-spacing: 0.06em;
-            text-transform: uppercase;
+            font: 600 11px/1.3 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            letter-spacing: 0;
         }
 
         .ai-provider-state.ready { color: var(--ai-teal); }
@@ -2852,7 +2837,7 @@
             padding: 14px;
             border: 1px solid var(--ai-line);
             border-radius: 10px;
-            background: rgba(0, 0, 0, 0.14);
+            background: var(--bg-secondary);
         }
 
         .ai-form .form-label {
@@ -2861,8 +2846,8 @@
         }
 
         .ai-form .form-input {
-            border-color: rgba(246, 240, 223, 0.14);
-            background: rgba(246, 240, 223, 0.06);
+            border-color: var(--border-color);
+            background: var(--bg-primary);
         }
 
         .ai-check-grid {
@@ -2876,7 +2861,7 @@
             align-items: center;
             gap: 7px;
             padding: 8px 9px;
-            border: 1px solid rgba(246, 240, 223, 0.1);
+            border: 1px solid var(--border-color);
             border-radius: 7px;
             color: var(--ai-muted);
             cursor: pointer;
@@ -2884,9 +2869,9 @@
         }
 
         .ai-check:has(input:checked) {
-            border-color: rgba(111, 225, 187, 0.45);
+            border-color: var(--ai-teal);
             color: var(--ai-ink);
-            background: rgba(111, 225, 187, 0.08);
+            background: var(--bg-card);
         }
 
         .ai-check input {
@@ -2906,7 +2891,7 @@
             padding: 12px;
             border: 1px solid var(--ai-line);
             border-radius: 9px;
-            background: rgba(246, 240, 223, 0.035);
+            background: var(--bg-tertiary);
         }
 
         .ai-session-card {
@@ -2950,8 +2935,8 @@
         }
 
         .ai-event-card:hover {
-            border-color: rgba(111, 225, 187, 0.5);
-            background: rgba(111, 225, 187, 0.08);
+            border-color: var(--ai-teal);
+            background: var(--bg-card);
         }
 
         .ai-event-card.buy { border-left: 3px solid var(--ai-teal); }
@@ -2960,8 +2945,8 @@
 
         .ai-event-action {
             color: var(--ai-teal);
-            font: 800 10px/1 "SFMono-Regular", Consolas, monospace;
-            letter-spacing: 0.08em;
+            font: 600 11px/1.3 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            letter-spacing: 0;
         }
 
         .ai-event-card.sell .ai-event-action { color: var(--ai-red); }
@@ -2974,10 +2959,11 @@
         }
 
         .ai-consultation-card {
-            border-left: 3px solid rgba(246, 240, 223, 0.25);
+            border-left: 3px solid var(--border-color);
         }
 
         .ai-consultation-card.completed { border-left-color: var(--ai-teal); }
+        .ai-consultation-card.degraded { border-left-color: var(--ai-amber); }
         .ai-consultation-card.failed { border-left-color: var(--ai-red); }
 
         .ai-advice-grid {
@@ -2992,14 +2978,14 @@
             min-width: 58px;
             padding: 8px 7px;
             border-radius: 7px;
-            background: rgba(111, 225, 187, 0.12);
+            background: rgba(63, 185, 80, 0.14);
             color: var(--ai-teal);
-            font: 900 13px/1 "SFMono-Regular", Consolas, monospace;
+            font: 700 13px/1.3 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
             text-align: center;
         }
 
-        .ai-advice-action.sell { background: rgba(255, 123, 114, 0.12); color: var(--ai-red); }
-        .ai-advice-action.wait { background: rgba(246, 240, 223, 0.08); color: var(--ai-muted); }
+        .ai-advice-action.sell { background: rgba(248, 81, 73, 0.14); color: var(--ai-red); }
+        .ai-advice-action.wait { background: var(--bg-tertiary); color: var(--ai-muted); }
 
         .ai-consultation-result {
             color: var(--ai-ink);
@@ -3015,7 +3001,7 @@
 
         .ai-empty {
             padding: 18px 12px;
-            border: 1px dashed rgba(246, 240, 223, 0.15);
+            border: 1px dashed var(--border-color);
             border-radius: 8px;
             color: var(--ai-muted);
             font-size: 12px;
@@ -3025,7 +3011,7 @@
         .ai-inline-note {
             margin-top: 10px;
             color: var(--ai-muted);
-            font: 10px/1.5 "SFMono-Regular", Consolas, monospace;
+            font: 11px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
         }
 
         @media (max-width: 768px) {
@@ -3127,7 +3113,7 @@
         }
     </style>
 </head>
-<body>
+<body class="pilot-redesign-shell">
     <div class="container">
         <!-- Header -->
         <header class="header">
@@ -3159,7 +3145,7 @@
             <button class="tab" data-tab="portfolio">Portfolio</button>
             <button class="tab" data-tab="market">Market</button>
             <button class="tab" data-tab="analysis">Analysis</button>
-            <button class="tab" data-tab="ai">AI Desk</button>
+            <button class="tab" data-tab="ai">의견</button>
             <button class="tab" data-tab="news">News</button>
             <button class="tab" data-tab="parameters">Parameters</button>
             <button class="tab" data-tab="history">History</button>
@@ -3295,14 +3281,14 @@
             </div>
         </div>
 
-        <!-- AI Desk Tab: subscription-backed, read-only decision consultation -->
+        <!-- Subscription-backed, read-only market opinions -->
         <div id="tab-ai" class="tab-content" style="display: none;">
             <section class="card ai-desk">
                 <div class="ai-hero">
                     <div>
-                        <div class="ai-kicker">AI 자문 / 신호 감시</div>
-                        <h2>필요한 신호가 보이면 AI 의견을 확인하세요.</h2>
-                        <p>감시할 신호를 선택해 GPT·Claude 구독 계정으로 AI 의견을 요청합니다. AI 의견은 기록되며 자동 매수·매도와는 별도로 관리됩니다.</p>
+                        <div class="ai-kicker">시장 신호와 의견</div>
+                        <h2>관심 신호가 생기면 의견을 받아보세요.</h2>
+                        <p>관심 신호를 등록해두면 ChatGPT 또는 Claude 의견을 요청할 수 있습니다. 의견은 기록되며 자동 주문과는 별개로 제공됩니다.</p>
                     </div>
                     <div class="ai-policy-stamp">참고용 의견<br>주문 연결 없음</div>
                 </div>
@@ -3314,15 +3300,15 @@
                             <button class="btn btn-secondary btn-sm" onclick="loadAiDesk(true)">새로고침</button>
                         </div>
                         <div id="aiProviderStatus" class="ai-provider-grid">
-                            <div class="ai-empty" style="grid-column: 1 / -1;">AI 연결 상태를 확인하는 중...</div>
+                            <div class="ai-empty" style="grid-column: 1 / -1;">의견 서비스 연결 상태를 확인하는 중입니다.</div>
                         </div>
 
                         <div class="ai-section-title">
-                            <span>AI 감시 목록</span>
+                            <span>관심 신호 알림</span>
                             <small id="aiSessionCount">0개 실행 중</small>
                         </div>
                         <div id="aiSessionList" class="ai-session-list">
-                            <div class="ai-empty">등록한 AI 감시가 없습니다.</div>
+                            <div class="ai-empty">등록한 알림이 없습니다.</div>
                         </div>
 
                         <div class="ai-section-title" style="margin-top: 20px;">
@@ -3332,12 +3318,12 @@
                         <form class="ai-form" onsubmit="createAiMonitoringSession(event)">
                             <div class="form-group">
                                 <label class="form-label" for="aiSessionName">감시 이름</label>
-                                <input id="aiSessionName" class="form-input" maxlength="80" placeholder="예: BTC 반등 감시" value="시장 이벤트 자문">
+                                <input id="aiSessionName" class="form-input" maxlength="80" placeholder="예: BTC 반등 알림" value="시장 신호 알림">
                             </div>
                             <div class="form-group">
-                                <label class="form-label">자문 AI</label>
+                                <label class="form-label">의견 서비스</label>
                                 <div class="ai-check-grid">
-                                    <label class="ai-check"><input type="checkbox" name="aiProvider" value="gpt" checked> GPT / Codex</label>
+                                    <label class="ai-check"><input type="checkbox" name="aiProvider" value="gpt" checked> ChatGPT</label>
                                     <label class="ai-check"><input type="checkbox" name="aiProvider" value="claude" checked> Claude</label>
                                 </div>
                             </div>
@@ -3358,16 +3344,16 @@
                             </div>
                             <div class="grid grid-2" style="gap: 10px; margin-bottom: 4px;">
                                 <div class="form-group" style="margin-bottom: 10px;">
-                                    <label class="form-label" for="aiCooldown">같은 신호를 다시 자문할 간격 (초)</label>
+                                    <label class="form-label" for="aiCooldown">같은 신호를 다시 요청할 간격 (초)</label>
                                     <input id="aiCooldown" class="form-input" type="number" min="30" max="86400" step="30" value="300">
                                 </div>
                                 <div class="form-group" style="margin-bottom: 10px;">
-                                    <label class="form-label" for="aiAutoConsult">자동 자문</label>
-                                    <label class="ai-check" style="height: 42px;"><input id="aiAutoConsult" type="checkbox" checked> 이벤트 발생 시 즉시 요청</label>
+                                    <label class="form-label" for="aiAutoConsult">자동 의견 요청</label>
+                                    <label class="ai-check" style="height: 42px;"><input id="aiAutoConsult" type="checkbox" checked> 선택한 신호가 생기면 요청</label>
                                 </div>
                             </div>
                             <button class="btn btn-primary" type="submit" style="width: 100%;">감시 시작</button>
-                            <div class="ai-inline-note">감시 설정은 다시 접속해도 저장됩니다. 자동 자문은 선택한 신호가 발생하고 재요청 간격이 지났을 때 실행됩니다.</div>
+                            <div class="ai-inline-note">알림 설정은 다시 접속해도 유지됩니다. 선택한 신호가 생기고 재요청 간격이 지나면 의견을 요청합니다.</div>
                         </form>
                     </div>
 
@@ -3377,16 +3363,16 @@
                             <small id="aiLatestSnapshotAt">수신 대기</small>
                         </div>
                         <div id="aiEventList" class="ai-event-list">
-                            <div class="ai-empty">자동매매가 분석을 마치면 매수·매도 신호가 여기에 표시됩니다.</div>
+                            <div class="ai-empty">새 시장 신호가 기록되면 여기에 표시됩니다.</div>
                         </div>
-                        <div class="ai-inline-note">신호를 누르면 선택한 AI에 직접 의견을 요청할 수 있습니다.</div>
+                        <div class="ai-inline-note">신호를 선택해 의견을 요청할 수 있습니다.</div>
 
                         <div class="ai-section-title" style="margin-top: 22px;">
-                            <span>AI 의견</span>
-                            <small id="aiConsultationCount">0 consultations</small>
+                            <span>최근 의견</span>
+                            <small id="aiConsultationCount">0회</small>
                         </div>
                         <div id="aiConsultationList" class="ai-consultation-list">
-                            <div class="ai-empty">아직 자문 결과가 없습니다.</div>
+                            <div class="ai-empty">의견 요청 기록이 없습니다.</div>
                         </div>
                     </div>
                 </div>
@@ -3474,7 +3460,7 @@
             <div class="grid grid-2" style="margin-bottom: 20px;">
                 <div class="card">
                     <div class="card-header">
-                        <h2>📈 매수 추천</h2>
+                        <h2>📈 매수 신호</h2>
                         <button class="btn btn-secondary btn-sm" onclick="loadBuyRecommendations()">새로고침</button>
                     </div>
                     <div class="card-body">
@@ -3489,7 +3475,7 @@
 
                 <div class="card">
                     <div class="card-header">
-                        <h2>📉 매도 추천</h2>
+                        <h2>📉 매도 신호</h2>
                         <button class="btn btn-secondary btn-sm" onclick="loadSellRecommendations()">새로고침</button>
                     </div>
                     <div class="card-body">
@@ -3912,12 +3898,12 @@
         <div id="tab-analysis" class="tab-content" style="display: none;">
             <div class="card">
                 <div class="card-header">
-                    <h2>📊 AI 코인 평가</h2>
+                    <h2>📊 종목 분석</h2>
                     <div style="display: flex; align-items: center; gap: 10px;">
                         <select id="analysisFilter" class="form-input" style="width: auto; min-width: 120px;" onchange="filterAnalysisResults()">
                             <option value="all">전체</option>
-                            <option value="buy">매수 추천</option>
-                            <option value="sell">매도 추천</option>
+                            <option value="buy">매수 신호</option>
+                            <option value="sell">매도 신호</option>
                             <option value="hold">관망</option>
                             <option value="strong">강한 신호</option>
                         </select>
@@ -3940,11 +3926,11 @@
                         </div>
                         <div style="text-align: center;">
                             <div style="font-size: 24px; font-weight: 700; color: var(--accent-green);">-</div>
-                            <div style="font-size: 11px; color: var(--text-muted);">매수 추천</div>
+                            <div style="font-size: 11px; color: var(--text-muted);">매수 신호</div>
                         </div>
                         <div style="text-align: center;">
                             <div style="font-size: 24px; font-weight: 700; color: var(--accent-red);">-</div>
-                            <div style="font-size: 11px; color: var(--text-muted);">매도 추천</div>
+                            <div style="font-size: 11px; color: var(--text-muted);">매도 신호</div>
                         </div>
                         <div style="text-align: center;">
                             <div style="font-size: 24px; font-weight: 700; color: var(--accent-yellow);">-</div>
@@ -4405,14 +4391,14 @@
         <button data-mobile-tab="trading">거래</button>
         <button data-mobile-tab="portfolio">자산</button>
         <button data-mobile-tab="analysis">신호</button>
-        <button data-mobile-tab="ai">AI</button>
+        <button data-mobile-tab="ai">의견</button>
     </nav>
 
     <!-- Toast Container -->
     <div class="toast-container" id="toastContainer"></div>
 
     <!-- Socket.io Client -->
-    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <script src="/socket.io/socket.io.js"></script>
     <!-- Auth gate: socket.io 다음, 앱 스크립트 이전에 로드되어야 한다 -->
     <script src="/auth-client.js"></script>
 
@@ -4737,16 +4723,13 @@
             showToast('번들 거래 실행 중...', 'info');
 
             try {
-                const response = await fetch('/api/trade/execute-bundle', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ sellCoin, buyCoin })
-                });
-
-                const result = await response.json();
+                const outcome = await submitProtectedMutation('/trade/execute-bundle', { sellCoin, buyCoin });
+                if (!acceptProtectedMutation(outcome, '번들 거래 결과를 확인할 수 없습니다.')) return;
+                const result = outcome.body || {};
 
                 if (result.success) {
                     showToast(`✅ ${result.message}`, 'success');
+                    if (outcome.kind === 'terminal-locked') { showToast(outcome.message, 'warning'); return; }
                     loadAccountInfo();
                     loadOverviewStats();
                 } else {
@@ -4888,6 +4871,23 @@
             }
         }
 
+        async function submitProtectedMutation(endpoint, body) {
+            const client = window.CoinPilotMutationClient;
+            if (!client || typeof client.submit !== 'function') {
+                return { kind: 'storage-error', message: '안전한 요청 기록을 사용할 수 없어 변경 요청을 보내지 않았습니다.' };
+            }
+            return client.submit(endpoint, body);
+        }
+
+        function acceptProtectedMutation(outcome, fallback) {
+            if (outcome?.kind === 'terminal' || outcome?.kind === 'terminal-locked') return true;
+            const error = outcome?.body?.error;
+            const message = outcome?.body?.message || error?.message || (typeof error === 'string' ? error : null) ||
+                outcome?.message || fallback;
+            showToast(message, outcome?.kind === 'rejected' || outcome?.kind === 'storage-error' || outcome?.kind === 'invalid' ? 'error' : 'warning');
+            return false;
+        }
+
         // ===== AI Desk / 장기 모니터링 =====
         const AI_EVENT_LABELS = {
             BUY_SIGNAL: '매수 신호',
@@ -4899,7 +4899,11 @@
         };
 
         function aiProviderLabel(provider) {
-            return provider === 'gpt' ? 'GPT / Codex' : provider === 'claude' ? 'Claude' : String(provider || '-');
+            return provider === 'gpt' ? 'ChatGPT' : provider === 'claude' ? 'Claude' : String(provider || '의견 서비스');
+        }
+
+        function aiActionLabel(value) {
+            return ({ BUY: '매수', SELL: '매도', HOLD: '보유', WAIT: '관망' })[String(value || '').toUpperCase()] || '관망';
         }
 
         function aiTime(value) {
@@ -4914,21 +4918,32 @@
             const container = document.getElementById('aiProviderStatus');
             if (!container) return;
             if (!status?.providers?.length) {
-                container.innerHTML = '<div class="ai-empty" style="grid-column: 1 / -1;">AI 서비스 상태를 불러오지 못했습니다.</div>';
+                container.innerHTML = '<div class="ai-empty" style="grid-column: 1 / -1;">의견 서비스 상태를 불러오지 못했습니다.</div>';
                 return;
             }
 
             container.innerHTML = status.providers.map(provider => {
+                const configWarning = provider.status === 'READY_WITH_CONFIG_WARNING' && provider.ready === true;
                 const stateClass = provider.ready ? 'ready' : provider.status === 'NOT_AUTHENTICATED' ? 'warn' : 'error';
-                const stateText = provider.ready ? '사용 가능' : provider.status === 'NOT_AUTHENTICATED' ? '로그인 필요' : '사용할 수 없음';
+                const stateText = provider.ready ? configWarning ? '연결됨' : '사용 가능' : provider.status === 'NOT_AUTHENTICATED' ? '로그인 필요' : '사용할 수 없음';
+                const detailText = configWarning
+                    ? '연결 설정에 확인할 부분이 있습니다. 현재 의견 요청은 가능합니다.'
+                    : provider.ready
+                    ? '이 서비스로 의견을 요청할 수 있습니다.'
+                    : provider.status === 'NOT_AUTHENTICATED'
+                        ? '해당 서비스 계정에서 로그인해 주세요.'
+                        : provider.status === 'NOT_INSTALLED'
+                            ? '연결 프로그램을 사용할 수 없습니다.'
+                            : provider.status === 'DISABLED'
+                                ? '현재 사용할 수 없는 서비스입니다.'
+                                : '연결 상태를 확인해 주세요.';
                 return `
                     <div class="ai-provider-card">
                         <div class="ai-provider-head">
                             <span class="ai-provider-name">${escapeHtml(provider.label || aiProviderLabel(provider.id))}</span>
                             <span class="ai-provider-state ${stateClass}">${escapeHtml(stateText)}</span>
                         </div>
-                        <div class="ai-provider-detail">${escapeHtml(provider.detail || provider.subscriptionLabel || '')}</div>
-                        <div style="color: var(--text-muted); font: 10px/1.3 'SFMono-Regular', Consolas, monospace;">${provider.ready ? '구독 계정 사용' : '로컬 로그인 상태를 확인하세요'}</div>
+                        <div class="ai-provider-detail">${escapeHtml(detailText)}</div>
                     </div>
                 `;
             }).join('');
@@ -4941,7 +4956,7 @@
             const activeCount = (sessions || []).filter(session => session.status === 'RUNNING').length;
             if (count) count.textContent = `실행 중 ${activeCount}개 / 전체 ${(sessions || []).length}개`;
             if (!sessions?.length) {
-                container.innerHTML = '<div class="ai-empty">등록한 AI 감시가 없습니다.</div>';
+                container.innerHTML = '<div class="ai-empty">등록한 알림이 없습니다.</div>';
                 return;
             }
 
@@ -4962,8 +4977,8 @@
                             <span class="ai-session-name">${escapeHtml(session.name)}</span>
                             <span class="ai-provider-state ${statusClass === 'stopped' ? 'error' : statusClass === 'paused' ? 'warn' : 'ready'}">${statusLabel}</span>
                         </div>
-                        <div class="ai-session-meta">${escapeHtml(providerLabels)}<br>${escapeHtml(eventLabels)}<br>${escapeHtml(coinText)} · 이벤트 ${session.eventCount || 0} · 자문 ${session.consultationCount || 0}</div>
-                        <div class="ai-session-meta">시작 ${aiTime(session.startedAt)} · 마지막 이벤트 ${aiTime(session.lastEventAt)}</div>
+                        <div class="ai-session-meta">${escapeHtml(providerLabels)}<br>${escapeHtml(eventLabels)}<br>${escapeHtml(coinText)} · 받은 신호 ${session.eventCount || 0}건 · 의견 요청 ${session.consultationCount || 0}회</div>
+                        <div class="ai-session-meta">시작 ${aiTime(session.startedAt)} · 최근 신호 ${aiTime(session.lastEventAt)}</div>
                         <div class="ai-session-actions">${actions}</div>
                     </div>
                 `;
@@ -4974,7 +4989,7 @@
             const container = document.getElementById('aiEventList');
             if (!container) return;
             if (!events?.length) {
-                container.innerHTML = '<div class="ai-empty">자동매매가 분석을 마치면 매수·매도 신호가 여기에 표시됩니다.</div>';
+                container.innerHTML = '<div class="ai-empty">새 시장 신호가 생기면 여기에 표시됩니다.</div>';
                 return;
             }
 
@@ -4987,10 +5002,10 @@
                     <div class="ai-event-card ${typeClass}">
                         <div class="ai-event-head">
                             <span class="ai-event-title">${escapeHtml(coin)} · ${escapeHtml(eventLabel)}</span>
-                            <span class="ai-event-action">${escapeHtml(event.action || 'WAIT')}</span>
+                            <span class="ai-event-action">${escapeHtml(aiActionLabel(event.action))}</span>
                         </div>
                         <div class="ai-event-meta">${escapeHtml(aiTime(event.timestamp))} · ${escapeHtml(price)}${event.signalStrength ? ` · ${escapeHtml(event.signalStrength)}` : ''}<br>${escapeHtml(event.reason || event.snapshot?.title || '관찰 이벤트')}</div>
-                        <div class="ai-event-ask"><button class="btn btn-secondary btn-sm" onclick="requestAiConsultation('${event.id}')">이 이벤트 자문</button></div>
+                        <div class="ai-event-ask"><button class="btn btn-secondary btn-sm" onclick="requestAiConsultation('${event.id}')">이 신호에 의견 요청</button></div>
                     </div>
                 `;
             }).join('');
@@ -5002,24 +5017,35 @@
             if (!container) return;
             if (count) count.textContent = `${(consultations || []).length}건`;
             if (!consultations?.length) {
-                container.innerHTML = '<div class="ai-empty">아직 자문 결과가 없습니다.</div>';
+                container.innerHTML = '<div class="ai-empty">의견 요청 기록이 없습니다.</div>';
                 return;
             }
 
             container.innerHTML = consultations.slice(0, 40).map(consultation => {
-                const stateClass = consultation.status === 'COMPLETED' ? 'completed' : consultation.status === 'RUNNING' ? '' : 'failed';
+                const hasProviderResponse = (consultation.results || []).some(result => result.status === 'COMPLETED');
+                const stateClass = consultation.status === 'COMPLETED' ? 'completed'
+                    : consultation.status === 'DEGRADED' ? 'degraded'
+                        : consultation.status === 'RUNNING' ? '' : 'failed';
+                const statusText = consultation.status === 'DEGRADED' && !hasProviderResponse
+                    ? '응답 없음 · 자료 요약'
+                    : ({ COMPLETED: '완료', DEGRADED: '일부 응답', RUNNING: '응답 중', FAILED: '응답 없음' }[consultation.status] || '확인 필요');
                 const event = consultation.event || {};
                 const coin = event.coin ? event.coin.replace('KRW-', '') : 'MARKET';
                 const resultHtml = (consultation.results || []).map(result => {
+                    if (result.status === 'FALLBACK' && result.advice) {
+                        const fallback = result.advice;
+                        const risks = (fallback.risks || []).map(risk => `<li>${escapeHtml(risk)}</li>`).join('');
+                        return `<div class="ai-advice-grid"><div class="ai-advice-action wait">확인한 정보</div><div class="ai-consultation-result"><strong>서비스 응답을 받지 못해 확인한 자료만 정리했습니다.</strong><br>${escapeHtml(fallback.rationale || '')}${risks ? `<ul class="ai-risk-list">${risks}</ul>` : ''}<div class="ai-consultation-meta">${escapeHtml(fallback.invalidation || '연결 상태를 확인한 뒤 다시 요청해 주세요.')}</div></div></div>`;
+                    }
                     if (result.status !== 'COMPLETED' || !result.advice) {
-                        return `<div class="ai-consultation-result"><span style="color: var(--ai-red);">${escapeHtml(aiProviderLabel(result.provider))}: ${escapeHtml(result.error || '응답 실패')}</span></div>`;
+                        return `<div class="ai-consultation-result"><span style="color: var(--ai-red);">${escapeHtml(aiProviderLabel(result.provider))}: ${escapeHtml(result.error || '의견을 받지 못했습니다.')}</span></div>`;
                     }
                     const advice = result.advice;
                     const actionClass = advice.action === 'SELL' ? 'sell' : ['HOLD', 'WAIT'].includes(advice.action) ? 'wait' : '';
                     const risks = (advice.risks || []).map(risk => `<li>${escapeHtml(risk)}</li>`).join('');
                     return `
                         <div class="ai-advice-grid">
-                            <div class="ai-advice-action ${actionClass}">${escapeHtml(advice.action)}</div>
+                            <div class="ai-advice-action ${actionClass}">${escapeHtml(aiActionLabel(advice.action))}</div>
                             <div class="ai-consultation-result"><strong>${escapeHtml(aiProviderLabel(result.provider))}</strong> · ${escapeHtml(advice.horizon || '')}<br>${escapeHtml(advice.rationale || '')}${risks ? `<ul class="ai-risk-list">${risks}</ul>` : ''}<div class="ai-consultation-meta">다시 확인할 조건: ${escapeHtml(advice.invalidation || '추가 확인 필요')}</div></div>
                         </div>
                     `;
@@ -5028,8 +5054,8 @@
                 const pending = consultation.status === 'RUNNING' ? '<div class="ai-consultation-result">응답을 기다리는 중…</div>' : '';
                 return `
                     <div class="ai-consultation-card ${stateClass}">
-                        <div class="ai-consultation-head"><span class="ai-event-title">${escapeHtml(coin)} · ${escapeHtml((event.type && AI_EVENT_LABELS[event.type]) || event.type || '자문')}</span><span class="ai-provider-state ${stateClass === 'completed' ? 'ready' : stateClass === 'failed' ? 'error' : 'warn'}">${escapeHtml({ COMPLETED: '완료', DEGRADED: '제한됨', RUNNING: '실행 중', FAILED: '실패' }[consultation.status] || consultation.status || '-')}</span></div>
-                        <div class="ai-consultation-meta">${escapeHtml(aiTime(consultation.createdAt))} · ${(consultation.providerSelection || []).map(aiProviderLabel).map(escapeHtml).join(' + ')}${consultation.auto ? ' · 자동 자문' : ' · 수동 자문'}</div>
+                        <div class="ai-consultation-head"><span class="ai-event-title">${escapeHtml(coin)} · ${escapeHtml((event.type && AI_EVENT_LABELS[event.type]) || event.type || '시장 신호')}</span><span class="ai-provider-state ${stateClass === 'completed' ? 'ready' : stateClass === 'failed' ? 'error' : 'warn'}">${escapeHtml(statusText)}</span></div>
+                        <div class="ai-consultation-meta">${escapeHtml(aiTime(consultation.createdAt))} · ${(consultation.providerSelection || []).map(aiProviderLabel).map(escapeHtml).join(' + ')}${consultation.auto ? ' · 자동 요청' : ' · 직접 요청'}</div>
                         ${resultHtml || pending || failure}
                     </div>
                 `;
@@ -5069,7 +5095,7 @@
             const providers = [...document.querySelectorAll('input[name="aiProvider"]:checked')].map(input => input.value);
             const eventTypes = [...document.querySelectorAll('input[name="aiEventType"]:checked')].map(input => input.value);
             if (!providers.length || !eventTypes.length) {
-                showToast('AI 서비스와 감시할 신호를 하나 이상 선택하세요.', 'warning');
+                showToast('의견 서비스를 고르고 알림을 받을 신호를 하나 이상 선택해 주세요.', 'warning');
                 return;
             }
             const result = await fetchAPI('/ai/sessions', {
@@ -5085,44 +5111,44 @@
                 })
             });
             if (!result?.success) {
-                showToast('AI 감시 시작 실패: ' + (result?.error || '서버 오류'), 'error');
+                showToast('알림을 시작하지 못했습니다: ' + (result?.error || '서버에서 요청을 처리하지 못했습니다.'), 'error');
                 return;
             }
-            showToast('AI 신호 감시를 시작했습니다.', 'success');
+            showToast('관심 신호 알림을 시작했습니다.', 'success');
             await loadAiDesk(false);
         }
 
         async function updateAiSession(sessionId, action) {
             const result = await fetchAPI(`/ai/sessions/${sessionId}/${action}`, { method: 'POST' });
             if (!result?.success) {
-                showToast('감시 상태 변경 실패: ' + (result?.error || '서버 오류'), 'error');
+                showToast('알림 상태를 바꾸지 못했습니다: ' + (result?.error || '서버에서 요청을 처리하지 못했습니다.'), 'error');
                 return;
             }
-            showToast(action === 'stop' ? 'AI 신호 감시를 종료했습니다.' : `감시를 ${action === 'pause' ? '일시정지' : '다시 시작'}했습니다`, 'success');
+            showToast(action === 'stop' ? '관심 신호 알림을 종료했습니다.' : `알림을 ${action === 'pause' ? '일시정지' : '다시 시작'}했습니다.`, 'success');
             await loadAiDesk(false);
         }
 
         async function requestAiConsultation(eventId) {
             const providers = [...document.querySelectorAll('input[name="aiProvider"]:checked')].map(input => input.value);
             const provider = providers.length === 2 ? 'both' : providers[0] || 'both';
-            showToast('AI 자문 요청 중…', 'info');
+            showToast('의견을 요청하고 있습니다.', 'info');
             const result = await fetchAPI('/ai/consult', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ eventId, provider })
             });
             if (!result?.consultation) {
-                showToast('AI 자문 요청 실패: ' + (result?.error || '서버 오류'), 'error');
+                showToast('의견을 받지 못했습니다: ' + (result?.error || '서버에서 요청을 처리하지 못했습니다.'), 'error');
                 return;
             }
             handleAiConsultationUpdate(result.consultation);
             const consultationStatus = result.consultation.status;
             showToast(
                 consultationStatus === 'COMPLETED'
-                    ? 'AI 자문 결과를 받았습니다'
+                    ? '의견을 받았습니다.'
                     : consultationStatus === 'DEGRADED'
-                        ? 'AI 응답이 없어 확인된 정보만 요약했습니다.'
-                        : 'AI 자문이 완료되지 않았습니다',
+                        ? '의견 서비스 응답이 없어 확인된 자료만 표시했습니다.'
+                        : '의견을 받지 못했습니다.',
                 consultationStatus === 'COMPLETED' ? 'success' : 'warning'
             );
         }
@@ -5131,7 +5157,7 @@
             aiEvents = [event, ...aiEvents.filter(item => item.id !== event.id)].slice(0, 80);
             if (localStorage.getItem('currentTab') === 'ai') renderAiEvents(aiEvents);
             if (['BUY_SIGNAL', 'SELL_SIGNAL'].includes(event.type)) {
-                showToast(`AI Desk 이벤트 · ${event.coin?.replace('KRW-', '') || 'MARKET'} ${AI_EVENT_LABELS[event.type]}`, event.type === 'SELL_SIGNAL' ? 'error' : 'info', 4000);
+                showToast(`${event.coin?.replace('KRW-', '') || '시장 전체'} ${AI_EVENT_LABELS[event.type]}`, event.type === 'SELL_SIGNAL' ? 'error' : 'info', 4000);
             }
         }
 
@@ -6302,11 +6328,9 @@
                 return;
             }
 
-            const result = await fetchAPI('/virtual/deposit', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ amount })
-            });
+            const outcome = await submitProtectedMutation('/virtual/deposit', { amount });
+            if (!acceptProtectedMutation(outcome, '입금 결과를 확인할 수 없습니다.')) return;
+            const result = outcome.body || {};
 
             if (result?.success) {
                 // 시드머니 업데이트 (손익 계산에 반영)
@@ -6314,6 +6338,7 @@
                     initialSeedMoney = result.newSeedMoney;
                 }
                 showVirtualWalletMessage(`${formatNumber(amount)}원 입금 완료! 시드머니: ${formatNumber(result.newSeedMoney || 0)}원`, true);
+                if (outcome.kind === 'terminal-locked') { showToast(outcome.message, 'warning'); return; }
                 document.getElementById('depositAmount').value = '';
                 loadOverviewStats();
             } else {
@@ -6329,11 +6354,9 @@
                 return;
             }
 
-            const result = await fetchAPI('/virtual/withdraw', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ amount })
-            });
+            const outcome = await submitProtectedMutation('/virtual/withdraw', { amount });
+            if (!acceptProtectedMutation(outcome, '출금 결과를 확인할 수 없습니다.')) return;
+            const result = outcome.body || {};
 
             if (result?.success) {
                 // 시드머니 업데이트 (손익 계산에 반영)
@@ -6341,6 +6364,7 @@
                     initialSeedMoney = result.newSeedMoney;
                 }
                 showVirtualWalletMessage(`${formatNumber(amount)}원 출금 완료! 시드머니: ${formatNumber(result.newSeedMoney || 0)}원`, true);
+                if (outcome.kind === 'terminal-locked') { showToast(outcome.message, 'warning'); return; }
                 document.getElementById('withdrawAmount').value = '';
                 loadOverviewStats();
             } else {
@@ -6350,11 +6374,9 @@
 
         // 빠른 입금
         async function quickDeposit(amount) {
-            const result = await fetchAPI('/virtual/deposit', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ amount })
-            });
+            const outcome = await submitProtectedMutation('/virtual/deposit', { amount });
+            if (!acceptProtectedMutation(outcome, '입금 결과를 확인할 수 없습니다.')) return;
+            const result = outcome.body || {};
 
             if (result?.success) {
                 // 시드머니 업데이트 (손익 계산에 반영)
@@ -6362,6 +6384,7 @@
                     initialSeedMoney = result.newSeedMoney;
                 }
                 showVirtualWalletMessage(`${formatNumber(amount)}원 입금 완료! 시드머니: ${formatNumber(result.newSeedMoney || 0)}원`, true);
+                if (outcome.kind === 'terminal-locked') { showToast(outcome.message, 'warning'); return; }
                 loadOverviewStats();
             } else {
                 showVirtualWalletMessage(result?.error || '입금 실패', false);
@@ -6376,14 +6399,13 @@
                 return;
             }
 
-            const result = await fetchAPI('/virtual/reset', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ seedMoney: newSeedMoney || 10000000 })
-            });
+            const outcome = await submitProtectedMutation('/virtual/reset', { seedMoney: newSeedMoney || 10000000 });
+            if (!acceptProtectedMutation(outcome, '지갑 초기화 결과를 확인할 수 없습니다.')) return;
+            const result = outcome.body || {};
 
             if (result?.success) {
                 showVirtualWalletMessage(`시드머니가 ${formatNumber(result.newSeedMoney)}원으로 리셋되었습니다.`, true);
+                if (outcome.kind === 'terminal-locked') { showToast(outcome.message, 'warning'); return; }
                 document.getElementById('resetSeedMoney').value = '';
                 loadOverviewStats();
                 loadPositions();
@@ -7614,21 +7636,18 @@
             showToast('스마트 자동 매수 분석 중...', 'info');
 
             try {
-                const response = await fetch('/api/trade/smart-buy', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        totalAmount: amount,
-                        minScore: 60,
-                        maxCoins: 0,  // 0 = 무제한
-                        strategy: 'score'
-                    })
+                const outcome = await submitProtectedMutation('/trade/smart-buy', {
+                    totalAmount: amount,
+                    minScore: 60,
+                    maxCoins: 0,  // 0 = 무제한
+                    strategy: 'score'
                 });
-
-                const result = await response.json();
+                if (!acceptProtectedMutation(outcome, '스마트 매수 결과를 확인할 수 없습니다.')) return;
+                const result = outcome.body || {};
 
                 if (result.success) {
                     showToast(`✅ ${result.trades.length}개 코인 매수 완료! (${result.qualifiedCoins}개 적합, 총 ${formatNumber(result.totalInvested)}원)`, 'success');
+                    if (outcome.kind === 'terminal-locked') { showToast(outcome.message, 'warning'); return; }
                     // Refresh data
                     loadOverviewStats();
                     loadAccountInfo();
@@ -7665,19 +7684,16 @@
             showToast('스마트 자동 매도 실행 중...', 'info');
 
             try {
-                const response = await fetch('/api/trade/smart-sell', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        targetAmount: targetAmount,
-                        strategy: strategy
-                    })
+                const outcome = await submitProtectedMutation('/trade/smart-sell', {
+                    targetAmount: targetAmount,
+                    strategy: strategy
                 });
-
-                const result = await response.json();
+                if (!acceptProtectedMutation(outcome, '스마트 매도 결과를 확인할 수 없습니다.')) return;
+                const result = outcome.body || {};
 
                 if (result.success) {
                     showToast(`✅ ${result.trades.length}개 코인 매도 완료! 총 ${formatNumber(result.totalReceived)}원 회수`, 'success');
+                    if (outcome.kind === 'terminal-locked') { showToast(outcome.message, 'warning'); return; }
                     // Refresh data
                     loadOverviewStats();
                     loadAccountInfo();
@@ -7696,7 +7712,7 @@
         // ===== 매수 추천 로드 =====
         async function loadBuyRecommendations() {
             const container = document.getElementById('buyRecommendations');
-            container.innerHTML = '<div class="loading"><div class="spinner"></div>매수 추천 분석 중...</div>';
+            container.innerHTML = '<div class="loading"><div class="spinner"></div>매수 신호를 분석하고 있습니다.</div>';
             try {
                 const data = await fetchAPI('/coin-analysis');
                 if (!data || !data.recommendations) {
@@ -7705,7 +7721,7 @@
                 }
                 const buyRecs = data.recommendations.filter(r => r.action.includes('BUY') || r.action === 'HOLD_OR_BUY').sort((a, b) => b.buyScore - a.buyScore);
                 if (buyRecs.length === 0) {
-                    container.innerHTML = '<div style="text-align: center; padding: 30px;"><div style="font-size: 36px; margin-bottom: 10px;">🤔</div><div style="color: var(--text-muted);">현재 매수 추천 코인이 없습니다</div></div>';
+                    container.innerHTML = '<div style="text-align: center; padding: 30px;"><div style="font-size: 36px; margin-bottom: 10px;">🤔</div><div style="color: var(--text-muted);">현재 매수 신호가 없습니다.</div></div>';
                     return;
                 }
                 let html = '';
@@ -7727,7 +7743,7 @@
         // ===== 매도 추천 로드 =====
         async function loadSellRecommendations() {
             const container = document.getElementById('sellRecommendations');
-            container.innerHTML = '<div class="loading"><div class="spinner"></div>매도 추천 분석 중...</div>';
+            container.innerHTML = '<div class="loading"><div class="spinner"></div>매도 신호를 분석하고 있습니다.</div>';
             try {
                 const positionsData = await fetchAPI('/positions');
                 if (!positionsData || !positionsData.holdings || positionsData.holdings.length === 0) {
@@ -7752,7 +7768,7 @@
                 }
                 sellRecs.sort((a, b) => { const order = { loss: 0, overbought: 1, signal: 2, profit: 3 }; return order[a.category] - order[b.category]; });
                 if (sellRecs.length === 0) {
-                    container.innerHTML = '<div style="text-align: center; padding: 30px;"><div style="font-size: 36px; margin-bottom: 10px;">👍</div><div style="color: var(--text-muted);">현재 매도 추천 코인이 없습니다</div></div>';
+                    container.innerHTML = '<div style="text-align: center; padding: 30px;"><div style="font-size: 36px; margin-bottom: 10px;">👍</div><div style="color: var(--text-muted);">현재 매도 신호가 없습니다.</div></div>';
                     return;
                 }
                 let html = '';
@@ -7811,10 +7827,12 @@
             if (!confirm(symbol + '을(를) ' + formatNumber(amount) + '원어치 매수하시겠습니까?')) return;
             showToast(symbol + ' 매수 주문 중...', 'info');
             try {
-                const response = await fetch('/api/trade/buy', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ coin: coin, amount: amount }) });
-                const result = await response.json();
+                const outcome = await submitProtectedMutation('/trade/buy', { coin: coin, amount: amount });
+                if (!acceptProtectedMutation(outcome, '매수 결과를 확인할 수 없습니다.')) return;
+                const result = outcome.body || {};
                 if (result.success) { showToast('✅ ' + symbol + ' ' + formatNumber(amount) + '원 매수 완료!', 'success'); input.value = ''; loadOverviewStats(); loadManualPositions(); loadBuyRecommendations(); loadPortfolioAnalysis(); loadAccountInfo(); loadPositions(); loadRecentTrades(); }
                 else { showToast('❌ 매수 실패: ' + result.error, 'error'); }
+                if (outcome.kind === 'terminal-locked') showToast(outcome.message, 'warning');
             } catch (error) { showToast('❌ 오류: ' + error.message, 'error'); }
         }
 
@@ -7828,10 +7846,12 @@
             if (!confirm(symbol + ' ' + quantity + '개를 매도하시겠습니까?')) return;
             showToast(symbol + ' 매도 주문 중...', 'info');
             try {
-                const response = await fetch('/api/trade/sell', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ coin: coin, quantity: quantity }) });
-                const result = await response.json();
+                const outcome = await submitProtectedMutation('/trade/sell', { coin: coin, quantity: quantity });
+                if (!acceptProtectedMutation(outcome, '매도 결과를 확인할 수 없습니다.')) return;
+                const result = outcome.body || {};
                 if (result.success) { showToast('✅ ' + symbol + ' 매도 완료!', 'success'); loadOverviewStats(); loadManualPositions(); loadSellRecommendations(); loadPortfolioAnalysis(); loadAccountInfo(); loadPositions(); loadRecentTrades(); }
                 else { showToast('❌ 매도 실패: ' + result.error, 'error'); }
+                if (outcome.kind === 'terminal-locked') showToast(outcome.message, 'warning');
             } catch (error) { showToast('❌ 오류: ' + error.message, 'error'); }
         }
 
@@ -7901,11 +7921,11 @@
                 </div>
                 <div style="text-align: center;">
                     <div style="font-size: 24px; font-weight: 700; color: var(--accent-green);">${buyCount}</div>
-                    <div style="font-size: 11px; color: var(--text-muted);">매수 추천</div>
+                    <div style="font-size: 11px; color: var(--text-muted);">매수 신호</div>
                 </div>
                 <div style="text-align: center;">
                     <div style="font-size: 24px; font-weight: 700; color: var(--accent-red);">${sellCount}</div>
-                    <div style="font-size: 11px; color: var(--text-muted);">매도 추천</div>
+                    <div style="font-size: 11px; color: var(--text-muted);">매도 신호</div>
                 </div>
                 <div style="text-align: center;">
                     <div style="font-size: 24px; font-weight: 700; color: var(--accent-yellow);">${holdCount}</div>
@@ -8071,8 +8091,8 @@
             const changePrefix = change >= 0 ? '+' : '';
 
             const recStyles = {
-                'BUY': { label: '매수 추천', color: 'var(--accent-green)', bg: 'rgba(63, 185, 80, 0.2)' },
-                'SELL': { label: '매도 추천', color: 'var(--accent-red)', bg: 'rgba(248, 81, 73, 0.2)' },
+                'BUY': { label: '매수 신호', color: 'var(--accent-green)', bg: 'rgba(63, 185, 80, 0.2)' },
+                'SELL': { label: '매도 신호', color: 'var(--accent-red)', bg: 'rgba(248, 81, 73, 0.2)' },
                 'HOLD': { label: '관망', color: 'var(--accent-yellow)', bg: 'rgba(210, 153, 34, 0.2)' }
             };
             const recStyle = recStyles[coin.recommendation] || recStyles['HOLD'];
@@ -8672,7 +8692,7 @@
 
             document.getElementById('acceptCoin').textContent = coin;
             document.getElementById('acceptCurrentPrice').textContent = formatNumber(currentPrice) + '원';
-            document.getElementById('acceptModalTitle').textContent = action === 'BUY' ? '매수 추천 수락' : '매도 추천 수락';
+            document.getElementById('acceptModalTitle').textContent = action === 'BUY' ? '매수 주문 확인' : '매도 주문 확인';
 
             // 매수 시 금액 옵션 표시, 매도 시 숨기기
             document.getElementById('acceptAmountGroup').style.display = action === 'BUY' ? 'block' : 'none';
@@ -8709,14 +8729,13 @@
             const { coin, action } = acceptModalData;
             const amount = action === 'BUY' ? parseInt(document.getElementById('acceptAmount').value) : null;
 
-            const result = await fetchAPI('/trade/execute', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ coin, action, amount })
-            });
+            const outcome = await submitProtectedMutation('/trade/execute', { coin, action, amount });
+            if (!acceptProtectedMutation(outcome, '거래 결과를 확인할 수 없습니다.')) return;
+            const result = outcome.body || {};
 
             if (result?.success) {
                 showToast(result.message, 'success');
+                if (outcome.kind === 'terminal-locked') { showToast(outcome.message, 'warning'); return; }
                 closeAcceptModal();
                 loadCoinAnalysis();
                 loadPortfolioSummary();
@@ -8761,14 +8780,13 @@
             const { coin, action } = tradeModalData;
             const amount = action === 'BUY' ? parseInt(document.getElementById('tradeAmount').value) : null;
 
-            const result = await fetchAPI('/trade/execute', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ coin, action, amount })
-            });
+            const outcome = await submitProtectedMutation('/trade/execute', { coin, action, amount });
+            if (!acceptProtectedMutation(outcome, '거래 결과를 확인할 수 없습니다.')) return;
+            const result = outcome.body || {};
 
             if (result?.success) {
                 showToast(result.message, 'success');
+                if (outcome.kind === 'terminal-locked') { showToast(outcome.message, 'warning'); return; }
                 closeTradeModal();
                 loadCoinAnalysis();
                 loadPortfolioSummary();
@@ -9035,18 +9053,17 @@
             btn.textContent = '처리중...';
 
             try {
-                const result = await fetchAPI('/trade/execute', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        coin,
-                        action,
-                        amount: action === 'BUY' ? amount : null
-                    })
+                const outcome = await submitProtectedMutation('/trade/execute', {
+                    coin,
+                    action,
+                    amount: action === 'BUY' ? amount : null
                 });
+                if (!acceptProtectedMutation(outcome, '거래 결과를 확인할 수 없습니다.')) return;
+                const result = outcome.body || {};
 
                 if (result.success) {
                     showToast(result.message || `${action === 'BUY' ? '매수' : '매도'} 완료`, 'success');
+                    if (outcome.kind === 'terminal-locked') { showToast(outcome.message, 'warning'); return; }
                     // 패널 업데이트
                     setTimeout(() => updateInlineTradePanel(coin), 500);
                 } else {
@@ -9055,7 +9072,8 @@
             } catch (error) {
                 showToast(error.message || '거래 실패', 'error');
             } finally {
-                btn.disabled = action === 'SELL' && inlineTradeData.holdingQuantity <= 0;
+                btn.disabled = window.CoinPilotMutationClient?.snapshot().locked === true ||
+                    (action === 'SELL' && inlineTradeData.holdingQuantity <= 0);
                 btn.textContent = originalText;
             }
         }
@@ -9164,14 +9182,13 @@
             btn.textContent = '처리중...';
 
             try {
-                const result = await fetchAPI('/trade/execute', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ coin, action, amount })
-                });
+                const outcome = await submitProtectedMutation('/trade/execute', { coin, action, amount });
+                if (!acceptProtectedMutation(outcome, '거래 결과를 확인할 수 없습니다.')) return;
+                const result = outcome.body || {};
 
                 if (result?.success) {
                     showToast(result.message, 'success');
+                    if (outcome.kind === 'terminal-locked') { showToast(outcome.message, 'warning'); return; }
                     closeQuickTrade();
                     // 데이터 새로고침
                     loadMarketPrices();
@@ -9183,7 +9200,8 @@
             } catch (e) {
                 showToast('거래 오류: ' + e.message, 'error');
             } finally {
-                btn.disabled = action === 'SELL' && (quickTradeData?.holdingQuantity || 0) <= 0;
+                btn.disabled = window.CoinPilotMutationClient?.snapshot().locked === true ||
+                    (action === 'SELL' && (quickTradeData?.holdingQuantity || 0) <= 0);
                 btn.textContent = originalText;
             }
         }
@@ -9915,10 +9933,10 @@
                                  sentiment.overall?.includes('negative') ? 'var(--accent-red)' : 'var(--text-secondary)';
 
             const recommendationBadge = sentiment.recommendation === 'BUY' ?
-                '<span class="badge badge-buy">매수 권장</span>' :
+                '<span class="badge" style="background: var(--bg-tertiary);">긍정 기사 우세</span>' :
                 sentiment.recommendation === 'SELL' ?
-                '<span class="badge badge-sell">매도 권장</span>' :
-                '<span class="badge" style="background: var(--bg-tertiary);">관망</span>';
+                '<span class="badge" style="background: var(--bg-tertiary);">부정 기사 우세</span>' :
+                '<span class="badge" style="background: var(--bg-tertiary);">중립</span>';
 
             container.innerHTML = `
                 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px;">
@@ -9926,13 +9944,13 @@
                     <div style="background: var(--bg-tertiary); padding: 20px; border-radius: 8px; text-align: center; border-left: 3px solid ${overallColor};">
                         <div style="font-size: 36px; margin-bottom: 8px;">${overallEmoji}</div>
                         <div style="font-size: 18px; font-weight: 700; color: ${overallColor}; margin-bottom: 4px;">${overallText}</div>
-                        <div style="font-size: 12px; color: var(--text-muted);">시장 심리</div>
+                        <div style="font-size: 12px; color: var(--text-muted);">뉴스 분위기</div>
                     </div>
 
                     <!-- 감성 점수 -->
                     <div style="background: var(--bg-tertiary); padding: 20px; border-radius: 8px; text-align: center;">
                         <div style="font-size: 28px; font-weight: 700; margin-bottom: 8px;">${sentiment.score || '0.00'}</div>
-                        <div style="font-size: 12px; color: var(--text-muted);">감성 점수</div>
+                        <div style="font-size: 12px; color: var(--text-muted);">기사 분류 점수</div>
                         <div style="margin-top: 8px;">${recommendationBadge}</div>
                     </div>
 
@@ -9948,7 +9966,7 @@
                             <div style="width: ${parseFloat(sentiment.negativeRatio) || 0}%; background: var(--accent-red);"></div>
                         </div>
                         <div style="font-size: 12px; color: var(--text-muted); margin-top: 8px; text-align: center;">
-                            총 ${sentiment.totalNews || 0}개 뉴스 분석
+                            기사 ${sentiment.totalNews || 0}건 분류
                         </div>
                     </div>
 
@@ -10032,7 +10050,7 @@
                         <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 12px;">
                             <div style="flex: 1;">
                                 <div style="font-weight: 600; font-size: 14px; line-height: 1.4; margin-bottom: 8px;">
-                                    ${sentimentEmoji} ${news.title || 'No title'}
+                                    ${sentimentEmoji} ${news.title || '제목 없음'}
                                 </div>
                                 <div style="display: flex; gap: 12px; font-size: 12px; color: var(--text-muted); align-items: center;">
                                     <span style="background: var(--bg-primary); padding: 2px 8px; border-radius: 4px;">${news.source || '-'}</span>
@@ -10042,7 +10060,7 @@
                             </div>
                             <div style="text-align: right; min-width: 60px;">
                                 <div style="font-weight: 600; color: ${sentimentColor}; font-size: 14px;">${sentimentText}</div>
-                                <div style="font-size: 12px; color: var(--text-muted);">점수: ${score}</div>
+                                <div style="font-size: 12px; color: var(--text-muted);">분류 점수: ${score}</div>
                             </div>
                         </div>
                     </div>
@@ -10079,7 +10097,7 @@
 
                 // 소스 정보 표시
                 sources.innerHTML = `
-                    <span>📊 감성: ${data.sentiment?.overall || 'neutral'} (점수: ${data.sentiment?.score || 0})</span>
+                    <span>📊 뉴스 분위기: ${data.sentiment?.overall || '중립'} (분류 점수: ${data.sentiment?.score || 0})</span>
                     <span style="margin-left: 15px;">🐦 Twitter: ${data.sources?.twitter || 0}개</span>
                     <span style="margin-left: 10px;">📰 Google: ${data.sources?.googleNews || 0}개</span>
                     <span style="margin-left: 10px;">기타: ${data.sources?.other || 0}개</span>
@@ -10115,7 +10133,7 @@
                             <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 12px;">
                                 <div style="flex: 1;">
                                     <div style="font-weight: 600; font-size: 14px; line-height: 1.4; margin-bottom: 8px;">
-                                        ${sentimentEmoji} ${news.title || 'No title'}
+                                        ${sentimentEmoji} ${news.title || '제목 없음'}
                                     </div>
                                     <div style="display: flex; gap: 12px; font-size: 12px; color: var(--text-muted); align-items: center;">
                                         <span style="background: ${isTwitter ? 'var(--accent-blue)' : 'var(--bg-primary)'}; color: ${isTwitter ? 'white' : 'inherit'}; padding: 2px 8px; border-radius: 4px;">
@@ -10127,7 +10145,7 @@
                                 </div>
                                 <div style="text-align: right; min-width: 60px;">
                                     <div style="font-weight: 600; color: ${sentimentColor}; font-size: 14px;">${sentimentText}</div>
-                                    <div style="font-size: 12px; color: var(--text-muted);">점수: ${score}</div>
+                                    <div style="font-size: 12px; color: var(--text-muted);">분류 점수: ${score}</div>
                                 </div>
                             </div>
                         </div>
@@ -10163,29 +10181,7 @@
                                   news.sentiment?.sentiment === 'negative' ? '부정적' : '중립';
 
             const score = news.sentiment?.score || 0;
-            const confidence = news.sentiment?.confidence || 0;
-
-            // 영향력 분석 생성
-            let impactAnalysis = '';
-            if (news.sentiment?.sentiment === 'positive') {
-                if (score > 3) {
-                    impactAnalysis = '이 뉴스는 <strong style="color: var(--accent-green);">강한 긍정적 영향</strong>을 미칠 것으로 예상됩니다. 매수 신호로 해석될 수 있습니다.';
-                } else if (score > 1) {
-                    impactAnalysis = '이 뉴스는 <strong style="color: var(--accent-green);">약한 긍정적 영향</strong>을 미칠 것으로 예상됩니다. 시장 심리 개선에 기여할 수 있습니다.';
-                } else {
-                    impactAnalysis = '이 뉴스는 <strong>약간 긍정적</strong>이나 시장에 큰 영향은 없을 것으로 예상됩니다.';
-                }
-            } else if (news.sentiment?.sentiment === 'negative') {
-                if (score < -3) {
-                    impactAnalysis = '이 뉴스는 <strong style="color: var(--accent-red);">강한 부정적 영향</strong>을 미칠 것으로 예상됩니다. 매도 신호로 해석될 수 있습니다.';
-                } else if (score < -1) {
-                    impactAnalysis = '이 뉴스는 <strong style="color: var(--accent-red);">약한 부정적 영향</strong>을 미칠 것으로 예상됩니다. 시장 심리 악화에 기여할 수 있습니다.';
-                } else {
-                    impactAnalysis = '이 뉴스는 <strong>약간 부정적</strong>이나 시장에 큰 영향은 없을 것으로 예상됩니다.';
-                }
-            } else {
-                impactAnalysis = '이 뉴스는 <strong>중립적</strong>이며 시장에 특별한 영향을 미치지 않을 것으로 예상됩니다.';
-            }
+                const sentimentNote = '기사 제목의 단어와 키워드를 분류한 참고 정보입니다. 실제 가격 움직임을 예측하지 않습니다.';
 
             const timeStr = news.timestamp ? new Date(news.timestamp).toLocaleString('ko-KR') : '-';
 
@@ -10195,7 +10191,7 @@
             content.innerHTML = `
                 <!-- 뉴스 제목 -->
                 <div style="background: var(--bg-tertiary); padding: 16px; border-radius: 8px; margin-bottom: 16px;">
-                    <div style="font-size: 16px; font-weight: 600; line-height: 1.5;">${news.title || 'No title'}</div>
+                    <div style="font-size: 16px; font-weight: 600; line-height: 1.5;">${news.title || '제목 없음'}</div>
                     <div style="margin-top: 8px; font-size: 12px; color: var(--text-muted); display: flex; justify-content: space-between; align-items: center;">
                         <div>
                             <span style="background: var(--bg-primary); padding: 2px 8px; border-radius: 4px; margin-right: 8px;">${news.source || '-'}</span>
@@ -10234,32 +10230,24 @@
                 <div style="background: var(--bg-tertiary); padding: 16px; border-radius: 8px; margin-bottom: 16px; border-left: 4px solid ${sentimentColor};">
                     <div style="font-weight: 600; margin-bottom: 12px; display: flex; align-items: center; gap: 8px;">
                         <span style="font-size: 24px;">${sentimentEmoji}</span>
-                        <span>AI 감성 분석</span>
+                        <span>기사 분위기 분류</span>
                     </div>
-                    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; text-align: center;">
+                    <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; text-align: center;">
                         <div>
                             <div style="font-size: 20px; font-weight: 700; color: ${sentimentColor};">${sentimentText}</div>
-                            <div style="font-size: 11px; color: var(--text-muted);">감성</div>
+                            <div style="font-size: 11px; color: var(--text-muted);">분류</div>
                         </div>
                         <div>
                             <div style="font-size: 20px; font-weight: 700;">${score.toFixed(2)}</div>
-                            <div style="font-size: 11px; color: var(--text-muted);">감성 점수</div>
-                        </div>
-                        <div>
-                            <div style="font-size: 20px; font-weight: 700;">${(confidence * 100).toFixed(0)}%</div>
-                            <div style="font-size: 11px; color: var(--text-muted);">참고 점수</div>
+                            <div style="font-size: 11px; color: var(--text-muted);">분류 점수</div>
                         </div>
                     </div>
                 </div>
 
-                <!-- 영향력 분석 -->
                 <div style="background: var(--bg-tertiary); padding: 16px; border-radius: 8px;">
-                    <div style="font-weight: 600; margin-bottom: 8px;">💡 예상 영향력</div>
+                    <div style="font-weight: 600; margin-bottom: 8px;">참고 사항</div>
                     <div style="font-size: 14px; line-height: 1.6; color: var(--text-secondary);">
-                        ${impactAnalysis}
-                    </div>
-                    <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border-color); font-size: 12px; color: var(--text-muted);">
-                        ⚠️ 본 분석은 AI 기반 자동 분석 결과이며, 실제 투자 결정은 신중하게 내려주세요.
+                        ${sentimentNote}
                     </div>
                 </div>
             `;
@@ -10281,6 +10269,6 @@
             }
         });
     </script>
-    <script src="/pilot-redesign.js?v=observer-readonly-128"></script>
+    <script src="/pilot-redesign.js?v=20260929-37"></script>
 </body>
 </html>

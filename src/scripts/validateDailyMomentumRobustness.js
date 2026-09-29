@@ -75,6 +75,10 @@ const exitExecution = process.env.DAILY_MOMENTUM_ROBUSTNESS_EXIT_EXECUTION === '
 const costPercent = process.env.DAILY_MOMENTUM_ROBUSTNESS_COST_PERCENT === undefined
   ? null
   : number(process.env.DAILY_MOMENTUM_ROBUSTNESS_COST_PERCENT, 0.2);
+const costPercentGridInput = process.env.DAILY_MOMENTUM_ROBUSTNESS_COST_PERCENT_GRID;
+const costPercentGrid = costPercentGridInput === undefined
+  ? null
+  : costPercentGridInput.split(',').map(value => value.trim());
 const modes = process.env.DAILY_MOMENTUM_ROBUSTNESS_MODES
   ? process.env.DAILY_MOMENTUM_ROBUSTNESS_MODES
     .split(',').map(value => value.trim()).filter(value => value === 'fixed' || value === 'regime')
@@ -111,6 +115,12 @@ function printShortlist(item) {
 }
 
 function main() {
+  const costPercentGridValues = costPercentGrid?.map(Number) ?? null;
+  if (costPercentGrid !== null && (costPercentGrid.length === 0 ||
+    costPercentGrid.some((value, index) => !value || !Number.isFinite(costPercentGridValues[index]) ||
+      costPercentGridValues[index] < 0))) {
+    throw new Error('FAIL_CLOSED: DAILY_MOMENTUM_ROBUSTNESS_COST_PERCENT_GRID must contain non-negative finite percentages.');
+  }
   const { candles, markets } = loadCandles(inputFile);
   const report = evaluateDailyMomentumRobustness(candles, {
     segmentCount: Math.max(2, Math.floor(number(
@@ -144,7 +154,7 @@ function main() {
         ...(costPercent !== null ? { costPercent } : {})
       }
     } : {}),
-    grid: modes?.length || maxHoldDays?.length || trendMinPercent?.length || breadthMin?.length || positionFraction?.length || maxPositions?.length ||
+    grid: modes?.length || maxHoldDays?.length || trendMinPercent?.length || breadthMin?.length || positionFraction?.length || maxPositions?.length || costPercentGridValues?.length ||
       cooldownAfterLossDays?.length || maxPortfolioDrawdownPercent?.length ||
       benchmarkThresholds?.length || minUpBars?.length ||
       benchmarkExitConfirmationBars?.length || regimeExitConfirmationBars?.length ||
@@ -153,6 +163,7 @@ function main() {
       ? {
         ...(modes?.length ? { mode: modes } : {}),
         ...(maxHoldDays?.length ? { maxHoldDays } : {}),
+        ...(costPercentGridValues?.length ? { costPercent: costPercentGridValues } : {}),
         ...(trendMinPercent?.length ? { trendMinPercent } : {}),
         ...(breadthMin?.length ? { breadthMin } : {}),
         ...(positionFraction?.length ? { positionFraction } : {}),

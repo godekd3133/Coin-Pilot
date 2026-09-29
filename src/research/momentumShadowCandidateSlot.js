@@ -8,9 +8,9 @@ function resolvedFile(file = DEFAULT_MOMENTUM_SHADOW_CANDIDATE_SLOT_FILE) {
   return path.resolve(String(file));
 }
 
-function readRaw(file) {
+function readRaw(file, readFileSync = fs.readFileSync) {
   try {
-    return fs.readFileSync(file, 'utf8');
+    return readFileSync(file, 'utf8');
   } catch (error) {
     if (error?.code === 'ENOENT') return null;
     throw error;
@@ -33,9 +33,12 @@ export function isMomentumShadowCandidateProcessAlive(pid) {
  * A malformed slot is unverifiable and must be handled fail-closed by the
  * caller rather than silently overwritten.
  */
-export function readMomentumShadowCandidateSlot(file = DEFAULT_MOMENTUM_SHADOW_CANDIDATE_SLOT_FILE) {
+export function readMomentumShadowCandidateSlot(
+  file = DEFAULT_MOMENTUM_SHADOW_CANDIDATE_SLOT_FILE,
+  { readFileSync = fs.readFileSync } = {}
+) {
   const resolved = resolvedFile(file);
-  const raw = readRaw(resolved);
+  const raw = readRaw(resolved, readFileSync);
   if (raw === null) return null;
   try {
     const parsed = JSON.parse(raw);
@@ -49,10 +52,11 @@ export function readMomentumShadowCandidateSlot(file = DEFAULT_MOMENTUM_SHADOW_C
 }
 
 export function inspectMomentumShadowCandidateSlot(
-  file = DEFAULT_MOMENTUM_SHADOW_CANDIDATE_SLOT_FILE
+  file = DEFAULT_MOMENTUM_SHADOW_CANDIDATE_SLOT_FILE,
+  options = {}
 ) {
   const resolved = resolvedFile(file);
-  const slot = readMomentumShadowCandidateSlot(resolved);
+  const slot = readMomentumShadowCandidateSlot(resolved, options);
   if (!slot) {
     return {
       file: resolved,

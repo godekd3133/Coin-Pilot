@@ -85,11 +85,11 @@ Coin Pilot은 업비트 계정의 시장 정보, 규칙 기반 자동매매, 전
 
 각 화면은 “값이 없음”, “오래됨”, “관측 불가”, “차단됨”을 정상값이나 0으로 바꾸지 않고 구별해야 한다. LIVE 거래 플로우에서 부분 fill 또는 fill 미관측은 완료 거래로 집계하지 않아야 한다.
 
-수동 주문 경로와 자동 스캘핑의 live validation gate는 서로 다른 기능이다. 거래 화면의 수동 단일 주문과 스마트 매수·매도 API가 있다는 사실만으로 자동 스캘핑 전략이 LIVE 승격됐다는 뜻은 아니다. 현재 `MultiCoinTrader.validatePromotionReport`는 `fixed_config`, 전략 모드와 마켓, 현재 runtime 설정 일치, 통계 신뢰도 게이트 및 `promoted=true`를 검사하지만 보고서 생성 시점의 24시간 freshness를 강제하지 않는다. `assessScalpingValidationReportFreshness`는 API 응답에 보고서 시점의 신선도를 표시하는 용도다. `requireValidationPassForLive=false`이면 자동매매 시작 시 promotion report gate 검사 자체를 건너뛸 수 있으므로 실제 설정도 함께 확인해야 한다. 따라서 보고서의 시점과 실제 LIVE gate 판정은 구분해 읽어야 한다.
+수동 주문 경로와 자동 스캘핑의 live validation gate는 서로 다른 기능이다. 거래 화면의 수동 단일 주문과 스마트 매수·매도 API가 있다는 사실만으로 자동 스캘핑 전략이 LIVE 승격됐다는 뜻은 아니다. `MultiCoinTrader.validatePromotionReport`는 `fixed_config`, 전략 모드와 마켓, 현재 runtime 설정 일치, 통계 신뢰도 게이트 및 `promoted=true`를 검사하고 `generatedAt`이 누락·미래이거나 기본 24시간 freshness 한도를 지난 보고서를 거부한다. API도 같은 helper로 보고서 시점을 표시한다. LIVE 자동 스캘핑은 `requireValidationPassForLive=false`로 검증을 우회할 수 없으며, 이 설정이면 주문 시작을 차단한다. 이 강제 규칙은 DRY_RUN·비(非)스캘핑 자동매매·수동 주문 경로를 바꾸지 않는다. 보고서가 현재여도 다른 승격 조건을 통과했다는 뜻일 뿐, 수익성 증명은 아니다.
 
-읽기 전용 `GET /api/strategy-readiness`는 구현되어 있다. 응답의 `liveGate`는 실제 promotion validator 결과와 LIVE 적용 여부를 나타내며 `enforcedFreshness=false`로 보고서 나이가 LIVE gate의 강제 조건이 아님을 명시한다. `report.freshness`와 `currentEvidence`는 현재성 판단을 별도로 나타내므로, 오래된 보고서는 `liveGate.passed=true`일 수 있어도 readiness 상태는 `BLOCKED`가 된다. route 테스트는 설정 보고서의 정상·누락·손상·오래됨·미래 시각, runtime 설정 불일치 및 validator 부재를 확인한다. `READY`는 현재 검증 증거를 읽을 수 있다는 뜻일 뿐, 실거래 순이익이나 전략의 지속적인 수익성을 증명하지 않는다.
+읽기 전용 `GET /api/strategy-readiness` 응답은 `liveGate.enforced`로 현재 runtime 적용 여부를, `liveGate.enforcedFreshness`로 validator의 보고서 나이 검사 여부를 분리해 표시한다. `report.freshness`와 `currentEvidence`도 제공하며, 만료·미래·시각 누락 보고서는 validator와 전체 readiness에서 차단된다. route 테스트는 정상·누락·손상·오래됨·미래 시각, runtime 설정 불일치 및 validator 부재를 확인한다. `READY`는 현재 검증 증거를 읽을 수 있다는 뜻일 뿐, 실거래 순이익이나 전략의 지속적인 수익성을 증명하지 않는다.
 
-읽기 전용 `GET /api/strategy-readiness`는 보고서 freshness와 실제 promotion validator의 판정을 별도 필드로 제공하며, stale report도 `liveGate.passed=true`일 수 있다. 기본 요약을 유지하면서 펼침형 상세에 보고서 파일명·작성 시각·freshness·실제 LIVE gate 통과 여부·현재 적용 여부·freshness 강제 여부·DRY_RUN/LIVE 모드를 연결했다. 실제 체결·지속 순수익이 아님을 안내하고 주기 갱신 뒤 펼침 상태도 유지한다. 2026-09-23 DRY_RUN staging에서 missing-report fail-closed 표기와 320/390px 무가로 overflow를 확인했으며, 실제 설치 단말 QA는 남아 있다.
+읽기 전용 `GET /api/strategy-readiness`는 보고서 freshness와 실제 promotion validator의 판정을 별도 필드로 제공한다. Stale report는 validator와 readiness 모두 `report_not_current`로 차단한다. 기본 요약을 유지하면서 펼침형 상세에 보고서 파일명·작성 시각·freshness·실제 LIVE gate 통과 여부·현재 적용 여부·freshness 강제 여부·DRY_RUN/LIVE 모드를 연결했다. 실제 체결·지속 순수익이 아님을 안내하고 주기 갱신 뒤 펼침 상태도 유지한다. 2026-09-23 DRY_RUN staging에서 missing-report fail-closed 표기와 320/390px 무가로 overflow를 확인했으며, 실제 설치 단말 QA는 남아 있다.
 
 ## 6. 운용 원칙과 중단 조건
 

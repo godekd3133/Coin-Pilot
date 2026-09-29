@@ -1,9 +1,9 @@
 export const DEFAULT_SCALPING_VALIDATION_REPORT_MAX_AGE_SECONDS = 24 * 60 * 60;
 
 /**
- * Describe the age of a read-only validation report without changing the
- * fixed-config live gate. Clients use this metadata to avoid presenting an
- * old historical report as current market evidence.
+ * Describe the age of a fixed-config validation report. Readiness clients use
+ * this metadata to avoid presenting old research as current market evidence,
+ * and the same boundary is enforced before LIVE startup.
  */
 export function assessScalpingValidationReportFreshness(
   generatedAt,

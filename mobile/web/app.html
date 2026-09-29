@@ -3,9 +3,10 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-    <meta name="theme-color" content="#0c110e">
-    <meta name="color-scheme" content="dark">
+    <meta name="theme-color" content="#f7f4ee">
+    <meta name="color-scheme" content="light">
     <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
     <title>CoinPilot</title>
     <link rel="stylesheet" href="app.css">
     <script src="dashboard.js" defer></script>
@@ -16,25 +17,24 @@
         <section class="screen active" data-screen="home" aria-labelledby="home-title">
           <header class="welcome-row">
             <div>
-              <p class="eyebrow" id="today-label">COINPILOT · 자산 브리핑</p>
-              <h1 id="home-title">자산 흐름을<br>차분히 살펴보세요.</h1>
+              <p class="date-label" id="today-label"></p>
+              <h1 id="home-title">자산 현황</h1>
             </div>
-            <img class="compass-art" src="compass-token.png" alt="CoinPilot 나침반 오브제">
           </header>
 
           <article class="balance-card" aria-labelledby="balance-label">
             <div class="balance-topline">
-              <span id="balance-label">총 자산</span>
+              <span id="balance-label">총 자산 평가액</span>
               <span id="mode-badge" class="mode-badge">연결 중</span>
             </div>
             <strong id="total-assets" class="balance-value">—</strong>
             <div class="balance-change-row">
-              <span id="profit-value" class="profit-value">서버에서 정보를 불러오고 있어요</span>
+              <span id="profit-value" class="profit-value">계좌 정보를 불러오는 중</span>
               <span id="valuation-note" class="valuation-note"></span>
             </div>
             <div class="chart-wrap" aria-label="자산 흐름">
               <svg id="equity-chart" class="equity-chart" viewBox="0 0 360 100" preserveAspectRatio="none" role="img" aria-label="자산 추이 차트"></svg>
-              <p id="chart-empty" class="chart-empty" hidden>자산 기록이 쌓이면 흐름을 보여드릴게요.</p>
+              <p id="chart-empty" class="chart-empty" hidden>선택한 기간의 자산 기록이 없습니다.</p>
             </div>
             <div class="chart-footer">
               <span id="chart-caption">최근 24시간</span>
@@ -52,103 +52,99 @@
               <strong id="position-count">—</strong>
             </article>
             <article class="quick-stat">
-              <span id="today-stat-label" class="stat-label">오늘 실현 손익</span>
+              <span id="today-stat-label" class="stat-label">오늘 손익</span>
               <strong id="today-profit">—</strong>
             </article>
           </div>
 
           <section class="content-section" aria-labelledby="market-title">
             <div class="section-heading">
-              <div><p class="eyebrow">MARKET WATCH</p><h2 id="market-title">시장 흐름</h2></div>
-              <span id="market-updated" class="quiet-note">시세 연결 중</span>
+              <h2 id="market-title">주요 시세</h2>
+              <span id="market-updated" class="quiet-note">시세 불러오는 중</span>
             </div>
-            <div id="market-list" class="list-card">
-              <div class="skeleton-row"></div><div class="skeleton-row"></div><div class="skeleton-row"></div>
-            </div>
+            <div id="market-list" class="list-card"><p class="empty-row">시세를 불러오는 중</p></div>
           </section>
 
           <section class="content-section" aria-labelledby="engine-title">
-            <div class="section-heading"><div><p class="eyebrow">ENGINE STATUS</p><h2 id="engine-title">자동매매 상태</h2></div></div>
+            <div class="section-heading"><h2 id="engine-title">자동매매</h2></div>
             <article class="engine-card">
               <span id="engine-indicator" class="engine-indicator"></span>
-              <div class="engine-copy"><strong id="engine-status">상태 확인 중</strong><span id="engine-detail">앱 화면과 자동매매 엔진은 별도로 동작합니다.</span></div>
+              <div class="engine-copy"><strong id="engine-status">상태 확인 중</strong><span id="engine-detail">서버 상태를 불러오는 중</span></div>
               <span id="engine-mode" class="engine-mode">—</span>
             </article>
           </section>
 
           <section class="content-section" aria-labelledby="recent-title">
-            <div class="section-heading"><div><p class="eyebrow">RECENT ACTIVITY</p><h2 id="recent-title">최근 기록</h2></div><button class="text-action" type="button" data-open-screen="activity">전체 보기</button></div>
-            <div id="recent-list" class="list-card"><p class="empty-row">서버 기록을 불러오고 있어요.</p></div>
+            <div class="section-heading"><h2 id="recent-title">최근 거래</h2><button class="text-action" type="button" data-open-screen="activity">전체 보기</button></div>
+            <div id="recent-list" class="list-card"><p class="empty-row">거래 내역을 불러오는 중</p></div>
           </section>
         </section>
 
         <section class="screen" data-screen="assets" aria-labelledby="assets-title" hidden>
-          <header class="page-heading"><p class="eyebrow">YOUR PORTFOLIO</p><h1 id="assets-title">보유 자산</h1><p class="page-intro">서버에서 받은 현재 계좌와 보유 내역입니다.</p></header>
-          <article class="total-card"><span>총 평가 자산</span><strong id="portfolio-total">—</strong><div id="portfolio-mode" class="total-card-note">평가 상태 확인 중</div></article>
+          <header class="page-heading"><h1 id="assets-title">보유 자산</h1><p class="page-intro">계좌 잔액과 보유 코인을 확인합니다.</p></header>
+          <article class="total-card"><span>계좌 총 평가액</span><strong id="portfolio-total">—</strong><div id="portfolio-mode" class="total-card-note">거래 모드 확인 중</div></article>
           <section class="content-section">
-            <div class="section-heading"><div><p class="eyebrow">CASH</p><h2>원화 잔액</h2></div></div>
+            <div class="section-heading"><h2>원화 잔액</h2></div>
             <article class="cash-card"><span class="asset-symbol cash-symbol">₩</span><div class="asset-main"><strong>원화</strong><span>KRW</span></div><strong id="cash-value" class="asset-value">—</strong></article>
           </section>
           <section class="content-section">
-            <div class="section-heading"><div><p class="eyebrow">OPEN POSITIONS</p><h2>코인 보유</h2></div><span id="holdings-count" class="quiet-note">—</span></div>
+            <div class="section-heading"><h2>코인 보유</h2><span id="holdings-count" class="quiet-note">—</span></div>
             <div id="holdings-list" class="list-card"><p class="empty-row">보유 정보를 불러오고 있어요.</p></div>
           </section>
-          <p class="footnote">평가액과 손익은 서버가 제공한 값입니다. 일부 관찰 계좌에서는 평가 정보를 제공하지 않을 수 있습니다.</p>
+          <p class="footnote">평가액과 손익은 서버에서 받은 값입니다. 조회 전용 계좌에서는 제공되지 않을 수 있습니다.</p>
         </section>
 
         <section class="screen" data-screen="activity" aria-labelledby="activity-title" hidden>
-          <header class="page-heading"><p class="eyebrow">ACCOUNT ACTIVITY</p><h1 id="activity-title">활동 기록</h1><p class="page-intro">서버에 저장된 최근 거래 기록을 확인합니다.</p></header>
-          <div class="activity-summary"><span>최근 업데이트</span><strong id="activity-updated">—</strong></div>
-          <div id="activity-list" class="list-card activity-list"><p class="empty-row">기록을 불러오고 있어요.</p></div>
-          <p class="footnote">이 화면은 서버의 거래 기록을 표시합니다. 거래소 체결·정산 내역을 대신하지 않습니다.</p>
+          <header class="page-heading"><h1 id="activity-title">거래 내역</h1><p class="page-intro">서버에 저장된 거래 내역입니다.</p></header>
+          <div class="activity-summary"><span>최근 확인</span><strong id="activity-updated">—</strong></div>
+          <div id="activity-list" class="list-card activity-list"><p class="empty-row">거래 내역을 불러오는 중</p></div>
+          <p class="footnote">표시된 내역은 서버에 저장된 기록입니다. 거래소 체결·정산 내역은 거래소에서 확인해 주세요.</p>
         </section>
 
         <section class="screen" data-screen="settings" aria-labelledby="settings-title" hidden>
-          <header class="page-heading"><p class="eyebrow">APP & CONNECTION</p><h1 id="settings-title">설정</h1><p class="page-intro">화면 연결과 서버 상태를 확인합니다.</p></header>
+          <header class="page-heading"><h1 id="settings-title">설정</h1><p class="page-intro">서버 연결과 자동매매 상태를 확인합니다.</p></header>
           <section class="content-section settings-section">
-            <div class="section-heading"><div><p class="eyebrow">SERVER</p><h2>연결된 서버</h2></div></div>
+            <div class="section-heading"><h2>서버</h2></div>
             <article class="settings-card">
               <div class="settings-row"><span>주소</span><strong id="server-address">앱 설정에서 확인</strong></div>
               <div class="settings-row"><span>서버 상태</span><strong id="settings-server-status">확인 중</strong></div>
               <div class="settings-row"><span>자동매매</span><strong id="settings-engine-status">확인 중</strong></div>
-              <div class="settings-row"><span>운용 방식</span><strong id="settings-mode">—</strong></div>
-              <div id="observer-row" class="settings-row" hidden><span>계좌 보기</span><strong>읽기 전용 관찰</strong></div>
+              <div class="settings-row"><span>거래 모드</span><strong id="settings-mode">—</strong></div>
+              <div id="observer-row" class="settings-row" hidden><span>계좌 권한</span><strong>조회 전용</strong></div>
             </article>
-            <button id="change-server" class="secondary-button" type="button">서버 주소 변경</button>
-            <button id="logout" class="quiet-button" type="button">저장된 서버 토큰 삭제</button>
+            <button id="change-server" class="secondary-button" type="button">서버 변경</button>
+            <button id="logout" class="quiet-button" type="button">서버 접속 정보 삭제</button>
           </section>
           <section class="content-section settings-section">
-            <div class="section-heading"><div><p class="eyebrow">ABOUT</p><h2>CoinPilot</h2></div></div>
-            <article class="settings-card about-card"><p>앱을 닫아도 자동매매 엔진은 서버에서 계속 동작합니다. iOS 앱은 계좌를 확인하는 화면이며 백그라운드에서 거래 엔진을 실행하지 않습니다.</p></article>
+            <div class="section-heading"><h2>앱 정보</h2></div>
+            <article class="settings-card about-card"><p id="engine-note">자동매매는 서버에서 실행됩니다. 이 앱에서는 계좌를 조회합니다.</p></article>
           </section>
-          <p class="footnote">개인 API 키와 자동매매 설정은 서버에 보관됩니다.</p>
+          <p class="footnote">거래소 API 키와 자동매매 설정은 서버에서 관리합니다.</p>
         </section>
       </main>
 
       <nav class="tab-bar" aria-label="주 메뉴">
-        <button class="tab-button selected" type="button" data-tab="home" aria-current="page"><span class="tab-icon" aria-hidden="true">⌂</span><span>홈</span></button>
-        <button class="tab-button" type="button" data-tab="assets"><span class="tab-icon" aria-hidden="true">◫</span><span>자산</span></button>
-        <button class="tab-button" type="button" data-tab="activity"><span class="tab-icon" aria-hidden="true">↗</span><span>기록</span></button>
-        <button class="tab-button" type="button" data-tab="settings"><span class="tab-icon" aria-hidden="true">•••</span><span>설정</span></button>
+        <button class="tab-button selected" type="button" data-tab="home" aria-current="page">홈</button>
+        <button class="tab-button" type="button" data-tab="assets">자산</button>
+        <button class="tab-button" type="button" data-tab="activity">거래 내역</button>
+        <button class="tab-button" type="button" data-tab="settings">설정</button>
       </nav>
     </div>
 
     <div id="connection-banner" class="connection-banner" hidden role="status" aria-live="polite">
-      <div><strong>서버에 연결할 수 없어요</strong><span id="connection-error">인터넷 연결과 서버 주소를 확인해 주세요.</span></div>
-      <button id="retry" type="button">다시 시도</button>
+      <div><strong>서버에 연결하지 못했습니다</strong><span id="connection-error">인터넷 연결과 서버 주소를 확인해 주세요.</span></div>
+      <button id="retry" type="button">다시 연결</button>
     </div>
 
     <section id="auth-gate" class="auth-gate" hidden aria-labelledby="auth-title">
       <form id="auth-form" class="auth-card" novalidate>
-        <div class="auth-mark" aria-hidden="true">CP</div>
-        <p class="eyebrow">PRIVATE CONNECTION</p>
-        <h1 id="auth-title">계좌를 안전하게<br>연결해 주세요.</h1>
-        <p class="auth-intro">서버의 DASHBOARD_TOKEN을 입력하면 iPhone 키체인에 안전하게 저장합니다.</p>
-        <label for="dashboard-token">서버 토큰</label>
-        <input id="dashboard-token" name="token" type="password" autocomplete="current-password" autocapitalize="none" spellcheck="false" required>
+        <h1 id="auth-title">서버에 연결</h1>
+        <p class="auth-intro">서버에서 발급한 접속 토큰을 입력해 주세요. 입력한 토큰은 이 기기에 저장됩니다.</p>
+        <label for="dashboard-token">접속 토큰</label>
+        <input id="dashboard-token" name="token" type="password" autocomplete="off" autocapitalize="none" spellcheck="false" required>
         <p id="auth-error" class="auth-error" role="alert" aria-live="polite"></p>
-        <button id="auth-submit" class="primary-button" type="submit">안전하게 연결하기 <span aria-hidden="true">→</span></button>
-        <p class="auth-footnote">토큰은 서버 인증에만 사용하며 앱 화면 코드에 저장하지 않습니다.</p>
+        <button id="auth-submit" class="primary-button" type="submit">접속</button>
+        <p class="auth-footnote">토큰은 서버에 접속할 때 사용됩니다.</p>
       </form>
     </section>
 

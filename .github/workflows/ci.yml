@@ -34,3 +34,36 @@ jobs:
 
       - name: Test
         run: npm test
+
+  ios-simulator-build:
+    runs-on: [self-hosted, personal-mac]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build server-data iOS app for Simulator
+        run: |
+          xcodebuild \
+            -project mobile/ios/App/App.xcodeproj \
+            -scheme App \
+            -sdk iphonesimulator \
+            -configuration Debug \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "${RUNNER_TEMP}/coinpilot-ios-server" \
+            COINPILOT_DATA_MODE=server \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+          test ! -f "${RUNNER_TEMP}/coinpilot-ios-server/Build/Products/Debug-iphonesimulator/App.app/CoinPilotBundledPreview.json"
+
+      - name: Build and verify bundled-preview profile
+        run: |
+          xcodebuild \
+            -project mobile/ios/App/App.xcodeproj \
+            -scheme App \
+            -sdk iphonesimulator \
+            -configuration Debug \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "${RUNNER_TEMP}/coinpilot-ios-preview" \
+            COINPILOT_DATA_MODE=bundled-preview \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+          test -f "${RUNNER_TEMP}/coinpilot-ios-preview/Build/Products/Debug-iphonesimulator/App.app/CoinPilotBundledPreview.json"

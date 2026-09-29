@@ -12,6 +12,21 @@ let sharedRateLimitQueue = [];
 let sharedRateLimitProcessorRunning = false;
 let sharedRateLimitSequence = 0;
 
+function serializeQueryString(query) {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(query || {})) {
+    if (value === null || value === undefined) continue;
+    const values = Array.isArray(value) ? value : [value];
+    for (const item of values) {
+      if (item === null || item === undefined) continue;
+      params.append(key, String(item));
+    }
+  }
+  // Upbit hashes the unescaped query string and requires repeated keys for
+  // array parameters such as states[]=wait&states[]=watch.
+  return decodeURIComponent(params.toString());
+}
+
 function processSharedRateLimitQueue() {
   if (sharedRateLimitProcessorRunning) return;
   sharedRateLimitProcessorRunning = true;
@@ -255,7 +270,7 @@ class UpbitAPI {
     };
 
     if (query) {
-      const queryString = new URLSearchParams(query).toString();
+      const queryString = serializeQueryString(query);
       const hash = crypto.createHash('sha512');
       const queryHash = hash.update(queryString, 'utf-8').digest('hex');
       payload.query_hash = queryHash;
@@ -359,14 +374,16 @@ class UpbitAPI {
    * @param {number} volume - 주문량
    * @param {number} price - 주문 가격
    * @param {string} ord_type - 주문 타입 (limit: 지정가, price: 시장가 매수, market: 시장가 매도)
+   * @param {string|null} identifier - 재기동 조회를 위한 계정 내 고유 주문 식별자
    * @returns {Object} 주문 결과 { success: boolean, data?: OrderData, error?: ErrorInfo }
    */
-  async order(market, side, volume, price = null, ord_type = 'limit') {
+  async order(market, side, volume, price = null, ord_type = 'limit', identifier = null) {
     const query = {
       market,
       side,
       ord_type
     };
+    if (typeof identifier === 'string' && identifier.trim()) query.identifier = identifier.trim();
 
     if (ord_type === 'limit') {
       query.volume = volume.toString();
@@ -406,26 +423,10 @@ class UpbitAPI {
         return { success: false, error: parsedError };
       }
 
-      // 서버 에러나 네트워크 에러는 재시도
-      if (error.response?.status >= 500 ||
-          error.code === 'ECONNRESET' ||
-          error.code === 'ETIMEDOUT') {
-        console.log('Retrying order due to server/network error...');
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        try {
-          await this.waitForRateLimit();
-          const retryToken = this.generateToken(query);
-          const retryResponse = await axios.post(`${this.baseURL}/orders`, query, this.getRequestConfig({
-            headers: { Authorization: `Bearer ${retryToken}` }
-          }));
-          return { success: true, data: retryResponse.data };
-        } catch (retryError) {
-          const retryParsedError = this.parseApiError(retryError);
-          return { success: false, error: retryParsedError };
-        }
-      }
-
-      return { success: false, error: parsedError };
+      // An order POST may have been accepted even when its response is lost.
+      // Never automatically repeat that request: callers persist its unique
+      // identifier before dispatch and reconcile through GET /order.
+      throw error;
     }
   }
 
@@ -449,7 +450,9 @@ class UpbitAPI {
    */
   async getOrders(market, state = 'wait') {
     return this.requestWithRetry(async () => {
-      const query = { market, state };
+      const query = Array.isArray(state)
+        ? { market, 'states[]': state }
+        : { market, state };
       const token = this.generateToken(query);
       const response = await axios.get(`${this.baseURL}/orders`, this.getRequestConfig({
         params: query,
@@ -460,11 +463,15 @@ class UpbitAPI {
   }
 
   /**
-   * 개별 주문 조회
+   * UUID 또는 client identifier로 개별 주문 조회
+   * @param {string} uuidOrIdentifier - UUID 또는 사전 기록한 client identifier
+   * @param {{ identifier?: boolean }} options - identifier 조회인지 여부
    */
-  async getOrder(uuid) {
+  async getOrder(uuidOrIdentifier, { identifier = false } = {}) {
     return this.requestWithRetry(async () => {
-      const query = { uuid };
+      const query = identifier
+        ? { identifier: uuidOrIdentifier }
+        : { uuid: uuidOrIdentifier };
       const token = this.generateToken(query);
       const response = await axios.get(`${this.baseURL}/order`, this.getRequestConfig({
         params: query,

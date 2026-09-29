@@ -21,8 +21,10 @@ import createResearchRoutes from './routes/research.js';
 import AIAdvisorService from '../ai/aiAdvisorService.js';
 import MonitoringSessionService from '../ai/monitoringSessionService.js';
 import { createDashboardAuth, createOriginGuard } from './auth.js';
+import { createDefaultManualOrderIdempotencyStore } from './manualOrderIdempotencyStore.js';
 import { getPaperEvidenceMutationLock } from '../research/paperEvidenceMutationGuard.js';
 import { resolveDashboardTls } from './dashboardTls.js';
+import { UpbitCacheMarketDataProvider } from './marketDataProvider.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -34,6 +36,15 @@ class DashboardServer {
     this.app = express();
     this.port = port;
     this.tradingSystem = tradingSystem;
+    const portfolioPath = tradingSystem?.virtualPortfolioFile ||
+      tradingSystem?.config?.virtualPortfolioFile ||
+      path.join(PROJECT_ROOT, 'dry_portfolio.json');
+    const idempotencyFile = tradingSystem?.config?.manualOrderIdempotencyFile ||
+      `${path.resolve(portfolioPath)}.manual_order_idempotency.json`;
+    this.manualOrderIdempotencyStore = options.manualOrderIdempotencyStore ||
+      createDefaultManualOrderIdempotencyStore(tradingSystem, idempotencyFile, {
+        writerLockPath: `${path.resolve(portfolioPath)}.manual_order_writer.lock`
+      });
     const dashboardEnv = options.env || process.env;
     this.logger = new Logger('debug', {
       logDir: resolveLogDirectory(PROJECT_ROOT, dashboardEnv.STAGING_OUTPUT_DIR)
@@ -44,7 +55,7 @@ class DashboardServer {
     }
     this.protocol = this.tlsConfig.enabled ? 'https' : 'http';
 
-    // API/소켓 데이터 평면 인증. 정적 셸은 공개이며, DASHBOARD_TOKEN이 없으면
+    // API/소켓 데이터 평면 인증. 정적 셸은 공개이며, 대시보드 토큰이 없으면
     // 루프백 전용 바인딩으로 강제된다 (src/api/auth.js 참고).
     this.auth = createDashboardAuth(dashboardEnv, {
       loginRateLimiter: options.loginRateLimiter
@@ -68,6 +79,8 @@ class DashboardServer {
     this.httpServer = this.tlsConfig.enabled
       ? createHttpsServer({ cert: this.tlsConfig.cert, key: this.tlsConfig.key }, this.app)
       : createServer(this.app);
+    this.server = null;
+    this.startPromise = null;
     this.io = new SocketIOServer(this.httpServer, {
       // WebSocket 업그레이드는 CORS 대상이 아니므로 Origin을 직접 검사하고,
       // 실제 인가는 handshake auth 토큰(socketMiddleware)이 담당한다.
@@ -79,12 +92,15 @@ class DashboardServer {
 
     // API 응답 캐싱 (rate limit 방지)
     this.cache = new Map();
+    this.inFlightAccountRequests = new Map();
+    this.inFlightTickerRequests = new Map();
     this.cacheTTL = {
       ticker: 1000,      // 시세: 1초
       account: 1000,     // 계좌: 1초
       statistics: 1000,  // 통계: 1초
       candles: 1000      // 캔들: 1초
     };
+    this.marketDataProvider = options.marketDataProvider || new UpbitCacheMarketDataProvider(this);
 
     // 알림 상태 추적
     this.lastSignals = new Map();        // 마지막 신호 저장 (중복 알림 방지)
@@ -226,33 +242,100 @@ class DashboardServer {
   }
 
   // 캐시 조회 (TTL 체크)
-  getCache(key) {
+  getCacheEntry(key) {
     const cached = this.cache.get(key);
     if (cached && Date.now() - cached.time < (this.cacheTTL[key.split(':')[0]] || 2000)) {
-      return cached.data;
+      return cached;
     }
     return null;
   }
 
-  // 캐시 저장
-  setCache(key, data) {
-    this.cache.set(key, { data, time: Date.now() });
+  getCache(key) {
+    return this.getCacheEntry(key)?.data ?? null;
   }
 
-  // 캐싱된 Ticker 조회
-  async getCachedTicker(coins) {
-    const coinKey = Array.isArray(coins) ? coins.sort().join(',') : coins;
+  // 캐시 저장
+  setCache(key, data, time = Date.now()) {
+    this.cache.set(key, { data, time });
+  }
+
+  // Observer GET routes share a short-lived account snapshot. Every caller
+  // receives its own array and row objects so a response projection cannot
+  // mutate another caller's view or the cached snapshot.
+  async getObserverCachedAccountInfo() {
+    const cacheKey = 'account';
+    const cloneRows = rows => Array.isArray(rows)
+      ? rows.map(row => row && typeof row === 'object' ? { ...row } : row)
+      : rows;
+    const cached = this.getCacheEntry(cacheKey);
+    if (cached) return cloneRows(cached.data);
+
+    const inFlight = this.inFlightAccountRequests.get(cacheKey);
+    if (inFlight) return cloneRows(await inFlight);
+
+    let request;
+    request = Promise.resolve()
+      .then(() => this.tradingSystem.getAccountInfo())
+      .then(rows => {
+        const snapshot = cloneRows(rows);
+        this.setCache(cacheKey, snapshot);
+        return snapshot;
+      })
+      .finally(() => {
+        if (this.inFlightAccountRequests.get(cacheKey) === request) {
+          this.inFlightAccountRequests.delete(cacheKey);
+        }
+      });
+    this.inFlightAccountRequests.set(cacheKey, request);
+    return cloneRows(await request);
+  }
+
+  // Cache metadata distinguishes exchange source time from local fetch time.
+  async getCachedTickerWithMetadata(coins) {
+    const requestedCoins = Array.isArray(coins) ? [...coins] : coins;
+    const coinKey = Array.isArray(requestedCoins) ? [...requestedCoins].sort().join(',') : requestedCoins;
     const cacheKey = `ticker:${coinKey}`;
 
-    const cached = this.getCache(cacheKey);
-    if (cached) return cached;
+    const cached = this.getCacheEntry(cacheKey);
+    if (cached) {
+      return {
+        tickers: cached.data,
+        fetchedAt: Number.isFinite(cached.time) ? new Date(cached.time).toISOString() : null
+      };
+    }
 
-    const data = await this.tradingSystem.upbit.getTicker(coins);
-    this.setCache(cacheKey, data);
-    return data;
+    const inFlight = this.inFlightTickerRequests.get(cacheKey);
+    if (inFlight) return inFlight;
+
+    let request;
+    request = Promise.resolve()
+      .then(() => this.tradingSystem.upbit.getTicker(requestedCoins))
+      .then(data => {
+        const cachedAt = Date.now();
+        this.setCache(cacheKey, data, cachedAt);
+        return {
+          tickers: data,
+          fetchedAt: new Date(cachedAt).toISOString()
+        };
+      })
+      .finally(() => {
+        if (this.inFlightTickerRequests.get(cacheKey) === request) {
+          this.inFlightTickerRequests.delete(cacheKey);
+        }
+      });
+    this.inFlightTickerRequests.set(cacheKey, request);
+    return request;
+  }
+
+  // Keep the existing array-only contract for current callers.
+  async getCachedTicker(coins) {
+    const result = await this.getCachedTickerWithMetadata(coins);
+    return result.tickers;
   }
 
   setupMiddleware() {
+    // Read-only credential scope must run before CORS can answer an API preflight.
+    this.app.use('/api', this.auth.readOnlyScopeMiddleware);
     this.app.use(this.originGuard.middleware);
     this.app.use(express.json());
     this.app.use(express.static(path.join(PROJECT_ROOT, 'public')));
@@ -390,9 +473,13 @@ class DashboardServer {
           }
         }
 
+        const runtimeSafety = typeof this.tradingSystem.getRuntimeSafetyStatus === 'function'
+          ? this.tradingSystem.getRuntimeSafetyStatus()
+          : {};
         res.json({
           isRunning: this.tradingSystem.isRunning,
           mode: this.tradingSystem.dryRun ? 'DRY_RUN' : 'LIVE',
+          ...runtimeSafety,
           readOnlyObserver: this.tradingSystem.readOnlyObserver === true,
           strategyMode: this.tradingSystem.strategyMode,
           maxPositions: this.tradingSystem.maxPositions,
@@ -1048,6 +1135,13 @@ class DashboardServer {
   }
 
   start() {
+    if (this.startPromise) return this.startPromise;
+    if (this.httpServer.listening) {
+      this.server = this.httpServer;
+      this.startPromise = Promise.resolve(this.server);
+      return this.startPromise;
+    }
+
     // 거래 알림 콜백 설정
     if (this.tradingSystem?.setTradeCallback) {
       this.tradingSystem.setTradeCallback((tradeInfo) => {
@@ -1062,30 +1156,73 @@ class DashboardServer {
       this.logger.warn(warning);
     }
 
-    this.server = this.httpServer.listen(this.port, this.auth.host, () => {
-      const address = this.server.address();
-      const boundPort = typeof address === 'object' && address ? address.port : this.port;
-      console.log(`\n🌐 대시보드 서버 시작: ${this.protocol}://${this.auth.host}:${boundPort}`);
-      console.log(`   API 엔드포인트: ${this.protocol}://${this.auth.host}:${boundPort}/api`);
-      console.log(`   🔐 인증: ${this.auth.enabled ? 'DASHBOARD_TOKEN 필요' : '비활성 (루프백 전용)'}`);
-      console.log(`   📡 실시간 알림: Socket.io 활성화`);
-      this.logger.info(`Dashboard server started on ${this.auth.host}:${boundPort} (auth=${this.auth.enabled})`);
-    });
+    const server = this.httpServer;
+    this.server = server;
+    let listening = false;
+    const startAttempt = new Promise((resolve, reject) => {
+      // Attach before listen(): a bind error must reject startup instead of
+      // leaving callers to mistake a constructed HTTP server for a ready one.
+      server.on('error', error => {
+        this.logger.error('Server error', {
+          error: error.message,
+          code: error.code,
+          stack: error.stack
+        });
 
-    // 서버 에러 핸들링
-    this.server.on('error', (error) => {
-      this.logger.error('Server error', {
-        error: error.message,
-        code: error.code,
-        stack: error.stack
+        if (error.code === 'EADDRINUSE') {
+          this.logger.error(`Port ${this.port} is already in use`);
+        }
+
+        if (!listening) reject(error);
       });
 
-      if (error.code === 'EADDRINUSE') {
-        this.logger.error(`Port ${this.port} is already in use`);
-      }
+      Promise.resolve()
+        .then(async () => {
+          const trader = this.tradingSystem;
+          const mutableTrader = trader && trader.readOnlyObserver !== true &&
+            (typeof trader.dryRun === 'boolean' ||
+              typeof trader.withManualPortfolioTransaction === 'function' ||
+              typeof trader.submitLiveOrder === 'function');
+          if (mutableTrader) {
+            if (typeof this.manualOrderIdempotencyStore?.initialize !== 'function') {
+              const error = new Error('Mutable dashboard requires profile writer lock initialization.');
+              error.code = 'MANUAL_ORDER_WRITER_LOCK_UNAVAILABLE';
+              throw error;
+            }
+            // Claim and validate this profile before listening. The startup
+            // failure path below calls stop(), which releases an acquired lock.
+            await this.manualOrderIdempotencyStore.initialize();
+          }
+
+          server.listen(this.port, this.auth.host, () => {
+            listening = true;
+            const address = server.address();
+            const boundPort = typeof address === 'object' && address ? address.port : this.port;
+            console.log(`\n🌐 대시보드 서버 시작: ${this.protocol}://${this.auth.host}:${boundPort}`);
+            console.log(`   API 엔드포인트: ${this.protocol}://${this.auth.host}:${boundPort}/api`);
+            console.log(`   🔐 인증: ${this.auth.enabled ? '대시보드 토큰 필요' : '비활성 (루프백 전용)'}`);
+            console.log(`   📡 실시간 알림: Socket.io 활성화`);
+            this.logger.info(`Dashboard server started on ${this.auth.host}:${boundPort} (auth=${this.auth.enabled})`);
+            resolve(server);
+          });
+        })
+        .catch(reject);
     });
 
-    return this.server;
+    this.startPromise = startAttempt.catch(async error => {
+      // Release Socket.IO, HTTP, and any scheduler initialized by the
+      // constructor before surfacing the original bind/startup error.
+      try {
+        await this.stop();
+      } catch (cleanupError) {
+        this.logger.error('Dashboard startup cleanup failed', {
+          error: cleanupError.message
+        });
+      }
+      throw error;
+    });
+
+    return this.startPromise;
   }
 
   /**
@@ -1105,6 +1242,17 @@ class DashboardServer {
     if (trader && typeof trader.isRunning === 'boolean') {
       checks.traderRunning = trader.isRunning;
       ready = ready && trader.isRunning;
+      const runtimeSafety = typeof trader.getRuntimeSafetyStatus === 'function'
+        ? trader.getRuntimeSafetyStatus()
+        : null;
+      if (runtimeSafety) {
+        checks.runtimeState = runtimeSafety.runtimeState;
+        checks.entriesPaused = runtimeSafety.entriesPaused;
+        checks.protectiveMonitorActive = runtimeSafety.protectiveMonitorActive;
+        checks.stopReason = runtimeSafety.stopReason;
+        checks.exchangeStateKnown = runtimeSafety.exchangeStateKnown;
+        if (runtimeSafety.exchangeStateKnown === false) ready = false;
+      }
 
       const lastCycleAt = trader.paperValidation?.telemetry?.lastCycleAt || null;
       const lastCycleMs = lastCycleAt ? Date.parse(lastCycleAt) : null;
@@ -1445,10 +1593,8 @@ class DashboardServer {
   }
 
   stop() {
-    // 최적화 스케줄러 중지
     this.stopOptimizationScheduler();
 
-    // 알림 모니터링 중지
     if (this.notificationInterval) {
       clearInterval(this.notificationInterval);
       this.notificationInterval = null;
@@ -1458,19 +1604,32 @@ class DashboardServer {
       this.notificationInitialTimer = null;
     }
 
-    const logClosed = () => {
-      console.log('\n🌐 대시보드 서버 종료');
-      this.logger.info('Dashboard server stopped');
-    };
-    // io.close()는 연결된 소켓을 끊고 바인딩된 http 서버까지 함께 닫는다.
-    if (this.io) {
-      this.io.close(logClosed);
-      this.io = null;
-      this.server = null;
-    } else if (this.server) {
-      this.server.close(logClosed);
-      this.server = null;
-    }
+    return new Promise(resolve => {
+      const logClosed = () => {
+        try {
+          this.manualOrderIdempotencyStore?.releaseWriterLock?.();
+        } catch (error) {
+          this.logger.error('Manual order writer lock release failed', {
+            error: error.message,
+            code: error.code
+          });
+        }
+        console.log('\n🌐 대시보드 서버 종료');
+        this.logger.info('Dashboard server stopped');
+        resolve();
+      };
+      // io.close() also closes the bound HTTP server after disconnecting sockets.
+      if (this.io) {
+        this.io.close(logClosed);
+        this.io = null;
+        this.server = null;
+      } else if (this.server) {
+        this.server.close(logClosed);
+        this.server = null;
+      } else {
+        resolve();
+      }
+    });
   }
 }
 

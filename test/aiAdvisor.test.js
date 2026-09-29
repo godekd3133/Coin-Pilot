@@ -43,8 +43,10 @@ test('두 provider CLI 실행은 로컬 초기화 contention을 피하도록 순
 
 test('timeout provider는 짧은 cooldown 동안 반복 child 실행을 차단한다', async () => {
   let calls = 0;
+  let now = 1_000;
   const service = new AIAdvisorService({
     providerFailureCooldownMs: 20,
+    now: () => now,
     runner: async () => {
       calls += 1;
       const error = new Error('synthetic timeout');
@@ -59,7 +61,7 @@ test('timeout provider는 짧은 cooldown 동안 반복 child 실행을 차단�
   assert.equal(first.results[0].errorCode, 'AI_TIMEOUT');
   assert.equal(second.results[0].errorCode, 'PROVIDER_COOLDOWN');
   assert.equal(calls, 1);
-  await new Promise(resolve => setTimeout(resolve, 25));
+  now += 25;
   const third = await service.ask(request);
   assert.equal(third.results[0].errorCode, 'AI_TIMEOUT');
   assert.equal(calls, 2);
@@ -324,7 +326,7 @@ test('provider가 모두 unavailable이면 AI 결과를 위조하지 않고 loca
   assert.equal(fallback.advice.mode, 'LOCAL_EVIDENCE_ONLY');
   assert.equal(fallback.advice.action, 'WAIT');
   assert.equal(fallback.advice.confidence, 0);
-  assert.match(fallback.advice.rationale, /AI provider 응답이 없어/);
+  assert.match(fallback.advice.rationale, /서비스 의견을 받지 못해 확인된 데이터만 정리했습니다/);
   assert.ok(fallback.advice.risks.length > 0);
 
   const directBrief = buildLocalEvidenceBrief({ coin: 'KRW-ETH', type: 'SELL_SIGNAL', action: 'SELL' }, []);
@@ -363,7 +365,7 @@ test('provider 의견이 충돌하면 consensus는 안전하게 WAIT가 된다',
   assert.equal(conflict.action, 'WAIT');
   assert.equal(conflict.agreementRatio, 0.5);
   assert.equal(conflict.conflict, true);
-  assert.match(conflict.rationale, /일치하지 않습니다/);
+  assert.match(conflict.rationale, /두 서비스의 의견이 달라 매수·매도 대신 관망으로 표시합니다/);
 });
 
 test('단일 provider 의견은 두 provider 합의로 과장되지 않는다', () => {
@@ -375,7 +377,7 @@ test('단일 provider 의견은 두 provider 합의로 과장되지 않는다', 
   assert.equal(single.providerCount, 1);
   assert.equal(single.quorum, false);
   assert.equal(single.singleProvider, true);
-  assert.match(single.rationale, /단일 provider/);
+  assert.match(single.rationale, /한 곳의 의견입니다\. 다른 서비스와 비교하지 않았습니다/);
 });
 
 test('WAIT veto는 원래 BUY/SELL 신호의 회피 효과를 별도로 판정한다', () => {

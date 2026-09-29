@@ -7,35 +7,34 @@
  */
 
 :root {
-    --sl-font-body: "Manrope", "Noto Sans KR", "Apple SD Gothic Neo", sans-serif;
-    /* Evidence-first UI: use a technical Korean sans for titles instead of a
-       literary serif so headings stay crisp beside charts, tables, and status
-       telemetry. */
-    --sl-font-display: "IBM Plex Sans KR", "Noto Sans KR", "Apple SD Gothic Neo", sans-serif;
-    --sl-ink: #142949;
-    --sl-ink-soft: #43516a;
+    /* Neutral and accent values map to Toss Design System foundation colors.
+       Status colors stay darker where small text needs stronger contrast. */
+    --sl-font-body: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", "Segoe UI", sans-serif;
+    --sl-font-display: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", "Segoe UI", sans-serif;
+    --sl-ink: #191f28;
+    --sl-ink-soft: #4e5968;
     /* Status/text colors are tuned so 10-12px labels still clear WCAG AA 4.5:1
        on the paper and tinted surfaces they sit on. --sl-faint stays below AA
        and is reserved for placeholders, icon glyphs, and decorative dots. */
-    --sl-muted: #66707f;
-    --sl-faint: #8a94a3;
-    --sl-line: #dfe4ea;
-    --sl-line-strong: #cbd3dd;
-    --sl-paper: #f7f4ee;
-    --sl-surface: #fffdf9;
-    --sl-surface-2: #f2f4f5;
-    --sl-blue: #1268d6;
-    --sl-blue-deep: #0b4fae;
-    --sl-blue-soft: #eaf2ff;
-    --sl-green: #0a7a58;
-    --sl-green-bright: #12a375;
-    --sl-green-soft: #e6f6ef;
+    --sl-muted: #6b7684;
+    --sl-faint: #8b95a1;
+    --sl-line: #e5e8eb;
+    --sl-line-strong: #d1d6db;
+    --sl-paper: #f9fafb;
+    --sl-surface: #ffffff;
+    --sl-surface-2: #f2f4f6;
+    --sl-blue: #1b64da;
+    --sl-blue-deep: #194aa6;
+    --sl-blue-soft: #e8f3ff;
+    --sl-green: #027648;
+    --sl-green-bright: #03b26c;
+    --sl-green-soft: #f0faf6;
     --sl-amber: #96590a;
-    --sl-amber-soft: #fff3d7;
-    --sl-red: #b5433e;
-    --sl-red-soft: #ffebe9;
-    --sl-shadow-xs: 0 1px 2px rgba(20, 41, 73, 0.04);
-    --sl-shadow-sm: 0 10px 30px rgba(20, 41, 73, 0.06);
+    --sl-amber-soft: #fff9e7;
+    --sl-red: #a51926;
+    --sl-red-soft: #ffeeee;
+    --sl-shadow-xs: 0 1px 2px rgba(2, 9, 19, 0.04);
+    --sl-shadow-sm: 0 10px 30px rgba(2, 9, 19, 0.06);
     --sl-radius-sm: 8px;
     --sl-radius-md: 12px;
     --sl-radius-lg: 16px;
@@ -44,7 +43,7 @@
 
 /* The new experience is the visible source of truth. Keep compatibility DOM
    mounted so the existing server-backed functions do not lose their anchors. */
-body:has(#pilot-redesign-root) {
+body.pilot-redesign-shell {
     margin: 0;
     /* Do not force a desktop-width canvas on narrow mobile webviews. */
     min-width: 0;
@@ -57,19 +56,25 @@ body:has(#pilot-redesign-root) {
     text-rendering: optimizeLegibility;
 }
 
-body:has(#pilot-redesign-root) > .container,
-body:has(#pilot-redesign-root) > .modal-overlay,
-body:has(#pilot-redesign-root) > .notification-overlay,
-body:has(#pilot-redesign-root) > .notification-popup,
-body:has(#pilot-redesign-root) > .quick-trade-overlay,
-body:has(#pilot-redesign-root) > .quick-trade-modal,
-body:has(#pilot-redesign-root) > .toast-container {
+body.pilot-redesign-shell > .container,
+body.pilot-redesign-shell > .modal-overlay,
+body.pilot-redesign-shell > .notification-overlay,
+body.pilot-redesign-shell > .notification-popup,
+body.pilot-redesign-shell > .quick-trade-overlay,
+body.pilot-redesign-shell > .quick-trade-modal,
+body.pilot-redesign-shell > .toast-container {
+    display: none !important;
+}
+
+body.pilot-redesign-shell #pieTooltip,
+body.pilot-redesign-shell #chartTooltip,
+body.pilot-redesign-shell #priceChartTooltip {
     display: none !important;
 }
 
 /* The old PWA shell has its own mobile bar. The redesigned shell owns the
    mobile navigation so two competing navigation systems never stack. */
-body:has(#pilot-redesign-root) .pilot-mobile-nav {
+body.pilot-redesign-shell .pilot-mobile-nav {
     display: none !important;
 }
 
@@ -104,7 +109,7 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
     min-height: 100vh;
     flex-direction: column;
     border-right: 1px solid var(--sl-line);
-    background: rgba(255, 253, 249, 0.88);
+    background: rgba(255, 255, 255, 0.88);
 }
 
 .pilot-brand {
@@ -191,8 +196,8 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
 }
 
 .pilot-nav-button:hover {
-    background: var(--sl-surface-2);
-    color: var(--sl-blue-deep);
+    background: var(--sl-blue-soft);
+    color: var(--sl-blue);
 }
 
 .pilot-nav-button:hover i,
@@ -202,16 +207,12 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
 
 .pilot-nav-button.is-active {
     background: var(--sl-blue-soft);
-    color: var(--sl-blue-deep);
+    color: var(--sl-blue);
     box-shadow: inset 3px 0 0 var(--sl-blue);
 }
 
-.pilot-sidebar-bottom {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    padding: 12px 12px 22px;
-    border-top: 1px solid var(--sl-line);
+.pilot-mobile-more {
+    display: none;
 }
 
 .pilot-sidebar-note {
@@ -231,13 +232,13 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
     top: 0;
     z-index: 15;
     display: grid;
-    grid-template-columns: auto minmax(220px, 1fr) auto;
+    grid-template-columns: auto minmax(0, 1fr);
     min-height: 84px;
     align-items: center;
     gap: 22px;
     padding: 16px 32px;
-    border-bottom: 1px solid rgba(203, 211, 221, 0.72);
-    background: rgba(247, 244, 238, 0.9);
+    border-bottom: 1px solid rgba(209, 214, 219, 0.72);
+    background: rgba(249, 250, 251, 0.9);
     -webkit-backdrop-filter: blur(18px);
     backdrop-filter: blur(18px);
 }
@@ -275,9 +276,9 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
 }
 
 .pilot-mode-button.is-active {
-    background: var(--sl-blue);
+    background: var(--sl-ink);
     color: #fff;
-    box-shadow: 0 4px 10px rgba(18, 104, 214, 0.2);
+    box-shadow: 0 3px 8px rgba(2, 9, 19, 0.14);
 }
 
 .pilot-mode-button.is-locked:not(.is-active) {
@@ -286,30 +287,6 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
 
 .pilot-mode-button.is-locked:not(.is-active) i {
     color: var(--sl-amber);
-}
-
-.pilot-top-copy {
-    min-width: 0;
-}
-
-.pilot-top-title {
-    display: block;
-    overflow: hidden;
-    color: var(--sl-ink);
-    font-size: 16px;
-    font-weight: 700;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.pilot-top-subtitle {
-    display: block;
-    margin-top: 2px;
-    overflow: hidden;
-    color: var(--sl-muted);
-    font-size: 12px;
-    text-overflow: ellipsis;
-    white-space: nowrap;
 }
 
 .pilot-top-meta {
@@ -343,26 +320,6 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
     border-radius: 50%;
     background: currentColor;
     box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 14%, transparent);
-}
-
-.pilot-user-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    color: var(--sl-ink-soft);
-    font-weight: 700;
-}
-
-.pilot-user-avatar {
-    display: inline-flex;
-    width: 30px;
-    height: 30px;
-    align-items: center;
-    justify-content: center;
-    border-radius: 50%;
-    background: var(--sl-ink);
-    color: #fff;
-    font-size: 12px;
 }
 
 .pilot-content {
@@ -517,12 +474,13 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
 .pilot-trade-tab:focus-visible,
 .pilot-trade-submit:focus-visible,
 .pilot-market-interval:focus-visible,
+.pilot-market-range:focus-visible,
 .pilot-market-row:focus-visible,
 .pilot-ai-form-input:focus-visible,
 .pilot-ai-form-select:focus-visible,
 .pilot-ai-check:focus-within,
 .pilot-switch:has(input:focus-visible) .pilot-switch-track {
-    outline: 3px solid rgba(18, 104, 214, 0.26);
+    outline: 3px solid rgba(27, 100, 218, 0.26);
     outline-offset: 2px;
 }
 
@@ -683,6 +641,53 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
     color: inherit;
 }
 
+.pilot-pending-mutation {
+    display: flex;
+    min-height: 54px;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 32px;
+    border-bottom: 1px solid #efcd82;
+    background: #fff7e3;
+    color: #76520e;
+}
+
+.pilot-pending-mutation[hidden] {
+    display: none !important;
+}
+
+.pilot-pending-mutation > i {
+    flex: 0 0 auto;
+    font-size: 22px;
+}
+
+.pilot-pending-mutation > div {
+    min-width: 0;
+    flex: 1;
+}
+
+.pilot-pending-mutation strong,
+.pilot-pending-mutation span {
+    display: block;
+}
+
+.pilot-pending-mutation strong {
+    font-size: 13px;
+}
+
+.pilot-pending-mutation span {
+    margin-top: 2px;
+    font-size: 12px;
+    line-height: 1.45;
+}
+
+.pilot-pending-mutation .pilot-button {
+    flex: 0 0 auto;
+    border-color: currentColor;
+    background: rgba(255, 255, 255, 0.56);
+    color: inherit;
+}
+
 .pilot-pwa-state {
     white-space: nowrap;
 }
@@ -737,7 +742,7 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
     padding: 15px 16px;
     border: 1px solid var(--sl-line);
     border-radius: var(--sl-radius-md);
-    background: rgba(255, 253, 249, 0.78);
+    background: rgba(255, 255, 255, 0.78);
     box-shadow: var(--sl-shadow-xs);
     cursor: pointer;
     /* <button> resets: inherit the Signal Ledger type instead of the UA font. */
@@ -807,7 +812,7 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
     min-width: 0;
     border: 1px solid var(--sl-line);
     border-radius: var(--sl-radius-md);
-    background: rgba(255, 253, 249, 0.86);
+    background: rgba(255, 255, 255, 0.86);
     box-shadow: var(--sl-shadow-xs);
 }
 
@@ -880,11 +885,22 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
     min-height: 302px;
     border-bottom: 1px solid var(--sl-line);
     background:
-        linear-gradient(rgba(18, 104, 214, 0.045) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(18, 104, 214, 0.045) 1px, transparent 1px),
+        linear-gradient(rgba(27, 100, 218, 0.045) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(27, 100, 218, 0.045) 1px, transparent 1px),
         #fffefa;
     background-size: 10% 25%, 10% 100%;
     overflow: hidden;
+}
+
+.pilot-chart-wrap.is-empty {
+    display: grid;
+    min-height: 166px;
+    place-items: center;
+    background: var(--sl-surface-1);
+}
+
+.pilot-chart-wrap.is-empty .pilot-chart-canvas {
+    display: none;
 }
 
 .pilot-chart-canvas {
@@ -894,14 +910,73 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
 }
 
 .pilot-chart-empty {
-    position: absolute;
-    inset: 0;
-    display: grid;
-    place-items: center;
-    padding: 30px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    width: min(100%, 620px);
+    min-height: 150px;
+    margin: 0 auto;
+    padding: 22px 28px;
     color: var(--sl-muted);
-    font-size: 13px;
-    text-align: center;
+    text-align: left;
+}
+
+.pilot-chart-empty-mark {
+    display: grid;
+    flex: 0 0 42px;
+    width: 42px;
+    height: 42px;
+    place-items: center;
+    border: 1px solid var(--sl-line);
+    border-radius: 13px;
+    background: var(--sl-surface-2);
+    color: var(--sl-blue);
+    font-size: 19px;
+}
+
+.pilot-chart-empty-copy {
+    display: grid;
+    flex: 1 1 auto;
+    min-width: 0;
+    gap: 4px;
+}
+
+.pilot-chart-empty-copy strong {
+    color: var(--sl-ink);
+    font-size: 14px;
+    font-weight: 700;
+}
+
+.pilot-chart-empty-copy > span {
+    color: var(--sl-muted);
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+.pilot-chart-empty .pilot-button {
+    flex: 0 0 auto;
+}
+
+@media (max-width: 520px) {
+    .pilot-chart-wrap.is-empty {
+        min-height: 194px;
+    }
+
+    .pilot-chart-empty {
+        flex-wrap: wrap;
+        min-height: 178px;
+        gap: 12px;
+        padding: 18px;
+    }
+
+    .pilot-chart-empty-copy {
+        flex-basis: calc(100% - 56px);
+    }
+
+    .pilot-chart-empty .pilot-button {
+        width: 100%;
+        margin-left: 56px;
+    }
 }
 
 .pilot-chart-legend {
@@ -1427,7 +1502,7 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
 .pilot-input:focus,
 .pilot-select:focus {
     border-color: var(--sl-blue);
-    box-shadow: 0 0 0 3px rgba(18, 104, 214, 0.12);
+    box-shadow: 0 0 0 3px rgba(27, 100, 218, 0.12);
 }
 
 .pilot-amount-presets {
@@ -1540,6 +1615,11 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
     gap: 16px;
 }
 
+#pilot-portfolio-allocation-grid.is-allocation-single > .pilot-panel:first-child,
+#pilot-portfolio-allocation-grid.is-allocation-zero > .pilot-panel:first-child {
+    align-self: start;
+}
+
 .pilot-table-wrap {
     overflow-x: auto;
 }
@@ -1565,6 +1645,15 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
     letter-spacing: 0.04em;
     text-transform: uppercase;
     white-space: nowrap;
+}
+
+#pilot-redesign-root .pilot-table thead th {
+    background: var(--sl-surface-2);
+    color: var(--sl-ink-soft);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0;
+    text-transform: none;
 }
 
 .pilot-table td {
@@ -1604,7 +1693,7 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
 }
 
 .pilot-asset-dot[data-color="green"] { background: var(--sl-green-bright); }
-.pilot-asset-dot[data-color="amber"] { background: #e6a12d; }
+.pilot-asset-dot[data-color="amber"] { background: #ed6700; }
 .pilot-asset-dot[data-color="red"] { background: var(--sl-red); }
 
 .pilot-status-pill {
@@ -1671,6 +1760,34 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
     border-bottom: 1px solid var(--sl-line);
 }
 
+.pilot-market-time-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 7px 20px;
+    padding: 10px 20px 12px;
+    border-bottom: 1px solid var(--sl-line);
+}
+
+.pilot-market-time-item {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 4px 7px;
+    min-width: 0;
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+}
+
+.pilot-market-time-label {
+    color: var(--sl-muted);
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.pilot-market-time-value {
+    color: var(--sl-ink-soft);
+}
+
 .pilot-market-symbol {
     display: block;
     color: var(--sl-ink);
@@ -1730,8 +1847,8 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
     position: relative;
     min-height: 398px;
     background:
-        linear-gradient(rgba(18, 104, 214, 0.05) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(18, 104, 214, 0.05) 1px, transparent 1px),
+        linear-gradient(rgba(27, 100, 218, 0.05) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(27, 100, 218, 0.05) 1px, transparent 1px),
         #fffefa;
     background-size: 10% 20%, 10% 100%;
 }
@@ -1750,6 +1867,16 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
     justify-content: flex-end;
 }
 
+.pilot-market-control-group {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 3px;
+    border: 1px solid var(--sl-line);
+    border-radius: 8px;
+    background: #fff;
+}
+
 .pilot-market-interval {
     min-height: 30px;
     padding: 0 8px;
@@ -1763,7 +1890,21 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
     font-weight: 700;
 }
 
-.pilot-market-interval.is-active {
+.pilot-market-range {
+    min-height: 30px;
+    padding: 0 8px;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--sl-muted);
+    cursor: pointer;
+    font: inherit;
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.pilot-market-interval.is-active,
+.pilot-market-range.is-active {
     border-color: var(--sl-blue);
     background: var(--sl-blue-soft);
     color: var(--sl-blue-deep);
@@ -1806,7 +1947,7 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
 }
 
 .pilot-market-row[role="button"]:focus-visible {
-    outline: 3px solid rgba(18, 104, 214, 0.26);
+    outline: 3px solid rgba(27, 100, 218, 0.26);
     outline-offset: -3px;
 }
 
@@ -2089,7 +2230,7 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
 .pilot-news-context-check {
     padding: 16px 20px 18px;
     border-top: 1px solid #cad9ee;
-    background: rgba(255, 253, 249, 0.6);
+    background: rgba(255, 255, 255, 0.6);
 }
 
 .pilot-news-context-check h3 {
@@ -2119,6 +2260,15 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
     align-items: start;
 }
 
+.pilot-settings-error {
+    margin: 0 0 18px;
+    padding: 10px 12px;
+    border-left: 2px solid var(--sl-red);
+    background: var(--sl-red-soft);
+    color: #8f302c;
+    font-size: 12px;
+}
+
 .pilot-settings-section + .pilot-settings-section {
     margin-top: 16px;
 }
@@ -2127,6 +2277,62 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
     display: flex;
     flex-direction: column;
     gap: 0;
+}
+
+.pilot-settings-category {
+    border-bottom: 1px solid var(--sl-line);
+}
+
+.pilot-settings-category > summary {
+    display: flex;
+    min-height: 58px;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px 2px;
+    color: var(--sl-ink);
+    cursor: pointer;
+    list-style: revert;
+}
+
+.pilot-settings-category > summary::marker {
+    color: var(--sl-blue);
+}
+
+.pilot-settings-category > summary:focus-visible {
+    outline: 3px solid rgba(27, 100, 218, 0.32);
+    outline-offset: 2px;
+}
+
+.pilot-settings-category-copy {
+    display: grid;
+    gap: 2px;
+    min-width: 0;
+}
+
+.pilot-settings-category-copy strong {
+    font-size: 13px;
+    font-weight: 700;
+}
+
+.pilot-settings-category-copy small {
+    color: var(--sl-muted);
+    font-size: 11px;
+    line-height: 1.4;
+}
+
+.pilot-settings-category-count {
+    flex: 0 0 auto;
+    padding: 3px 8px;
+    border-radius: 999px;
+    background: var(--sl-surface-2);
+    color: var(--sl-muted);
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.pilot-settings-category-body {
+    padding: 0 2px 8px;
 }
 
 .pilot-setting-row {
@@ -2283,7 +2489,9 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
 .pilot-preset-risk {
     color: var(--sl-amber);
     font-size: 11px;
-    letter-spacing: 0.08em;
+    font-weight: 700;
+    letter-spacing: 0;
+    white-space: nowrap;
 }
 
 .pilot-control-row {
@@ -2297,6 +2505,21 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
 
 .pilot-control-row:last-child {
     border-bottom: 0;
+}
+
+.pilot-optimization-run-row {
+    gap: 10px;
+}
+
+.pilot-optimization-run-row .pilot-control-copy {
+    min-width: 0;
+    flex: 1 1 auto;
+}
+
+.pilot-optimization-run-row > .pilot-button {
+    flex: 0 0 auto;
+    min-width: 80px;
+    white-space: nowrap;
 }
 
 .pilot-control-copy strong {
@@ -2402,7 +2625,7 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
     padding: 14px;
     border: 1px solid var(--sl-line);
     border-radius: 9px;
-    background: rgba(255, 253, 249, 0.86);
+    background: rgba(255, 255, 255, 0.86);
 }
 
 .pilot-history-metric span {
@@ -3342,7 +3565,7 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
     display: grid;
     place-items: center;
     padding: 20px;
-    background: rgba(20, 41, 73, 0.34);
+    background: rgba(2, 9, 19, 0.34);
     -webkit-backdrop-filter: blur(4px);
     backdrop-filter: blur(4px);
 }
@@ -3354,7 +3577,7 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
     border: 1px solid var(--sl-line-strong);
     border-radius: var(--sl-radius-lg);
     background: var(--sl-surface);
-    box-shadow: 0 24px 60px rgba(20, 41, 73, 0.2);
+    box-shadow: 0 24px 60px rgba(2, 9, 19, 0.2);
 }
 
 .pilot-modal-header,
@@ -3380,6 +3603,12 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
     color: var(--sl-ink);
     font-size: 16px;
     font-weight: 800;
+}
+
+.pilot-modal-title:focus {
+    border-radius: 2px;
+    outline: 3px solid rgba(27, 100, 218, 0.32);
+    outline-offset: 3px;
 }
 
 .pilot-modal-body {
@@ -3426,7 +3655,7 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
     border-left: 3px solid var(--sl-blue);
     border-radius: 9px;
     background: var(--sl-surface);
-    box-shadow: 0 15px 35px rgba(20, 41, 73, 0.13);
+    box-shadow: 0 15px 35px rgba(2, 9, 19, 0.13);
     color: var(--sl-ink-soft);
     font-size: 12px;
     animation: pilot-toast-in 220ms ease both;
@@ -3465,6 +3694,136 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
     border: 0 !important;
 }
 
+.pilot-mobile-menu {
+    position: fixed;
+    inset: 0;
+    width: 100vw;
+    max-width: none;
+    height: 100vh;
+    max-height: none;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    border: 0;
+    background: transparent;
+    color: var(--sl-ink);
+}
+
+.pilot-mobile-menu::backdrop {
+    background: rgba(22, 34, 51, 0.32);
+    -webkit-backdrop-filter: blur(2px);
+    backdrop-filter: blur(2px);
+}
+
+.pilot-mobile-menu-sheet {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    max-height: min(76vh, 560px);
+    max-height: min(76dvh, 560px);
+    overflow: auto;
+    padding: 15px 18px calc(18px + env(safe-area-inset-bottom, 0px));
+    border: 1px solid var(--sl-line-strong);
+    border-bottom: 0;
+    border-radius: 22px 22px 0 0;
+    background: var(--sl-surface);
+    box-shadow: 0 -14px 42px rgba(2, 9, 19, 0.16);
+    overscroll-behavior: contain;
+    animation: pilot-mobile-menu-rise 180ms cubic-bezier(0.2, 0.75, 0.25, 1) both;
+}
+
+.pilot-mobile-menu-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding-bottom: 10px;
+}
+
+.pilot-mobile-menu-heading span {
+    display: block;
+    margin-bottom: 2px;
+    color: var(--sl-muted);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+}
+
+.pilot-mobile-menu-heading h2 {
+    margin: 0;
+    color: var(--sl-ink);
+    font-size: 18px;
+    font-weight: 750;
+    letter-spacing: -0.025em;
+}
+
+.pilot-mobile-menu-close {
+    display: inline-flex;
+    width: 44px;
+    min-width: 44px;
+    height: 44px;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--sl-line);
+    border-radius: 50%;
+    background: var(--sl-surface);
+    color: var(--sl-ink-soft);
+    cursor: pointer;
+    font: inherit;
+    font-size: 20px;
+}
+
+.pilot-mobile-menu-close:focus-visible {
+    outline: 3px solid color-mix(in srgb, var(--sl-green) 55%, transparent);
+    outline-offset: 2px;
+}
+
+.pilot-mobile-menu-nav {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 7px;
+    padding-top: 3px;
+}
+
+.pilot-mobile-menu-nav .pilot-nav-button {
+    min-width: 0;
+    min-height: 54px;
+    justify-content: flex-start;
+    gap: 10px;
+    padding: 0 12px;
+    border: 1px solid var(--sl-line);
+    border-radius: 11px;
+    background: #fff;
+    color: var(--sl-ink-soft);
+    font-size: 13px;
+    font-weight: 650;
+    white-space: nowrap;
+    box-shadow: none;
+}
+
+.pilot-mobile-menu-nav .pilot-nav-button i {
+    flex-basis: 20px;
+    color: var(--sl-muted);
+    font-size: 19px;
+}
+
+.pilot-mobile-menu-nav .pilot-nav-button.is-active {
+    border-color: color-mix(in srgb, var(--sl-green) 24%, var(--sl-line));
+    background: var(--sl-green-soft);
+    color: var(--sl-green);
+    box-shadow: inset 2px 0 0 var(--sl-green);
+}
+
+.pilot-mobile-menu-nav .pilot-nav-button:hover {
+    background: var(--sl-surface-2);
+}
+
+@keyframes pilot-mobile-menu-rise {
+    from { opacity: 0; transform: translateY(12px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
 /* AI advisory desk ------------------------------------------------------- */
 .pilot-ai-page .pilot-page-description {
     max-width: 680px;
@@ -3479,7 +3838,7 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
     padding: 13px 16px;
     border: 1px solid #eadbb5;
     border-radius: var(--sl-radius-md);
-    background: linear-gradient(110deg, #fff8e5, #fffdf9 72%);
+    background: linear-gradient(110deg, #fff9e7, #ffffff 72%);
     color: var(--sl-amber);
     font-size: 12px;
 }
@@ -3534,6 +3893,105 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
     padding: 16px 18px;
 }
 
+/* Keep the opinion workspace closer to a field journal than a stack of
+   status cards. The divider follows each section without boxing every item. */
+.pilot-ai-page .pilot-panel {
+    border: 0;
+    border-top: 1px solid var(--sl-line-strong);
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+}
+
+.pilot-ai-page .pilot-ai-panel-header {
+    padding: 12px 0;
+    border-bottom: 0;
+}
+
+.pilot-ai-page .pilot-ai-panel-body {
+    padding: 0 0 12px;
+}
+
+.pilot-ai-page .pilot-ai-policy {
+    margin-bottom: 20px;
+    padding: 4px 0 4px 12px;
+    border: 0;
+    border-left: 2px solid #d6ac5f;
+    border-radius: 0;
+    background: transparent;
+    color: var(--sl-muted);
+}
+
+.pilot-ai-page .pilot-ai-policy strong {
+    display: inline;
+    margin: 0 8px 0 0;
+    color: var(--sl-ink);
+}
+
+.pilot-ai-page .pilot-ai-policy span {
+    color: var(--sl-muted);
+}
+
+.pilot-ai-load-error {
+    margin: -8px 0 16px;
+    padding: 2px 0 2px 12px;
+    border-left: 2px solid var(--sl-red);
+    color: var(--sl-red);
+    font-size: 12px;
+    line-height: 1.45;
+}
+
+.pilot-ai-page .pilot-ai-provider {
+    min-height: 0;
+    padding: 9px 0;
+    border: 0;
+    border-bottom: 1px solid var(--sl-line);
+    border-radius: 0;
+    background: transparent;
+}
+
+.pilot-ai-page .pilot-ai-provider.is-ready,
+.pilot-ai-page .pilot-ai-provider.is-warning,
+.pilot-ai-page .pilot-ai-provider.is-error {
+    border-color: var(--sl-line);
+    background: transparent;
+}
+
+.pilot-ai-page .pilot-ai-effectiveness-summary > div {
+    padding: 8px 4px;
+    border: 0;
+    border-bottom: 1px solid var(--sl-line);
+    border-radius: 0;
+    background: transparent;
+    text-align: left;
+}
+
+.pilot-ai-page .pilot-ai-effectiveness-row {
+    padding: 9px 0;
+    border: 0;
+    border-bottom: 1px solid var(--sl-line);
+    border-radius: 0;
+    background: transparent;
+}
+
+.pilot-ai-page .pilot-ai-session,
+.pilot-ai-page .pilot-ai-event,
+.pilot-ai-page .pilot-ai-consultation {
+    padding: 10px 0 12px 12px;
+    border-top: 0;
+    border-right: 0;
+    border-bottom: 1px solid var(--sl-line);
+    border-radius: 0;
+    background: transparent;
+}
+
+.pilot-ai-page .pilot-ai-empty {
+    padding: 12px 0;
+    border: 0;
+    border-radius: 0;
+    text-align: left;
+}
+
 .pilot-ai-section-title {
     display: flex;
     align-items: baseline;
@@ -3569,7 +4027,7 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
 
 .pilot-ai-effectiveness-summary {
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
     gap: 7px;
 }
 
@@ -3636,6 +4094,16 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
     color: var(--sl-green);
     font-family: "SFMono-Regular", Consolas, monospace;
     font-size: 12px;
+    text-align: right;
+}
+
+.pilot-ai-effectiveness-row b span {
+    display: block;
+    margin: 0 0 2px;
+    color: var(--sl-muted);
+    font-family: var(--sl-font-body);
+    font-size: 10px;
+    font-weight: 500;
 }
 
 .pilot-ai-provider {
@@ -3644,6 +4112,14 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
     border: 1px solid var(--sl-line);
     border-radius: 10px;
     background: #fbfbf9;
+}
+
+.pilot-ai-provider-help {
+    display: block;
+    margin-top: 11px;
+    color: var(--sl-muted);
+    font-size: 11px;
+    line-height: 1.45;
 }
 
 .pilot-ai-provider.is-ready {
@@ -3970,24 +4446,22 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
 
     .pilot-app {
         display: block;
-        /* The five-column nav wraps into two rows on a phone. Keep the final
-           card above the fixed nav and the OS home indicator. */
-        padding-bottom: calc(148px + env(safe-area-inset-bottom, 0px));
+        padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px));
     }
 
     .pilot-sidebar {
         position: fixed;
         top: auto !important;
-        right: 10px;
-        bottom: calc(10px + env(safe-area-inset-bottom, 0px));
-        left: 10px;
+        right: max(10px, env(safe-area-inset-right, 0px));
+        bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+        left: max(10px, env(safe-area-inset-left, 0px));
         display: block;
         min-height: 0 !important;
         height: auto !important;
         border: 1px solid var(--sl-line-strong);
-        border-radius: 14px;
-        background: rgba(255, 253, 249, 0.94);
-        box-shadow: 0 12px 34px rgba(20, 41, 73, 0.15);
+        border-radius: 18px;
+        background: rgba(255, 255, 255, 0.94);
+        box-shadow: 0 12px 34px rgba(2, 9, 19, 0.15);
         -webkit-backdrop-filter: blur(16px);
         backdrop-filter: blur(16px);
     }
@@ -4001,29 +4475,52 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
 
     .pilot-sidebar-nav {
         display: grid;
-        grid-template-columns: repeat(5, 1fr);
+        grid-template-columns: repeat(5, minmax(0, 1fr));
         gap: 2px;
         padding: 4px;
     }
 
+    .pilot-sidebar-nav > .pilot-nav-button[data-pilot-view] {
+        display: none;
+    }
+
+    .pilot-sidebar-nav > .pilot-nav-button[data-pilot-view="overview"],
+    .pilot-sidebar-nav > .pilot-nav-button[data-pilot-view="trade"],
+    .pilot-sidebar-nav > .pilot-nav-button[data-pilot-view="portfolio"],
+    .pilot-sidebar-nav > .pilot-nav-button[data-pilot-view="market"],
+    .pilot-sidebar-nav > .pilot-mobile-more {
+        display: flex;
+    }
+
     .pilot-nav-button {
-        min-height: 44px;
+        min-width: 0;
+        min-height: 56px;
         flex-direction: column;
         justify-content: center;
         gap: 2px;
-        padding: 2px;
+        padding: 3px 1px;
         border-radius: 9px;
-        font-size: 9px;
+        font-size: 11px;
         text-align: center;
+        white-space: nowrap;
     }
 
     .pilot-nav-button i {
         flex: 0 0 auto;
-        font-size: 16px;
+        font-size: 18px;
     }
 
     .pilot-nav-button.is-active {
         box-shadow: none;
+    }
+
+    .pilot-mobile-menu[open] {
+        display: block;
+    }
+
+    .pilot-mobile-menu-sheet {
+        padding-right: max(18px, env(safe-area-inset-right, 0px));
+        padding-left: max(18px, env(safe-area-inset-left, 0px));
     }
 
     .pilot-topbar {
@@ -4047,18 +4544,10 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
         min-height: 40px;
     }
 
-    .pilot-top-copy {
-        text-align: center;
-    }
-
     .pilot-top-meta {
         display: flex;
         justify-content: space-between;
         margin: 0;
-    }
-
-    .pilot-user-chip {
-        display: none;
     }
 
     .pilot-mode-banner {
@@ -4078,6 +4567,12 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
     }
 
     .pilot-offline-banner {
+        align-items: flex-start;
+        padding: 12px 14px;
+        flex-wrap: wrap;
+    }
+
+    .pilot-pending-mutation {
         align-items: flex-start;
         padding: 12px 14px;
         flex-wrap: wrap;
@@ -4226,6 +4721,12 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
         padding: 15px;
     }
 
+    .pilot-market-time-meta {
+        flex-direction: column;
+        gap: 7px;
+        padding: 10px 15px 12px;
+    }
+
     .pilot-market-price {
         font-size: 22px;
     }
@@ -4335,6 +4836,7 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
     }
 
     .pilot-market-interval,
+    .pilot-market-range,
     .pilot-filter-chip {
         min-height: 34px;
     }
@@ -4433,6 +4935,36 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
         font-size: 10px;
     }
 
+    .pilot-pending-mutation {
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr);
+        align-items: start;
+        gap: 7px;
+        min-height: 0;
+        padding: 8px 10px;
+    }
+
+    .pilot-pending-mutation > i {
+        font-size: 18px;
+    }
+
+    .pilot-pending-mutation strong {
+        font-size: 11px;
+    }
+
+    .pilot-pending-mutation span {
+        font-size: 10px;
+        line-height: 1.35;
+    }
+
+    .pilot-pending-mutation .pilot-button {
+        grid-column: 2;
+        justify-self: start;
+        min-height: 32px;
+        padding: 0 6px;
+        font-size: 10px;
+    }
+
     .pilot-gate-card {
         min-height: 88px;
         height: 88px;
@@ -4461,6 +4993,18 @@ body:has(#pilot-redesign-root) .pilot-mobile-nav {
 
     .pilot-gate-arrow {
         font-size: 12px;
+    }
+}
+
+@media (max-width: 480px) {
+    .pilot-optimization-run-row {
+        align-items: flex-start;
+        gap: 8px;
+    }
+
+    .pilot-optimization-run-row > .pilot-button {
+        min-height: 36px;
+        padding: 0 8px;
     }
 }
 

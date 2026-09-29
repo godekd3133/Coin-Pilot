@@ -6,11 +6,15 @@ import UpbitAPI from './api/upbit.js';
 import Logger from './utils/logger.js';
 import ParameterOptimizer from './optimization/parameterOptimizer.js';
 import { loadEnv, formatEnvErrors, formatEnvWarnings } from './config/envLoader.js';
-import { finalizeActivePaperValidation } from './runtime/paperShutdown.js';
+import { resolveTradingLimits } from './config/tradingLimits.js';
+import { setupExitHandlers } from './runtime/exitHandlers.js';
+import { runAfterDashboardReady } from './runtime/dashboardStartup.js';
 import fs from 'fs';
 import axios from 'axios';
 
 dotenv.config();
+
+let activeExitHandlers = null;
 
 /**
  * 여러 번의 API 호출로 충분한 분봉 데이터 수집
@@ -95,6 +99,7 @@ function createConfig(env) {
   // 기존 종합점수 전략으로 생성된 파라미터는 스캘핑 반등 계약과 호환되지
   // 않으므로 새 전략에서는 무시한다.
   const optimalParams = isScalpingMode ? null : loadOptimalConfig();
+  const tradingLimits = resolveTradingLimits({ env, isScalpingMode, optimalParams });
 
   return {
     strategyMode,
@@ -111,13 +116,7 @@ function createConfig(env) {
         ? env.TARGET_COINS.split(',')
         : ['KRW-BTC', 'KRW-ETH', 'KRW-XRP'],
     analyzeAllCoins: env.TARGET_COINS === 'ALL',
-
-    maxPositions: (
-      isScalpingMode ? env.SCALP_MAX_POSITIONS : env.MAX_POSITIONS
-    ) || (isScalpingMode ? 3 : 99999),
-    portfolioAllocation: (
-      isScalpingMode ? env.SCALP_PORTFOLIO_ALLOCATION : env.PORTFOLIO_ALLOCATION
-    ) || (isScalpingMode ? 0.1 : 0.5),
+    ...tradingLimits,
 
     investmentAmount: env.INVESTMENT_AMOUNT || 50000,
     stopLossPercent: isScalpingMode
@@ -171,11 +170,6 @@ function createConfig(env) {
     // 가중치 설정 (최적화 파라미터 우선)
     technicalWeight: optimalParams?.technicalWeight || env.TECHNICAL_WEIGHT || 0.6,
     newsWeight: optimalParams?.technicalWeight ? (1 - optimalParams.technicalWeight) : (env.NEWS_WEIGHT || 0.4),
-
-    // 투자 비율 (최적화 파라미터 우선)
-    investmentRatio: isScalpingMode
-      ? env.SCALP_INVESTMENT_RATIO || 0.02
-      : (optimalParams?.investmentRatio || env.INVESTMENT_RATIO || 0.05),
 
     // 과매도 반응 스캘핑 설정
     candleUnit: isScalpingMode
@@ -590,81 +584,6 @@ function startOptimizationLoop(config, logger) {
   return setInterval(runOptimization, interval);
 }
 
-// 종료 처리
-function setupExitHandlers(trader, dashboardServer, backtestTimer, optimizationTimer, logger) {
-  const gracefulShutdown = async () => {
-    console.log('\n\n⏹️  시스템 종료 중...');
-
-    trader.stop();
-
-    // A dashboard/staging process can own an active paper validation session
-    // even when the trading loop itself is idle. Close that evidence window
-    // before exit so SIGINT/SIGTERM produces a terminal ledger instead of
-    // leaving an avoidable active/orphaned session for the observer to infer.
-    await finalizeActivePaperValidation(trader, console);
-
-    if (dashboardServer) {
-      dashboardServer.stop();
-    }
-
-    if (backtestTimer) {
-      clearInterval(backtestTimer);
-    }
-
-    if (optimizationTimer) {
-      clearInterval(optimizationTimer);
-    }
-
-    // 현재 포지션 정보 출력
-    let hasPositions = false;
-    for (const [coin, strategy] of trader.strategies.entries()) {
-      if (strategy.currentPosition) {
-        if (!hasPositions) {
-          console.log('\n⚠️  주의: 아직 닫히지 않은 포지션이 있습니다!');
-          hasPositions = true;
-        }
-        console.log(`\n[${coin}]`);
-        console.log(strategy.currentPosition);
-      }
-    }
-
-    // 최종 통계 출력
-    console.log('\n📊 최종 거래 통계:');
-    for (const [coin, strategy] of trader.strategies.entries()) {
-      const stats = strategy.getStatistics();
-      if (stats.totalTrades > 0) {
-        console.log(`\n[${coin}]`);
-        console.log(stats);
-      }
-    }
-
-    console.log('\n👋 프로그램을 종료합니다.\n');
-    process.exit(0);
-  };
-
-  // Ctrl+C
-  process.on('SIGINT', gracefulShutdown);
-
-  // kill 명령
-  process.on('SIGTERM', gracefulShutdown);
-
-  // 예외 처리
-  process.on('uncaughtException', (error) => {
-    console.error('\n💥 예상치 못한 오류 발생:', error);
-    if (logger) {
-      logger.error('Uncaught Exception', { error: error.message, stack: error.stack });
-    }
-    gracefulShutdown();
-  });
-
-  process.on('unhandledRejection', (reason, _promise) => {
-    console.error('\n💥 처리되지 않은 Promise 거부:', reason);
-    if (logger) {
-      logger.error('Unhandled Rejection', { reason });
-    }
-  });
-}
-
 // 메인 함수
 async function main() {
   printBanner();
@@ -736,65 +655,75 @@ async function main() {
   let dashboardServer = null;
   if (config.enableDashboard) {
     dashboardServer = new DashboardServer(trader, config.dashboardPort);
-    dashboardServer.start();
   }
 
-  // 스캘핑 모드에서는 기존 종합점수 전략용 백테스트/최적화가
-  // 반등 전략 파라미터를 오염시키지 않도록 실행하지 않는다.
-  let backtestTimer = null;
-  let optimizationTimer = null;
+  await runAfterDashboardReady(dashboardServer, async () => {
+    // 스캘핑 모드에서는 기존 종합점수 전략용 백테스트/최적화가
+    // 반등 전략 파라미터를 오염시키지 않도록 실행하지 않는다.
+    let backtestTimer = null;
+    let optimizationTimer = null;
 
-  if (config.dryRun && !config.isScalpingMode) {
-    backtestTimer = startBacktestingLoop(config, logger, trader);
-  }
+    if (config.dryRun && !config.isScalpingMode) {
+      backtestTimer = startBacktestingLoop(config, logger, trader);
+    }
 
-  if (!config.isScalpingMode) {
-    optimizationTimer = startOptimizationLoop(config, logger);
-  } else {
-    console.log('ℹ️  스캘핑 모드: 기존 종합점수 백테스트/유전 최적화 루프는 비활성화됩니다.');
-  }
+    if (!config.isScalpingMode) {
+      optimizationTimer = startOptimizationLoop(config, logger);
+    } else {
+      console.log('ℹ️  스캘핑 모드: 기존 종합점수 백테스트/유전 최적화 루프는 비활성화됩니다.');
+    }
 
-  // 종료 핸들러 설정
-  setupExitHandlers(trader, dashboardServer, backtestTimer, optimizationTimer, logger);
+    // 종료 핸들러 설정
+    const exitHandlers = setupExitHandlers(trader, dashboardServer, backtestTimer, optimizationTimer, logger);
+    activeExitHandlers = exitHandlers;
 
-  // 안내 메시지
-  console.log('💡 팁:');
-  console.log('  - Ctrl+C를 눌러 언제든지 종료할 수 있습니다.');
-  console.log('  - 로그는 logs/ 디렉토리에 저장됩니다.');
-  console.log('  - 웹 대시보드: ' + (dashboardServer?.protocol || 'http') + '://localhost:' + config.dashboardPort);
-  if (config.dryRun && !config.isScalpingMode) {
-    console.log('  - 백테스팅 결과: backtest_results_*.json 파일 확인');
-    console.log('  - 백테스팅 간격: ' + (config.backtestInterval / 60000) + '분마다');
-  }
-  if (!config.isScalpingMode) {
-    console.log('  - 최적화 결과: optimal_config.json 파일 확인');
-    console.log('  - 최적화 간격: ' + (config.dryRun ?
-      ((parseInt(process.env.OPTIMIZATION_INTERVAL_DRY) || 21600000) / 3600000) :
-      ((parseInt(process.env.OPTIMIZATION_INTERVAL) || 86400000) / 3600000)) + '시간마다');
-  }
-  console.log('');
-  console.log('─'.repeat(80));
+    // 안내 메시지
+    console.log('💡 팁:');
+    console.log('  - Ctrl+C를 눌러 언제든지 종료할 수 있습니다.');
+    console.log('  - 로그는 logs/ 디렉토리에 저장됩니다.');
+    console.log('  - 웹 대시보드: ' + (dashboardServer?.protocol || 'http') + '://localhost:' + config.dashboardPort);
+    if (config.dryRun && !config.isScalpingMode) {
+      console.log('  - 백테스팅 결과: backtest_results_*.json 파일 확인');
+      console.log('  - 백테스팅 간격: ' + (config.backtestInterval / 60000) + '분마다');
+    }
+    if (!config.isScalpingMode) {
+      console.log('  - 최적화 결과: optimal_config.json 파일 확인');
+      console.log('  - 최적화 간격: ' + (config.dryRun ?
+        ((parseInt(process.env.OPTIMIZATION_INTERVAL_DRY) || 21600000) / 3600000) :
+        ((parseInt(process.env.OPTIMIZATION_INTERVAL) || 86400000) / 3600000)) + '시간마다');
+    }
+    console.log('');
+    console.log('─'.repeat(80));
 
-  // 카운트다운
-  console.log('\n⏱️  3초 후 자동매매를 시작합니다...');
-  await new Promise(resolve => setTimeout(resolve, 1000));
-  console.log('⏱️  2...');
-  await new Promise(resolve => setTimeout(resolve, 1000));
-  console.log('⏱️  1...');
-  await new Promise(resolve => setTimeout(resolve, 1000));
+    // 카운트다운
+    console.log('\n⏱️  3초 후 자동매매를 시작합니다...');
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    console.log('⏱️  2...');
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    console.log('⏱️  1...');
+    await new Promise(resolve => setTimeout(resolve, 1000));
 
-  // 자동매매 시작
-  try {
-    await trader.start();
-  } catch (error) {
-    console.error('\n❌ 치명적 오류:', error);
-    logger.error('Fatal Error', { error: error.message, stack: error.stack });
-    process.exit(1);
-  }
+    // 자동매매 시작
+    try {
+      await trader.start();
+    } catch (error) {
+      console.error('\n❌ 치명적 오류:', error);
+      logger.error('Fatal Error', { error: error.message, stack: error.stack });
+      process.exitCode = Math.max(Number(process.exitCode) || 0, 1);
+      await exitHandlers.gracefulShutdown(1, { reason: 'startup_failure' });
+    }
+  });
 }
 
 // 프로그램 실행
-main().catch(error => {
+main().catch(async error => {
   console.error('❌ 시작 실패:', error);
-  process.exit(1);
+  process.exitCode = Math.max(Number(process.exitCode) || 0, 1);
+  if (activeExitHandlers?.gracefulShutdown) {
+    try {
+      await activeExitHandlers.gracefulShutdown(1, { reason: 'startup_failure' });
+    } catch (shutdownError) {
+      console.error('시작 실패 정리 중 오류:', shutdownError);
+    }
+  }
 });

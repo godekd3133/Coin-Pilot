@@ -10,7 +10,6 @@ const webDirectory = path.resolve(testDirectory, '../web');
 const serverUrlSource = fs.readFileSync(path.join(webDirectory, 'server-url.js'), 'utf8');
 const autoConnectSource = fs.readFileSync(path.join(webDirectory, 'auto-connect.js'), 'utf8');
 const STORAGE_KEY = 'coinpilot.ios.dashboardUrl';
-const DEFAULT_URL = 'https://52.78.156.161';
 
 function loadMobileWebShell({
   savedUrl = null,
@@ -50,25 +49,28 @@ function loadMobileWebShell({
   return state;
 }
 
-test('standalone browser saves and opens the configured default dashboard', () => {
+test('standalone browser stays on the connection form until the user selects a server', () => {
   const state = loadMobileWebShell();
 
-  assert.deepEqual(state.redirects, [DEFAULT_URL]);
-  assert.deepEqual(state.writes, [DEFAULT_URL]);
-  assert.equal(state.savedUrl, DEFAULT_URL);
+  assert.deepEqual(state.redirects, []);
+  assert.deepEqual(state.writes, []);
+  assert.equal(state.savedUrl, null);
 });
 
-test('standalone browser uses a saved server after applying the shared URL policy', () => {
+test('standalone browser keeps a saved server visible without opening it implicitly', () => {
   const state = loadMobileWebShell({ savedUrl: 'https://coinpilot.example.com/' });
 
-  assert.deepEqual(state.redirects, ['https://coinpilot.example.com']);
+  assert.deepEqual(state.redirects, []);
+  assert.deepEqual(state.writes, []);
+  assert.equal(state.savedUrl, 'https://coinpilot.example.com/');
   assert.deepEqual(state.nativeMessages, []);
 });
 
-test('an invalid saved public HTTP address never receives a browser redirect', () => {
+test('an invalid saved public HTTP address is never opened implicitly', () => {
   const state = loadMobileWebShell({ savedUrl: 'http://coinpilot.example.com' });
 
-  assert.deepEqual(state.redirects, [DEFAULT_URL]);
+  assert.deepEqual(state.redirects, []);
+  assert.deepEqual(state.writes, []);
 });
 
 test('native WebView leaves navigation to the native server controller', () => {
@@ -79,9 +81,9 @@ test('native WebView leaves navigation to the native server controller', () => {
   assert.deepEqual(state.nativeMessages, []);
 });
 
-test('browser falls back to the default when local storage is unavailable', () => {
+test('browser stays on the setup page when local storage is unavailable', () => {
   const state = loadMobileWebShell({ storageUnavailable: true });
 
-  assert.deepEqual(state.redirects, [DEFAULT_URL]);
+  assert.deepEqual(state.redirects, []);
   assert.deepEqual(state.writes, []);
 });

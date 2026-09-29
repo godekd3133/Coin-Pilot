@@ -82,7 +82,10 @@ test('live entry와 forward-paper entry는 동일한 SCALP_* env 계약을 해�
         .map(match => match[1])
         .filter(name => name.startsWith('SCALP_'))
     );
-  const live = envNames(fs.readFileSync('src/index.js', 'utf8'));
+  const live = envNames([
+    fs.readFileSync('src/index.js', 'utf8'),
+    fs.readFileSync('src/config/tradingLimits.js', 'utf8')
+  ].join('\n'));
   const paper = envNames(fs.readFileSync('src/scripts/runPaperSmoke.js', 'utf8'));
 
   // Live-only knobs the paper lane intentionally never needs: the live gate

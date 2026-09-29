@@ -26,8 +26,7 @@ test('scalping validation API uses the configured staging path without falling b
   const dashboard = new DashboardServer(trader, 0, {
     env: { ...process.env, DASHBOARD_TOKEN: '' }
   });
-  const httpServer = dashboard.start();
-  await new Promise(resolve => httpServer.once('listening', resolve));
+  const httpServer = await dashboard.start();
   const port = httpServer.address().port;
 
   try {

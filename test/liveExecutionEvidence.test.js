@@ -18,6 +18,41 @@ import {
   projectLiveAccountReadback
 } from '../src/research/liveExecutionEvidence.js';
 
+function withReadyLiveOrderState(tradingSystem) {
+  return {
+    _orderInProgress: false,
+    _entriesPaused: false,
+    _stopRequested: false,
+    _riskMonitorProtectiveOnly: false,
+    _gracefulShutdownPromise: null,
+    _liveAccountStateKnown: true,
+    _liveExchangeStateKnown: true,
+    _liveOrderStateUnknownMarkets: new Set(),
+    _livePendingOrderMarkets: new Set(),
+    getRuntimeSafetyStatus() {
+      return {
+        runtimeState: this._liveExchangeStateKnown ? 'STOPPED' : 'SYNC_REQUIRED',
+        exchangeStateKnown: this._liveExchangeStateKnown
+      };
+    },
+    canExecuteLiveOrder(market) {
+      return this._liveAccountStateKnown && this._liveExchangeStateKnown &&
+        !this._liveOrderStateUnknownMarkets.has(market) && !this._livePendingOrderMarkets.has(market);
+    },
+    async ensureLiveOrderMarketStateVerified(market) {
+      return this._liveAccountStateKnown && this._liveExchangeStateKnown &&
+        !this._liveOrderStateUnknownMarkets.has(market) &&
+        !this._livePendingOrderMarkets.has(market);
+    },
+    // Test adapter only: production MultiCoinTrader persists and fsyncs its
+    // unique ORDER_INTENT before dispatching through the same mocked Upbit API.
+    async submitLiveOrder(market, side, volume, price, orderType) {
+      return this.upbit.order(market, side, volume, price, orderType);
+    },
+    ...tradingSystem
+  };
+}
+
 test('live execution evidence keeps fill fields bounded and settlement explicit', () => {
   const event = createLiveExecutionEvidenceEvent({
     eventType: 'FILL_OBSERVED',
@@ -150,6 +185,137 @@ test('reconciliation does not treat an incomplete fill as settlement-ready evide
   assert.equal(result.readyForSettlementComparison, false);
 });
 
+test('durable order intent and ambiguous FILL_NOT_OBSERVED records remain unresolved without terminal exchange proof', () => {
+  const intent = createLiveExecutionEvidenceEvent({
+    eventType: 'ORDER_INTENT',
+    clientIntentId: 'intent-crash-window',
+    market: 'KRW-BTC',
+    side: 'bid',
+    orderType: 'price',
+    requested: { amount: 100_000 }
+  });
+  const ambiguousSubmitted = createLiveExecutionEvidenceEvent({
+    eventType: 'ORDER_SUBMITTED',
+    clientIntentId: 'intent-timeout',
+    orderId: 'order-timeout',
+    market: 'KRW-ETH',
+    side: 'bid'
+  });
+  const timeout = createLiveExecutionEvidenceEvent({
+    eventType: 'FILL_NOT_OBSERVED',
+    clientIntentId: 'intent-timeout',
+    orderId: 'order-timeout',
+    market: 'KRW-ETH',
+    side: 'bid',
+    order: { uuid: 'order-timeout', state: 'wait', executed_volume: '0', remaining_volume: '0.01' },
+    fillResult: { filled: false, error: 'timeout' }
+  });
+
+  const result = reconcileLiveExecutionEvidence([intent, ambiguousSubmitted, timeout]);
+  assert.equal(result.unresolvedOrderIntentCount, 1);
+  assert.deepEqual(result.unresolvedOrderIntents.map(row => row.clientIntentId), ['intent-crash-window']);
+  assert.deepEqual(result.unresolvedSubmittedOrderIds, ['order-timeout']);
+  assert.deepEqual(result.managedMarkets, ['KRW-BTC', 'KRW-ETH']);
+});
+
+test('only terminal zero-fill cancel/done or fully observed terminal fills resolve submitted orders', () => {
+  const submitted = orderId => createLiveExecutionEvidenceEvent({
+    eventType: 'ORDER_SUBMITTED', orderId, market: 'KRW-BTC', side: 'bid'
+  });
+  const unfilledTimeout = createLiveExecutionEvidenceEvent({
+    eventType: 'FILL_NOT_OBSERVED', orderId: 'timeout', market: 'KRW-BTC', side: 'bid',
+    order: { uuid: 'timeout', state: 'wait', executed_volume: '0', remaining_volume: '1' },
+    fillResult: { filled: false, error: 'timeout' }
+  });
+  const terminalCancel = createLiveExecutionEvidenceEvent({
+    eventType: 'FILL_NOT_OBSERVED', orderId: 'cancelled', market: 'KRW-BTC', side: 'bid',
+    order: { uuid: 'cancelled', state: 'cancel', executed_volume: '0', remaining_volume: '1' },
+    fillResult: { filled: false, error: 'cancelled' }
+  });
+  const terminalCancelWithoutObservedVolume = createLiveExecutionEvidenceEvent({
+    eventType: 'FILL_NOT_OBSERVED', orderId: 'cancelled-missing-volume', market: 'KRW-BTC', side: 'bid',
+    order: { uuid: 'cancelled-missing-volume', state: 'cancel', executed_volume: null, remaining_volume: '1' },
+    fillResult: { filled: false, error: 'missing executed volume' }
+  });
+  const partialWait = createLiveExecutionEvidenceEvent({
+    eventType: 'FILL_PARTIAL', orderId: 'partial', market: 'KRW-BTC', side: 'bid',
+    order: { uuid: 'partial', state: 'wait', executed_volume: '1', remaining_volume: '1', avg_price: '100', paid_fee: '0' },
+    fillResult: { filled: true, partial: true }
+  });
+  const partialCancel = createLiveExecutionEvidenceEvent({
+    eventType: 'FILL_PARTIAL', orderId: 'partial-cancel', market: 'KRW-BTC', side: 'bid',
+    order: { uuid: 'partial-cancel', state: 'cancel', executed_volume: '1', remaining_volume: '1', avg_price: '100', paid_fee: '0' },
+    fillResult: { filled: true, partial: true }
+  });
+  const done = createLiveExecutionEvidenceEvent({
+    eventType: 'FILL_OBSERVED', orderId: 'done', market: 'KRW-BTC', side: 'bid',
+    order: { uuid: 'done', state: 'done', executed_volume: '1', remaining_volume: '0', avg_price: '100', paid_fee: '0' },
+    fillResult: { filled: true }
+  });
+
+  const result = reconcileLiveExecutionEvidence([
+    submitted('timeout'), unfilledTimeout,
+    submitted('cancelled'), terminalCancel,
+    submitted('cancelled-missing-volume'), terminalCancelWithoutObservedVolume,
+    submitted('partial'), partialWait,
+    submitted('partial-cancel'), partialCancel,
+    submitted('done'), done
+  ]);
+  assert.deepEqual(result.unresolvedSubmittedOrderIds, ['timeout', 'cancelled-missing-volume', 'partial']);
+  assert.deepEqual(result.unresolvedSubmittedOrders.map(row => row.orderId), ['timeout', 'cancelled-missing-volume', 'partial']);
+});
+
+test('unscoped legacy order intents inherit the market from a successful exchange readback', () => {
+  const submitted = createLiveExecutionEvidenceEvent({
+    eventType: 'ORDER_SUBMITTED',
+    orderId: 'legacy-unscoped-order',
+    side: 'bid',
+    requested: { amount: 100_000 }
+  });
+  const unscoped = reconcileLiveExecutionEvidence([submitted]);
+  assert.equal(unscoped.unresolvedSubmittedOrders[0].market, null);
+
+  const readback = createLiveExecutionEvidenceEvent({
+    eventType: 'ORDER_STATE_OBSERVED',
+    orderId: 'legacy-unscoped-order',
+    market: 'KRW-XRP',
+    side: 'bid',
+    order: {
+      uuid: 'legacy-unscoped-order',
+      market: 'KRW-XRP',
+      side: 'bid',
+      ord_type: 'price',
+      state: 'wait',
+      executed_volume: '0',
+      remaining_volume: '1'
+    }
+  });
+  const recovered = reconcileLiveExecutionEvidence([submitted, readback]);
+  assert.equal(recovered.unresolvedSubmittedOrders[0].market, 'KRW-XRP');
+  assert.deepEqual(recovered.managedMarkets, ['KRW-XRP']);
+});
+
+test('cumulative partial-fill readbacks for one UUID do not double-count recovered positions', () => {
+  const submitted = createLiveExecutionEvidenceEvent({
+    eventType: 'ORDER_SUBMITTED', orderId: 'same-order', market: 'KRW-BTC', side: 'bid'
+  });
+  const waiting = createLiveExecutionEvidenceEvent({
+    eventType: 'FILL_PARTIAL', orderId: 'same-order', market: 'KRW-BTC', side: 'bid',
+    recordedAt: '2026-09-29T00:00:01.000Z',
+    order: { uuid: 'same-order', state: 'wait', executed_volume: '0.25', remaining_volume: '0.75', avg_price: '100', paid_fee: '1' },
+    fillResult: { filled: true, partial: true }
+  });
+  const cancelled = createLiveExecutionEvidenceEvent({
+    eventType: 'FILL_PARTIAL', orderId: 'same-order', market: 'KRW-BTC', side: 'bid',
+    recordedAt: '2026-09-29T00:00:02.000Z',
+    order: { uuid: 'same-order', state: 'cancel', executed_volume: '0.25', remaining_volume: '0.75', avg_price: '100', paid_fee: '1' },
+    fillResult: { filled: true, partial: true }
+  });
+  const result = reconcileLiveExecutionEvidence([submitted, waiting, cancelled]);
+  assert.deepEqual(result.managedOpenPositions, [{ market: 'KRW-BTC', amount: 0.25, entryTime: '2026-09-29T00:00:01.000Z' }]);
+  assert.deepEqual(result.unresolvedSubmittedOrderIds, []);
+});
+
 test('account readback projection identifies the relevant post-fill account without claiming causality', () => {
   const bid = projectLiveAccountReadback([
     { currency: 'KRW', balance: '800000', locked: '0' },
@@ -265,11 +431,38 @@ test('live recorder appends only in live mode and blocks after an evidence write
   }
 });
 
+test('live evidence append restricts permissions on a pre-existing file', t => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'coinpilot-live-evidence-mode-'));
+  t.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
+  const evidenceFile = path.join(tempDir, 'evidence.jsonl');
+  fs.writeFileSync(evidenceFile, '', { mode: 0o644 });
+  fs.chmodSync(evidenceFile, 0o644);
+  const trader = new MultiCoinTrader({
+    strategyMode: 'oversold_reaction_scalping',
+    targetCoins: ['KRW-BTC'],
+    dryRun: false,
+    useNews: false,
+    liveExecutionEvidenceFile: evidenceFile
+  });
+  t.after(() => trader.stop());
+  const event = trader.createLiveExecutionEvidence({
+    eventType: 'ORDER_INTENT',
+    clientIntentId: 'restricted-mode-intent',
+    market: 'KRW-BTC',
+    side: 'bid',
+    orderType: 'price',
+    requested: { amount: 100_000 }
+  });
+
+  assert.equal(trader.recordLiveExecutionEvidence(event), true);
+  assert.equal(fs.statSync(evidenceFile).mode & 0o777, 0o600);
+});
+
 test('UI live-order helper waits for the exchange fill before reporting success', async () => {
   const events = [];
   const orders = [];
   const cancellations = [];
-  const tradingSystem = {
+  const tradingSystem = withReadyLiveOrderState({
     dryRun: false,
     upbit: {
       async order(...args) {
@@ -300,7 +493,7 @@ test('UI live-order helper waits for the exchange fill before reporting success'
       events.push(event);
       return true;
     }
-  };
+  });
 
   const result = await executeLiveOrderWithEvidence(tradingSystem, {
     market: 'KRW-BTC',
@@ -319,11 +512,146 @@ test('UI live-order helper waits for the exchange fill before reporting success'
   assert.equal(result.fill.error, '체결 대기 시간 초과');
   assert.deepEqual(events.map(event => event.eventType), ['ORDER_SUBMITTED', 'FILL_NOT_OBSERVED']);
   assert.deepEqual(cancellations, ['ui-order-1']);
+
+  const retry = await executeLiveOrderWithEvidence(tradingSystem, {
+    market: 'KRW-BTC',
+    side: 'bid',
+    volume: 200_000,
+    orderType: 'price',
+    requested: { amount: 200_000 },
+    referencePrice: 100_000_000
+  });
+  assert.equal(retry.blocked, true);
+  assert.equal(orders.length, 1);
+  assert.equal(tradingSystem._liveExchangeStateKnown, false);
+});
+
+test('UI LIVE order helper blocks protective, unverified, and already-running order states', async () => {
+  const cases = [
+    ['protective_only', { _riskMonitorProtectiveOnly: true }],
+    ['exchange_state_unverified', { _liveExchangeStateKnown: false }],
+    ['live_order_in_progress', { _orderInProgress: true }],
+    ['live_order_gate_unavailable', { canExecuteLiveOrder: undefined }]
+  ];
+
+  for (const [reason, overrides] of cases) {
+    let orderCalls = 0;
+    const tradingSystem = withReadyLiveOrderState({
+      ...overrides,
+      dryRun: false,
+      upbit: { async order() { orderCalls += 1; return { success: true, data: { uuid: 'must-not-run' } }; } },
+      createLiveExecutionEvidence(options) { return createLiveExecutionEvidenceEvent(options); },
+      recordLiveExecutionEvidence() { return true; }
+    });
+
+    const result = await executeLiveOrderWithEvidence(tradingSystem, {
+      market: 'KRW-BTC',
+      side: 'ask',
+      volume: 0.001,
+      orderType: 'market'
+    });
+
+    assert.equal(result.blocked, true);
+    assert.equal(result.reason, reason);
+    assert.equal(orderCalls, 0);
+  }
+});
+
+test('UI manual order remains available after a completed operator stop with verified exchange state', async () => {
+  let orderCalls = 0;
+  const tradingSystem = withReadyLiveOrderState({
+    dryRun: false,
+    _entriesPaused: true,
+    _stopRequested: true,
+    stopReason: 'operator_stop',
+    upbit: {
+      async order() {
+        orderCalls += 1;
+        return { success: true, data: { uuid: 'stopped-manual-order' } };
+      },
+      async waitForOrderFill() {
+        return {
+          filled: false,
+          error: 'cancelled before fill',
+          order: { uuid: 'stopped-manual-order', state: 'cancel', executed_volume: '0', remaining_volume: '0' }
+        };
+      }
+    },
+    createLiveExecutionEvidence(options) { return createLiveExecutionEvidenceEvent(options); },
+    recordLiveExecutionEvidence() { return true; }
+  });
+
+  const result = await executeLiveOrderWithEvidence(tradingSystem, {
+    market: 'KRW-BTC',
+    side: 'bid',
+    volume: 100_000,
+    orderType: 'price'
+  });
+
+  assert.equal(orderCalls, 1);
+  assert.equal(result.fill.status, 'not_observed');
+});
+
+test('UI bundle second order is re-gated if safety state changes after the first fill', async () => {
+  let orderCalls = 0;
+  const tradingSystem = withReadyLiveOrderState({
+    dryRun: false,
+    upbit: {
+      async order() {
+        orderCalls += 1;
+        return { success: true, data: { uuid: `bundle-order-${orderCalls}` } };
+      },
+      async waitForOrderFill() {
+        tradingSystem._entriesPaused = true;
+        return {
+          filled: true,
+          partial: false,
+          order: {
+            uuid: 'bundle-order-1',
+            market: 'KRW-BTC',
+            side: 'ask',
+            ord_type: 'market',
+            state: 'done',
+            executed_volume: '0.001',
+            remaining_volume: '0',
+            avg_price: '100000000',
+            paid_fee: '50'
+          }
+        };
+      }
+    },
+    async getAccountInfo() {
+      return [
+        { currency: 'KRW', balance: '100000', locked: '0' },
+        { currency: 'BTC', balance: '0.001', locked: '0' }
+      ];
+    },
+    createLiveExecutionEvidence(options) { return createLiveExecutionEvidenceEvent(options); },
+    recordLiveExecutionEvidence() { return true; }
+  });
+
+  const first = await executeLiveOrderWithEvidence(tradingSystem, {
+    market: 'KRW-BTC',
+    side: 'ask',
+    volume: 0.001,
+    orderType: 'market'
+  });
+  assert.equal(first.fill.status, 'filled');
+
+  const second = await executeLiveOrderWithEvidence(tradingSystem, {
+    market: 'KRW-ETH',
+    side: 'bid',
+    volume: 100_000,
+    orderType: 'price'
+  });
+  assert.equal(second.blocked, true);
+  assert.equal(second.reason, 'trading_paused');
+  assert.equal(orderCalls, 1);
 });
 
 test('UI live-order helper records a post-fill account readback when available', async () => {
   const events = [];
-  const tradingSystem = {
+  const tradingSystem = withReadyLiveOrderState({
     dryRun: false,
     upbit: {
       async order() {
@@ -360,7 +688,7 @@ test('UI live-order helper records a post-fill account readback when available',
       events.push(event);
       return true;
     }
-  };
+  });
 
   const result = await executeLiveOrderWithEvidence(tradingSystem, {
     market: 'KRW-BTC',
@@ -413,6 +741,11 @@ test('live rebalancing records partial fill, cancels the remainder, and reads se
     useNews: false,
     liveExecutionEvidenceFile: evidenceFile
   });
+  trader._liveAccountStateKnown = true;
+  trader._liveExchangeStateKnown = true;
+  trader._liveOrderStateUnknownMarkets.clear();
+  trader._livePendingOrderMarkets.clear();
+  trader._liveVerifiedOrderMarkets.set('KRW-BTC', Date.now());
   const strategy = trader.getStrategy('KRW-BTC');
   strategy.openPosition(100, 10, 'BUY');
   trader.upbit = {
@@ -462,10 +795,15 @@ test('live rebalancing records partial fill, cancels the remainder, and reads se
     assert.equal(trader.liveExecutionEvidenceDataError, null);
     const events = fs.readFileSync(evidenceFile, 'utf8').trim().split('\n').map(line => JSON.parse(line));
     assert.deepEqual(events.map(event => event.eventType), [
+      'ORDER_INTENT',
       'ORDER_SUBMITTED',
       'FILL_PARTIAL',
       'SETTLEMENT_READBACK'
     ]);
+    const clientIntentId = events[0].clientIntentId;
+    assert.ok(clientIntentId);
+    assert.ok(events.every(event => event.clientIntentId === clientIntentId));
+    assert.equal(events[0].identifier, clientIntentId);
     assert.equal(events.at(-1).settlement.status, 'observed');
     assert.equal(events.at(-1).settlement.krwBalance, 360);
     assert.equal(events.at(-1).settlement.assetBalance, 6);
@@ -475,7 +813,7 @@ test('live rebalancing records partial fill, cancels the remainder, and reads se
   }
 });
 
-test('legacy AutoTrader does not open a live position from submission alone', async () => {
+test('legacy AutoTrader LIVE order is blocked without the durable submission seam', async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'coinpilot-auto-live-'));
   const evidenceFile = path.join(tempDir, 'evidence.jsonl');
   const trader = new AutoTrader({
@@ -483,9 +821,16 @@ test('legacy AutoTrader does not open a live position from submission alone', as
     dryRun: false,
     liveExecutionEvidenceFile: evidenceFile
   });
+  trader._liveAccountStateKnown = true;
+  trader._liveExchangeStateKnown = true;
+  trader._liveOrderStateUnknownMarkets = new Set();
+  trader._livePendingOrderMarkets = new Set();
+  trader.canExecuteLiveOrder = () => true;
   const cancellations = [];
+  let orderCalls = 0;
   trader.upbit = {
     async order() {
+      orderCalls += 1;
       return { success: true, data: { uuid: 'auto-live-order-1' } };
     },
     async waitForOrderFill() {
@@ -512,9 +857,9 @@ test('legacy AutoTrader does not open a live position from submission alone', as
   try {
     await trader.executeOrder({ action: 'BUY' }, 100_000_000, 100_000, 0);
     assert.equal(trader.strategy.currentPosition, null);
-    assert.deepEqual(cancellations, ['auto-live-order-1']);
-    const events = fs.readFileSync(evidenceFile, 'utf8').trim().split('\n').map(line => JSON.parse(line));
-    assert.deepEqual(events.map(event => event.eventType), ['ORDER_SUBMITTED', 'FILL_NOT_OBSERVED']);
+    assert.equal(orderCalls, 0);
+    assert.deepEqual(cancellations, []);
+    assert.equal(fs.existsSync(evidenceFile), false);
   } finally {
     trader.stop();
     fs.rmSync(tempDir, { recursive: true, force: true });
@@ -579,7 +924,7 @@ test('a restarted live trader blocks new orders while a prior submission is unre
     });
     assert.equal(result.blocked, true);
     assert.equal(orderCalled, false);
-    assert.equal(result.reason, 'live_execution_evidence_unavailable');
+    assert.equal(result.reason, 'exchange_state_unverified');
   } finally {
     trader.stop();
     fs.rmSync(tempDir, { recursive: true, force: true });

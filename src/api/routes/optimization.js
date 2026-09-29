@@ -23,10 +23,10 @@ export default function createOptimizationRoutes(server) {
         const results = JSON.parse(fs.readFileSync(resultsFile, 'utf8'));
         res.json(results);
       } else {
-        res.json({ message: 'No backtest results found' });
+        res.json({ message: '과거 거래 비교 기록이 없습니다.' });
       }
-    } catch (error) {
-      res.status(500).json({ error: error.message });
+    } catch {
+      res.status(500).json({ error: '과거 거래 비교 기록을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.' });
     }
   });
 
@@ -40,10 +40,10 @@ export default function createOptimizationRoutes(server) {
         const results = JSON.parse(fs.readFileSync(resultsFile, 'utf8'));
         res.json(results);
       } else {
-        res.json({ exists: false, message: `No backtest results for ${req.params.coin}` });
+        res.json({ exists: false, message: `${req.params.coin} 과거 거래 비교 기록이 없습니다.` });
       }
-    } catch (error) {
-      res.status(500).json({ error: error.message });
+    } catch {
+      res.status(500).json({ error: '과거 거래 비교 기록을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.' });
     }
   });
 
@@ -56,10 +56,10 @@ export default function createOptimizationRoutes(server) {
         const config = JSON.parse(fs.readFileSync(configFile, 'utf8'));
         res.json(config);
       } else {
-        res.json({ message: 'No optimal config found' });
+        res.json({ message: '저장된 비교 설정이 없습니다.' });
       }
-    } catch (error) {
-      res.status(500).json({ error: error.message });
+    } catch {
+      res.status(500).json({ error: '저장된 비교 설정을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.' });
     }
   });
 
@@ -75,8 +75,8 @@ export default function createOptimizationRoutes(server) {
       } else {
         res.json([]);
       }
-    } catch (error) {
-      res.status(500).json({ error: error.message });
+    } catch {
+      res.status(500).json({ error: '설정 비교 기록을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.' });
     }
   });
 
@@ -87,8 +87,8 @@ export default function createOptimizationRoutes(server) {
         ...server.optimizationState,
         evidenceMutationLock: getPaperEvidenceMutationLock(server.tradingSystem, 'optimization')
       });
-    } catch (error) {
-      res.status(500).json({ error: error.message });
+    } catch {
+      res.status(500).json({ error: '자동 후보 비교 설정을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.' });
     }
   });
 
@@ -107,8 +107,8 @@ export default function createOptimizationRoutes(server) {
 
       server.saveOptimizationState();
       res.json({ success: true, ...server.optimizationState });
-    } catch (error) {
-      res.status(500).json({ error: error.message });
+    } catch {
+      res.status(500).json({ error: '자동 후보 비교 설정을 저장하지 못했습니다. 잠시 후 다시 시도해 주세요.' });
     }
   });
 
@@ -126,8 +126,8 @@ export default function createOptimizationRoutes(server) {
 
       server.saveOptimizationState();
       res.json({ success: true, ...server.optimizationState });
-    } catch (error) {
-      res.status(500).json({ error: error.message });
+    } catch {
+      res.status(500).json({ error: '비교 간격을 저장하지 못했습니다. 잠시 후 다시 시도해 주세요.' });
     }
   });
 
@@ -136,13 +136,13 @@ export default function createOptimizationRoutes(server) {
     if (respondIfPaperEvidenceMutationBlocked(server.tradingSystem, res, 'optimization_run_now')) return;
     try {
       if (server.optimizationState.isRunning) {
-        return res.status(400).json({ error: '이미 최적화가 실행 중입니다.' });
+        return res.status(400).json({ error: '설정 비교를 이미 진행 중입니다.' });
       }
 
       server.runOptimizationCycle();
-      res.json({ success: true, message: '최적화가 시작되었습니다.' });
-    } catch (error) {
-      res.status(500).json({ error: error.message });
+      res.json({ success: true, message: '설정 후보 비교를 시작했습니다.' });
+    } catch {
+      res.status(500).json({ error: '설정 후보 비교를 시작하지 못했습니다. 잠시 후 다시 시도해 주세요.' });
     }
   });
 

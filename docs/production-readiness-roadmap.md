@@ -3,8 +3,28 @@
 Coin Pilot을 상용 서비스 수준으로 끌어올리기 위한 단계별 개선 계획.
 
 - 작성일: 2026-09-16
+- 최신 상태 점검: 2026-09-29
 - 태스크: `docs/tasks/H1-2026-09-16-mk-prod-readiness.md`
 - 운영 맥락: 개인 자동매매 봇, 같은 LAN의 모바일에서 대시보드 접속 중
+
+> **상태 기준:** 아래 Phase의 “현재 문제” 목록은 2026-09-16 초안 당시의 기록이다. 일부는 이후 구현되어 현재 상태와 다르다. 최신 구현·검증·미해결 사항은 [`commercial-readiness-audit-2026-09-29.md`](commercial-readiness-audit-2026-09-29.md)를 기준으로 본다.
+
+## 2026-09-29 상태 요약
+
+| 영역 | 상태 | 근거와 남은 범위 |
+|---|---|---|
+| 대시보드 API 인증 | 로컬 구현 확인 | 전체 토큰과 네이티브 읽기 전용 토큰을 분리하고 경로별 method/query allowlist를 둔다. 토큰 발급·회전, 공개 환경 TLS·reverse proxy는 운영 배포에서 확인되지 않았다. |
+| 헬스·준비 상태 | 로컬 구현 확인 | `/health`는 최소 liveness, `/ready`는 trader·analysis·risk와 LIVE exchange account/order reconciliation 상태를 반환한다. 여러 프로세스의 외부 관측·알림·SLO는 별도 과제다. |
+| CI·테스트·lint | 로컬 검증 통과 | 최신 `npm test`: Node 802, mobile auto-connect 5, server-address policy 15, Swift store 15 통과. ESLint, `git diff --check`, `verify:pwa` 통과. 실제 GitHub Actions 실행은 포함하지 않았다. |
+| 성능·용량 | 측정 중 | 8,640-point JSON history microbenchmark: read p95 6.99ms, atomic fsync write p95 12.07ms. Synthetic `/api/momentum-shadow` fixture (95 sessions ×1 close, 11 books ×5 closes): warm p95/p99 11.30/11.96ms, cold p95 34.08ms, 275KB response, path-fenced at 120 sync file reads/request. Concurrent-user/API event-loop targets, exact live data shape, deployed latency, and SLOs remain unverified. |
+| 설정 검증 | 부분 완료 | `ENV_SCHEMA`와 런타임 검증은 존재한다. 모든 스크립트의 직접 `process.env` 접근과 설정 계약은 여전히 단계적으로 단일화해야 한다. |
+| 실행·데이터 구조 | 개인 단일 운영자 수준 | 거래 엔진과 대시보드 API가 같은 Node 프로세스에서 실행되고 JSON ledger/history를 사용한다. 다중 사용자·수평 확장·트랜잭션 저장소·장애 복구 서비스는 구현됐다고 볼 수 없다. |
+| 네이티브 앱 데이터 경계 | 로컬 검증 통과 | Server 프로필은 synthetic fixture를 포함하지 않는다. `bundled-preview`에만 예시 데이터가 포함되고 네이티브 주문 요청은 없다. 이는 읽기 전용 화면 미리보기이며 로컬 데이터 수집/운용 엔진은 아니다. 자료별 stale/pending 시각과 자산 기록 freshness를 유지한다. |
+| 실계정·배포 | 미검증 | 실제 서버의 읽기 전용 토큰, 실기기/TestFlight/App Store, 실거래·체결·정산, 상시 운영은 이번 로컬 검증으로 입증되지 않았다. |
+
+## 2026-09-16 Phase 초안 (기록용)
+
+아래 Phase별 문제 목록과 완료 기준은 최초 계획의 근거를 보존하기 위한 기록이다. 현재 구현 상태 판정은 위 상태 요약 및 최신 감사 문서를 우선한다.
 
 ## 불변 조건 (모든 Phase 공통)
 
@@ -181,3 +201,31 @@ Coin Pilot을 상용 서비스 수준으로 끌어올리기 위한 단계별 개
 2. **Phase 0+1을 먼저** — 보안 구멍 봉합 + CI 안전망이 있어야 이후 리팩터링이 안전하다.
 3. **Phase별 브랜치** — `agent/<task-id>`로 분기, 검증 후 머지. 한 번에 여러 Phase를 섞지 않는다.
 4. **테스트 계약 유지** — 각 Phase 완료 기준에 항상 "기존 테스트 전부 green"을 포함한다.
+
+## 2026-09-29 continuation — latest local evidence
+
+- The dashboard startup bind gate passed its focused `37/37` set. PWA order-banner and source/fetch timestamp coverage passed `57/57` plus `npm run verify:pwa`. Native provenance UI/store checks passed 16 scenarios; bundled-preview built successfully and was reviewed on iPhone 17 Simulator.
+- Same-fixture synthetic `/api/momentum-shadow` warm measurements improved from 183 to 50 file reads/request, 2.70 to 1.19 MB/request, and 27.23 to 12.49ms p95. Response bytes were unchanged; event-loop-delay p95 moved from 25.87 to 13.95ms. This remains a single-process synthetic benchmark, not a service SLO.
+- Open boundaries remain: MarketDataProvider is not an independent collector; bundled-preview is fictional; PWA/iOS provenance has no staleness threshold; physical-device and release verification are absent; local mode and deployment topology still need a user decision.
+- An earlier accidental full `strategyResearchRoute` file-suite run left default owner-path reads **outcome unknown**; it was not repeated. No owner/ledger write or order was reported, and its empty temp fixture directory was removed. The synthetic local dashboard is still managed on `127.0.0.1:39471` (PID/PGID `33288`) for session-end cleanup.
+
+## 2026-09-29 follow-up — latest UI and safety evidence
+
+- PWA order-banner, source/fetch timestamp, and allocation behavior passed `63/63`; PWA verification and targeted ESLint passed. Assets are JS `20260929-28` / service worker `v172`. Native Store passed 16 scenarios; fictional bundled-preview built successfully and was captured on iPhone 17 Simulator.
+- Upbit `trade_timestamp` means latest trade time, displayed as `최근 체결`; `fetchedAt` remains server collection time ([official ticker API](https://docs.upbit.com/kr/reference/list-quote-tickers)). Allocation avoids pie charts for one item and hides ratios when cash or holding valuation is unknown.
+- Fatal shutdown remains an open P0: standalone `uncaughtException` with LIVE exposure calls stop, disabling risk monitoring, then closes the dashboard and exits without drain/reconciliation. Its standalone test covers only a flat trader. No code change was made pending the user's fatal-shutdown decision. Local operating mode and deployment topology are also unresolved; the broader goal remains active.
+
+## 2026-09-29 latest PWA visual correction
+
+- Preserve the prior JS `20260929-28` / SW `v172` record as history. Latest assets are JS `20260929-29`, CSS `20260929-17`, SW `v173`; focused `pilotRedesignRefresh` is `64/64` and `verify:pwa` is valid. CUA confirms the compact `KRW 1,000,000 · 100%` cash-only row without a chart/stretch and a manual-order banner that distinguishes stopped automation from available DRY_RUN manual orders. `trade_timestamp` denotes last trade time (`최근 체결 시각`); `fetchedAt` is server collection time.
+
+## 2026-09-29 market chart-range follow-up
+
+- PWA range options are 30/60/100 candles, default 60; it renders a copied last-N valid-candle subset for candles/axis/time labels while the API still requests 100 and the original array stays unchanged. `pilotRedesignRefresh` passed `66/66`, `verify:pwa` is valid, assets are JS `20260929-30` / CSS `20260929-18` / SW `v174`. CUA checked synthetic data at 800×600 (not 1280×720); full x-axis labels were not visible. Prior incident/process records remain intact; fatal/local/deployment decisions remain open.
+
+## 2026-09-29 manual mutation safety and UI follow-up
+
+- Manual order and virtual-wallet requests now require a stable idempotency key; PWA and legacy callers persist and retry the same exact request across timeout/reload. DRY_RUN portfolio receipts recover journal state after a split-file crash window. LIVE unknown outcomes fail closed without resubmission.
+- Mutable `DashboardServer` startup claims a same-host writer lock before listening and releases it on orderly stop/start failure. Read-only observers skip the lock. This protects same-profile dashboard instances; dashboard-disabled automatic-only processes and multi-host file storage remain outside the guarantee.
+- Focused verification: server `46/46`, PWA `89/89`, PWA verifier, targeted lint, syntax check, diff check. `docs/commercial-readiness-audit-2026-09-29.md` records scope and evidence.
+- Next: define LIVE unknown-operation reconciliation and journal retention; extend single-writer ownership to automatic-only processes; design shared transactional storage before multi-host/multi-user support. Resolve local install data mode, deployment topology, and fatal-shutdown ownership before broadening those contracts.

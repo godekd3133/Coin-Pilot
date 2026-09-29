@@ -94,8 +94,7 @@ test('읽기 전용 paper dashboard는 최신 ledger를 표시하고 원본을 �
     assert.equal(fs.readFileSync(ledgerFile, 'utf8'), JSON.stringify(updated, null, 2));
 
     const dashboard = new DashboardServer(trader, 0, { env: { ...process.env, DASHBOARD_TOKEN: '' } });
-    const httpServer = dashboard.start();
-    await new Promise(resolve => httpServer.once('listening', resolve));
+    const httpServer = await dashboard.start();
     const port = httpServer.address().port;
     try {
       const response = await fetch(`http://127.0.0.1:${port}/api/trade/buy`, {
@@ -174,8 +173,7 @@ test('읽기 전용 observer는 orphan 미청산 ledger를 UI에서도 fail-clos
     fs.writeFileSync(ledgerFile, JSON.stringify(ledger, null, 2), 'utf8');
     attachReadOnlyPaperLedger(trader, ledgerFile);
     const dashboard = new DashboardServer(trader, 0, { env: { ...process.env, DASHBOARD_TOKEN: '' } });
-    const httpServer = dashboard.start();
-    await new Promise(resolve => httpServer.once('listening', resolve));
+    const httpServer = await dashboard.start();
     const port = httpServer.address().port;
     try {
       const response = await fetch(`http://127.0.0.1:${port}/api/paper-validation`);
@@ -268,8 +266,7 @@ test('읽기 전용 observer의 계좌·보유·구성 API는 paper ledger를 �
     };
 
     const dashboard = new DashboardServer(trader, 0, { env: { ...process.env, DASHBOARD_TOKEN: '' } });
-    const httpServer = dashboard.start();
-    await new Promise(resolve => httpServer.once('listening', resolve));
+    const httpServer = await dashboard.start();
     const port = httpServer.address().port;
     const ledgerBytes = fs.readFileSync(ledgerFile, 'utf8');
     try {

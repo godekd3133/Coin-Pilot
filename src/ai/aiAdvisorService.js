@@ -12,17 +12,17 @@ const MAX_RISK_CHARS = 280;
 export const AI_PROVIDER_DEFINITIONS = Object.freeze({
   gpt: Object.freeze({
     id: 'gpt',
-    label: 'GPT / Codex',
+    label: 'ChatGPT',
     executableEnv: 'AI_CODEX_BIN',
     defaultExecutable: 'codex',
-    subscriptionLabel: 'ChatGPT 구독 세션'
+    subscriptionLabel: 'ChatGPT 구독'
   }),
   claude: Object.freeze({
     id: 'claude',
     label: 'Claude',
     executableEnv: 'AI_CLAUDE_BIN',
     defaultExecutable: 'claude',
-    subscriptionLabel: 'claude.ai 구독 세션'
+    subscriptionLabel: 'Claude 구독'
   })
 });
 
@@ -64,6 +64,14 @@ function normalizeConfidence(value) {
 function normalizeAction(value) {
   const key = String(value ?? '').trim().toUpperCase();
   return ACTION_ALIASES[key] || 'WAIT';
+}
+
+function displayAction(value) {
+  return ({ BUY: '매수', SELL: '매도', HOLD: '보유', WAIT: '관망' })[normalizeAction(value)];
+}
+
+function displayProvider(value) {
+  return AI_PROVIDER_DEFINITIONS[value]?.label || String(value || '의견 서비스');
 }
 
 function resolveEvaluationMinutes(value, fallback = DEFAULT_EVALUATION_MINUTES) {
@@ -206,7 +214,7 @@ export function parseAdviceResponse(rawOutput) {
 
   const direct = walkForAdvice(text);
   if (direct) return direct;
-  throw new Error('AI 응답에서 판단 JSON을 찾지 못했습니다');
+  throw new Error('응답을 확인할 수 없습니다. 다시 요청해 주세요.');
 }
 
 export function normalizeAdvice(value, metadata = {}) {
@@ -224,9 +232,9 @@ export function normalizeAdvice(value, metadata = {}) {
     action: normalizeAction(source.action ?? source.decision),
     confidence: normalizeConfidence(source.confidence),
     horizon: truncate(source.horizon || source.timeHorizon || '단기 관찰', 120),
-    rationale: truncate(source.rationale || source.reason || source.summary || '구체적 근거가 부족해 관망합니다.', MAX_RATIONALE_CHARS),
+    rationale: truncate(source.rationale || source.reason || source.summary || '제공된 자료만으로는 판단하기 어렵습니다.', MAX_RATIONALE_CHARS),
     risks,
-    invalidation: truncate(source.invalidation || source.invalidationCondition || '추가 확인 필요', 360),
+    invalidation: truncate(source.invalidation || source.invalidationCondition || '판단을 바꿀 조건이 제시되지 않았습니다.', 360),
     provider: metadata.provider || null,
     mode: metadata.mode || 'AI_PROVIDER',
     requestId: metadata.requestId || null,
@@ -252,7 +260,9 @@ export function aggregateAdvice(results = []) {
   const singleProvider = completed.length === 1;
   const quorum = completed.length >= 2 && !conflict;
   const averageConfidence = Math.round(completed.reduce((sum, result) => sum + normalizeConfidence(result.advice.confidence), 0) / completed.length);
-  const providerNames = completed.map(result => `${result.providerLabel || result.provider}=${normalizeAction(result.advice.action)}`);
+  const providerNames = completed.map(result =>
+    `${result.providerLabel || displayProvider(result.provider)}: ${displayAction(result.advice.action)}`
+  );
 
   return {
     ...normalizeAdvice({
@@ -260,16 +270,16 @@ export function aggregateAdvice(results = []) {
       confidence: conflict
         ? Math.min(50, Math.round(averageConfidence * agreementRatio))
         : singleProvider ? Math.min(60, averageConfidence) : averageConfidence,
-      horizon: conflict ? 'provider 의견 일치 후 재자문' : completed[0].advice.horizon,
+      horizon: conflict ? '의견 비교 보류' : completed[0].advice.horizon,
       rationale: conflict
-        ? `provider 의견이 일치하지 않습니다: ${providerNames.join(', ')}. 충돌 중에는 관망합니다.`
+        ? `두 서비스의 의견이 달라 매수·매도 대신 관망으로 표시합니다. ${providerNames.join(', ')}.`
         : singleProvider
-          ? `단일 provider 의견입니다: ${providerNames.join(', ')}. 다른 provider 합의가 없어 확신을 제한합니다.`
-          : `provider ${completed.length}개 의견 일치: ${providerNames.join(', ')}.`,
+          ? `이번 결과는 ${providerNames.join(', ')} 한 곳의 의견입니다. 다른 서비스와 비교하지 않았습니다.`
+          : `${completed.length}개 서비스의 의견입니다. ${providerNames.join(', ')}.`,
       risks: conflict
-        ? ['provider 의견 불일치', '단일 합의로 판단하지 않음']
-        : singleProvider ? ['단일 provider 응답', '다른 provider 합의 없음'] : [],
-      invalidation: conflict ? 'provider 의견이 일치하는 새 snapshot을 다시 확인하세요.' : completed[0].advice.invalidation
+        ? ['두 서비스의 의견이 다릅니다.', '의견이 다를 때는 관망으로 표시합니다.']
+        : singleProvider ? ['한 서비스의 의견만 확인했습니다.', '다른 서비스와 비교하지 않았습니다.'] : [],
+      invalidation: conflict ? '새 신호가 나타나면 의견을 다시 비교할 수 있습니다.' : completed[0].advice.invalidation
     }, { provider: 'consensus', mode: 'AI_CONSENSUS' }),
     agreementRatio,
     providerCount: completed.length,
@@ -294,23 +304,35 @@ export function buildLocalEvidenceBrief(event, providerFailures = []) {
   if (Number.isFinite(volumeRatio)) facts.push(`거래량 배수 ${volumeRatio.toFixed(2)}`);
   if (Number.isFinite(closeStrength)) facts.push(`종가 강도 ${closeStrength.toFixed(2)}`);
   if (rebound.reboundConfirmed === true) facts.push('반등 확정');
-  if (freshness.valid === false) facts.push(`캔들 freshness 실패 ${freshness.reason || 'unknown'}`);
-  if (regime.confirmed === false) facts.push('시장 regime 미통과');
-  if (event?.action) facts.push(`설정 전략 판정 ${event.action}`);
-  const failureNames = providerFailures.map(result => result.providerLabel || result.provider).filter(Boolean);
+  if (freshness.valid === false) facts.push('시세 캔들 시각 확인 필요');
+  if (regime.confirmed === false) facts.push('전체 시장 방향 조건 미충족');
+  if (event?.action) facts.push(`자동매매 신호 ${displayAction(event.action)}`);
+  const failureNames = providerFailures
+    .map(result => result.providerLabel || displayProvider(result.provider))
+    .filter(Boolean);
+  const eventLabels = {
+    BUY_SIGNAL: '매수 신호',
+    SELL_SIGNAL: '매도 신호',
+    REBOUND_CANDIDATE: '반등 후보',
+    BREAKING_NEWS: '속보',
+    BUNDLE_SUGGESTION: '리밸런싱 제안',
+    TRADE_EXECUTED: '체결'
+  };
+  const coin = event?.coin ? String(event.coin).replace(/^KRW-/, '') : '시장 전체';
+  const eventLabel = eventLabels[event?.type] || '시장 정보';
 
   return normalizeAdvice({
     action: 'WAIT',
     confidence: 0,
-    horizon: 'provider 연결 후 재자문',
-    rationale: `AI provider 응답이 없어 사실 요약만 남깁니다. ${event?.coin || 'MARKET'} ${event?.type || 'EVENT'} · ${facts.join(', ') || '추가 지표 없음'}. 이 결과는 AI 판단이 아닙니다.`,
+    horizon: '정보 요약',
+    rationale: `서비스 의견을 받지 못해 확인된 데이터만 정리했습니다. ${coin} · ${eventLabel} · ${facts.join(' · ') || '추가 지표 없음'}. 매수·매도 권고는 아닙니다.`,
     risks: [
-      'AI provider 미연결 또는 인증 실패',
-      ...(failureNames.length > 0 ? [`실패 provider: ${failureNames.join(', ')}`] : []),
-      ...(freshness.valid === false ? ['오래되었거나 불완전한 캔들 snapshot'] : []),
-      ...(regime.confirmed === false ? ['시장 방향성 gate 미통과'] : [])
+      '의견을 받으려면 서비스 계정에 로그인해야 합니다.',
+      ...(failureNames.length > 0 ? [`응답을 받지 못한 서비스: ${failureNames.join(', ')}`] : []),
+      ...(freshness.valid === false ? ['시세 자료가 오래되었거나 일부 빠짐'] : []),
+      ...(regime.confirmed === false ? ['전체 시장 방향 조건 미충족'] : [])
     ].slice(0, 5),
-    invalidation: 'provider 인증·연결을 복구한 뒤 동일 이벤트에 대해 AI 자문을 다시 요청하세요.'
+    invalidation: '서비스 연결을 확인한 뒤 다시 요청해 주세요.'
   }, { provider: 'local-brief', mode: 'LOCAL_EVIDENCE_ONLY' });
 }
 
@@ -347,6 +369,8 @@ export function buildAdvisorPrompt({ event, context = {}, session = {} }) {
     'If the supplied current rebound or price-change percentage is itself below that band and the snapshot does not provide an explicit forward expected-move estimate or catalyst that clears the band, do not assume unseen follow-through from generic indicator strength; choose WAIT.',
     'For a fresh BUY_SIGNAL with reboundConfirmed=true, evaluate the confirmed BUY candidate directly rather than defaulting to WAIT merely because this is advisory. Choose BUY only when the supplied evidence plausibly exceeds the stated neutral band after transaction costs; choose WAIT only when a concrete contradiction, rejection reason, stale/incomplete input, or insufficient net movement remains.',
     'For a fresh SELL_SIGNAL with a confirmed sell condition, apply the same independent cost-aware judgment. Do not mirror event.action blindly.',
+    'Write every user-facing field in concise, natural Korean for an individual investor. Keep rationale to one or two short sentences, list at most three specific risks, and state invalidation as an observable condition.',
+    'Do not mention that you are an AI or language model, repeat the prompt, add generic filler, invent missing values, or claim an order was placed or profit was realized.',
     'Return JSON only with exactly these fields: action (BUY|SELL|HOLD|WAIT), confidence (0..100), horizon, rationale, risks (array of strings), invalidation.',
     'A BUY or SELL is an advisory opinion only. The existing settings-based automation remains the sole automated execution path.',
     `SNAPSHOT_JSON:\n${JSON.stringify(payload)}`
@@ -398,10 +422,10 @@ function providerArgs(provider, prompt, model, { ignoreUserConfig = true } = {})
 function commandFailure(provider, executable, error, stdout = '', stderr = '') {
   const wrapped = new Error(
     error?.code === 'ENOENT'
-      ? `${AI_PROVIDER_DEFINITIONS[provider].label} CLI를 찾지 못했습니다`
+      ? `${AI_PROVIDER_DEFINITIONS[provider].label} 응답을 받을 수 없습니다. 연결 프로그램을 확인해 주세요.`
       : error?.code === 'AI_TIMEOUT'
-        ? `${AI_PROVIDER_DEFINITIONS[provider].label} 응답 시간 초과`
-        : `${AI_PROVIDER_DEFINITIONS[provider].label} CLI 실행 실패`
+        ? `${AI_PROVIDER_DEFINITIONS[provider].label} 응답이 늦어져 의견을 받지 못했습니다.`
+        : `${AI_PROVIDER_DEFINITIONS[provider].label} 의견을 받지 못했습니다. 연결 상태를 확인해 주세요.`
   );
   wrapped.code = error?.code || 'AI_PROVIDER_ERROR';
   wrapped.provider = provider;
@@ -413,6 +437,7 @@ function commandFailure(provider, executable, error, stdout = '', stderr = '') {
 export class AIAdvisorService {
   constructor(options = {}) {
     this.workspaceRoot = options.workspaceRoot || process.cwd();
+    this.now = typeof options.now === 'function' ? options.now : () => Date.now();
     const configuredEnabled = options.enabled ?? options.config?.aiAdvisorEnabled ?? process.env.AI_ADVISOR_ENABLED !== 'false';
     this.enabled = configuredEnabled !== false;
     this.timeoutMs = Math.max(3_000, Number(options.timeoutMs || options.config?.aiAdvisorTimeoutMs || process.env.AI_ADVISOR_TIMEOUT_MS || DEFAULT_TIMEOUT_MS));
@@ -461,7 +486,7 @@ export class AIAdvisorService {
   }
 
   getProviderCooldownRemaining(provider) {
-    return Math.max(0, (this.providerCooldownUntil.get(provider) || 0) - Date.now());
+    return Math.max(0, (this.providerCooldownUntil.get(provider) || 0) - this.now());
   }
 
   recordProviderResult(provider, result) {
@@ -470,7 +495,7 @@ export class AIAdvisorService {
       return;
     }
     if (this.providerFailureCooldownMs > 0 && ['AI_TIMEOUT', 'AI_PROCESS_EXIT', 'AI_PROVIDER_ERROR'].includes(result?.errorCode)) {
-      this.providerCooldownUntil.set(provider, Date.now() + this.providerFailureCooldownMs);
+      this.providerCooldownUntil.set(provider, this.now() + this.providerFailureCooldownMs);
     }
   }
 
@@ -567,7 +592,7 @@ export class AIAdvisorService {
         providerLabel: AI_PROVIDER_DEFINITIONS[provider].label,
         status: 'FAILED',
         latencyMs: Date.now() - startedAt,
-        error: redactMessage(error?.detail || error?.message || error),
+        error: redactMessage(error?.message || '의견 서비스를 사용할 수 없습니다. 연결 상태를 확인해 주세요.'),
         errorCode: error?.code || 'AI_ADVISOR_ERROR',
         completedAt: new Date().toISOString()
       };
@@ -580,13 +605,13 @@ export class AIAdvisorService {
         requestId: randomUUID(),
         status: 'DISABLED',
         results: [],
-        error: 'AI 자문 기능이 비활성화되어 있습니다.'
+        error: '현재 의견 기능을 사용할 수 없습니다.'
       };
     }
 
     const providers = normalizeProviderSelection(provider);
-    if (providers.length === 0) throw new Error('지원하는 AI provider를 선택해주세요');
-    if (!event || typeof event !== 'object') throw new Error('자문할 monitoring event가 필요합니다');
+    if (providers.length === 0) throw new Error('의견을 받을 서비스를 하나 이상 선택해 주세요.');
+    if (!event || typeof event !== 'object') throw new Error('의견을 요청할 신호를 선택해 주세요.');
 
     const requestId = randomUUID();
     const promptContext = {
@@ -626,7 +651,7 @@ export class AIAdvisorService {
           status: 'FAILED',
           latencyMs: 0,
           errorCode: 'PROVIDER_NOT_READY',
-          error: providerStatus.detail || 'provider 로그인 상태를 확인해주세요.',
+          error: providerStatus.detail || `${AI_PROVIDER_DEFINITIONS[item].label} 계정 로그인 상태를 확인해 주세요.`,
           completedAt: new Date().toISOString()
         });
         continue;
@@ -639,7 +664,7 @@ export class AIAdvisorService {
           status: 'FAILED',
           latencyMs: 0,
           errorCode: 'PROVIDER_COOLDOWN',
-          error: `${AI_PROVIDER_DEFINITIONS[item].label} 일시 실패 후 cooldown 중입니다. ${Math.ceil(cooldownRemainingMs / 1000)}초 후 재시도합니다.`,
+          error: `${AI_PROVIDER_DEFINITIONS[item].label} 응답을 받지 못했습니다. ${Math.ceil(cooldownRemainingMs / 1000)}초 뒤에 다시 요청해 주세요.`,
           completedAt: new Date().toISOString()
         });
         continue;
@@ -655,7 +680,7 @@ export class AIAdvisorService {
         ? {
             ...result,
             configWarning: true,
-            warning: 'Codex 사용자 설정 오류는 남아 있지만 격리 실행 경로로 provider 응답을 확인합니다.'
+            warning: '서비스 연결 설정에 문제가 있어 다른 연결 방식으로 응답을 받았습니다.'
           }
         : result);
     }
@@ -670,7 +695,7 @@ export class AIAdvisorService {
     if (!hasCompletedProvider && this.allowLocalBrief) {
       results.push({
         provider: 'local-brief',
-        providerLabel: 'Local evidence brief',
+        providerLabel: '확인된 자료',
         status: 'FALLBACK',
         latencyMs: 0,
         advice: buildLocalEvidenceBrief(event, results),
@@ -694,8 +719,8 @@ export class AIAdvisorService {
     status.status = 'READY_WITH_CONFIG_WARNING';
     status.authMode = 'chatgpt_subscription';
     status.executionVerifiedAt = verifiedAt;
-    status.detail = 'Codex 사용자 설정에는 경고가 있지만 격리 실행 경로에서 provider 응답을 확인했습니다.';
-    status.nextStep = 'Codex 사용자 설정은 별도로 정리할 수 있습니다. 현재 자문 실행은 가능합니다.';
+    status.detail = '연결 설정을 확인할 부분이 있지만 현재 의견 요청은 가능합니다.';
+    status.nextStep = '필요하면 연결 설정을 확인해 주세요. 지금 의견 요청은 가능합니다.';
   }
 
   async getProviderStatus({ force = false } = {}) {
@@ -710,7 +735,7 @@ export class AIAdvisorService {
           ready: false,
           status: 'DISABLED',
           subscriptionLabel: definition.subscriptionLabel,
-          detail: 'AI 자문 기능이 비활성화되어 있습니다.'
+          detail: '현재 의견 기능을 사용할 수 없습니다.'
         }))
       };
     }
@@ -750,8 +775,8 @@ export class AIAdvisorService {
           authMode: loggedIn ? (provider === 'gpt' ? 'chatgpt_subscription' : 'claude_subscription') : null,
           subscriptionLabel: definition.subscriptionLabel,
           subscriptionType: typeof parsed?.subscriptionType === 'string' ? truncate(parsed.subscriptionType, 80) : null,
-          detail: loggedIn ? '로컬 구독 세션 사용 가능' : 'CLI 로그인 상태를 확인해주세요.',
-          nextStep: loggedIn ? null : provider === 'claude' ? 'claude auth login' : 'codex login status',
+          detail: loggedIn ? '사용 가능' : '계정 로그인이 필요합니다.',
+          nextStep: loggedIn ? null : `${definition.label} 계정에 로그인한 뒤 다시 확인해 주세요.`,
           canAttemptWithoutUserConfig: provider === 'gpt' && this.gptIgnoreUserConfig === true
         });
       } catch (error) {
@@ -759,11 +784,11 @@ export class AIAdvisorService {
         const unauthenticated = provider === 'claude' &&
           (/loggedIn["': =]+false/i.test(errorDetail) || /authMethod["': =]+none/i.test(errorDetail));
         const detail = error?.code === 'ENOENT'
-          ? 'CLI가 설치되어 있지 않습니다.'
+            ? `${definition.label}에 연결할 수 없습니다. 연결 프로그램 설치 여부를 확인해 주세요.`
           : unauthenticated
-            ? 'Claude CLI 로그인이 필요합니다.'
+            ? 'Claude 계정에 로그인해 주세요.'
           : /config|invalid type|설정/i.test(error?.detail || '') && provider === 'gpt'
-            ? 'Codex 사용자 설정을 읽지 못했습니다. Codex 설정을 수정한 뒤 자문을 다시 시도하세요.'
+            ? 'ChatGPT 계정 연결 설정을 불러오지 못했습니다. 연결 상태를 확인해 주세요.'
             : '로그인 상태를 확인하지 못했습니다.';
         const configurationError = provider === 'gpt' && /config|invalid type|설정/i.test(errorDetail);
         providers.push({
@@ -783,12 +808,12 @@ export class AIAdvisorService {
           detail,
           canAttemptWithoutUserConfig: provider === 'gpt' && configurationError && this.gptIgnoreUserConfig === true,
           nextStep: error?.code === 'ENOENT'
-            ? `${definition.defaultExecutable} CLI 설치/경로 확인`
+            ? '서비스 연결 프로그램과 계정 상태를 확인해 주세요.'
             : unauthenticated
-              ? 'claude auth login'
+              ? 'Claude 계정으로 로그인해 주세요.'
               : configurationError
-                ? 'Codex 설정 수정 후 codex login status'
-                : `${definition.defaultExecutable} 로그인 상태 확인`
+            ? 'ChatGPT 계정 연결 설정을 확인해 주세요.'
+                : '서비스 계정 연결 상태를 확인해 주세요.'
         });
       }
     }
@@ -797,7 +822,7 @@ export class AIAdvisorService {
       enabled: true,
       checkedAt: new Date().toISOString(),
       usesApiKeys: false,
-      policy: '구독 기반 로컬 CLI 자문만 사용하며, API 키를 저장하거나 주문을 실행하지 않습니다.',
+      policy: '연결한 ChatGPT 또는 Claude 계정으로 의견을 요청합니다. 자동 주문은 실행하지 않습니다.',
       providers
     };
     this.statusCacheAt = Date.now();

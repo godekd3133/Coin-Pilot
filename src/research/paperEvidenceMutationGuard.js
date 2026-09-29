@@ -1,5 +1,6 @@
 export const PAPER_EVIDENCE_MUTATION_BLOCKED_CODE = 'paper_evidence_mutation_blocked';
 export const READ_ONLY_OBSERVER_MUTATION_BLOCKED_CODE = 'read_only_observer_mutation_blocked';
+export const TRADING_RUNTIME_MUTATION_BLOCKED_CODE = 'trading_runtime_mutation_blocked';
 
 /**
  * Return the mutation boundary that protects an evidence-bearing paper
@@ -24,9 +25,36 @@ export function getPaperEvidenceMutationLock(tradingSystem, operation = 'configu
       locked: true,
       code: PAPER_EVIDENCE_MUTATION_BLOCKED_CODE,
       operation,
-      reason: '활성 모의투자 검증 세션의 설정 기록을 보호하기 위해 세션을 중지한 뒤 변경하세요.',
+      reason: '모의투자가 실행 중입니다. 기록을 보존하려면 먼저 중지한 뒤 설정을 변경해 주세요.',
       sessionId: session.sessionId || null,
       startedAt: session.startedAt || null
+    };
+  }
+
+  const safety = tradingSystem?.getRuntimeSafetyStatus?.() || {};
+  const livePositionsOpen = tradingSystem?.dryRun !== true &&
+    Number(tradingSystem?.getCurrentPositionCount?.()) > 0;
+  const unresolvedOrders = Number(tradingSystem?._livePendingOrderMarkets?.size) > 0;
+  const runtimeTransitioning = tradingSystem?._startPromise || tradingSystem?._gracefulShutdownPromise ||
+    tradingSystem?._orderInProgress === true || tradingSystem?._riskCheckInProgress === true;
+  const runtimeBlocked = tradingSystem?.isRunning === true || runtimeTransitioning ||
+    tradingSystem?._riskMonitorProtectiveOnly === true || safety.runtimeState === 'PROTECTIVE_ONLY' ||
+    unresolvedOrders || livePositionsOpen;
+  if (runtimeBlocked) {
+    return {
+      locked: true,
+      code: TRADING_RUNTIME_MUTATION_BLOCKED_CODE,
+      operation,
+      reason: tradingSystem?._gracefulShutdownPromise || tradingSystem?._orderInProgress === true
+        ? '진행 중인 거래나 중지 처리가 끝날 때까지 설정을 변경할 수 없습니다.'
+        : unresolvedOrders
+          ? '확인되지 않은 주문 결과를 거래소와 대조할 때까지 설정을 변경할 수 없습니다.'
+          : safety.runtimeState === 'PROTECTIVE_ONLY' || tradingSystem?._riskMonitorProtectiveOnly === true
+          ? '위험 감시 중에는 설정을 변경할 수 없습니다.'
+            : livePositionsOpen
+              ? '보유 포지션을 정리한 뒤 설정을 변경할 수 있습니다.'
+              : '자동매매를 중지한 뒤 설정을 변경할 수 있습니다.',
+      sessionId: session?.sessionId || null
     };
   }
 

@@ -78,16 +78,16 @@ test('mobile server setup does not mistake public fc/fd domains for local IPv6',
 });
 
 test('mobile server setup rejects loopback and scoped link-local routes', () => {
-  assert.throws(() => normalizeDashboardUrl('http://127.0.0.2:3000'), /localhost/);
-  assert.throws(() => normalizeDashboardUrl('https://localhost:3000'), /localhost/);
-  assert.throws(() => normalizeDashboardUrl('http://[::1]:3000'), /localhost/);
+  assert.throws(() => normalizeDashboardUrl('http://127.0.0.2:3000'), /기기 자체 주소/);
+  assert.throws(() => normalizeDashboardUrl('https://localhost:3000'), /기기 자체 주소/);
+  assert.throws(() => normalizeDashboardUrl('http://[::1]:3000'), /기기 자체 주소/);
   assert.throws(() => normalizeDashboardUrl('http://[fe80::10]:3000'), /HTTPS/);
 });
 
 test('mobile server setup rejects credentials and dashboard subpaths', () => {
-  assert.throws(() => normalizeDashboardUrl('http://user:pass@192.168.1.12:3000'), /사용자 이름이나 비밀번호/);
-  assert.throws(() => normalizeDashboardUrl('http://192.168.1.12:3000/dashboard'), /루트 주소/);
-  assert.throws(() => normalizeDashboardUrl('http://192.168.1.12:3000/?token=secret'), /루트 주소/);
+  assert.throws(() => normalizeDashboardUrl('http://user:pass@192.168.1.12:3000'), /서버 주소에 로그인 정보/);
+  assert.throws(() => normalizeDashboardUrl('http://192.168.1.12:3000/dashboard'), /서버 주소만 입력해 주세요/);
+  assert.throws(() => normalizeDashboardUrl('http://192.168.1.12:3000/?token=secret'), /서버 주소만 입력해 주세요/);
 });
 
 test('native saved-server settings return to the setup screen when file storage is unavailable', () => {
@@ -117,7 +117,7 @@ test('native saved-server settings allow clearing a legacy address without expos
 
   assert.equal(elements.get('#saved-server').hidden, false);
   assert.equal(elements.get('#forget-server').hidden, false);
-  assert.equal(elements.get('#saved-host').textContent, '저장된 주소를 사용할 수 없습니다. 지우고 다시 등록하세요.');
+  assert.equal(elements.get('#saved-host').textContent, '저장된 서버 주소를 확인할 수 없습니다. 주소를 다시 입력해 주세요.');
   assert.equal(elements.get('#server-url').value, '');
 });
 

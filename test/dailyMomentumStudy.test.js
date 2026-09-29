@@ -273,6 +273,7 @@ test('daily momentum next-open execution reports an unfilled final signal as bou
   assert.equal(result.openPositions.length, 0);
   assert.equal(result.unknownBoundaryEntryCount, 1);
   assert.equal(result.unknownBoundaryEntries[0].reason, 'entry_after_study_boundary');
+  assert.deepEqual(result.unknownBoundaryEntryMarkets, ['KRW-BTC']);
 });
 
 test('daily momentum next-open exit execution fills at the following candle open', () => {
@@ -319,6 +320,7 @@ test('daily momentum next-open exit execution reports a final unresolved exit bo
   assert.equal(result.trades.length, 0);
   assert.equal(result.unknownBoundaryExitCount, 1);
   assert.equal(result.unknownBoundaryExits[0].reason, 'exit_after_study_boundary');
+  assert.deepEqual(result.unknownBoundaryExitMarkets, ['KRW-BTC']);
 });
 
 test('daily momentum regime mode exits when the trailing trend turns off', () => {
@@ -361,6 +363,7 @@ test('daily momentum realized P&L excludes capital in an open boundary position'
 
   assert.equal(result.trades.length, 0);
   assert.equal(result.unknownBoundaryPositionCount, 1);
+  assert.deepEqual(result.unknownBoundaryPositionMarkets, ['KRW-BTC']);
   assert.equal(result.metrics.realizedProfit, 0);
   assert.ok(result.metrics.finalEquity > result.metrics.initialBalance);
 });

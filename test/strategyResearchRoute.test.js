@@ -1,9 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import express from 'express';
 import os from 'node:os';
 import path from 'node:path';
 import DashboardServer from '../src/api/dashboardServer.js';
+import createResearchRoutes from '../src/api/routes/research.js';
 import { createMockTrader } from '../src/scripts/runDashboard.js';
 import {
   MOMENTUM_SHADOW_BENCHMARK_OBSERVATION_SCHEMA_VERSION
@@ -30,8 +32,7 @@ test('strategy research route exposes a diagnostic report but hard-forces promot
   }), 'utf8');
 
   const dashboard = new DashboardServer(trader, 0, { env: { ...process.env, DASHBOARD_TOKEN: '' } });
-  const httpServer = dashboard.start();
-  await new Promise(resolve => httpServer.once('listening', resolve));
+  const httpServer = await dashboard.start();
   const port = httpServer.address().port;
   try {
     const response = await fetch(`http://127.0.0.1:${port}/api/strategy-research`);
@@ -54,8 +55,7 @@ test('strategy research route reports an unconfigured report without inventing r
   const trader = createMockTrader();
   delete trader.config.higherTimeframeMomentumReportFile;
   const dashboard = new DashboardServer(trader, 0, { env: { ...process.env, DASHBOARD_TOKEN: '' } });
-  const httpServer = dashboard.start();
-  await new Promise(resolve => httpServer.once('listening', resolve));
+  const httpServer = await dashboard.start();
   const port = httpServer.address().port;
   try {
     const response = await fetch(`http://127.0.0.1:${port}/api/strategy-research`);
@@ -101,8 +101,7 @@ test('strategy research route projects same-window scalping variants and invalid
   }), 'utf8');
 
   const dashboard = new DashboardServer(trader, 0, { env: { ...process.env, DASHBOARD_TOKEN: '' } });
-  const httpServer = dashboard.start();
-  await new Promise(resolve => httpServer.once('listening', resolve));
+  const httpServer = await dashboard.start();
   const port = httpServer.address().port;
   try {
     const response = await fetch(`http://127.0.0.1:${port}/api/strategy-research`);
@@ -134,6 +133,7 @@ test('strategy research route projects same-window scalping variants and invalid
 test('momentum shadow route projects the latest quote snapshot as read-only evidence', async () => {
   const quoteFile = path.join(os.tmpdir(), `coinpilot-momentum-quotes-${process.pid}-${Date.now()}.json`);
   const historyFile = path.join(os.tmpdir(), `coinpilot-momentum-quote-history-${process.pid}-${Date.now()}.jsonl`);
+  const historyNow = Date.now();
   fs.writeFileSync(quoteFile, JSON.stringify({
     generatedAt: new Date().toISOString(),
     complete: true,
@@ -166,9 +166,9 @@ test('momentum shadow route projects the latest quote snapshot as read-only evid
   }), 'utf8');
   fs.writeFileSync(historyFile, [
     JSON.stringify({
-      generatedAt: new Date(Date.now() - 120_000).toISOString(),
-      complete: true,
-      errors: 0,
+      generatedAt: new Date(historyNow - 5_346_929).toISOString(),
+      complete: false,
+      errors: 5,
       summary: { markets: { 'KRW-DOGE': {
         p95: 0.91,
         overCeiling: 5,
@@ -182,7 +182,7 @@ test('momentum shadow route projects the latest quote snapshot as read-only evid
       } } }
     }),
     JSON.stringify({
-      generatedAt: new Date(Date.now() - 60_000).toISOString(),
+      generatedAt: new Date(historyNow - 60_000).toISOString(),
       complete: true,
       errors: 0,
       summary: { markets: { 'KRW-DOGE': {
@@ -202,8 +202,7 @@ test('momentum shadow route projects the latest quote snapshot as read-only evid
   trader.config.momentumShadowQuoteReportFile = quoteFile;
   trader.config.momentumShadowQuoteHistoryFile = historyFile;
   const dashboard = new DashboardServer(trader, 0, { env: { ...process.env, DASHBOARD_TOKEN: '' } });
-  const httpServer = dashboard.start();
-  await new Promise(resolve => httpServer.once('listening', resolve));
+  const httpServer = await dashboard.start();
   const port = httpServer.address().port;
   try {
     const response = await fetch(`http://127.0.0.1:${port}/api/momentum-shadow`);
@@ -216,6 +215,15 @@ test('momentum shadow route projects the latest quote snapshot as read-only evid
     assert.equal(typeof body.paperForwardCohort.profitabilityEvidenceSessionCount, 'number');
     assert.equal(typeof body.paperForwardCohort.profitabilityEvidenceConfigCount, 'number');
     assert.ok(['none', 'single_config', 'mixed_configs_not_aggregated'].includes(body.paperForwardCohort.profitabilityEvidenceProfitAggregation));
+    assert.equal(body.candidateReadiness.quoteSampler.required, true);
+    assert.equal(body.candidateReadiness.quoteSampler.ready, false);
+    assert.ok(body.candidateReadiness.blockers.includes('quote_quality_market_set_incomplete'));
+    assert.equal(body.candidateReadiness.quoteQuality.required, false);
+    for (const variant of body.candidateReadinessVariants) {
+      assert.equal(variant.readiness.quoteSampler.required, true, `${variant.key} quote sampler gate`);
+      assert.equal(variant.readiness.quoteSampler.ready, false, `${variant.key} must block the incomplete market report`);
+      assert.equal(variant.readiness.quoteSampler.reason, 'quote_quality_market_set_incomplete');
+    }
     assert.equal(body.quoteQualitySnapshot.available, true);
     assert.equal(body.quoteQualitySnapshot.complete, true);
     assert.equal(body.quoteQualitySnapshot.fresh, true);
@@ -234,11 +242,17 @@ test('momentum shadow route projects the latest quote snapshot as read-only evid
     });
     assert.equal(body.quoteQualitySnapshot.history.available, true);
     assert.equal(body.quoteQualitySnapshot.history.reportCount, 2);
-    assert.equal(body.quoteQualitySnapshot.history.windowLimit, 48);
+    assert.equal(body.quoteQualitySnapshot.history.windowLimit, 144);
+    assert.equal(body.quoteQualitySnapshot.history.completeReportCount, 1);
+    assert.equal(body.quoteQualitySnapshot.history.errorReportCount, 1);
+    assert.equal(body.quoteQualitySnapshot.history.cadence.expectedIntervalSeconds, 600);
+    assert.equal(body.quoteQualitySnapshot.history.cadence.freshnessLimitSeconds, 900);
+    assert.equal(body.quoteQualitySnapshot.history.cadence.maxGapSeconds, 5_286.929);
+    assert.equal(body.quoteQualitySnapshot.history.cadence.gapsOverFreshnessLimit, 1);
     assert.equal(body.quoteQualitySnapshot.history.minimumDepthReports, 30);
     assert.deepEqual(body.quoteQualitySnapshot.history.repeatedOverCeilingMarkets, ['KRW-DOGE']);
     assert.equal(body.quoteQualitySnapshot.history.markets['KRW-DOGE'].overCeilingReports, 2);
-    assert.equal(body.quoteQualitySnapshot.history.markets['KRW-DOGE'].topOfBookDepth.twoSidedDepthReportCount, 2);
+    assert.equal(body.quoteQualitySnapshot.history.markets['KRW-DOGE'].topOfBookDepth.twoSidedDepthReportCount, 1);
     assert.equal(body.quoteQualitySnapshot.history.markets['KRW-DOGE'].topOfBookDepth.status, 'INSUFFICIENT_DEPTH_REPORT_HISTORY');
     assert.equal(body.quoteQualitySnapshot.promoted, false);
     assert.equal(body.quoteQualitySnapshot.researchOnly, true);
@@ -273,8 +287,7 @@ test('momentum shadow quote snapshot marks stale and future reports as not curre
   trader.config.momentumShadowQuoteReportFile = quoteFile;
   trader.config.momentumShadowQuoteMaxAgeSeconds = 60;
   const dashboard = new DashboardServer(trader, 0, { env: { ...process.env, DASHBOARD_TOKEN: '' } });
-  const httpServer = dashboard.start();
-  await new Promise(resolve => httpServer.once('listening', resolve));
+  const httpServer = await dashboard.start();
   const port = httpServer.address().port;
   try {
     fs.writeFileSync(quoteFile, JSON.stringify(report(new Date(Date.now() - 61_000).toISOString())), 'utf8');
@@ -283,6 +296,8 @@ test('momentum shadow quote snapshot marks stale and future reports as not curre
     assert.equal(staleBody.quoteQualitySnapshot.fresh, false);
     assert.equal(staleBody.quoteQualitySnapshot.freshnessReason, 'quote_quality_report_stale');
     assert.ok(staleBody.quoteQualitySnapshot.ageSeconds >= 61);
+    assert.equal(staleBody.candidateReadiness.quoteSampler.ready, false);
+    assert.ok(staleBody.candidateReadiness.blockers.includes('quote_quality_report_stale'));
 
     fs.writeFileSync(quoteFile, JSON.stringify(report(new Date(Date.now() + 60_000).toISOString())), 'utf8');
     const futureResponse = await fetch(`http://127.0.0.1:${port}/api/momentum-shadow`);
@@ -290,6 +305,8 @@ test('momentum shadow quote snapshot marks stale and future reports as not curre
     assert.equal(futureBody.quoteQualitySnapshot.fresh, false);
     assert.equal(futureBody.quoteQualitySnapshot.ageSeconds, null);
     assert.equal(futureBody.quoteQualitySnapshot.freshnessReason, 'quote_quality_report_future_timestamp');
+    assert.equal(futureBody.candidateReadiness.quoteSampler.ready, false);
+    assert.ok(futureBody.candidateReadiness.blockers.includes('quote_quality_report_timestamp_invalid'));
   } finally {
     dashboard.stop();
     trader.stop();
@@ -382,8 +399,7 @@ test('momentum shadow route projects marked equity as read-only research evidenc
   trader.config.momentumShadowBenchmarkDir = regimeDir;
   trader.config.momentumShadowQuoteHistoryFile = historyFile;
   const dashboard = new DashboardServer(trader, 0, { env: { ...process.env, DASHBOARD_TOKEN: '' } });
-  const httpServer = dashboard.start();
-  await new Promise(resolve => httpServer.once('listening', resolve));
+  const httpServer = await dashboard.start();
   const port = httpServer.address().port;
   try {
     const response = await fetch(`http://127.0.0.1:${port}/api/momentum-shadow`);
@@ -576,6 +592,92 @@ test('momentum shadow route projects marked equity as read-only research evidenc
   }
 });
 
+test('momentum shadow route accepts an isolated paper-forward cohort root', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'coinpilot-momentum-shadow-root-'));
+  const priorOwnerDirs = process.env.MOMO_SHADOW_OWNER_DIRS;
+  const bookNames = [
+    'baseline', 'regime', 'benchmark', 'volatility', 'next-open', 'fixed-2d',
+    'fixed-2d-loss-cap', 'fixed-2d-loss-cap-no-doge', 'fixed-2d-spread',
+    'fixed-2d-relative', 'fixed-2d-quote-cross'
+  ];
+  const bookDirs = bookNames.map(name => path.join(root, 'books', name));
+  const cohortRoot = path.join(root, 'synthetic-paper-cohort');
+  const artifacts = path.join(root, 'artifacts');
+  const candidateSlotFile = path.join(artifacts, 'candidate-slot.json');
+  const quoteReportFile = path.join(artifacts, 'quote-quality.json');
+  const quoteHistoryFile = path.join(artifacts, 'quote-history.jsonl');
+  const liveEvidenceFile = path.join(artifacts, 'live-evidence.jsonl');
+  const candidateDir = path.join(root, 'candidate-target');
+  const config = {
+    momentumShadowCandidateDir: candidateDir,
+    momentumShadowBenchmarkDir: bookDirs[2],
+    momentumShadowQuoteHistoryFile: quoteHistoryFile,
+    momentumShadowQuoteReportFile: quoteReportFile,
+    momentumShadowCandidateSlotFile: candidateSlotFile,
+    momentumShadowMinTrades: 20,
+    momentumShadowMinResearchDays: 7
+  };
+  const configKeys = [
+    'momentumShadowFixedDir', 'momentumShadowRegimeDir', 'momentumShadowBenchmarkDir',
+    'momentumShadowVolatilityDir', 'momentumShadowNextOpenDir', 'momentumShadowFixedHoldDir',
+    'momentumShadowFixedHoldLossCapDir', 'momentumShadowFixedHoldLossCapNoDogeDir',
+    'momentumShadowFixedHoldSpreadDir', 'momentumShadowFixedHoldRelativeDir',
+    'momentumShadowFixedHoldQuoteCrossDir'
+  ];
+  configKeys.forEach((key, index) => { config[key] = bookDirs[index]; });
+  const app = express();
+  app.use('/api', createResearchRoutes({
+    tradingSystem: { config, dryRun: true, liveExecutionEvidenceFile: liveEvidenceFile }
+  }, { paperForwardCohortRootDir: cohortRoot }));
+  const server = app.listen(0, '127.0.0.1');
+  try {
+    process.env.MOMO_SHADOW_OWNER_DIRS = bookDirs.join(',');
+    fs.mkdirSync(cohortRoot, { recursive: true });
+    fs.mkdirSync(artifacts, { recursive: true });
+    bookDirs.forEach((directory, index) => {
+      fs.mkdirSync(directory, { recursive: true });
+      const ledger = index === 0
+        ? { balance: 100, initialBalance: 100, positions: {}, trades: [], config: {} }
+        : {};
+      fs.writeFileSync(path.join(directory, 'ledger.json'), JSON.stringify(ledger), 'utf8');
+    });
+    fs.mkdirSync(path.join(cohortRoot, '.paper-forward-synthetic'), { recursive: true });
+    fs.writeFileSync(path.join(cohortRoot, '.paper-forward-synthetic', 'paper_validation.json'), JSON.stringify({}), 'utf8');
+    fs.writeFileSync(candidateSlotFile, '{}', 'utf8');
+    fs.writeFileSync(quoteReportFile, '{}', 'utf8');
+    fs.writeFileSync(quoteHistoryFile, '', 'utf8');
+    fs.writeFileSync(liveEvidenceFile, '', 'utf8');
+
+    await new Promise(resolve => server.once('listening', resolve));
+    const response = await fetch(`http://127.0.0.1:${server.address().port}/api/momentum-shadow`);
+    const body = await response.json();
+    assert.equal(response.status, 200);
+    assert.equal(body.paperForwardCohort.rootName, path.basename(cohortRoot));
+    assert.equal(body.paperForwardCohort.sessionCount, 1);
+    assert.equal(body.paperForwardCohort.researchOnly, true);
+    assert.equal(body.paperForwardCohort.promoted, false);
+    assert.equal(body.books[0].cash, 100);
+
+    fs.writeFileSync(path.join(bookDirs[0], 'ledger.json'), JSON.stringify({
+      balance: 250,
+      initialBalance: 250,
+      positions: {},
+      trades: [],
+      config: {}
+    }), 'utf8');
+    const refreshedResponse = await fetch(`http://127.0.0.1:${server.address().port}/api/momentum-shadow`);
+    const refreshedBody = await refreshedResponse.json();
+    assert.equal(refreshedResponse.status, 200);
+    assert.equal(refreshedBody.books[0].cash, 250);
+    assert.deepEqual(Object.keys(refreshedBody).sort(), Object.keys(body).sort());
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+    if (priorOwnerDirs === undefined) delete process.env.MOMO_SHADOW_OWNER_DIRS;
+    else process.env.MOMO_SHADOW_OWNER_DIRS = priorOwnerDirs;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('momentum shadow route blocks a negative trade-return confidence bound', async () => {
   const fixedDir = path.join(os.tmpdir(), `coinpilot-momentum-confidence-${process.pid}-${Date.now()}`);
   fs.mkdirSync(fixedDir, { recursive: true });
@@ -636,8 +738,7 @@ test('momentum shadow route blocks a negative trade-return confidence bound', as
   const trader = createMockTrader();
   trader.config.momentumShadowFixedDir = fixedDir;
   const dashboard = new DashboardServer(trader, 0, { env: { ...process.env, DASHBOARD_TOKEN: '' } });
-  const httpServer = dashboard.start();
-  await new Promise(resolve => httpServer.once('listening', resolve));
+  const httpServer = await dashboard.start();
   const port = httpServer.address().port;
   try {
     const response = await fetch(`http://127.0.0.1:${port}/api/momentum-shadow`);
@@ -711,8 +812,7 @@ test('momentum shadow route does not treat zero realized return as paper profit'
   const trader = createMockTrader();
   trader.config.momentumShadowFixedDir = fixedDir;
   const dashboard = new DashboardServer(trader, 0, { env: { ...process.env, DASHBOARD_TOKEN: '' } });
-  const httpServer = dashboard.start();
-  await new Promise(resolve => httpServer.once('listening', resolve));
+  const httpServer = await dashboard.start();
   const port = httpServer.address().port;
   try {
     const response = await fetch(`http://127.0.0.1:${port}/api/momentum-shadow`);
@@ -783,8 +883,7 @@ test('momentum shadow route reports modeled quote boundary evidence separately f
   const trader = createMockTrader();
   trader.config.momentumShadowFixedDir = fixedDir;
   const dashboard = new DashboardServer(trader, 0, { env: { ...process.env, DASHBOARD_TOKEN: '' } });
-  const httpServer = dashboard.start();
-  await new Promise(resolve => httpServer.once('listening', resolve));
+  const httpServer = await dashboard.start();
   const port = httpServer.address().port;
   try {
     const response = await fetch(`http://127.0.0.1:${port}/api/momentum-shadow`);
@@ -823,8 +922,7 @@ test('momentum shadow variant readiness is sealed against ambient candidate env'
 
   const trader = createMockTrader();
   const dashboard = new DashboardServer(trader, 0, { env: { ...process.env, DASHBOARD_TOKEN: '' } });
-  const httpServer = dashboard.start();
-  await new Promise(resolve => httpServer.once('listening', resolve));
+  const httpServer = await dashboard.start();
   const port = httpServer.address().port;
   try {
     const response = await fetch(`http://127.0.0.1:${port}/api/momentum-shadow`);

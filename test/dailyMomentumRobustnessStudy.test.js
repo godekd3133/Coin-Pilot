@@ -280,8 +280,52 @@ test('continuous robustness segments carry internal positions and only flag the 
   assert.equal(report.segmentMode, 'continuous');
   assert.equal(report.variants[0].segments.length, 3);
   assert.equal(report.variants[0].segments[0].unknownBoundaryPositionCount, 0);
+  assert.deepEqual(report.variants[0].segments[0].unknownBoundaryPositionMarkets, []);
   assert.equal(report.variants[0].segments[1].unknownBoundaryPositionCount, 0);
+  assert.deepEqual(report.variants[0].segments[1].unknownBoundaryPositionMarkets, []);
   assert.equal(report.variants[0].segments[2].unknownBoundaryPositionCount, 1);
+  assert.deepEqual(report.variants[0].segments[2].unknownBoundaryPositionMarkets, ['KRW-BTC']);
+  assert.deepEqual(report.variants[0].unknownBoundaryPositionMarkets, ['KRW-BTC']);
+  assert.deepEqual(report.variants[0].unknownBoundaryEntryMarkets, []);
+  assert.deepEqual(report.variants[0].unknownBoundaryExitMarkets, []);
+  assert.deepEqual(report.nearMisses[0].unknownBoundaryPositionMarkets, ['KRW-BTC']);
   assert.ok(report.variants[0].eligibilityBlockers.includes('unknown_boundary_position'));
+  assert.equal(report.promoted, false);
+});
+
+test('independent robustness reports expose boundary market attribution without changing HOLD', () => {
+  const candles = {
+    'KRW-BTC': daily([100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111]),
+    'KRW-ETH': daily([100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111])
+  };
+  const report = evaluateDailyMomentumRobustness(candles, {
+    segmentMode: 'independent',
+    segmentCount: 3,
+    variants: [{
+      name: 'independent-boundary-test',
+      config: {
+        mode: 'regime',
+        trendLookbackDays: 2,
+        trendMinPercent: 0,
+        breadthMin: 2,
+        maxHoldDays: 3650,
+        positionFraction: 0.25,
+        maxPositions: 1,
+        benchmarkMarket: null,
+        exitOnBenchmarkOff: false
+      }
+    }],
+    minimumFullReturnPercent: -100,
+    maximumDrawdownPercent: 100,
+    minimumWorstSegmentReturnPercent: -100,
+    minimumTradeCount: 1
+  });
+
+  assert.equal(report.segmentMode, 'independent');
+  assert.deepEqual(report.variants[0].unknownBoundaryPositionMarkets, ['KRW-BTC']);
+  assert.deepEqual(report.nearMisses[0].unknownBoundaryPositionMarkets, ['KRW-BTC']);
+  assert.ok(report.variants[0].segments.every(segment => Array.isArray(segment.unknownBoundaryPositionMarkets)));
+  assert.ok(report.variants[0].eligibilityBlockers.includes('unknown_boundary_position'));
+  assert.equal(report.variants[0].status, 'HOLD');
   assert.equal(report.promoted, false);
 });

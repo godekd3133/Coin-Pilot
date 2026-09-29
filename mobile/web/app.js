@@ -55,7 +55,7 @@ form.addEventListener('submit', event => {
   try {
     openDashboard(input.value);
   } catch (cause) {
-    error.textContent = cause instanceof Error ? cause.message : '주소를 저장하지 못했습니다.';
+    error.textContent = cause instanceof Error ? cause.message : '서버 주소를 저장하지 못했습니다. 다시 시도해 주세요.';
   }
 });
 
@@ -87,7 +87,7 @@ window.addEventListener('coinpilot-native-server-config', event => {
   }
 
   input.value = '';
-  savedHost.textContent = '저장된 주소를 사용할 수 없습니다. 지우고 다시 등록하세요.';
+  savedHost.textContent = '저장된 서버 주소를 확인할 수 없습니다. 주소를 다시 입력해 주세요.';
   saved.hidden = false;
   forgetButton.hidden = false;
 });

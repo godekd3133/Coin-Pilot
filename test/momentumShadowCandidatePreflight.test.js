@@ -30,6 +30,23 @@ function baseExpected() {
   };
 }
 
+function writeFreshQuoteReport(root, now, markets = baseExpected().markets) {
+  const quoteFile = path.join(root, 'quote-quality.json');
+  fs.writeFileSync(quoteFile, JSON.stringify({
+    generatedAt: new Date(now).toISOString(),
+    complete: true,
+    errors: [],
+    requestedSampleCount: 5,
+    samples: [{}, {}, {}, {}, {}],
+    summary: {
+      valid: true,
+      sampleCount: 5,
+      markets: Object.fromEntries(markets.map(market => [market, { overCeiling: 0 }]))
+    }
+  }));
+  return quoteFile;
+}
+
 test('candidate preflight blocks a closed benchmark without touching owners', () => {
   const result = inspectMomentumShadowCandidate({
     targetDir: '/tmp/coinpilot-preflight-target-missing',
@@ -152,6 +169,7 @@ test('candidate preflight exposes the next benchmark polling window', () => {
 test('candidate preflight allows a fresh open benchmark with an empty target', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'coinpilot-preflight-open-'));
   const benchmarkDir = path.join(root, 'benchmark');
+  const quoteFile = path.join(root, 'quote-quality.json');
   fs.mkdirSync(benchmarkDir, { recursive: true });
   const now = Date.parse('2026-01-01T00:05:00.000Z');
   fs.writeFileSync(path.join(benchmarkDir, 'ledger.json'), JSON.stringify({
@@ -164,6 +182,18 @@ test('candidate preflight allows a fresh open benchmark with an empty target', (
     dataQuality: { valid: true, reason: 'daily_grid_aligned_and_contiguous', marketCount: 2 },
     config: { pollMs: 900_000 }
   }));
+  fs.writeFileSync(quoteFile, JSON.stringify({
+    generatedAt: new Date(now).toISOString(),
+    complete: true,
+    errors: [],
+    requestedSampleCount: 5,
+    samples: [{}, {}, {}, {}, {}],
+    summary: {
+      valid: true,
+      sampleCount: 5,
+      markets: { 'KRW-BTC': { overCeiling: 0 }, 'KRW-ETH': { overCeiling: 0 } }
+    }
+  }));
   try {
     const result = inspectMomentumShadowCandidate({
       targetDir: path.join(root, 'target'),
@@ -175,6 +205,7 @@ test('candidate preflight allows a fresh open benchmark with an empty target', (
         maxDailyCandleAgeHours: 36,
         maxSpreadPercent: 0.5
       },
+      quoteReportFile: quoteFile,
       now
     });
 
@@ -201,11 +232,84 @@ test('candidate preflight allows a fresh open benchmark with an empty target', (
   }
 });
 
+test('every candidate requires a fresh complete quote sampler report, including candle-close execution', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'coinpilot-preflight-quote-sampler-'));
+  const benchmarkDir = path.join(root, 'benchmark');
+  const quoteFile = path.join(root, 'quote-quality.json');
+  fs.mkdirSync(benchmarkDir, { recursive: true });
+  const now = Date.parse('2026-01-01T00:05:00.000Z');
+  fs.writeFileSync(path.join(benchmarkDir, 'ledger.json'), JSON.stringify({
+    ownerPid: process.pid,
+    runnerState: 'running',
+    heartbeatAt: new Date(now).toISOString(),
+    benchmarkGateOpen: true,
+    benchmarkTrendPercent: 2.5,
+    benchmarkObservationSchemaVersion: MOMENTUM_SHADOW_BENCHMARK_OBSERVATION_SCHEMA_VERSION,
+    dataQuality: { valid: true, reason: 'daily_grid_aligned_and_contiguous', marketCount: 2 },
+    config: { pollMs: 900_000 }
+  }));
+  const preflight = () => inspectMomentumShadowCandidate({
+    targetDir: path.join(root, 'target'),
+    benchmarkDir,
+    ownerDirs: [benchmarkDir],
+    expectedConfig: baseExpected(),
+    quoteReportFile: quoteFile,
+    now
+  });
+  const writeQuoteReport = ({ generatedAt = new Date(now).toISOString(), complete = true, errors = [], sampleCount = 5 } = {}) => {
+    fs.writeFileSync(quoteFile, JSON.stringify({
+      generatedAt,
+      complete,
+      errors,
+      requestedSampleCount: 5,
+      samples: Array.from({ length: sampleCount }, () => ({})),
+      summary: {
+        valid: complete,
+        sampleCount,
+        markets: { 'KRW-BTC': { overCeiling: 0 }, 'KRW-ETH': { overCeiling: 0 } }
+      }
+    }));
+  };
+
+  try {
+    const missing = preflight();
+    assert.equal(missing.launchAllowed, false);
+    assert.ok(missing.blockers.includes('quote_quality_report_missing'));
+    assert.equal(missing.quoteSampler.required, true);
+    assert.equal(missing.quoteSampler.ready, false);
+    assert.equal(missing.quoteQuality.required, false);
+
+    writeQuoteReport({ generatedAt: new Date(now - 901_000).toISOString() });
+    const stale = preflight();
+    assert.equal(stale.launchAllowed, false);
+    assert.ok(stale.blockers.includes('quote_quality_report_stale'));
+
+    writeQuoteReport({ complete: false });
+    const incomplete = preflight();
+    assert.equal(incomplete.launchAllowed, false);
+    assert.ok(incomplete.blockers.includes('quote_quality_report_incomplete'));
+
+    writeQuoteReport({ complete: false, errors: ['sample_failed'], sampleCount: 0 });
+    const errored = preflight();
+    assert.equal(errored.launchAllowed, false);
+    assert.ok(errored.blockers.includes('quote_quality_report_errors'));
+
+    writeQuoteReport();
+    const fresh = preflight();
+    assert.equal(fresh.launchAllowed, true);
+    assert.equal(fresh.quoteSampler.ready, true);
+    assert.equal(fresh.quoteSampler.ageSeconds, 0);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('candidate preflight rejects a round-trip cost below the modeled execution-cost floor', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'coinpilot-preflight-cost-floor-'));
   const benchmarkDir = path.join(root, 'benchmark');
   fs.mkdirSync(benchmarkDir, { recursive: true });
   const now = Date.parse('2026-01-01T00:05:00.000Z');
+  const quoteFile = writeFreshQuoteReport(root, now);
   fs.writeFileSync(path.join(benchmarkDir, 'ledger.json'), JSON.stringify({
     ownerPid: process.pid,
     runnerState: 'running',
@@ -222,6 +326,7 @@ test('candidate preflight rejects a round-trip cost below the modeled execution-
       benchmarkDir,
       ownerDirs: [],
       expectedConfig: { ...baseExpected(), costPercent: 0.2 },
+      quoteReportFile: quoteFile,
       now
     });
     assert.equal(undercosted.launchAllowed, false);
@@ -235,6 +340,7 @@ test('candidate preflight rejects a round-trip cost below the modeled execution-
       benchmarkDir,
       ownerDirs: [],
       expectedConfig: { ...baseExpected(), costPercent: 0.3 },
+      quoteReportFile: quoteFile,
       now
     });
     assert.equal(costAligned.launchAllowed, true);
@@ -287,6 +393,7 @@ test('candidate preflight identifies legacy benchmark observation telemetry sepa
   const benchmarkDir = path.join(root, 'benchmark');
   fs.mkdirSync(benchmarkDir, { recursive: true });
   const now = Date.parse('2026-01-01T00:05:00.000Z');
+  const quoteFile = writeFreshQuoteReport(root, now);
   fs.writeFileSync(path.join(benchmarkDir, 'ledger.json'), JSON.stringify({
     ownerPid: process.pid,
     runnerState: 'running',
@@ -302,6 +409,7 @@ test('candidate preflight identifies legacy benchmark observation telemetry sepa
       benchmarkDir,
       ownerDirs: [],
       expectedConfig: baseExpected(),
+      quoteReportFile: quoteFile,
       now
     });
     assert.equal(result.launchAllowed, true);
@@ -432,6 +540,7 @@ test('candidate preflight keeps recovered benchmark fetch history informational'
   const benchmarkDir = path.join(root, 'benchmark');
   fs.mkdirSync(benchmarkDir, { recursive: true });
   const now = Date.parse('2026-01-01T00:05:00.000Z');
+  const quoteFile = writeFreshQuoteReport(root, now);
   fs.writeFileSync(path.join(benchmarkDir, 'ledger.json'), JSON.stringify({
     ownerPid: process.pid,
     runnerState: 'running',
@@ -450,6 +559,7 @@ test('candidate preflight keeps recovered benchmark fetch history informational'
       benchmarkDir,
       ownerDirs: [],
       expectedConfig: baseExpected(),
+      quoteReportFile: quoteFile,
       now
     });
 
@@ -468,6 +578,7 @@ test('candidate preflight warns while the benchmark owner is actively failing', 
   const benchmarkDir = path.join(root, 'benchmark');
   fs.mkdirSync(benchmarkDir, { recursive: true });
   const now = Date.parse('2026-01-01T00:05:00.000Z');
+  const quoteFile = writeFreshQuoteReport(root, now);
   fs.writeFileSync(path.join(benchmarkDir, 'ledger.json'), JSON.stringify({
     ownerPid: process.pid,
     runnerState: 'running',
@@ -486,6 +597,7 @@ test('candidate preflight warns while the benchmark owner is actively failing', 
       benchmarkDir,
       ownerDirs: [],
       expectedConfig: baseExpected(),
+      quoteReportFile: quoteFile,
       now
     });
 
@@ -504,6 +616,7 @@ test('candidate preflight evaluates the candidate threshold instead of copying t
   const benchmarkDir = path.join(root, 'benchmark');
   fs.mkdirSync(benchmarkDir, { recursive: true });
   const now = Date.parse('2026-01-01T00:05:00.000Z');
+  const quoteFile = writeFreshQuoteReport(root, now);
   fs.writeFileSync(path.join(benchmarkDir, 'ledger.json'), JSON.stringify({
     ownerPid: process.pid,
     runnerState: 'running',
@@ -524,6 +637,7 @@ test('candidate preflight evaluates the candidate threshold instead of copying t
         maxEntryGapPercent: 0.2,
         maxDailyCandleAgeHours: 36
       },
+      quoteReportFile: quoteFile,
       now
     });
 

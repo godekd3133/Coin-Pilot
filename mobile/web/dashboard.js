@@ -43,7 +43,7 @@
 
   function signedWon(value) {
     const parsed = finite(value);
-    if (parsed === null) return '평가 정보를 제공하지 않아요';
+    if (parsed === null) return '손익 미제공';
     const prefix = parsed > 0 ? '+' : parsed < 0 ? '−' : '';
     return prefix + won(Math.abs(parsed));
   }
@@ -66,11 +66,22 @@
   }
 
   function dateText(value) {
-    if (!value) return '시간 정보 없음';
+    if (!value) return '시각 미제공';
     const date = new Date(value);
-    if (!Number.isFinite(date.getTime())) return '시간 정보 없음';
+    if (!Number.isFinite(date.getTime())) return '시각 미제공';
     return new Intl.DateTimeFormat('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(date);
   }
+
+  function clockText(value) {
+    const date = value ? new Date(value) : null;
+    return date && Number.isFinite(date.getTime())
+      ? new Intl.DateTimeFormat('ko-KR', { hour: '2-digit', minute: '2-digit' }).format(date)
+      : '시각 미제공';
+  }
+
+  byId('today-label').textContent = new Intl.DateTimeFormat('ko-KR', {
+    month: 'long', day: 'numeric', weekday: 'long'
+  }).format(new Date());
 
   function showToast(message) {
     const toast = byId('toast');
@@ -83,16 +94,16 @@
   function setConnectionError(message) {
     byId('connection-error').textContent = message || '인터넷 연결과 서버 주소를 확인해 주세요.';
     byId('connection-banner').hidden = !message;
-    byId('settings-server-status').textContent = message ? '연결할 수 없음' : '연결됨';
+    byId('settings-server-status').textContent = message ? '연결되지 않음' : '연결됨';
   }
 
   async function nativeRequest(payload) {
-    if (!apiBridge) return { ok: false, status: 0, error: 'iOS 앱 연결이 필요합니다.' };
+    if (!apiBridge) return { ok: false, status: 0, error: '이 기능은 iOS 앱에서 사용할 수 있습니다.' };
     try {
       const result = await apiBridge.postMessage(payload);
-      return result && typeof result === 'object' ? result : { ok: false, status: 0, error: '서버 응답을 읽지 못했습니다.' };
-    } catch (error) {
-      return { ok: false, status: 0, error: error instanceof Error ? error.message : '서버에 연결할 수 없습니다.' };
+      return result && typeof result === 'object' ? result : { ok: false, status: 0, error: '서버 응답을 읽지 못했습니다. 다시 시도해 주세요.' };
+    } catch {
+      return { ok: false, status: 0, error: '서버에 연결하지 못했습니다. 인터넷 연결과 서버 주소를 확인해 주세요.' };
     }
   }
 
@@ -105,12 +116,12 @@
 
   function updateMode() {
     const mode = state.status?.mode || state.account?.mode || state.pnl?.mode || '';
-    const label = mode === 'LIVE' ? '실거래' : mode === 'DRY_RUN' ? '모의 운용' : '운용 방식 확인 중';
+    const label = mode === 'LIVE' ? '실거래' : mode === 'DRY_RUN' ? '모의투자' : '거래 모드 확인 중';
     const badge = byId('mode-badge');
     badge.textContent = label;
     badge.classList.toggle('live', mode === 'LIVE');
     byId('engine-mode').textContent = label;
-    byId('portfolio-mode').textContent = mode === 'LIVE' ? '실거래 계좌' : mode === 'DRY_RUN' ? '모의 운용 계좌' : '운용 정보를 확인할 수 없어요';
+    byId('portfolio-mode').textContent = mode === 'LIVE' ? '실거래 계좌' : mode === 'DRY_RUN' ? '모의투자 계좌' : '거래 모드를 확인할 수 없습니다.';
     byId('settings-mode').textContent = label;
     byId('observer-row').hidden = state.status?.readOnlyObserver !== true && state.account?.readOnlyObserver !== true;
   }
@@ -140,19 +151,17 @@
     });
     const line = coords.map((point, index) => (index ? 'L' : 'M') + point[0].toFixed(1) + ' ' + point[1].toFixed(1)).join(' ');
     const area = line + ' L 358 100 L 2 100 Z';
-    const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
-    defs.innerHTML = '<linearGradient id="equity-fill" x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stop-color="#cce97a" stop-opacity=".25"/><stop offset="100%" stop-color="#cce97a" stop-opacity="0"/></linearGradient>';
     const fill = document.createElementNS('http://www.w3.org/2000/svg', 'path');
     fill.setAttribute('d', area);
-    fill.setAttribute('fill', 'url(#equity-fill)');
+    fill.setAttribute('fill', '#e6f6ef');
     const stroke = document.createElementNS('http://www.w3.org/2000/svg', 'path');
     stroke.setAttribute('d', line);
     stroke.setAttribute('fill', 'none');
-    stroke.setAttribute('stroke', '#d0ee7d');
-    stroke.setAttribute('stroke-width', '2.2');
-    stroke.setAttribute('stroke-linecap', 'round');
+    stroke.setAttribute('stroke', '#0a7a58');
+    stroke.setAttribute('stroke-width', '1.8');
+    stroke.setAttribute('stroke-linecap', 'square');
     stroke.setAttribute('stroke-linejoin', 'round');
-    svg.append(defs, fill, stroke);
+    svg.append(fill, stroke);
     byId('chart-caption').textContent = state.period === '7d' ? '최근 7일' : state.period === '30d' ? '최근 30일' : '최근 24시간';
   }
 
@@ -177,25 +186,26 @@
       const color = change === null ? '' : change > 0 ? 'positive' : change < 0 ? 'negative' : '';
       return '<article class="market-row"><span class="coin-avatar ' + info[2] + '">' + escapeHtml(info[1].slice(0, 1)) + '</span><div class="market-copy"><strong>' + escapeHtml(info[0]) + '</strong><span>' + escapeHtml(info[1]) + ' · KRW</span></div><strong class="market-value">' + won(item.price) + '<span class="' + color + '">' + percent(change) + '</span></strong></article>';
     }).join('');
-    byId('market-updated').textContent = state.updatedAt ? '방금 업데이트' : '시세 확인 중';
+    byId('market-updated').textContent = state.updatedAt ? '확인 ' + clockText(state.updatedAt) : '시각 미제공';
   }
 
   function tradeKind(trade) {
     const raw = String(trade.type || trade.action || trade.side || '').toUpperCase();
-    if (raw.includes('BUY') || raw.includes('OPEN')) return { label: '매수 기록', kind: 'buy', glyph: '＋' };
-    if (raw.includes('SELL') || raw.includes('CLOSE')) return { label: '매도 기록', kind: 'sell', glyph: '−' };
-    return { label: '거래 기록', kind: '', glyph: '·' };
+    if (raw.includes('BUNDLE_TRADE')) return { label: '묶음 거래', kind: '', glyph: '↔' };
+    if (raw.includes('BUY') || raw.includes('OPEN')) return { label: '매수', kind: 'buy', glyph: '＋' };
+    if (raw.includes('SELL') || raw.includes('CLOSE')) return { label: '매도', kind: 'sell', glyph: '−' };
+    return { label: '거래', kind: '', glyph: '·' };
   }
 
   function tradeValue(trade) {
     if (trade.source === 'strategy') {
       const profit = finite(trade.profit);
-      if (profit !== null) return { value: profit, label: '기록 손익', signed: true };
+      if (profit !== null) return { value: profit, label: '손익', signed: true };
       const price = finite(trade.price) ?? finite(trade.exitPrice) ?? finite(trade.entryPrice);
-      return price === null ? null : { value: price, label: '기록 기준가', signed: false };
+      return price === null ? null : { value: price, label: '기준가', signed: false };
     }
     const explicitValue = finite(trade.value) ?? finite(trade.total) ?? finite(trade.amount);
-    return explicitValue === null ? null : { value: explicitValue, label: '기록 금액', signed: false };
+    return explicitValue === null ? null : { value: explicitValue, label: '거래 금액', signed: false };
   }
 
   function renderTrades() {
@@ -203,24 +213,29 @@
     const target = byId('recent-list');
     const activityTarget = byId('activity-list');
     if (!trades.length) {
-      const empty = '<p class="empty-row">아직 표시할 거래 기록이 없습니다.</p>';
+      const empty = '<p class="empty-row">거래 내역이 없습니다.</p>';
       target.innerHTML = empty;
       activityTarget.innerHTML = empty;
       return;
     }
     const rows = trades.map(trade => {
       const kind = tradeKind(trade);
-      const coin = safeString(trade.coin, '코인 정보 없음').replace('KRW-', '');
+      const tradeType = String(trade.type || '').toUpperCase();
+      const sold = safeString(trade.sell?.coin, '').replace('KRW-', '');
+      const bought = safeString(trade.buy?.coin, '').replace('KRW-', '');
+      const coin = tradeType === 'BUNDLE_TRADE' && sold && bought
+        ? sold + ' → ' + bought
+        : safeString(trade.coin, '자산 미제공').replace('KRW-', '');
       const time = dateText(trade.timestamp || trade.entryTime || trade.exitTime);
       const value = tradeValue(trade);
-      const amount = value === null ? '금액 정보 없음' : value.signed ? signedWon(value.value) : won(value.value);
+      const amount = value === null ? '금액 미제공' : value.signed ? signedWon(value.value) : won(value.value);
       const amountClass = value === null || !value.signed ? '' : value.value > 0 ? 'positive' : value.value < 0 ? 'negative' : '';
       const amountLabel = value === null ? '' : value.label;
       return '<article class="activity-row"><span class="activity-symbol ' + kind.kind + '">' + kind.glyph + '</span><div class="activity-copy"><strong>' + escapeHtml(coin + ' · ' + kind.label) + '</strong><span>' + escapeHtml(time) + '</span></div><strong class="activity-value ' + amountClass + '">' + escapeHtml(amount) + (amountLabel ? '<span>' + escapeHtml(amountLabel) + '</span>' : '') + '</strong></article>';
     });
     target.innerHTML = rows.slice(0, 3).join('');
     activityTarget.innerHTML = rows.join('');
-    byId('activity-updated').textContent = state.updatedAt ? dateText(state.updatedAt) : '—';
+    byId('activity-updated').textContent = state.updatedAt ? '확인 ' + clockText(state.updatedAt) : '시각 미제공';
   }
 
   function renderPositions() {
@@ -237,9 +252,9 @@
       const value = finite(position.currentValue);
       const gain = finite(position.profit);
       const gainClass = gain === null ? '' : gain > 0 ? 'positive' : gain < 0 ? 'negative' : '';
-      const detail = position.amount === null || position.amount === undefined ? '보유 수량 정보 없음' : '보유 수량 ' + quantityText(position.amount);
+      const detail = position.amount === null || position.amount === undefined ? '수량 미제공' : '수량 ' + quantityText(position.amount);
       const change = position.profitPercent === null || position.profitPercent === undefined ? '' : '<span class="' + gainClass + '">' + percent(position.profitPercent) + '</span>';
-      return '<article class="holding-row"><span class="asset-symbol">' + escapeHtml(symbol.slice(0, 1)) + '</span><div class="asset-main"><strong>' + escapeHtml(symbol) + '</strong><span>' + escapeHtml(detail) + '</span></div><strong class="asset-value">' + (value === null ? '평가 불가' : won(value)) + '<span>' + (gain === null ? '손익 정보 없음' : '<span class="' + gainClass + '">' + signedWon(gain) + '</span>') + change + '</span></strong></article>';
+      return '<article class="holding-row"><span class="asset-symbol">' + escapeHtml(symbol.slice(0, 1)) + '</span><div class="asset-main"><strong>' + escapeHtml(symbol) + '</strong><span>' + escapeHtml(detail) + '</span></div><strong class="asset-value">' + (value === null ? '평가액 미제공' : won(value)) + '<span>' + (gain === null ? '손익 미제공' : '<span class="' + gainClass + '">' + signedWon(gain) + '</span>') + change + '</span></strong></article>';
     }).join('');
   }
 
@@ -250,30 +265,41 @@
     const total = observer ? finite(account.totalAssets) : finite(account.totalAssets) ?? finite(pnl.totalAssets);
     const profit = observer ? finite(account.profit) : finite(account.profit) ?? finite(pnl.profit);
     const change = observer ? finite(account.profitPercent) : finite(account.profitPercent) ?? finite(pnl.profitPercent);
-    byId('total-assets').textContent = total === null ? '평가 정보 없음' : won(total);
-    byId('portfolio-total').textContent = total === null ? '평가 정보 없음' : won(total);
-    const profitText = profit === null ? '평가 손익 정보가 없습니다.' : signedWon(profit) + (change === null ? '' : ' · ' + percent(change));
+    byId('total-assets').textContent = total === null ? '평가액 미제공' : won(total);
+    byId('portfolio-total').textContent = total === null ? '평가액 미제공' : won(total);
+    const profitText = profit === null ? '손익 미제공' : signedWon(profit) + (change === null ? '' : ' · ' + percent(change));
     byId('profit-value').textContent = profitText;
     byId('profit-value').classList.toggle('positive', profit !== null && profit > 0);
     byId('profit-value').classList.toggle('negative', profit !== null && profit < 0);
-    byId('today-stat-label').textContent = observer ? '평가 기준 시각' : '오늘 실현 손익';
-    byId('today-profit').textContent = observer ? dateText(account.valuationAsOf) : signedWon(state.today?.realizedProfit);
+    byId('today-stat-label').textContent = observer ? '평가 기준 시각' : '오늘 손익';
+    byId('today-profit').textContent = observer
+      ? (account.valuationAsOf ? dateText(account.valuationAsOf) : '시각 미제공')
+      : signedWon(state.today?.realizedProfit);
     byId('today-profit').classList.toggle('positive', !observer && finite(state.today?.realizedProfit) > 0);
     byId('today-profit').classList.toggle('negative', !observer && finite(state.today?.realizedProfit) < 0);
     byId('valuation-note').textContent = account.readOnlyObserver === true
-      ? (account.valuationAsOf ? '관찰 계좌 · ' + dateText(account.valuationAsOf) : '관찰 계좌')
-      : (state.updatedAt ? '서버 제공 평가' : '');
+      ? (account.valuationAsOf ? '조회 전용 · ' + dateText(account.valuationAsOf) : '조회 전용 계좌')
+      : (state.updatedAt ? '마지막 확인 ' + clockText(state.updatedAt) : '');
     byId('engine-status').textContent = observer
-      ? '읽기 전용 관찰 중'
+      ? '조회 전용 계좌'
       : state.status?.isRunning === true ? '자동매매 실행 중' : state.status?.isRunning === false ? '자동매매 중지' : '자동매매 상태 확인 불가';
     byId('engine-detail').textContent = observer
-      ? '읽기 전용 계좌 상태를 표시하고 있습니다.'
-      : '앱 화면과 자동매매 엔진은 별도로 동작합니다.';
+      ? '이 계좌에서는 주문을 실행하지 않습니다.'
+      : state.status?.isRunning === true ? '앱을 닫아도 서버에서 계속 실행됩니다.'
+        : state.status?.isRunning === false ? '현재 중지되어 있습니다.'
+          : '자동매매 상태를 확인하지 못했습니다.';
+    byId('engine-note').textContent = observer
+      ? '이 계좌는 조회 전용입니다. 앱에서는 주문을 실행하지 않습니다.'
+      : state.status?.isRunning === true
+        ? '자동매매가 실행 중입니다. 앱을 닫아도 서버에서 계속 실행됩니다.'
+        : state.status?.isRunning === false
+          ? '자동매매가 중지되어 있습니다. 앱을 닫아도 다시 시작되지 않습니다.'
+          : '자동매매 상태를 확인하지 못했습니다.';
     byId('engine-indicator').classList.toggle('running', state.status?.isRunning === true);
     byId('settings-engine-status').textContent = observer
-      ? '읽기 전용 관찰'
+      ? '조회 전용'
       : state.status?.isRunning === true ? '실행 중' : state.status?.isRunning === false ? '중지' : '확인 불가';
-    byId('server-address').textContent = safeString(state.serverAddress, '앱 설정에서 확인');
+    byId('server-address').textContent = safeString(state.serverAddress, '확인 중');
     byId('settings-server-status').textContent = state.status || state.account ? '연결됨' : '확인 중';
     updateMode();
     renderChart();
@@ -292,7 +318,7 @@
       const auth = await nativeRequest({ action: 'auth-status' });
       if (!auth.ok) {
         setConnectionError(auth.error || '서버 주소와 인터넷 연결을 확인해 주세요.');
-        byId('settings-server-status').textContent = '연결할 수 없음';
+        byId('settings-server-status').textContent = '연결되지 않음';
         return;
       }
       setConnectionError('');
@@ -313,7 +339,7 @@
       const results = await Promise.all(paths.map(async ([key, path]) => [key, await nativeRequest({ action: 'read', path })]));
       const rejected = results.find(([, result]) => result.status === 401);
       if (rejected) {
-        openLogin('인증이 만료되었어요. 서버 토큰을 다시 입력해 주세요.');
+        openLogin('서버 인증을 확인할 수 없습니다. 접속 토큰을 다시 입력해 주세요.');
         return;
       }
       let successes = 0;
@@ -324,7 +350,7 @@
       }
       if (!successes) {
         const failure = results.find(([, result]) => result.error)?.[1];
-        setConnectionError(failure?.error || '서버에서 정보를 가져오지 못했습니다.');
+        setConnectionError(failure?.error || '서버에서 계좌 정보를 불러오지 못했습니다.');
         return;
       }
       state.updatedAt = new Date().toISOString();
@@ -361,24 +387,24 @@
   byId('retry').addEventListener('click', refresh);
   byId('change-server').addEventListener('click', () => {
     if (serverSettingsBridge) serverSettingsBridge.postMessage('');
-    else showToast('서버 설정은 iOS 앱에서 열 수 있어요.');
+    else showToast('서버 설정은 iOS 앱에서 변경할 수 있습니다.');
   });
   byId('logout').addEventListener('click', async () => {
     const result = await nativeRequest({ action: 'logout' });
     if (!result.ok) {
-      showToast(result.error || '토큰을 삭제하지 못했습니다.');
+      showToast(result.error || '서버 접속 정보를 삭제하지 못했습니다.');
       return;
     }
     await refresh();
-    if (!byId('auth-gate').hidden) byId('auth-error').textContent = '서버 토큰을 삭제했습니다. 다시 연결해 주세요.';
-    else showToast('저장된 토큰을 삭제했습니다.');
+    if (!byId('auth-gate').hidden) byId('auth-error').textContent = '서버 접속 정보를 삭제했습니다. 다시 연결하려면 토큰을 입력해 주세요.';
+    else showToast('서버 접속 정보를 삭제했습니다.');
   });
 
   byId('auth-form').addEventListener('submit', async event => {
     event.preventDefault();
     const token = byId('dashboard-token').value.trim();
     if (!token) {
-      byId('auth-error').textContent = '서버 토큰을 입력해 주세요.';
+      byId('auth-error').textContent = '접속 토큰을 입력해 주세요.';
       return;
     }
     const submit = byId('auth-submit');
@@ -387,13 +413,13 @@
     const result = await nativeRequest({ action: 'login', token });
     submit.disabled = false;
     if (!result.ok) {
-      byId('auth-error').textContent = result.error || '토큰을 확인해 주세요.';
+      byId('auth-error').textContent = result.error || '접속 토큰을 확인해 주세요.';
       return;
     }
     byId('dashboard-token').value = '';
     byId('auth-gate').hidden = true;
     await refresh();
-    showToast('서버에 안전하게 연결했습니다.');
+    showToast('서버에 연결했습니다.');
   });
 
   window.addEventListener('coinpilot-server-config', event => {

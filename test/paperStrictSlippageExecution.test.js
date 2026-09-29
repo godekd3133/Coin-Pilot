@@ -6,22 +6,25 @@ import path from 'node:path';
 import MultiCoinTrader from '../src/trader/multiCoinTrader.js';
 import { summarizePaperStrictTradeCostAudit } from '../src/research/paperStrictTradeCostAudit.js';
 
-function createTrader(prefix) {
-  const trader = new MultiCoinTrader({
+function createTrader(prefix, { explicitCostRates = true } = {}) {
+  const config = {
     strategyMode: 'oversold_reaction_scalping',
     targetCoins: ['KRW-BTC'],
     dryRun: true,
     dryRunSeedMoney: 1_000_000,
     investmentRatio: 0.02,
     portfolioAllocation: 1,
-    tradingFee: 0.001,
-    slippage: 0.005,
     useNews: false,
     paperValidationFile: path.join(os.tmpdir(), `${prefix}.paper.json`),
     virtualPortfolioFile: path.join(os.tmpdir(), `${prefix}.portfolio.json`),
     portfolioHistoryFile: path.join(os.tmpdir(), `${prefix}.history.json`),
     aiMonitoringFile: path.join(os.tmpdir(), `${prefix}.ai.json`)
-  });
+  };
+  if (explicitCostRates) {
+    config.tradingFee = 0.001;
+    config.slippage = 0.005;
+  }
+  const trader = new MultiCoinTrader(config);
   trader.virtualPortfolio = { krwBalance: 1_000_000, holdings: new Map() };
   trader.calculateTotalAssets = async () => 1_000_000;
   trader.calculateDynamicInvestmentAmount = async () => 20_000;
@@ -115,6 +118,53 @@ test('sealed strict paper는 설정된 미끄러짐을 진입·청산 가격과 
     assert.equal(audit.unmodeledExecutionTradeCount, 0);
     assert.equal(audit.modeledSlippageDragKrw, 0);
     assert.equal(audit.costStressedNetPnlKrw, closedTrade.profit);
+  } finally {
+    trader.stop();
+    removeTraderFiles(trader);
+  }
+});
+
+test('runner가 비용률을 생략해도 정규화된 기본 미끄러짐·수수료를 strict 체결에 반영한다', async () => {
+  const trader = createTrader(`coinpilot-paper-slip-default-${Date.now()}`, {
+    explicitCostRates: false
+  });
+  try {
+    await trader.startPaperValidationSession();
+    assert.equal(trader.config.slippage, undefined);
+    assert.equal(trader.config.tradingFee, undefined);
+    assert.deepEqual(trader.getStrictPaperExecutionCostModel(), {
+      version: 'strict_paper_cost_model_v1',
+      slippageRate: 0.001,
+      tradingFeeRate: 0.0005
+    });
+
+    await trader.executeOrder('KRW-BTC', buyDecision(), 100, 1_000_000, 0, 0, []);
+    const strategy = trader.getStrategy('KRW-BTC');
+    const position = strategy.currentPosition;
+    assert.ok(Math.abs(position.entryPrice - 100.1) < 1e-9);
+    assert.equal(position.paperExecutionCostModel, 'strict_paper_cost_model_v1');
+    assert.equal(position.paperExecutionSlippageRate, 0.001);
+    assert.equal(position.paperExecutionTradingFeeRate, 0.0005);
+
+    await trader.executeOrder(
+      'KRW-BTC',
+      { action: 'SELL', reason: '기본 비용 설정 모델 청산 테스트' },
+      110,
+      trader.virtualPortfolio.krwBalance,
+      position.amount,
+      1,
+      []
+    );
+
+    const closedTrade = trader.paperValidation.strictTrades.at(-1);
+    assert.ok(Math.abs(closedTrade.exitPrice - 109.89) < 1e-9);
+    assert.equal(closedTrade.paperExecutionCostModel, 'strict_paper_cost_model_v1');
+    assert.equal(closedTrade.paperExecutionSlippageRate, 0.001);
+    assert.equal(closedTrade.paperExecutionTradingFeeRate, 0.0005);
+    const audit = summarizePaperStrictTradeCostAudit(trader.paperValidation);
+    assert.equal(audit.modeledExecutionTradeCount, 1);
+    assert.equal(audit.unmodeledExecutionTradeCount, 0);
+    assert.equal(audit.modeledSlippageDragKrw, 0);
   } finally {
     trader.stop();
     removeTraderFiles(trader);

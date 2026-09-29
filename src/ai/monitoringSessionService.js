@@ -660,17 +660,17 @@ export class MonitoringSessionService {
         horizonMinutes: this.defaultEvaluationMinutes,
         neutralBandPercent: this.evaluationNeutralBandPercent,
         minimumEvaluationSamples: this.minimumEvaluationSamples,
-        actionableSampleDefinition: '비중립 실제 provider BUY/SELL 결과(HIT/MISS) 또는 비중립 기존 BUY/SELL WAIT/HOLD veto(VETO_GOOD/MISSED_OPPORTUNITY)만 충분성 표본으로 집계',
-        vetoImpactDefinition: 'VETO_GOOD은 neutral band 초과 손실 회피를 양수, VETO_MISSED_OPPORTUNITY는 neutral band 초과 기회손실을 음수로 합산',
-        hitDefinition: 'BUY/SELL 방향이 neutral band를 넘어 미래 기준 시점 가격과 일치하면 HIT',
-        waitDefinition: 'HOLD/WAIT는 방향 예측이 아니므로 CALM/ABSTAINED로 별도 집계',
-        source: '동일 event의 기준 가격과 horizon 이후 첫 관측 가격'
+        actionableSampleDefinition: '매수·매도 의견의 가격 방향 일치 여부와 주문 보류 뒤의 가격 변화를 평가합니다.',
+        vetoImpactDefinition: '주문 보류 뒤 중립 범위를 넘는 가격 변화를 비교합니다. 실제 손익을 뜻하지 않습니다.',
+        hitDefinition: '매수·매도 의견과 확인 시점 이후의 가격 방향이 일치하면 일치로 계산합니다.',
+        waitDefinition: '보유·관망 의견은 매수·매도 방향 예측과 분리해 집계합니다.',
+        source: '같은 신호 시점의 기준 가격과 설정한 확인 시점 이후 첫 가격'
       },
       sufficientEvidence: Object.values(publicStats).some(stats => stats.sufficientEvidence === true),
       evidenceWarning: Object.keys(publicStats).length === 0
-        ? '실제 provider 응답이 없어 평가할 표본이 없습니다.'
+        ? '가격을 비교할 자료가 없습니다.'
         : maximumActionableEvaluations < this.minimumEvaluationSamples
-          ? `아직 ${this.minimumEvaluationSamples}개 비중립 방향성/veto 평가 표본이 필요합니다. 현재 ${maximumActionableEvaluations}개입니다.`
+          ? `매수·매도 방향 또는 주문 보류 결과 ${this.minimumEvaluationSamples}건 이상이 있어야 평가할 수 있습니다. 현재 ${maximumActionableEvaluations}건입니다.`
           : null
     };
   }
@@ -709,13 +709,13 @@ export class MonitoringSessionService {
     const autoConsultEventTypes = input.autoConsultEventTypes === undefined
       ? eventTypes
       : normalizeEventTypes(input.autoConsultEventTypes).filter(type => eventTypes.includes(type));
-    if (eventTypes.length === 0) throw new Error('최소 하나의 monitoring event를 선택해주세요');
-    if (providers.length === 0) throw new Error('최소 하나의 AI provider를 선택해주세요');
+    if (eventTypes.length === 0) throw new Error('관심 신호를 하나 이상 선택해 주세요.');
+    if (providers.length === 0) throw new Error('의견을 받을 서비스를 하나 이상 선택해 주세요.');
 
     const now = new Date().toISOString();
     const session = {
       id: randomUUID(),
-      name: truncate(input.name || 'CoinPilot AI 모니터링', 80),
+      name: truncate(input.name || '시장 신호 알림', 80),
       status: 'RUNNING',
       providers,
       eventTypes,
@@ -746,10 +746,10 @@ export class MonitoringSessionService {
 
   updateSessionStatus(sessionId, status) {
     const session = this.findSession(sessionId);
-    if (!session) throw new Error('monitoring session을 찾지 못했습니다');
-    if (!['RUNNING', 'PAUSED', 'STOPPED'].includes(status)) throw new Error('지원하지 않는 session 상태입니다');
+    if (!session) throw new Error('관심 신호 설정을 찾지 못했습니다. 새로고침한 뒤 다시 시도해 주세요.');
+    if (!['RUNNING', 'PAUSED', 'STOPPED'].includes(status)) throw new Error('요청한 상태를 변경할 수 없습니다.');
     if (session.status === 'STOPPED' && status !== 'STOPPED') {
-      throw new Error('종료된 session은 재개할 수 없습니다. 새 session을 시작해주세요');
+      throw new Error('종료된 알림은 다시 시작할 수 없습니다. 새 알림을 만들어 주세요.');
     }
 
     const now = new Date().toISOString();
@@ -884,9 +884,9 @@ export class MonitoringSessionService {
     }
     const actualResults = this.actualProviderResults(consultation);
     if (actualResults.length === 0) {
-      if (evaluation.status !== 'NOT_EVALUABLE' || evaluation.reason !== '실제 AI provider 응답이 없어 결과를 평가하지 않습니다.') {
+      if (evaluation.status !== 'NOT_EVALUABLE' || evaluation.reason !== '응답이 없어 의견을 비교할 수 없습니다.') {
         evaluation.status = 'NOT_EVALUABLE';
-        evaluation.reason = '실제 AI provider 응답이 없어 결과를 평가하지 않습니다.';
+        evaluation.reason = '응답이 없어 의견을 비교할 수 없습니다.';
         evaluation.evaluatedAt = new Date().toISOString();
         return true;
       }
@@ -934,7 +934,7 @@ export class MonitoringSessionService {
     if (consultation.consensus && consultation.consensus.providerCount > 0 && consultation.consensus.quorum === true) {
       verdicts.push({
         source: 'consensus',
-        providerLabel: 'Provider consensus',
+        providerLabel: '종합 의견',
         ...scoreAdviceOutcome(consultation.consensus, priceChangePercent, evaluation.neutralBandPercent, consultation.event?.action)
       });
     }
@@ -1060,7 +1060,7 @@ export class MonitoringSessionService {
       price: numberOrNull(eventInput?.price ?? eventInput?.snapshot?.currentPrice),
       confidence: eventInput?.confidence ?? null,
       signalStrength: eventInput?.signalStrength || null,
-      reason: truncate(eventInput?.reason || '사용자 지정 자문 이벤트', 240),
+      reason: truncate(eventInput?.reason || '사용자 지정 의견 요청', 240),
       signalKey: eventInput?.signalKey || null,
       timestamp: eventInput?.timestamp || new Date().toISOString(),
       source: 'manual',
@@ -1077,14 +1077,14 @@ export class MonitoringSessionService {
 
   requestConsultation({ sessionId = null, eventId = null, event = null, provider = null, auto = false } = {}) {
     const session = sessionId ? this.findSession(sessionId) : null;
-    if (sessionId && !session) return Promise.reject(new Error('monitoring session을 찾지 못했습니다'));
+    if (sessionId && !session) return Promise.reject(new Error('관심 신호 설정을 찾지 못했습니다.'));
 
     let selectedEvent = eventId ? this.findEvent(eventId) : event;
     if (!selectedEvent && event && typeof event === 'object') selectedEvent = this.addManualEvent(event);
-    if (!selectedEvent) return Promise.reject(new Error('자문할 event를 찾지 못했습니다'));
+    if (!selectedEvent) return Promise.reject(new Error('의견을 요청할 신호를 찾지 못했습니다.'));
 
     const providers = normalizeProviderValue(provider ?? session?.providers);
-    if (providers.length === 0) return Promise.reject(new Error('AI provider를 선택해주세요'));
+    if (providers.length === 0) return Promise.reject(new Error('의견을 받을 서비스를 하나 이상 선택해 주세요.'));
     const pendingKey = `${sessionId || 'manual'}:${selectedEvent.id}:${providers.join(',')}`;
     if (this.pendingConsultations.has(pendingKey)) return this.pendingConsultations.get(pendingKey);
 
@@ -1122,7 +1122,7 @@ export class MonitoringSessionService {
 
     const work = (async () => {
       try {
-        if (!this.advisor) throw new Error('AI advisor가 초기화되지 않았습니다');
+        if (!this.advisor) throw new Error('현재 의견 기능을 사용할 수 없습니다.');
         const response = await this.advisor.ask({
           provider: providers,
           event: selectedEvent,

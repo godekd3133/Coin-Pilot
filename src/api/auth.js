@@ -17,6 +17,16 @@ const DEFAULT_LOGIN_WINDOW_MS = 5 * 60 * 1000;
 const DEFAULT_LOGIN_MAX_FAILURES = 10;
 const DEFAULT_LOGIN_BLOCK_MS = 5 * 60 * 1000;
 
+const READ_ONLY_PATHS = new Set([
+  '/api/status',
+  '/api/account',
+  '/api/cumulative-pnl',
+  '/api/today-summary',
+  '/api/market/prices',
+  '/api/paper-validation/summary'
+]);
+const READ_ONLY_PORTFOLIO_PERIODS = new Set(['24h', '7d', '30d']);
+
 function isTrue(value) {
   return TRUE_VALUES.has(String(value || '').trim().toLowerCase());
 }
@@ -40,11 +50,49 @@ export function extractBearerToken(req) {
   return header.startsWith('Bearer ') ? header.slice(7).trim() : '';
 }
 
+function isReadOnlyRequestAllowed(req) {
+  if (req.method !== 'GET') return false;
+
+  let url;
+  try {
+    url = new URL(req.originalUrl || req.url || req.path || '/', 'http://dashboard.local');
+  } catch {
+    return false;
+  }
+
+  if (READ_ONLY_PATHS.has(url.pathname)) return url.searchParams.toString() === '';
+
+  const query = [...url.searchParams.entries()];
+  if (url.pathname === '/api/portfolio/history') {
+    return query.length === 1 &&
+      query[0][0] === 'period' &&
+      READ_ONLY_PORTFOLIO_PERIODS.has(query[0][1]);
+  }
+
+  if (url.pathname === '/api/trades') {
+    if (query.length !== 1 || query[0][0] !== 'limit' || !/^[1-9]\d*$/.test(query[0][1])) {
+      return false;
+    }
+    const limit = Number(query[0][1]);
+    return Number.isSafeInteger(limit) && limit >= 1 && limit <= 50;
+  }
+
+  return false;
+}
+
+function forbiddenReadOnly(res) {
+  return res.status(403).json({
+    success: false,
+    error: '읽기 전용 대시보드에서는 허용되지 않은 요청입니다.'
+  });
+}
+
 /**
  * Resolve dashboard auth + bind policy from env.
  *
- * - DASHBOARD_TOKEN set      → auth required, default bind 0.0.0.0 (LAN/mobile)
- * - DASHBOARD_TOKEN missing  → auth disabled, bind forced to 127.0.0.1 unless
+ * - DASHBOARD_TOKEN or DASHBOARD_READ_ONLY_TOKEN set → auth required, default
+ *                              bind 0.0.0.0 (LAN/mobile)
+ * - both tokens missing     → auth disabled, bind forced to 127.0.0.1 unless
  *                              DASHBOARD_ALLOW_INSECURE=true (explicit opt-out)
  * - DASHBOARD_HOST           → explicit bind host; a non-loopback host without
  *                              a token is still refused unless the insecure
@@ -54,7 +102,11 @@ export function extractBearerToken(req) {
  */
 export function resolveDashboardAuth(env = {}) {
   const token = String(env.DASHBOARD_TOKEN || '').trim();
-  const enabled = token.length > 0;
+  const readOnlyToken = String(env.DASHBOARD_READ_ONLY_TOKEN || '').trim();
+  if (token && readOnlyToken && token === readOnlyToken) {
+    throw new Error('DASHBOARD_READ_ONLY_TOKEN must differ from DASHBOARD_TOKEN.');
+  }
+  const enabled = token.length > 0 || readOnlyToken.length > 0;
   const allowInsecure = isTrue(env.DASHBOARD_ALLOW_INSECURE);
   const requestedHost = String(env.DASHBOARD_HOST || '').trim();
   const corsOrigins = String(env.DASHBOARD_CORS_ORIGINS || '')
@@ -86,7 +138,18 @@ export function resolveDashboardAuth(env = {}) {
     }
   }
 
-  return { enabled, token, host, requestedHost, allowInsecure, corsOrigins, warnings };
+  return {
+    enabled,
+    token,
+    // There is one writable dashboard token and no user registry today. Keep
+    // the idempotency principal stable across token rotation and mode changes.
+    writeProfileId: 'operator',
+    host,
+    requestedHost,
+    allowInsecure,
+    corsOrigins,
+    warnings
+  };
 }
 
 /**
@@ -165,7 +228,7 @@ export function createOriginGuard(extraOrigins = []) {
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Vary', 'Origin');
     res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Authorization,Content-Type');
+    res.setHeader('Access-Control-Allow-Headers', 'Authorization,Content-Type,Idempotency-Key');
     if (req.method === 'OPTIONS') return res.status(204).end();
     next();
   }
@@ -187,8 +250,22 @@ export function createDashboardAuth(env = {}, options = {}) {
 
   const middleware = (req, res, next) => {
     if (!resolved.enabled) return next();
-    if (safeTokenEqual(extractBearerToken(req), resolved.token)) return next();
+    const candidate = extractBearerToken(req);
+    if (safeTokenEqual(candidate, resolved.token)) return next();
+    if (safeTokenEqual(candidate, String(env.DASHBOARD_READ_ONLY_TOKEN || '').trim())) {
+      return isReadOnlyRequestAllowed(req) ? next() : forbiddenReadOnly(res);
+    }
     return unauthorized(res);
+  };
+
+  // Public auth endpoints retain their existing unauthenticated behavior, but
+  // a read-only credential cannot use them as an out-of-scope API route.
+  const readOnlyScopeMiddleware = (req, res, next) => {
+    const readOnlyToken = String(env.DASHBOARD_READ_ONLY_TOKEN || '').trim();
+    if (safeTokenEqual(extractBearerToken(req), readOnlyToken) && !isReadOnlyRequestAllowed(req)) {
+      return forbiddenReadOnly(res);
+    }
+    return next();
   };
 
   const socketMiddleware = (socket, next) => {
@@ -215,7 +292,9 @@ export function createDashboardAuth(env = {}, options = {}) {
         retryAfterSeconds: Math.ceil((blockedUntil - Date.now()) / 1000)
       });
     }
-    if (safeTokenEqual(String(req.body?.token || ''), resolved.token)) {
+    const candidate = String(req.body?.token || '');
+    const readOnlyToken = String(env.DASHBOARD_READ_ONLY_TOKEN || '').trim();
+    if (safeTokenEqual(candidate, resolved.token) || safeTokenEqual(candidate, readOnlyToken)) {
       limiter.recordSuccess(key);
       return res.json({ success: true });
     }
@@ -225,6 +304,7 @@ export function createDashboardAuth(env = {}, options = {}) {
 
   return {
     ...resolved,
+    readOnlyScopeMiddleware,
     middleware,
     socketMiddleware,
     statusHandler,

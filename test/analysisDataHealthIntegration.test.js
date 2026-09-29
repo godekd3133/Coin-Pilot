@@ -109,3 +109,29 @@ test('실제 trading cycle의 부분 응답은 shadow 진입 없이 fail-closed 
   assert.equal(trader.paperValidation.telemetry.lastIncompleteAnalysis.failClosed, true);
   assert.equal(trader.paperValidation.shadow?.entryCount || 0, 0);
 });
+
+test('분석 실패는 allowlist transport code만 paper telemetry에 남긴다', async () => {
+  const trader = createTrader(60);
+  trader.isRunning = true;
+  trader.getAccountInfo = async () => [{ currency: 'KRW', balance: '1000000' }];
+  trader.getTickerMapForCycle = async () => new Map([
+    ['KRW-BTC', { market: 'KRW-BTC', trade_price: 100 }],
+    ['KRW-ETH', { market: 'KRW-ETH', trade_price: 100 }]
+  ]);
+  trader.analyzeCoin = async coin => {
+    const error = new Error(`PRIVATE diagnostic text for ${coin}`);
+    error.code = coin === 'KRW-BTC' ? 'ENETRESET' : 'EPIPE';
+    throw error;
+  };
+  trader.printPortfolioSummary = () => {};
+  trader.notifyAnalysisCycle = () => {};
+
+  await trader.executeTradingCycle();
+
+  const incomplete = trader.paperValidation.telemetry.lastIncompleteAnalysis;
+  assert.equal(incomplete.failureCode, 'network_fetch_failed');
+  assert.deepEqual(incomplete.failureCounts, { network_fetch_failed: 2 });
+  assert.deepEqual(incomplete.transportFailureCodes, { ENETRESET: 1, EPIPE: 1 });
+  assert.equal(JSON.stringify(incomplete).includes('PRIVATE diagnostic text'), false);
+  assert.equal(trader.isRunning, true);
+});

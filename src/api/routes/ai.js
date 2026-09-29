@@ -30,25 +30,25 @@ function validateSessionInput(body = {}) {
     : [...new Set(rawAutoConsultEventTypes
       .map(type => String(type).trim().toUpperCase())
       .filter(type => eventTypes.includes(type)))];
-  if (eventTypes.length === 0) throw new Error('최소 하나의 monitoring event를 선택해주세요');
+  if (eventTypes.length === 0) throw new Error('관심 신호를 하나 이상 선택해 주세요.');
 
   const name = String(body.name || '').trim();
-  if (name.length > 80) throw new Error('session 이름은 80자 이내로 입력해주세요');
+  if (name.length > 80) throw new Error('이름은 80자 이내로 입력해 주세요.');
 
   const cooldownSeconds = Number(body.cooldownSeconds ?? 300);
   if (!Number.isFinite(cooldownSeconds) || cooldownSeconds < 30 || cooldownSeconds > 86_400) {
-    throw new Error('cooldownSeconds는 30~86400 범위여야 합니다');
+    throw new Error('같은 신호 재요청 간격은 30초~24시간 사이로 설정해 주세요.');
   }
 
   const hasEvaluationMinutes = body.evaluationMinutes !== undefined;
   const evaluationMinutes = hasEvaluationMinutes ? Number(body.evaluationMinutes) : null;
   if (hasEvaluationMinutes && (!Number.isFinite(evaluationMinutes) || evaluationMinutes < 1 || evaluationMinutes > 1_440)) {
-    throw new Error('evaluationMinutes는 1~1440 범위여야 합니다');
+    throw new Error('가격 확인 시점은 1분~24시간 사이로 설정해 주세요.');
   }
 
   return {
     ...body,
-    name: name || 'CoinPilot AI 모니터링',
+    name: name || '시장 신호 알림',
     eventTypes,
     ...(autoConsultEventTypes === undefined ? {} : { autoConsultEventTypes }),
     autoConsult: parseBoolean(body.autoConsult, true),
@@ -65,8 +65,8 @@ export default function createAiRoutes(server) {
     try {
       const status = await server.aiAdvisor.getProviderStatus({ force: req.query.refresh === 'true' });
       return res.json(status);
-    } catch (error) {
-      return res.status(500).json({ enabled: false, providers: [], error: error.message });
+    } catch {
+      return res.status(500).json({ enabled: false, providers: [], error: '서비스 연결 상태를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.' });
     }
   });
 
@@ -113,7 +113,7 @@ export default function createAiRoutes(server) {
 
   router.get('/ai/sessions/:sessionId', (req, res) => {
     const session = sessions.findSession(req.params.sessionId);
-    if (!session) return res.status(404).json({ success: false, error: 'monitoring session을 찾지 못했습니다' });
+    if (!session) return res.status(404).json({ success: false, error: '관심 신호 설정을 찾지 못했습니다. 새로고침한 뒤 다시 시도해 주세요.' });
     return res.json({
       session: sessions.publicSession(session),
       ...sessions.getSnapshot({ limit: Number(req.query.limit) || 60, sessionId: session.id })
@@ -123,7 +123,7 @@ export default function createAiRoutes(server) {
   router.post('/ai/sessions/:sessionId/:action', (req, res) => {
     const actionMap = { pause: 'PAUSED', resume: 'RUNNING', stop: 'STOPPED' };
     const status = actionMap[req.params.action];
-    if (!status) return res.status(404).json({ success: false, error: '지원하지 않는 session action입니다' });
+    if (!status) return res.status(404).json({ success: false, error: '요청한 동작을 처리할 수 없습니다. 새로고침한 뒤 다시 시도해 주세요.' });
     try {
       const session = sessions.updateSessionStatus(req.params.sessionId, status);
       return res.json({ success: true, session });
@@ -136,7 +136,7 @@ export default function createAiRoutes(server) {
     try {
       const body = req.body || {};
       if (!body.eventId && !body.event) {
-        return res.status(400).json({ success: false, error: 'eventId 또는 event가 필요합니다' });
+        return res.status(400).json({ success: false, error: '의견을 요청할 신호를 선택해 주세요.' });
       }
       const consultation = await sessions.requestConsultation({
         sessionId: body.sessionId ? String(body.sessionId) : null,

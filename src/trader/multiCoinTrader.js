@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import UpbitAPI from '../api/upbit.js';
 import { comprehensiveAnalysis } from '../analysis/technicalIndicators.js';
 import NewsMonitor from '../analysis/newsMonitor.js';
@@ -47,8 +48,16 @@ import {
   evaluatePaperExecutionRobustnessGate,
   summarizePaperExecutionComparison
 } from '../research/paperExecutionComparison.js';
+
+function cloneManualPortfolioValue(value) {
+  if (value === undefined) return undefined;
+  if (typeof globalThis.structuredClone === 'function') return globalThis.structuredClone(value);
+  return JSON.parse(JSON.stringify(value));
+}
 import {
   createLiveExecutionEvidenceEvent,
+  isDefinitiveLiveOrderRejection,
+  isTerminalLiveOrderResolution,
   inspectLiveExecutionEvidenceFile,
   projectLiveAccountReadback
 } from '../research/liveExecutionEvidence.js';
@@ -56,10 +65,12 @@ import {
   PAPER_EXIT_EVIDENCE_SCHEMA,
   summarizePaperExitEvidence
 } from '../research/paperExitEvidence.js';
+import { assessScalpingValidationReportFreshness } from '../research/scalpingValidationFreshness.js';
 import { LIVE_GATE_COMPARABLE_KEYS } from '../research/scalpingValidationConfig.js';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import { randomUUID } from 'node:crypto';
 
 function resolveLossCircuitBreakerConfig(config = {}) {
   const configuredCount = Number(config.lossCircuitBreakerCount);
@@ -78,10 +89,26 @@ function resolveLossCircuitBreakerConfig(config = {}) {
   };
 }
 
+const ANALYSIS_NETWORK_ERROR_CODES = new Set([
+  'ENOTFOUND',
+  'EAI_AGAIN',
+  'ECONNRESET',
+  'ECONNABORTED',
+  'ECONNREFUSED',
+  'ETIMEDOUT',
+  'EPIPE',
+  'ENETRESET'
+]);
+
+function analysisNetworkErrorCode(error) {
+  const code = String(error?.code || error?.cause?.code || '').toUpperCase();
+  return ANALYSIS_NETWORK_ERROR_CODES.has(code) ? code : null;
+}
+
 function classifyAnalysisFailure(error) {
   const code = String(error?.code || error?.cause?.code || '').toUpperCase();
   const message = String(error?.message || '').toLowerCase();
-  if (['ENOTFOUND', 'EAI_AGAIN', 'ECONNRESET', 'ECONNABORTED', 'ECONNREFUSED', 'ETIMEDOUT'].includes(code) ||
+  if (ANALYSIS_NETWORK_ERROR_CODES.has(code) ||
       /getaddrinfo|dns|timeout|network/.test(message)) {
     return 'network_fetch_failed';
   }
@@ -425,8 +452,8 @@ class MultiCoinTrader {
     this.lastRebalanceTime = null;
 
     // 포트폴리오 관리
-    this.maxPositions = config.maxPositions || (this.isScalpingMode ? 3 : 1000);
-    this.portfolioAllocation = config.portfolioAllocation || (this.isScalpingMode ? 0.1 : 0.3);
+    this.maxPositions = config.maxPositions ?? (this.isScalpingMode ? 3 : 1000);
+    this.portfolioAllocation = config.portfolioAllocation ?? (this.isScalpingMode ? 0.1 : 0.3);
     this.candleUnit = config.candleUnit || (this.isScalpingMode ? 1 : 5);
     this.candleCount = config.candleCount || 200;
     this.maxCandleAgeSeconds = resolveMaxCandleAgeSeconds(config.maxCandleAgeSeconds, this.candleUnit);
@@ -462,7 +489,26 @@ class MultiCoinTrader {
     this.lastAnalysisStatePersistedAt = 0;
     this._riskCheckInProgress = false;
     this._orderInProgress = false;
+    this._portfolioMutationContext = new AsyncLocalStorage();
+    this._portfolioMutationTail = Promise.resolve();
+    this._liveExchangeStateKnown = this.dryRun;
+    this._liveAccountStateKnown = this.dryRun;
+    this._liveVerifiedOrderMarkets = new Map();
+    this._manualOrderReconciliationMarkets = new Set();
+    this._liveOrderStateUnknownMarkets = new Set(this.dryRun ? [] : this.targetCoins);
+    this._livePendingOrderMarkets = new Set();
+    this._exchangeSyncPromise = null;
+    this._gracefulShutdownPromise = null;
+    this._startPromise = null;
+    this.exchangeSyncRetryMs = Math.max(250, Number(config.exchangeSyncRetryMs) || 5000);
+    this._lastExchangeSyncAttemptTime = 0;
+    this._startupReconciliationPending = false;
+    this._startupSafetyHold = false;
     this._stopRequested = false;
+    this._entriesPaused = false;
+    this._riskMonitorProtectiveOnly = false;
+    this._riskMonitorExitInProgress = false;
+    this._deferredProtectiveExitIntents = new Map();
     this.stopReason = null;
     this.cycleRequestStats = null;
     this.runtimeSignalWindowEntryCounts = new Map();
@@ -472,6 +518,7 @@ class MultiCoinTrader {
       krwBalance: config.dryRunSeedMoney || 10000000,
       holdings: new Map() // coin -> { amount, avgPrice }
     };
+    this.manualOrderIdempotencyRecords = [];
 
     // 초기 시드머니 저장 (누적손익 계산용)
     if (this.dryRun) {
@@ -499,8 +546,38 @@ class MultiCoinTrader {
     this.liveExecutionEvidenceWriteError = null;
     this.liveExecutionEvidenceDataError = null;
     this.liveExecutionEvidenceStartup = inspectLiveExecutionEvidenceFile(this.liveExecutionEvidenceFile);
-    if (this.liveExecutionEvidenceStartup.blockingReasons.length > 0) {
-      this.liveExecutionEvidenceDataError = `startup safety block: ${this.liveExecutionEvidenceStartup.blockingReasons.join('; ')}`;
+    const startupReconciliation = this.liveExecutionEvidenceStartup.reconciliation;
+    const knownSubmittedOrders = startupReconciliation?.knownSubmittedOrders || [];
+    this._liveEngineOrderMarkets = new Map(knownSubmittedOrders
+      .filter(order => typeof order.orderId === 'string' && typeof order.market === 'string')
+      .map(order => [order.orderId, order.market]));
+    this._liveEngineOrderIds = new Set(this._liveEngineOrderMarkets.keys());
+    this._liveRecordedSubmissionIds = new Set(this._liveEngineOrderIds);
+    this._liveRecordedIntentOutcomeKeys = new Set();
+    this._liveUsedOrderIntentIds = new Set(startupReconciliation?.knownClientIntentIds || []);
+    this._liveOrderClientIntentById = new Map(knownSubmittedOrders
+      .filter(order => typeof order.orderId === 'string' && typeof order.clientIntentId === 'string')
+      .map(order => [order.orderId, order.clientIntentId]));
+    this._liveLatestOrderIntentByMarket = new Map();
+    this._liveUnresolvedOrderIds = new Map((startupReconciliation?.unresolvedSubmittedOrders || [])
+      .map(order => [order.orderId, order]));
+    this._liveUnresolvedOrderIntents = new Map((startupReconciliation?.unresolvedOrderIntents || [])
+      .map((intent, index) => [intent.clientIntentId || `legacy:${intent.market || 'unknown'}:${intent.createdAt || index}`, intent]));
+    this._liveEvidenceBlockedMarkets = new Set([
+      ...[...this._liveUnresolvedOrderIds.values()].map(order => order.market),
+      ...[...this._liveUnresolvedOrderIntents.values()].map(intent => intent.market)
+    ].filter(Boolean));
+    this._liveRecoveredManagedMarkets = new Set(startupReconciliation?.managedMarkets || []);
+    this._liveRecoveredPositionStates = new Map(
+      (startupReconciliation?.managedOpenPositions || [])
+        .filter(position => typeof position.market === 'string')
+        .map(position => [position.market, position])
+    );
+    this._liveOrderStateUnknownMarkets = new Set(this.getLiveManagedMarkets());
+    const nonOrderStartupBlocks = this.liveExecutionEvidenceStartup.blockingReasons.filter(reason =>
+      !reason.startsWith('unresolved submitted orders:') && !reason.startsWith('unresolved order intents:'));
+    if (nonOrderStartupBlocks.length > 0) {
+      this.liveExecutionEvidenceDataError = `startup safety block: ${nonOrderStartupBlocks.join('; ')}`;
     }
     // Live mode has no paper ledger, so keep its optional global circuit in
     // memory. DRY_RUN forward sessions replace this reference with their
@@ -521,7 +598,7 @@ class MultiCoinTrader {
     this.restorePaperStrategyRiskState();
 
     // 동적 투자금액 설정 (비율 기반으로 단순화)
-    this.investmentRatio = config.investmentRatio || 0.05; // 총 자산의 5%를 기본 투자 비율로
+    this.investmentRatio = config.investmentRatio ?? 0.05; // 총 자산의 5%를 기본 투자 비율로
     this.MIN_ORDER_AMOUNT = 5000; // 업비트 최소 주문 금액 (고정)
 
     // 거래 알림 콜백 (대시보드에서 설정)
@@ -580,10 +657,35 @@ class MultiCoinTrader {
   recordLiveExecutionEvidence(event) {
     if (this.dryRun || !event) return true;
     if (this.liveExecutionEvidenceWriteError || this.liveExecutionEvidenceDataError) return false;
+    const outcomeKey = event.clientIntentId && ['ORDER_SUBMITTED', 'ORDER_REJECTED'].includes(event.eventType)
+      ? `${event.eventType}:${event.clientIntentId}`
+      : null;
+    if ((event.eventType === 'ORDER_SUBMITTED' && event.orderId && this._liveRecordedSubmissionIds.has(event.orderId)) ||
+      (outcomeKey && this._liveRecordedIntentOutcomeKeys.has(outcomeKey))) {
+      return true;
+    }
     try {
       const directory = path.dirname(this.liveExecutionEvidenceFile);
       if (directory && directory !== '.') fs.mkdirSync(directory, { recursive: true });
-      fs.appendFileSync(this.liveExecutionEvidenceFile, `${JSON.stringify(event)}\n`, 'utf8');
+      const descriptor = fs.openSync(this.liveExecutionEvidenceFile, 'a', 0o600);
+      try {
+        // openSync's mode is ignored for an existing file, so protect the
+        // descriptor before appending account and execution evidence.
+        fs.fchmodSync(descriptor, 0o600);
+        const payload = Buffer.from(`${JSON.stringify(event)}\n`, 'utf8');
+        let offset = 0;
+        while (offset < payload.length) {
+          const written = fs.writeSync(descriptor, payload, offset, payload.length - offset);
+          if (written <= 0) throw new Error('live evidence append made no progress');
+          offset += written;
+        }
+        fs.fsyncSync(descriptor);
+      } finally {
+        fs.closeSync(descriptor);
+      }
+      this.applyLiveExecutionEvidenceRuntimeState(event);
+      if (outcomeKey) this._liveRecordedIntentOutcomeKeys.add(outcomeKey);
+      if (event.eventType === 'ORDER_SUBMITTED' && event.orderId) this._liveRecordedSubmissionIds.add(event.orderId);
       return true;
     } catch (error) {
       this.liveExecutionEvidenceWriteError = error.message;
@@ -592,8 +694,93 @@ class MultiCoinTrader {
     }
   }
 
+  applyLiveExecutionEvidenceRuntimeState(event) {
+    const clientIntentId = event.clientIntentId || null;
+    const market = event.market || null;
+    if (event.eventType === 'ORDER_INTENT' && clientIntentId) {
+      this._liveUsedOrderIntentIds.add(clientIntentId);
+      const intent = {
+        clientIntentId,
+        market,
+        side: event.side || null,
+        request: event.request || null,
+        createdAt: event.recordedAt,
+        reason: 'intent_outcome_unknown'
+      };
+      this._liveUnresolvedOrderIntents.set(clientIntentId, intent);
+      if (market) {
+        this._liveRecoveredManagedMarkets.add(market);
+        this._liveEvidenceBlockedMarkets.add(market);
+      }
+      return;
+    }
+    if (event.eventType === 'ORDER_SUBMITTED' && typeof event.orderId === 'string' && event.orderId) {
+      this._liveEngineOrderIds.add(event.orderId);
+      this._liveEngineOrderMarkets.set(event.orderId, market);
+      if (clientIntentId) {
+        this._liveOrderClientIntentById.set(event.orderId, clientIntentId);
+        this._liveUnresolvedOrderIntents.delete(clientIntentId);
+      }
+      this._liveUnresolvedOrderIds.set(event.orderId, {
+        orderId: event.orderId,
+        market,
+        side: event.side || null,
+        clientIntentId,
+        submittedAt: event.recordedAt
+      });
+      if (market) this._liveRecoveredManagedMarkets.add(market);
+    }
+    if (event.eventType === 'ORDER_SUBMITTED' && !event.orderId && clientIntentId) {
+      this._liveUnresolvedOrderIntents.set(clientIntentId, {
+        clientIntentId,
+        market,
+        side: event.side || null,
+        request: event.request || null,
+        createdAt: event.recordedAt,
+        reason: 'submitted_order_uuid_missing'
+      });
+    }
+    if (event.eventType === 'ORDER_POST_AMBIGUOUS' && clientIntentId) {
+      const intent = this._liveUnresolvedOrderIntents.get(clientIntentId);
+      if (intent) intent.reason = 'post_response_unknown';
+    }
+    if (isDefinitiveLiveOrderRejection(event) && clientIntentId) {
+      this._liveUnresolvedOrderIntents.delete(clientIntentId);
+      this.clearLiveEvidenceMarketBlockIfResolved(market);
+    }
+    if (event.orderId && isTerminalLiveOrderResolution(event)) {
+      this._liveUnresolvedOrderIds.delete(event.orderId);
+      const resolvedIntentId = clientIntentId || this._liveOrderClientIntentById.get(event.orderId);
+      if (resolvedIntentId) this._liveUnresolvedOrderIntents.delete(resolvedIntentId);
+      this.clearLiveEvidenceMarketBlockIfResolved(market);
+    }
+    if (event.eventType === 'FILL_NOT_OBSERVED' && !isTerminalLiveOrderResolution(event) && market) {
+      this.markLiveMarketOrderUnresolved(market);
+    }
+    if (event.eventType === 'FILL_PARTIAL' && !isTerminalLiveOrderResolution(event) && market) {
+      this.markLiveMarketOrderUnresolved(market);
+    }
+    if (event.eventType === 'SETTLEMENT_READBACK' && event.settlement?.status !== 'observed' && market) {
+      this.markLiveMarketOrderUnresolved(market);
+    }
+  }
+
+  clearLiveEvidenceMarketBlockIfResolved(market) {
+    if (typeof market !== 'string' || !market) return;
+    const unresolvedOrder = [...this._liveUnresolvedOrderIds.values()].some(order => order.market === market);
+    const unresolvedIntent = [...this._liveUnresolvedOrderIntents.values()].some(intent => intent.market === market);
+    if (!unresolvedOrder && !unresolvedIntent) {
+      this._liveEvidenceBlockedMarkets.delete(market);
+      this._liveVerifiedOrderMarkets.delete(market);
+    }
+  }
+
   createLiveExecutionEvidence(options = {}) {
-    return createLiveExecutionEvidenceEvent(options);
+    const orderId = options.orderId || options.order?.uuid;
+    const clientIntentId = options.clientIntentId ||
+      (orderId ? this._liveOrderClientIntentById.get(orderId) : null) ||
+      (options.market ? this._liveLatestOrderIntentByMarket.get(options.market) : null);
+    return createLiveExecutionEvidenceEvent({ ...options, clientIntentId });
   }
 
   async cancelLiveOrderIfOpen(orderId, order = null) {
@@ -660,6 +847,155 @@ class MultiCoinTrader {
       this.applyPaperStrategyRiskState(coin, strategy);
     }
     return this.strategies.get(coin);
+  }
+
+  getLiveManagedMarkets() {
+    return [...new Set([
+      ...this.targetCoins,
+      ...(this._liveOrderStateUnknownMarkets?.values?.() || []),
+      ...(this._livePendingOrderMarkets?.values?.() || []),
+      ...(this._manualOrderReconciliationMarkets?.values?.() || []),
+      ...[...this.strategies.entries()]
+        .filter(([, strategy]) => strategy?.currentPosition)
+        .map(([market]) => market),
+      ...(this._liveRecoveredManagedMarkets?.values?.() || [])
+    ])];
+  }
+
+  async ensureLiveOrderMarketStateVerified(market) {
+    if (this.dryRun || typeof market !== 'string' || !market.trim()) return false;
+    const maxVerifiedAgeMs = 10 * 60 * 1000;
+    const isVerified = () => {
+      const verifiedAt = Number(this._liveVerifiedOrderMarkets.get(market));
+      return this._liveAccountStateKnown === true && this._liveExchangeStateKnown === true &&
+        Number.isFinite(verifiedAt) && Date.now() - verifiedAt < maxVerifiedAgeMs &&
+        !this._liveEvidenceBlockedMarkets.has(market) &&
+        !this._liveOrderStateUnknownMarkets.has(market) &&
+        !this._livePendingOrderMarkets.has(market);
+    };
+    if (isVerified()) return true;
+
+    if (this._exchangeSyncPromise) await this._exchangeSyncPromise;
+    this._manualOrderReconciliationMarkets.add(market);
+    try {
+      const synchronized = await this.syncWithExchange();
+      if (synchronized) this._lastSyncTime = Date.now();
+      return synchronized === true && isVerified();
+    } finally {
+      this._manualOrderReconciliationMarkets.delete(market);
+    }
+  }
+
+  markLiveMarketOrderUnresolved(market) {
+    if (this.dryRun || typeof market !== 'string' || !market.trim()) return;
+    this._liveRecoveredManagedMarkets.add(market);
+    this._liveEvidenceBlockedMarkets.add(market);
+    this._liveOrderStateUnknownMarkets.add(market);
+    this._livePendingOrderMarkets.add(market);
+  }
+
+  async submitLiveOrder(market, side, volume, price, orderType) {
+    if (this.dryRun) throw new Error('submitLiveOrder is only available in LIVE mode');
+    if (!market || !['bid', 'ask'].includes(side)) throw new Error('invalid live order market or side');
+    const validPositive = value => Number.isFinite(Number(value)) && Number(value) > 0;
+    if ((orderType === 'price' && !validPositive(volume)) ||
+      (orderType === 'market' && !validPositive(volume)) ||
+      (orderType === 'limit' && (!validPositive(volume) || !validPositive(price))) ||
+      !['price', 'market', 'limit'].includes(orderType)) {
+      throw new Error('invalid live order request');
+    }
+    if (!this._liveAccountStateKnown || !this._liveExchangeStateKnown ||
+      !this.canExecuteLiveOrder(market, { action: side === 'bid' ? 'BUY' : 'SELL' })) {
+      throw new Error(`live order state is not verified for ${market}`);
+    }
+    if (this.liveExecutionEvidenceWriteError || this.liveExecutionEvidenceDataError) {
+      throw new Error('live execution evidence is unavailable');
+    }
+    let clientIntentId = null;
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const candidate = randomUUID();
+      if (!this._liveUsedOrderIntentIds.has(candidate)) {
+        clientIntentId = candidate;
+        break;
+      }
+    }
+    if (!clientIntentId) throw new Error('could not allocate an unused live order identifier');
+    this._liveUsedOrderIntentIds.add(clientIntentId);
+    const requested = orderType === 'price'
+      ? { amount: volume }
+      : orderType === 'market'
+        ? { volume }
+        : { volume, price };
+    const intent = this.createLiveExecutionEvidence({
+      eventType: 'ORDER_INTENT',
+      clientIntentId,
+      market,
+      side,
+      orderType,
+      requested
+    });
+    if (!this.recordLiveExecutionEvidence(intent)) {
+      throw new Error('could not durably record live order intent');
+    }
+    this._liveLatestOrderIntentByMarket.set(market, clientIntentId);
+    try {
+      const orderResult = await this.upbit.order(market, side, volume, price, orderType, clientIntentId);
+      const orderId = orderResult?.data?.uuid || null;
+      if (orderResult?.success === true) {
+        const recorded = this.recordLiveExecutionEvidence(this.createLiveExecutionEvidence({
+          eventType: 'ORDER_SUBMITTED',
+          clientIntentId,
+          orderId,
+          market,
+          side,
+          orderType,
+          requested,
+          order: orderResult.data
+        }));
+        if (!recorded) {
+          this.markLiveMarketOrderUnresolved(market);
+          throw new Error('order was accepted but its UUID could not be durably recorded');
+        }
+        if (!orderId) this.markLiveMarketOrderUnresolved(market);
+      } else {
+        const errorCode = orderResult?.error?.code || null;
+        const recorded = this.recordLiveExecutionEvidence(this.createLiveExecutionEvidence({
+          eventType: 'ORDER_REJECTED',
+          clientIntentId,
+          market,
+          side,
+          orderType,
+          requested,
+          error: orderResult?.error?.message || 'order response did not confirm acceptance',
+          errorCode
+        }));
+        if (!recorded || !isDefinitiveLiveOrderRejection({ eventType: 'ORDER_REJECTED', errorCode })) {
+          this.markLiveMarketOrderUnresolved(market);
+        }
+      }
+      return orderResult;
+    } catch (error) {
+      this.recordLiveExecutionEvidence(this.createLiveExecutionEvidence({
+        eventType: 'ORDER_POST_AMBIGUOUS',
+        clientIntentId,
+        market,
+        side,
+        orderType,
+        requested,
+        error: error.message
+      }));
+      this.markLiveMarketOrderUnresolved(market);
+      throw error;
+    }
+  }
+
+  async waitForLiveOrderFill(market, orderId, timeoutMs, intervalMs) {
+    try {
+      return await this.upbit.waitForOrderFill(orderId, timeoutMs, intervalMs);
+    } catch (error) {
+      this.markLiveMarketOrderUnresolved(market);
+      throw error;
+    }
   }
 
   /**
@@ -734,12 +1070,41 @@ class MultiCoinTrader {
   /**
    * 총 자산 계산 (KRW + 코인 평가액) - 드라이/실전 모드 모두 지원
    */
-  async calculateTotalAssets(priceMapOverride = null) {
+  async calculateTotalAssets(priceMapOverride = null, {
+    allowAveragePriceFallback = true,
+    accountsOverride = null
+  } = {}) {
     if (this.dryRun) {
       // 드라이 모드: 가상 포트폴리오 사용
       let totalAssets = this.virtualPortfolio.krwBalance;
 
       const holdingCoins = Array.from(this.virtualPortfolio.holdings.keys());
+      if (!allowAveragePriceFallback && holdingCoins.length > 0) {
+        const priceMap = priceMapOverride instanceof Map ? new Map(priceMapOverride) : new Map();
+        if (!(priceMapOverride instanceof Map)) {
+          try {
+            const tickers = await this.upbit.getTicker(holdingCoins);
+            if (Array.isArray(tickers)) {
+              for (const ticker of tickers) {
+                const price = Number(ticker?.trade_price);
+                if (ticker?.market && Number.isFinite(price) && price > 0) {
+                  priceMap.set(ticker.market, price);
+                }
+              }
+            }
+          } catch {
+            return null;
+          }
+        }
+
+        for (const [coin, holding] of this.virtualPortfolio.holdings.entries()) {
+          const currentPrice = Number(priceMap.get(coin));
+          if (!Number.isFinite(currentPrice) || currentPrice <= 0) return null;
+          totalAssets += currentPrice * holding.amount;
+        }
+        return totalAssets;
+      }
+
       if (holdingCoins.length > 0) {
         // A shared research snapshot may provide one common mark for every
         // variant. In normal runtime paths this remains null and the method
@@ -779,10 +1144,54 @@ class MultiCoinTrader {
       return totalAssets;
     } else {
       // 실전 모드: 실제 업비트 계좌 잔액 사용
-      const accounts = await this.upbit.getAccounts();
+      const accounts = !allowAveragePriceFallback && Array.isArray(accountsOverride)
+        ? accountsOverride
+        : await this.upbit.getAccounts();
       if (!accounts || !Array.isArray(accounts)) {
         console.error('계좌 조회 실패');
-        return 0;
+        return allowAveragePriceFallback ? 0 : null;
+      }
+
+      if (!allowAveragePriceFallback) {
+        let totalAssets = 0;
+        const krwAccount = accounts.find(acc => acc.currency === 'KRW');
+        if (krwAccount) {
+          totalAssets += parseFloat(krwAccount.balance || 0) + parseFloat(krwAccount.locked || 0);
+        }
+
+        const coinAccounts = accounts.filter(acc => {
+          if (acc.currency === 'KRW') return false;
+          const balance = parseFloat(acc.balance || 0) + parseFloat(acc.locked || 0);
+          return Number.isFinite(balance) && balance > 0;
+        });
+        if (coinAccounts.length === 0) return totalAssets;
+
+        const coinMarkets = coinAccounts.map(acc => `KRW-${acc.currency}`);
+        const priceMap = priceMapOverride instanceof Map ? new Map(priceMapOverride) : new Map();
+        if (!(priceMapOverride instanceof Map)) {
+          try {
+            const tickers = await this.upbit.getTicker(coinMarkets);
+            if (Array.isArray(tickers)) {
+              for (const ticker of tickers) {
+                const price = Number(ticker?.trade_price);
+                if (ticker?.market && Number.isFinite(price) && price > 0) {
+                  priceMap.set(ticker.market, price);
+                }
+              }
+            }
+          } catch {
+            return null;
+          }
+        }
+
+        for (const account of coinAccounts) {
+          const market = `KRW-${account.currency}`;
+          const price = Number(priceMap.get(market));
+          if (!Number.isFinite(price) || price <= 0) return null;
+          const balance = parseFloat(account.balance || 0) + parseFloat(account.locked || 0);
+          totalAssets += price * balance;
+        }
+        return totalAssets;
       }
 
       let totalAssets = 0;
@@ -860,13 +1269,16 @@ class MultiCoinTrader {
    * @param {Object} signalStrength - 신호 강도 { level, multiplier, score }
    */
   async calculateDynamicInvestmentAmount(totalAssets = null, signalStrength = null) {
+    const investmentRatio = Number(this.investmentRatio);
+    if (!Number.isFinite(investmentRatio) || investmentRatio <= 0) return 0;
+
     // 총 자산이 전달되지 않으면 계산
     if (totalAssets === null) {
       totalAssets = await this.calculateTotalAssets();
     }
 
     // 투자금액: 총 자산의 investmentRatio
-    let dynamicAmount = totalAssets * this.investmentRatio;
+    let dynamicAmount = totalAssets * investmentRatio;
 
     // 신호 강도에 따른 배수 적용
     if (signalStrength && signalStrength.multiplier > 0) {
@@ -883,20 +1295,24 @@ class MultiCoinTrader {
   /**
    * 누적손익 계산
    */
-  async calculateCumulativePnL() {
-    const totalAssets = await this.calculateTotalAssets();
-    const profit = totalAssets - this.initialSeedMoney;
-    const profitPercent = this.initialSeedMoney > 0
-      ? ((totalAssets / this.initialSeedMoney) - 1) * 100
-      : 0;
-
-    return {
+  async calculateCumulativePnL(options = {}) {
+    const totalAssets = await this.calculateTotalAssets(options.priceMapOverride ?? null, options);
+    const valuationAvailable = Number.isFinite(totalAssets);
+    const result = {
       initialSeedMoney: this.initialSeedMoney,
-      totalAssets: Math.round(totalAssets),
-      profit: Math.round(profit),
-      profitPercent: profitPercent,
+      totalAssets: valuationAvailable ? Math.round(totalAssets) : null,
+      profit: valuationAvailable ? Math.round(totalAssets - this.initialSeedMoney) : null,
+      profitPercent: valuationAvailable && this.initialSeedMoney > 0
+        ? ((totalAssets / this.initialSeedMoney) - 1) * 100
+        : valuationAvailable ? 0 : null,
       mode: this.dryRun ? 'DRY_RUN' : 'LIVE'
     };
+
+    if (options.allowAveragePriceFallback === false) {
+      result.valuationAvailable = valuationAvailable;
+      result.valuationStatus = valuationAvailable ? 'available' : 'unavailable';
+    }
+    return result;
   }
 
   /**
@@ -949,8 +1365,196 @@ class MultiCoinTrader {
   /**
    * 가상 포트폴리오 저장 (드라이 모드)
    */
-  saveVirtualPortfolio() {
+  mutateAndPersistVirtualPortfolio(mutate) {
+    if (!this.dryRun) throw new Error('가상 포트폴리오는 모의투자 모드에서만 변경할 수 있습니다.');
+    if (typeof mutate !== 'function') throw new TypeError('가상 포트폴리오 변경 함수가 필요합니다.');
+
+    const portfolio = this.virtualPortfolio;
+    const previousBalance = portfolio.krwBalance;
+    const previousHoldingsReference = portfolio.holdings;
+    const previousHoldingsEntries = previousHoldingsReference instanceof Map
+      ? Array.from(previousHoldingsReference.entries(), ([market, holding]) => [
+        market,
+        holding && typeof holding === 'object' ? { ...holding } : holding
+      ])
+      : null;
+    const previousSeedMoney = this.initialSeedMoney;
+    const previousStrategyState = Array.from(this.strategies?.values?.() || [], strategy => ({
+      strategy,
+      currentPosition: strategy.currentPosition,
+      tradeHistory: strategy.tradeHistory
+    }));
+
+    try {
+      mutate();
+      this.saveVirtualPortfolio();
+      return true;
+    } catch (error) {
+      this.virtualPortfolio = portfolio;
+      portfolio.krwBalance = previousBalance;
+      portfolio.holdings = previousHoldingsReference;
+      if (previousHoldingsReference instanceof Map && previousHoldingsEntries) {
+        previousHoldingsReference.clear();
+        for (const [market, holding] of previousHoldingsEntries) {
+          previousHoldingsReference.set(market, holding);
+        }
+      }
+      this.initialSeedMoney = previousSeedMoney;
+      for (const state of previousStrategyState) {
+        state.strategy.currentPosition = state.currentPosition;
+        state.strategy.tradeHistory = state.tradeHistory;
+      }
+      throw error;
+    }
+  }
+
+  adjustVirtualWalletBalance(delta) {
+    if (!Number.isSafeInteger(delta) || delta === 0) {
+      throw new TypeError('모의 잔액 변경 금액이 올바르지 않습니다.');
+    }
+
+    const currentBalance = Number(this.virtualPortfolio?.krwBalance);
+    const nextBalance = currentBalance + delta;
+    if (!Number.isFinite(currentBalance) || !Number.isFinite(nextBalance) || nextBalance < 0) {
+      throw new RangeError('모의 잔액을 확인할 수 없습니다.');
+    }
+
+    const previousSeedMoney = this.initialSeedMoney;
+    const nextSeedMoney = previousSeedMoney === undefined
+      ? previousSeedMoney
+      : Math.max(0, Number(previousSeedMoney) + delta);
+    if (nextSeedMoney !== undefined && !Number.isFinite(nextSeedMoney)) {
+      throw new RangeError('수익률 기준 금액을 확인할 수 없습니다.');
+    }
+
+    this.mutateAndPersistVirtualPortfolio(() => {
+      this.virtualPortfolio.krwBalance = nextBalance;
+      if (previousSeedMoney !== undefined) this.initialSeedMoney = nextSeedMoney;
+    });
+    return {
+      krwBalance: this.virtualPortfolio.krwBalance,
+      initialSeedMoney: this.initialSeedMoney
+    };
+  }
+
+  async withPortfolioMutationLock(operation) {
+    if (typeof operation !== 'function') throw new TypeError('포트폴리오 변경 함수가 필요합니다.');
+    const currentContext = this._portfolioMutationContext.getStore();
+    if (currentContext?.tradingSystem === this) return operation(currentContext);
+
+    const previousTurn = this._portfolioMutationTail;
+    const turn = previousTurn.then(() => {
+      const context = { tradingSystem: this, manualPortfolioTransaction: null };
+      return this._portfolioMutationContext.run(context, () => operation(context));
+    });
+    this._portfolioMutationTail = turn.then(() => undefined, () => undefined);
+    return turn;
+  }
+
+  snapshotManualPortfolioState() {
+    const portfolio = this.virtualPortfolio;
+    const holdings = portfolio?.holdings;
+    return {
+      portfolio,
+      krwBalance: portfolio?.krwBalance,
+      holdingsReference: holdings,
+      holdingsEntries: holdings instanceof Map
+        ? Array.from(holdings.entries(), ([market, holding]) => [market, cloneManualPortfolioValue(holding)])
+        : null,
+      initialSeedMoney: this.initialSeedMoney,
+      strategiesReference: this.strategies,
+      strategies: Array.from(this.strategies?.entries?.() || [], ([coin, strategy]) => ({
+        coin,
+        strategy,
+        currentPosition: cloneManualPortfolioValue(strategy.currentPosition),
+        tradeHistory: cloneManualPortfolioValue(strategy.tradeHistory)
+      })),
+      smartTradeHistoryReference: this.smartTradeHistory,
+      smartTradeHistory: cloneManualPortfolioValue(this.smartTradeHistory)
+    };
+  }
+
+  restoreManualPortfolioState(snapshot) {
+    this.virtualPortfolio = snapshot.portfolio;
+    if (snapshot.portfolio) {
+      snapshot.portfolio.krwBalance = snapshot.krwBalance;
+      snapshot.portfolio.holdings = snapshot.holdingsReference;
+      if (snapshot.holdingsReference instanceof Map && snapshot.holdingsEntries) {
+        snapshot.holdingsReference.clear();
+        for (const [market, holding] of snapshot.holdingsEntries) {
+          snapshot.holdingsReference.set(market, cloneManualPortfolioValue(holding));
+        }
+      }
+    }
+    this.initialSeedMoney = snapshot.initialSeedMoney;
+
+    this.strategies = snapshot.strategiesReference;
+    const retainedCoins = new Set(snapshot.strategies.map(state => state.coin));
+    for (const coin of this.strategies.keys()) {
+      if (!retainedCoins.has(coin)) this.strategies.delete(coin);
+    }
+    for (const state of snapshot.strategies) {
+      this.strategies.set(state.coin, state.strategy);
+      state.strategy.currentPosition = cloneManualPortfolioValue(state.currentPosition);
+      state.strategy.tradeHistory = cloneManualPortfolioValue(state.tradeHistory);
+    }
+
+    if (Array.isArray(snapshot.smartTradeHistoryReference)) {
+      snapshot.smartTradeHistoryReference.splice(0, snapshot.smartTradeHistoryReference.length,
+        ...(Array.isArray(snapshot.smartTradeHistory) ? cloneManualPortfolioValue(snapshot.smartTradeHistory) : []));
+    }
+    this.smartTradeHistory = snapshot.smartTradeHistoryReference;
+  }
+
+  async withManualPortfolioTransaction(operation) {
+    if (typeof operation !== 'function') throw new TypeError('수동 포트폴리오 작업 함수가 필요합니다.');
+    return this.withPortfolioMutationLock(async context => {
+      if (context.manualPortfolioTransaction) {
+        return operation(context.manualPortfolioTransaction);
+      }
+      const snapshot = this.snapshotManualPortfolioState();
+      const transaction = {
+        committed: false,
+        rolledBack: false,
+        rollback: () => {
+          if (transaction.rolledBack) return;
+          this.restoreManualPortfolioState(snapshot);
+          transaction.rolledBack = true;
+        },
+        commit: () => { transaction.committed = true; }
+      };
+      context.manualPortfolioTransaction = transaction;
+      try {
+        return await operation(transaction);
+      } finally {
+        if (!transaction.committed) transaction.rollback();
+        context.manualPortfolioTransaction = null;
+      }
+    });
+  }
+
+  persistManualOrderIdempotencyRecords(records) {
+    if (!this.dryRun) throw new Error('모의 포트폴리오 기록을 LIVE에서 저장할 수 없습니다.');
+    const previousRecords = this.manualOrderIdempotencyRecords;
+    this.manualOrderIdempotencyRecords = cloneManualPortfolioValue(records);
+    try {
+      this.saveVirtualPortfolio({ force: true, syncDirectory: true });
+      const transaction = this._portfolioMutationContext.getStore()?.manualPortfolioTransaction;
+      transaction?.commit?.();
+    } catch (error) {
+      this.manualOrderIdempotencyRecords = previousRecords;
+      throw error;
+    }
+  }
+
+  saveVirtualPortfolio({ force = false, syncDirectory = false } = {}) {
     if (!this.dryRun) return;
+
+    const transaction = this._portfolioMutationContext.getStore()?.manualPortfolioTransaction;
+    if (transaction && !force) {
+      transaction.dirty = true;
+      return;
+    }
 
     const portfolioFile = this.virtualPortfolioFile;
     const data = {
@@ -958,6 +1562,7 @@ class MultiCoinTrader {
       holdings: {},
       positions: {},
       tradeHistory: {},
+      manualOrderIdempotencyRecords: this.manualOrderIdempotencyRecords,
       initialSeedMoney: this.initialSeedMoney,
       updatedAt: new Date().toISOString()
     };
@@ -990,20 +1595,38 @@ class MultiCoinTrader {
       }
     }
 
-    this.writeJsonAtomically(portfolioFile, data);
+    this.writeJsonAtomically(portfolioFile, data, { mode: 0o600, fsync: true, syncDirectory });
     console.log('💾 가상 포트폴리오 저장됨');
   }
 
-  writeJsonAtomically(file, data) {
+  writeJsonAtomically(file, data, { mode, fsync = false, syncDirectory = false } = {}) {
     const directory = path.dirname(file);
     if (directory && directory !== '.') fs.mkdirSync(directory, { recursive: true });
-    const temporaryFile = `${file}.${process.pid}.${Date.now()}.tmp`;
+    const temporaryFile = `${file}.${process.pid}.${randomUUID()}.tmp`;
+    let temporaryFileCreated = false;
     try {
-      fs.writeFileSync(temporaryFile, JSON.stringify(data, null, 2), 'utf8');
+      const descriptor = fs.openSync(temporaryFile, 'wx', mode ?? 0o666);
+      temporaryFileCreated = true;
+      try {
+        if (mode !== undefined) fs.fchmodSync(descriptor, mode);
+        fs.writeFileSync(descriptor, JSON.stringify(data, null, 2), 'utf8');
+        if (fsync) fs.fsyncSync(descriptor);
+      } finally {
+        fs.closeSync(descriptor);
+      }
       fs.renameSync(temporaryFile, file);
+      temporaryFileCreated = false;
+      if (syncDirectory) {
+        const directoryDescriptor = fs.openSync(directory, 'r');
+        try {
+          fs.fsyncSync(directoryDescriptor);
+        } finally {
+          fs.closeSync(directoryDescriptor);
+        }
+      }
     } catch (error) {
       try {
-        if (fs.existsSync(temporaryFile)) fs.unlinkSync(temporaryFile);
+        if (temporaryFileCreated && fs.existsSync(temporaryFile)) fs.unlinkSync(temporaryFile);
       } catch {
         // Preserve the original write/rename error. A later startup can use
         // the owner-process/heartbeat recovery path if cleanup also fails.
@@ -1024,32 +1647,17 @@ class MultiCoinTrader {
 
     console.log('\n🔄 가상 포트폴리오 리셋 중...');
 
-    // 가상 포트폴리오 초기화
-    this.virtualPortfolio = {
-      krwBalance: seedMoney,
-      holdings: new Map()
-    };
-
-    // 초기 시드머니 업데이트
-    this.initialSeedMoney = seedMoney;
-
-    // 모든 전략 인스턴스 초기화
-    for (const [, strategy] of this.strategies.entries()) {
-      strategy.currentPosition = null;
-      strategy.tradeHistory = [];
-    }
-
-    // 파일 저장
-    const portfolioFile = this.virtualPortfolioFile;
-    const data = {
-      krwBalance: seedMoney,
-      holdings: {},
-      positions: {},
-      tradeHistory: {},
-      initialSeedMoney: seedMoney,
-      updatedAt: new Date().toISOString()
-    };
-    this.writeJsonAtomically(portfolioFile, data);
+    this.mutateAndPersistVirtualPortfolio(() => {
+      this.virtualPortfolio = {
+        krwBalance: seedMoney,
+        holdings: new Map()
+      };
+      this.initialSeedMoney = seedMoney;
+      for (const strategy of this.strategies.values()) {
+        strategy.currentPosition = null;
+        strategy.tradeHistory = [];
+      }
+    });
 
     console.log(`✅ 포트폴리오 리셋 완료!`);
     console.log(`   시드머니: ${seedMoney.toLocaleString()}원`);
@@ -1069,6 +1677,7 @@ class MultiCoinTrader {
         const data = JSON.parse(fs.readFileSync(portfolioFile, 'utf8'));
         this.virtualPortfolio.krwBalance = data.krwBalance;
         this.virtualPortfolio.holdings = new Map(Object.entries(data.holdings || {}));
+        this.manualOrderIdempotencyRecords = data.manualOrderIdempotencyRecords ?? [];
 
         // 저장된 초기 시드머니 로드 (없으면 현재 설정값 유지)
         if (data.initialSeedMoney) {
@@ -2079,7 +2688,7 @@ class MultiCoinTrader {
 
   async startPaperValidationSession(options = {}) {
     if (!this.dryRun) {
-      throw new Error('실전 모드에서는 forward paper 세션을 시작할 수 없습니다.');
+      throw new Error('실거래 모드에서는 모의투자 세션을 시작할 수 없습니다.');
     }
 
     const previousDiagnosticOpenPositions = this.getPaperDiagnosticOpenPositionSnapshot();
@@ -2099,11 +2708,11 @@ class MultiCoinTrader {
         .map(position => `${position.book}:${position.coin}`)
         .filter(Boolean);
       const details = [
-        strictCoins.length > 0 ? `strict 미청산 포지션(${strictCoins.join(', ')})` : null,
-        diagnosticCoins.length > 0 ? `진단 미청산 포지션(${diagnosticCoins.join(', ')})` : null,
-        previousContinuityInvalid ? '연속성 무효화' : null
+        strictCoins.length > 0 ? `정리되지 않은 포지션: ${strictCoins.join(', ')}` : null,
+        diagnosticCoins.length > 0 ? `비교 기록에 정리되지 않은 포지션 ${diagnosticCoins.length}개` : null,
+        previousContinuityInvalid ? '기록이 끊긴 구간이 있습니다' : null
       ].filter(Boolean).join(', ');
-      throw new Error(`이전 paper 세션이 ${details || '재사용 불가 상태'}입니다. 새 출력 디렉터리를 사용하거나 reset 또는 allowUnsettledResume=true를 명시하세요.`);
+      throw new Error(`이전 모의투자 기록을 이어서 사용할 수 없습니다.${details ? ` ${details}.` : ''} 기록을 확인해 주세요. 초기화하려면 '초기화 후 시작'을 선택하세요. 기존 가상 잔액·보유 자산·거래 기록이 삭제됩니다.`);
     }
 
     const shouldReset = options.reset === true;
@@ -3296,7 +3905,10 @@ class MultiCoinTrader {
         }
 
         const activePositionCount = Object.keys(shadow.positions).length;
-        const maxPositions = Number(this.maxPositions) || 3;
+        const configuredMaxPositions = Number(this.maxPositions);
+        const maxPositions = Number.isFinite(configuredMaxPositions)
+          ? Math.max(0, configuredMaxPositions)
+          : 3;
         if (activePositionCount < maxPositions) {
           if (isLossCircuitCoolingDown(
             shadow.lossCircuitBreaker,
@@ -3362,7 +3974,7 @@ class MultiCoinTrader {
     return result;
   }
 
-  async getPaperValidationStatus() {
+  async getPaperValidationStatus({ includeCurrentAssets = true } = {}) {
     const session = this.paperValidation;
     if (!session) {
       return {
@@ -3373,7 +3985,12 @@ class MultiCoinTrader {
       };
     }
 
-    const currentAssets = await this.calculateTotalAssets();
+    const persistedAssets = session.snapshots?.at(-1)?.totalAssets ?? session.baselineAssets;
+    const currentAssets = includeCurrentAssets
+      ? await this.calculateTotalAssets()
+      : persistedAssets !== null && persistedAssets !== undefined && Number.isFinite(Number(persistedAssets))
+        ? Number(persistedAssets)
+        : null;
     const startedAtMs = new Date(session.startedAt).getTime();
     const elapsedDays = Math.max(0, (Date.now() - startedAtMs) / 86_400_000);
     const heartbeatAt = session.telemetry?.heartbeatAt || session.startedAt;
@@ -4129,9 +4746,29 @@ class MultiCoinTrader {
   /**
    * 다중 코인 자동매매 시작
    */
-  async start() {
+  start() {
+    if (this._startPromise) return this._startPromise;
+    const startPromise = this.performStart();
+    this._startPromise = startPromise;
+    startPromise.then(
+      () => { if (this._startPromise === startPromise) this._startPromise = null; },
+      () => { if (this._startPromise === startPromise) this._startPromise = null; }
+    );
+    return startPromise;
+  }
+
+  async performStart() {
+    if (this._riskMonitorProtectiveOnly) {
+      throw new Error('보호 전용 상태에서는 자동매매를 다시 시작할 수 없습니다. 열린 LIVE 포지션이 모두 정리된 뒤 새 trader 인스턴스로 시작하세요.');
+    }
     this.assertLiveValidationGate();
     this._stopRequested = false;
+    this._startupSafetyHold = false;
+    this._startupReconciliationPending = !this.dryRun;
+    this._entriesPaused = this._startupReconciliationPending;
+    this._riskMonitorProtectiveOnly = false;
+    this._riskMonitorExitInProgress = false;
+    this.stopReason = this._startupReconciliationPending ? 'exchange_state_unverified' : null;
     console.log(`\n🚀 ${this.isScalpingMode ? '과매도 반응 스캘핑' : '다중 코인'} 자동매매 시스템 시작`);
     console.log(`모드: ${this.dryRun ? '모의투자' : '실전투자'}`);
 
@@ -4154,9 +4791,36 @@ class MultiCoinTrader {
 
     console.log('─'.repeat(80));
 
+    if (this._startupReconciliationPending) {
+      while (!this._liveExchangeStateKnown && !this._stopRequested) {
+        while (this._orderInProgress || this._riskCheckInProgress) {
+          await new Promise(resolve => setTimeout(resolve, 25));
+        }
+        const synchronized = await this.syncWithExchange();
+        if (synchronized) {
+          this._lastSyncTime = Date.now();
+          break;
+        }
+        if (this._liveAccountStateKnown && this.getCurrentPositionCount() > 0) {
+          this._startupSafetyHold = true;
+          this.pauseForSafetyIncident('exchange_state_unverified');
+        }
+        if (!this._stopRequested) await this.sleep(this.exchangeSyncRetryMs);
+      }
+
+      if (this._stopRequested || this._riskMonitorProtectiveOnly || this._startupSafetyHold) return;
+      if (!this._liveExchangeStateKnown) return;
+      this._startupReconciliationPending = false;
+      this._entriesPaused = false;
+      this.stopReason = null;
+    }
+
     this.isRunning = true;
     this.startPositionRiskMonitor();
     this.startAnalysisDataWatchdog();
+    if (!this.dryRun && this.getCurrentPositionCount() > 0) {
+      await this.monitorOpenPositions();
+    }
 
     // 스캘핑은 뉴스 수집 지연과 장기 감성을 매수 조건에서 제외한다.
     if (this.useNews) {
@@ -4184,8 +4848,19 @@ class MultiCoinTrader {
    * 통과하기 전까지 시작하지 않는다. DRY_RUN에는 적용하지 않는다.
    */
   assertLiveValidationGate() {
-    if (this.dryRun || !this.isScalpingMode || this.config.requireValidationPassForLive === false) {
-      return;
+    if (this.dryRun) return;
+    if (this.positionRiskCheckIntervalMs <= 0) {
+      throw new Error('실전 매매 차단: 포지션 위험 감시를 비활성화할 수 없습니다. SCALP_RISK_CHECK_INTERVAL_MS를 0보다 크게 설정하세요.');
+    }
+    if (this.maxRiskDataGapSeconds <= 0) {
+      throw new Error('실전 매매 차단: 리스크 데이터 공백 감지를 비활성화할 수 없습니다. SCALP_MAX_RISK_DATA_GAP_SECONDS를 0보다 크게 설정하세요.');
+    }
+    if (!this.isScalpingMode) return;
+    if (this.config.requireValidationPassForLive === false) {
+      throw Object.assign(
+        new Error('실전 스캘핑 차단: 실전 검증 게이트를 비활성화할 수 없습니다. SCALP_REQUIRE_VALIDATION_PASS=true로 설정하고 최신 fixed_config 검증을 통과하세요.'),
+        { code: 'live_validation_bypass_not_supported' }
+      );
     }
 
     const reportFile = this.config.scalpingValidationOutputFile ||
@@ -4205,7 +4880,7 @@ class MultiCoinTrader {
     this.validatePromotionReport(report);
   }
 
-  validatePromotionReport(report) {
+  validatePromotionReport(report, { now = Date.now(), maxAgeSeconds } = {}) {
     if (!report || report.validationMode !== 'fixed_config') {
       throw new Error('실전 스캘핑 차단: 현재 runtime 설정을 고정 검증한 fixed_config 리포트가 필요합니다. tuned 리포트는 live 승격에 사용할 수 없습니다.');
     }
@@ -4263,6 +4938,18 @@ class MultiCoinTrader {
       const total = Array.isArray(report.markets) ? report.markets.length : 0;
       throw new Error(`실전 스캘핑 차단: 전체 워크포워드 게이트 미통과 (${promoted}/${total}). DRY_RUN=true로 계속 검증하세요.`);
     }
+
+    const freshness = assessScalpingValidationReportFreshness(report.generatedAt, {
+      now,
+      ...(maxAgeSeconds === undefined ? {} : { maxAgeSeconds })
+    });
+    if (!freshness.fresh) {
+      const error = new Error(
+        `실전 스캘핑 차단: 검증 리포트가 오래되었거나 작성 시각을 확인할 수 없습니다 (${freshness.reason}). 최신 fixed validation을 다시 실행하세요.`
+      );
+      error.code = 'report_not_current';
+      throw error;
+    }
   }
 
   /**
@@ -4314,7 +5001,7 @@ class MultiCoinTrader {
         `\n🛑 늦은 risk ticker 성공 callback으로 확인된 시세 공백 ${status.currentOutageDurationSeconds.toFixed(1)}초 초과 - ` +
         'paper/live 관찰을 중지합니다.'
       );
-      this.stop('risk_data_gap');
+      this.pauseForSafetyIncident('risk_data_gap');
     } else {
       this.persistRiskMonitorStateIfDue(now);
     }
@@ -4368,7 +5055,7 @@ class MultiCoinTrader {
       `\n🛑 리스크 시세 freshness ${result.outageDurationSeconds.toFixed(1)}초 초과 - ` +
       '실패 callback 없이도 paper/live 관찰을 중지합니다.'
     );
-    this.stop('risk_data_gap');
+    this.pauseForSafetyIncident('risk_data_gap');
     return {
       ...result,
       status: this.getRiskMonitorStatus(now)
@@ -4384,7 +5071,7 @@ class MultiCoinTrader {
     const result = this.recordRiskMonitorFailure(error);
     if (result.failClosed && this.isRunning) {
       console.error(`\n🛑 리스크 시세 공백 ${result.outageDurationSeconds.toFixed(1)}초 초과 - 신규 매매와 paper 관찰을 중지합니다.`);
-      this.stop('risk_data_gap');
+      this.pauseForSafetyIncident('risk_data_gap');
     }
     return result;
   }
@@ -4463,7 +5150,7 @@ class MultiCoinTrader {
       `\n🛑 분석 cycle freshness ${result.gapDurationSeconds.toFixed(1)}초 초과 - ` +
       'paper/live 관찰을 중지합니다.'
     );
-    this.stop('analysis_data_gap');
+    this.pauseForSafetyIncident('analysis_data_gap');
     return {
       ...result,
       status: this.getAnalysisDataHealthStatus(now)
@@ -4519,6 +5206,7 @@ class MultiCoinTrader {
       ...result,
       failureCode: result.failureCode || null,
       failureMarkets: result.failureMarkets || [],
+      transportFailureCodes: failureDetails.transportFailureCodes || {},
       status: this.getAnalysisDataHealthStatus(now)
     };
   }
@@ -4539,7 +5227,8 @@ class MultiCoinTrader {
       failClosed: analysisHealth.failClosed === true,
       failureCode: analysisHealth.failureCode || null,
       failureMarkets: analysisHealth.failureMarkets || [],
-      failureCounts: analysisHealth.status?.failureCounts || {}
+      failureCounts: analysisHealth.status?.failureCounts || {},
+      transportFailureCodes: analysisHealth.transportFailureCodes || {}
     };
     telemetry.reasonCounts = telemetry.reasonCounts || {};
     const reason = `분석 데이터 불완전 - ${analysisHealth.missingMarkets?.join(', ') || '시장 응답 없음'}`;
@@ -4570,9 +5259,115 @@ class MultiCoinTrader {
     console.log('\n⏹️  다중 코인 자동매매 시스템 중지');
     if (reason) this.stopReason = reason;
     this._stopRequested = true;
+    this._entriesPaused = true;
+    this._riskMonitorProtectiveOnly = false;
+    this._riskMonitorExitInProgress = false;
     this.isRunning = false;
     this.stopPositionRiskMonitor();
     this.stopAnalysisDataWatchdog();
+  }
+
+  pauseForSafetyIncident(reason) {
+    const hasLivePosition = !this.dryRun && this.getCurrentPositionCount() > 0;
+    if (!hasLivePosition || this.positionRiskCheckIntervalMs <= 0) {
+      this.stop(reason);
+      return false;
+    }
+
+    if (this._riskMonitorProtectiveOnly) return true;
+    console.error(
+      `\n🛡️  ${reason} - 분석과 신규 진입을 멈추고 기존 LIVE 포지션의 위험 감시를 유지합니다.`
+    );
+    this.stopReason = reason;
+    this.isRunning = false;
+    this._stopRequested = false;
+    this._entriesPaused = true;
+    this._riskMonitorProtectiveOnly = true;
+    this.stopAnalysisDataWatchdog();
+    this.startPositionRiskMonitor();
+    return true;
+  }
+
+  requestGracefulShutdown(reason = 'operator_shutdown') {
+    if (this._gracefulShutdownPromise) return this._gracefulShutdownPromise;
+    const shutdownPromise = this.performGracefulShutdown(reason);
+    this._gracefulShutdownPromise = shutdownPromise;
+    shutdownPromise.then(
+      () => { if (this._gracefulShutdownPromise === shutdownPromise) this._gracefulShutdownPromise = null; },
+      () => { if (this._gracefulShutdownPromise === shutdownPromise) this._gracefulShutdownPromise = null; }
+    );
+    return shutdownPromise;
+  }
+
+  async performGracefulShutdown(reason = 'operator_shutdown') {
+    this._stopRequested = true;
+    this._entriesPaused = true;
+    this.isRunning = false;
+    this.stopAnalysisDataWatchdog();
+
+    // Let an already-submitted order finish and reconcile before deciding
+    // whether the process is flat. No new order can enter while we wait.
+    while (this._orderInProgress || this._riskCheckInProgress) {
+      await new Promise(resolve => setTimeout(resolve, 25));
+    }
+
+    if (!this.dryRun && this.getCurrentPositionCount() > 0 && !this._riskMonitorProtectiveOnly) {
+      this.pauseForSafetyIncident(reason);
+    }
+
+    if (!this.dryRun) {
+      // A local strategy map can be empty or stale after a restart, lost order
+      // response, or partial fill. Do not decide that LIVE is flat until both
+      // account balances and target-market open orders have been reconciled.
+      while (true) {
+        const synchronized = await this.syncWithExchange();
+        if (synchronized === true && !this.hasUnresolvedLiveOrderState()) {
+          this._lastSyncTime = Date.now();
+          break;
+        }
+        console.error(synchronized === true
+          ? '🛑 미해결 LIVE 주문 상태가 남아 있어 종료를 보류하고 재조회합니다.'
+          : '🛑 LIVE 거래소 상태를 확인할 수 없어 종료를 보류하고 재조회합니다.');
+        await this.sleep(this.exchangeSyncRetryMs);
+      }
+    }
+
+    if (!this.dryRun && this.getCurrentPositionCount() > 0) {
+      if (this.positionRiskCheckIntervalMs <= 0) {
+        throw new Error('LIVE 포지션이 남아 있지만 리스크 모니터가 비활성화되어 안전하게 종료할 수 없습니다.');
+      }
+      return this.pauseForSafetyIncident(reason);
+    }
+    this.stop(reason);
+    return false;
+  }
+
+  async waitForProtectiveDrain() {
+    while (this._riskMonitorProtectiveOnly) {
+      await new Promise(resolve => setTimeout(resolve, 250));
+    }
+    return this.getCurrentPositionCount() === 0;
+  }
+
+  finishProtectiveMonitoringWhenFlat() {
+    if (!this._riskMonitorProtectiveOnly || this.getCurrentPositionCount() > 0) return false;
+    this._riskMonitorProtectiveOnly = false;
+    this.stopPositionRiskMonitor();
+    console.log('\n✅ 감시 중이던 LIVE 포지션이 모두 닫혀 위험 감시가 idle 상태가 됐습니다. 신규 진입은 재개하지 않습니다.');
+    return true;
+  }
+
+  getRuntimeSafetyStatus() {
+    return {
+      runtimeState: this._riskMonitorProtectiveOnly
+        ? 'PROTECTIVE_ONLY'
+        : !this.dryRun && !this._liveExchangeStateKnown ? 'SYNC_REQUIRED'
+        : this.isRunning ? 'RUNNING' : 'STOPPED',
+      entriesPaused: this._entriesPaused || this._stopRequested || (!this.dryRun && !this._liveExchangeStateKnown),
+      protectiveMonitorActive: this._riskMonitorProtectiveOnly && this.positionRiskTimer !== null,
+      stopReason: this.stopReason || (!this.dryRun && !this._liveExchangeStateKnown ? 'exchange_state_unverified' : null),
+      exchangeStateKnown: this.dryRun ? null : this._liveExchangeStateKnown
+    };
   }
 
   startAnalysisDataWatchdog() {
@@ -4599,10 +5394,10 @@ class MultiCoinTrader {
       !Number.isFinite(Number(position.paperExecutionTradingFeeRate)))) return null;
     const configuredSlippageRate = position
       ? position.paperExecutionSlippageRate
-      : this.config?.slippage;
+      : this.config?.slippage ?? this.strategyConfig?.slippage;
     const configuredTradingFeeRate = position
       ? position.paperExecutionTradingFeeRate
-      : this.config?.tradingFee;
+      : this.config?.tradingFee ?? this.strategyConfig?.tradingFee;
     const slippageRate = Number(configuredSlippageRate);
     const tradingFeeRate = Number(configuredTradingFeeRate);
     if (!Number.isFinite(slippageRate) || slippageRate < 0 || slippageRate >= 1 ||
@@ -4621,7 +5416,7 @@ class MultiCoinTrader {
         this.persistRiskMonitorStateIfDue(now);
       }
       this.enforceRiskMonitorFreshness(now);
-      if (!this.isRunning) return;
+      if (!this.isRunning && !this._riskMonitorProtectiveOnly) return;
       this.monitorOpenPositions().catch(error => {
         console.error(`\n❌ 포지션 리스크 모니터 오류: ${error.message}`);
       });
@@ -4635,14 +5430,19 @@ class MultiCoinTrader {
   }
 
   async monitorOpenPositions(snapshotContext = null) {
-    if (!this.isRunning || this._riskCheckInProgress || this._orderInProgress) return;
+    if ((!this.isRunning && !this._riskMonitorProtectiveOnly) ||
+      this._riskCheckInProgress || this._orderInProgress) return;
 
     const riskFreshness = this.enforceRiskMonitorFreshness();
-    if (riskFreshness.failClosed && riskFreshness.staleReason === 'risk_check_stale') return;
+    if (!this._riskMonitorProtectiveOnly &&
+      riskFreshness.failClosed && riskFreshness.staleReason === 'risk_check_stale') return;
 
     const strictPositions = [...this.strategies.entries()]
       .filter(([, strategy]) => strategy?.currentPosition)
       .map(([coin, strategy]) => ({ coin, strategy }));
+    for (const coin of this._deferredProtectiveExitIntents.keys()) {
+      if (!this.strategies.get(coin)?.currentPosition) this._deferredProtectiveExitIntents.delete(coin);
+    }
     const winnerShadowActive = this.winnerShadowExtendMinutes > 0 ||
       this.winnerShadowMaxReboundPercent > 0 ||
       Object.keys(this.paperValidation?.winnerShadow?.positions || {}).length > 0;
@@ -4662,6 +5462,7 @@ class MultiCoinTrader {
         this.syncRiskMonitorState();
         this.persistRiskMonitorStateIfDue(Date.now(), true);
       }
+      this.finishProtectiveMonitoringWhenFlat();
       return;
     }
 
@@ -4700,37 +5501,106 @@ class MultiCoinTrader {
         throw error;
       }
       this.recordRiskMonitorSuccess();
-      if (priceMap.size === 0 || !this.isRunning) return;
+      if (priceMap.size === 0 || (!this.isRunning && !this._riskMonitorProtectiveOnly)) return;
 
       if (strictPositions.length > 0) {
-        const accounts = await this.getAccountInfo();
         let currentPositions = this.getCurrentPositionCount();
+        const exitCandidates = [];
+        const canExecuteRiskExit = coin => {
+          const previousExitState = this._riskMonitorExitInProgress;
+          this._riskMonitorExitInProgress = true;
+          try {
+            return this.canExecuteLiveOrder(coin, { action: 'SELL' });
+          } finally {
+            this._riskMonitorExitInProgress = previousExitState;
+          }
+        };
         for (const { coin, strategy } of strictPositions) {
-          if (!this.isRunning || this._orderInProgress) break;
+          if ((!this.isRunning && !this._riskMonitorProtectiveOnly) || this._orderInProgress) break;
           const currentPrice = priceMap.get(coin);
           if (!Number.isFinite(currentPrice) || !strategy.currentPosition) continue;
 
-          const positionCheck = strategy.checkPosition(currentPrice);
+          const deferredIntent = this._deferredProtectiveExitIntents.get(coin);
+          const positionCheck = deferredIntent
+            ? { shouldClose: true, reason: deferredIntent.reason, type: deferredIntent.type }
+            : strategy.checkPosition(currentPrice);
           if (!positionCheck.shouldClose) continue;
 
-          await this.executeOrder(
-            coin,
-            {
-              action: 'SELL',
-              reason: positionCheck.reason,
-              confidence: '1.00',
-              signalStrength: { level: 'STRONG', multiplier: 1, score: 100 },
-              scores: { technical: '0.00', news: '50.00', total: '0.00' },
-              details: { positionCheck, source: 'position_risk_monitor' }
-            },
-            currentPrice,
-            this.getKRWBalance(accounts),
-            this.getCoinBalance(accounts, coin),
-            currentPositions,
-            [],
-            snapshotContext
-          );
-          currentPositions = this.getCurrentPositionCount();
+          const exitIntent = {
+            reason: positionCheck.reason,
+            type: positionCheck.type || deferredIntent?.type || null,
+            triggeredAt: deferredIntent?.triggeredAt || new Date().toISOString()
+          };
+          this._deferredProtectiveExitIntents.set(coin, exitIntent);
+
+          if (!this.dryRun && !canExecuteRiskExit(coin)) {
+            if (!this._riskMonitorProtectiveOnly) {
+              this.pauseForSafetyIncident('exchange_state_unverified');
+            }
+            continue;
+          }
+
+          exitCandidates.push({ coin, strategy, currentPrice, positionCheck, exitIntent });
+        }
+
+        if (exitCandidates.length > 0) {
+          let accounts;
+          try {
+            accounts = await this.getAccountInfo();
+            const isFiniteNonnegativeField = value =>
+              (typeof value === 'number' || (typeof value === 'string' && value.trim() !== '')) &&
+              Number.isFinite(Number(value)) && Number(value) >= 0;
+            if (!Array.isArray(accounts) || accounts.some(account =>
+              !account || typeof account.currency !== 'string' || !account.currency.trim() ||
+              !isFiniteNonnegativeField(account.balance) || !isFiniteNonnegativeField(account.locked)
+            )) {
+              const error = new Error('리스크 청산용 거래소 계좌 응답이 올바르지 않습니다.');
+              error.code = 'INVALID_RISK_ACCOUNT_SNAPSHOT';
+              throw error;
+            }
+          } catch (error) {
+            if (!this.dryRun) this.pauseForSafetyIncident('exchange_state_unverified');
+            throw error;
+          }
+
+          for (const { coin, strategy, currentPrice, positionCheck, exitIntent } of exitCandidates) {
+            if ((!this.isRunning && !this._riskMonitorProtectiveOnly) || this._orderInProgress) break;
+            if (!strategy.currentPosition) {
+              this._deferredProtectiveExitIntents.delete(coin);
+              continue;
+            }
+            if (!this.dryRun && !canExecuteRiskExit(coin)) {
+              if (!this._riskMonitorProtectiveOnly) {
+                this.pauseForSafetyIncident('exchange_state_unverified');
+              }
+              continue;
+            }
+
+            this._riskMonitorExitInProgress = this._riskMonitorProtectiveOnly;
+            try {
+              await this.executeOrder(
+                coin,
+                {
+                  action: 'SELL',
+                  reason: exitIntent.reason,
+                  confidence: '1.00',
+                  signalStrength: { level: 'STRONG', multiplier: 1, score: 100 },
+                  scores: { technical: '0.00', news: '50.00', total: '0.00' },
+                  details: { positionCheck, source: 'position_risk_monitor' }
+                },
+                currentPrice,
+                this.getKRWBalance(accounts),
+                this.getCoinBalance(accounts, coin),
+                currentPositions,
+                [],
+                snapshotContext
+              );
+            } finally {
+              this._riskMonitorExitInProgress = false;
+            }
+            if (!strategy.currentPosition) this._deferredProtectiveExitIntents.delete(coin);
+            currentPositions = this.getCurrentPositionCount();
+          }
         }
       }
 
@@ -4755,6 +5625,7 @@ class MultiCoinTrader {
         }
         if (shadowClosed) this.savePaperValidation();
       }
+      this.finishProtectiveMonitoringWhenFlat();
     } catch (error) {
       const result = this.handleRiskMonitorFailure(error);
       console.error(`\n⚠️  포지션 리스크 조회 실패: ${error.message} (연속 ${result.status.consecutiveFailures}회, outage ${result.status.currentOutageDurationSeconds.toFixed(1)}초)`);
@@ -4766,37 +5637,298 @@ class MultiCoinTrader {
   /**
    * 실전 모드: 거래소 실제 잔고와 내부 상태 동기화
    * 주문 후 실제 체결 결과와 내부 포지션 상태 불일치 방지
+   * 상태를 확인하지 못하면 false를 반환하며 caller는 분석·신규 판단을 건너뛴다.
    */
   async syncWithExchange() {
-    if (this.dryRun) return; // 모의투자는 동기화 불필요
+    if (this.dryRun) return true; // 모의투자는 동기화 불필요
+
+    if (this._exchangeSyncPromise) return this._exchangeSyncPromise;
+    const syncPromise = this.performExchangeSync();
+    this._exchangeSyncPromise = syncPromise;
+    try {
+      return await syncPromise;
+    } finally {
+      if (this._exchangeSyncPromise === syncPromise) this._exchangeSyncPromise = null;
+    }
+  }
+
+  hasUnresolvedLiveOrderState() {
+    return [
+      this._liveOrderStateUnknownMarkets,
+      this._livePendingOrderMarkets,
+      this._liveEvidenceBlockedMarkets
+    ].some(markets => (markets?.size || 0) > 0) ||
+      (this._liveUnresolvedOrderIds?.size || 0) > 0 ||
+      (this._liveUnresolvedOrderIntents?.size || 0) > 0;
+  }
+
+  async persistLiveOrderReadback({
+    lookupValue,
+    lookupByIdentifier = false,
+    orderId = null,
+    clientIntentId = null,
+    market = null,
+    side = null,
+    orderType = null,
+    request = null
+  } = {}) {
+    if (typeof this.upbit.getOrder !== 'function') throw new Error('exchange order readback is unavailable');
+    const order = await this.upbit.getOrder(lookupValue, { identifier: lookupByIdentifier });
+    if (!order || typeof order.uuid !== 'string' || !order.uuid ||
+      (orderId && order.uuid !== orderId) ||
+      (market && order.market && order.market !== market) ||
+      (side && order.side && order.side !== side) ||
+      (lookupByIdentifier && order.identifier && order.identifier !== clientIntentId)) {
+      throw new Error('exchange order readback does not match the durable order identity');
+    }
+
+    const resolvedOrderId = order.uuid;
+    const resolvedMarket = market || order.market;
+    const resolvedSide = side || order.side;
+    const resolvedOrderType = orderType || order.ord_type;
+    if (lookupByIdentifier) {
+      const submission = this.createLiveExecutionEvidence({
+        eventType: 'ORDER_SUBMITTED',
+        clientIntentId,
+        orderId: resolvedOrderId,
+        market: resolvedMarket,
+        side: resolvedSide,
+        orderType: resolvedOrderType,
+        requested: request,
+        order
+      });
+      if (!this.recordLiveExecutionEvidence(submission)) {
+        throw new Error('could not persist identifier-based order resolution');
+      }
+    }
+
+    const stateEvent = this.createLiveExecutionEvidence({
+      eventType: 'ORDER_STATE_OBSERVED',
+      clientIntentId,
+      orderId: resolvedOrderId,
+      market: resolvedMarket,
+      side: resolvedSide,
+      orderType: resolvedOrderType,
+      order
+    });
+    if (!this.recordLiveExecutionEvidence(stateEvent)) {
+      throw new Error('could not persist exchange order readback');
+    }
+
+    const hasObservedNumber = value => value !== null && value !== undefined &&
+      !(typeof value === 'string' && value.trim() === '') && Number.isFinite(Number(value));
+    const executedVolume = hasObservedNumber(order.executed_volume) ? Number(order.executed_volume) : null;
+    const remainingVolume = hasObservedNumber(order.remaining_volume) ? Number(order.remaining_volume) : null;
+    const averagePrice = hasObservedNumber(order.avg_price) ? Number(order.avg_price) : null;
+    const paidFee = hasObservedNumber(order.paid_fee) ? Number(order.paid_fee) : null;
+    const completeFillAccounting = executedVolume !== null && executedVolume > 0 &&
+      remainingVolume !== null && remainingVolume >= 0 &&
+      averagePrice !== null && averagePrice > 0 &&
+      paidFee !== null && paidFee >= 0;
+    if (completeFillAccounting) {
+      const terminalFill = order.state === 'done' && remainingVolume === 0;
+      const fillEvent = this.createLiveExecutionEvidence({
+        eventType: terminalFill ? 'FILL_OBSERVED' : 'FILL_PARTIAL',
+        clientIntentId,
+        orderId: resolvedOrderId,
+        market: resolvedMarket,
+        side: resolvedSide,
+        orderType: resolvedOrderType,
+        order,
+        fillResult: {
+          filled: terminalFill || executedVolume > 0,
+          partial: !terminalFill,
+          error: terminalFill ? null : `exchange order state: ${order.state || 'unknown'}`
+        }
+      });
+      if (!this.recordLiveExecutionEvidence(fillEvent)) {
+        throw new Error('could not persist observed exchange fill');
+      }
+    } else if (['cancel', 'done'].includes(order.state) && executedVolume === 0) {
+      const notFilledEvent = this.createLiveExecutionEvidence({
+        eventType: 'FILL_NOT_OBSERVED',
+        clientIntentId,
+        orderId: resolvedOrderId,
+        market: resolvedMarket,
+        side: resolvedSide,
+        orderType: resolvedOrderType,
+        order,
+        fillResult: { filled: false, error: 'terminal exchange order has zero executed volume' }
+      });
+      if (!this.recordLiveExecutionEvidence(notFilledEvent)) {
+        throw new Error('could not persist terminal zero-fill exchange state');
+      }
+    }
+    return resolvedOrderId;
+  }
+
+  async resolveUnresolvedLiveOrders() {
+    const inspection = inspectLiveExecutionEvidenceFile(this.liveExecutionEvidenceFile);
+    const reconciliation = inspection.reconciliation;
+    if (!inspection.available || !reconciliation) {
+      if (inspection.blockingReasons.length > 0) {
+        this.liveExecutionEvidenceDataError = `live execution evidence cannot be read: ${inspection.blockingReasons.join('; ')}`;
+      }
+      return { complete: inspection.blockingReasons.length === 0 };
+    }
+
+    let complete = true;
+    for (const unresolved of reconciliation.unresolvedSubmittedOrders || []) {
+      try {
+        await this.persistLiveOrderReadback({
+          lookupValue: unresolved.orderId,
+          orderId: unresolved.orderId,
+          clientIntentId: unresolved.clientIntentId,
+          market: unresolved.market,
+          side: unresolved.side,
+          orderType: unresolved.orderType,
+          request: unresolved.request
+        });
+      } catch (error) {
+        if (unresolved.market) this._liveOrderStateUnknownMarkets.add(unresolved.market);
+        else complete = false;
+        console.error(`  ❌ [${unresolved.market || unresolved.orderId}] 주문 ${unresolved.orderId} 복구 확인 실패: ${error.message}`);
+      }
+    }
+
+    for (const intent of reconciliation.unresolvedOrderIntents || []) {
+      if (!intent.clientIntentId) {
+        complete = false;
+        continue;
+      }
+      try {
+        await this.persistLiveOrderReadback({
+          lookupValue: intent.clientIntentId,
+          lookupByIdentifier: true,
+          clientIntentId: intent.clientIntentId,
+          market: intent.market,
+          side: intent.side,
+          orderType: intent.orderType,
+          request: intent.request
+        });
+      } catch (error) {
+        this._liveOrderStateUnknownMarkets.add(intent.market);
+        if (!intent.market) complete = false;
+        console.error(`  ❌ [${intent.market}] 주문 intent ${intent.clientIntentId} 복구 확인 실패: ${error.message}`);
+      }
+    }
+    return { complete };
+  }
+
+  refreshLiveEvidenceRecoveryState({ checkedMarkets = new Set(), orderReadUnknownMarkets = new Set(), orderPendingMarkets = new Set() } = {}) {
+    const inspection = inspectLiveExecutionEvidenceFile(this.liveExecutionEvidenceFile);
+    this.liveExecutionEvidenceStartup = inspection;
+    const reconciliation = inspection.reconciliation;
+    if (!reconciliation) return;
+
+    this._liveUnresolvedOrderIds = new Map((reconciliation.unresolvedSubmittedOrders || [])
+      .map(order => [order.orderId, order]));
+    this._liveUnresolvedOrderIntents = new Map((reconciliation.unresolvedOrderIntents || [])
+      .map((intent, index) => [intent.clientIntentId || `legacy:${intent.market || 'unknown'}:${intent.createdAt || index}`, intent]));
+    const unresolvedMarkets = new Set([
+      ...[...this._liveUnresolvedOrderIds.values()].map(order => order.market),
+      ...[...this._liveUnresolvedOrderIntents.values()].map(intent => intent.market)
+    ].filter(Boolean));
+    const previousBlockedMarkets = [...this._liveEvidenceBlockedMarkets];
+    this._liveEvidenceBlockedMarkets = unresolvedMarkets;
+    for (const market of previousBlockedMarkets) {
+      if (!unresolvedMarkets.has(market) && checkedMarkets.has(market) &&
+        !orderReadUnknownMarkets.has(market) && !orderPendingMarkets.has(market)) {
+        this._liveOrderStateUnknownMarkets.delete(market);
+        this._livePendingOrderMarkets.delete(market);
+      }
+    }
+    for (const market of unresolvedMarkets) {
+      this._liveRecoveredManagedMarkets.add(market);
+      this._liveOrderStateUnknownMarkets.add(market);
+      this._livePendingOrderMarkets.add(market);
+    }
+    const fatalBlocks = inspection.blockingReasons.filter(reason =>
+      !reason.startsWith('unresolved submitted orders:') && !reason.startsWith('unresolved order intents:'));
+    if (fatalBlocks.length > 0) {
+      this.liveExecutionEvidenceDataError = `startup safety block: ${fatalBlocks.join('; ')}`;
+    } else if (typeof this.liveExecutionEvidenceDataError === 'string' &&
+      this.liveExecutionEvidenceDataError.startsWith('startup safety block:')) {
+      this.liveExecutionEvidenceDataError = null;
+    }
+  }
+
+  async performExchangeSync() {
+    const fullManagedMarketSet = this.getLiveManagedMarkets();
+    const scopedMarkets = new Set([
+      ...this._liveEvidenceBlockedMarkets,
+      ...this._livePendingOrderMarkets,
+      ...this._liveOrderStateUnknownMarkets
+    ]);
+    const partialMarketRefresh = this._liveExchangeStateKnown === true && scopedMarkets.size > 0 &&
+      Date.now() - (this._lastSyncTime || 0) < 10 * 60 * 1000;
+    const orderMarketsToRefresh = partialMarketRefresh
+      ? [...new Set([...scopedMarkets, ...this._manualOrderReconciliationMarkets])]
+      : fullManagedMarketSet;
+    this._liveExchangeStateKnown = false;
+    this._liveAccountStateKnown = false;
+    if (!partialMarketRefresh) {
+      this._liveVerifiedOrderMarkets.clear();
+      this._liveOrderStateUnknownMarkets = new Set(fullManagedMarketSet);
+      this._livePendingOrderMarkets = new Set();
+    }
 
     try {
       console.log(`\n🔄 거래소 잔고 동기화 중...`);
 
+      // Resolve UUIDs persisted by earlier process instances before reading
+      // the open-order list. UUID-less intents remain ambiguous and are scoped
+      // to their market until a human can resolve the exchange-side identity.
+      const evidenceRecovery = await this.resolveUnresolvedLiveOrders();
+
+      // Read open orders first, then read balances so a fill that occurs while
+      // the order list is being checked is reflected in the recovered account.
+      const pendingOrderStatus = await this.cleanupPendingOrders({
+        managedMarkets: orderMarketsToRefresh,
+        preserveUntouchedMarkets: partialMarketRefresh
+      });
       const accounts = await this.upbit.getAccounts();
+      if (!Array.isArray(accounts)) throw new Error('거래소 계좌 응답이 올바르지 않습니다.');
       const exchangeHoldings = new Map();
+      const isFiniteNonnegativeField = value =>
+        (typeof value === 'number' || (typeof value === 'string' && value.trim() !== '')) &&
+        Number.isFinite(Number(value)) && Number(value) >= 0;
 
       // 거래소 실제 보유량 수집
       for (const acc of accounts) {
+        if (!acc || typeof acc.currency !== 'string' || !acc.currency.trim() ||
+          !isFiniteNonnegativeField(acc.balance) || !isFiniteNonnegativeField(acc.locked)) {
+          this._liveAccountStateKnown = false;
+          console.error('  ❌ 거래소 계좌 응답에 통화 또는 잔고 값이 잘못된 행이 있습니다.');
+          return false;
+        }
         if (acc.currency === 'KRW') continue;
 
-        const balance = parseFloat(acc.balance || 0);
-        const locked = parseFloat(acc.locked || 0);
+        const balance = Number(acc.balance);
+        const locked = Number(acc.locked);
         const totalBalance = balance + locked;
 
         if (totalBalance > 0) {
           const market = `KRW-${acc.currency}`;
           exchangeHoldings.set(market, {
             balance: totalBalance,
-            avgPrice: parseFloat(acc.avg_buy_price || 0)
+            avgPrice: Number(acc.avg_buy_price || 0)
           });
         }
       }
+      this._liveAccountStateKnown = true;
 
       // 내부 상태와 비교
       let syncIssues = 0;
+      let positionsComplete = true;
+      const targetMarketSet = new Set(this.getLiveManagedMarkets());
+      const reconciliationCoins = new Set(this.strategies.keys());
+      for (const coin of exchangeHoldings.keys()) {
+        if (targetMarketSet.has(coin)) reconciliationCoins.add(coin);
+      }
 
-      for (const [coin, strategy] of this.strategies.entries()) {
+      for (const coin of reconciliationCoins) {
+        const strategy = this.getStrategy(coin);
         const exchangeData = exchangeHoldings.get(coin);
         const internalPosition = strategy.currentPosition;
 
@@ -4808,14 +5940,23 @@ class MultiCoinTrader {
         } else if (!internalPosition && exchangeData && exchangeData.balance > 0) {
           // 거래소에는 있지만 내부에 없음 - 수동 매수 또는 동기화 누락
           const minValue = exchangeData.balance * exchangeData.avgPrice;
-          if (minValue >= 5000) { // 최소 금액 이상인 경우만
-            console.log(`  ⚠️  [${coin}] 동기화: 거래소에 보유 중이지만 내부 포지션 없음`);
-            console.log(`      보유량: ${exchangeData.balance.toFixed(8)}, 평균가: ${exchangeData.avgPrice.toLocaleString()}원`);
-            // 포지션 복구
-            strategy.openPosition(exchangeData.avgPrice, exchangeData.balance, 'BUY');
-            console.log(`      → 포지션 복구됨`);
-            syncIssues++;
+          if (!Number.isFinite(exchangeData.avgPrice) || exchangeData.avgPrice <= 0 || !Number.isFinite(minValue)) {
+            console.error(`  ❌ [${coin}] 거래소 보유량의 평균 매입가를 확인할 수 없어 포지션을 복구하지 못했습니다.`);
+            positionsComplete = false;
+            continue;
           }
+          console.log(`  ⚠️  [${coin}] 동기화: 거래소에 보유 중이지만 내부 포지션 없음`);
+          console.log(`      보유량: ${exchangeData.balance.toFixed(8)}, 평균가: ${exchangeData.avgPrice.toLocaleString()}원`);
+          // 전략 universe의 보유량은 주문 최소 금액 미만이어도 flat으로 오인하지 않도록 복구한다.
+          strategy.openPosition(exchangeData.avgPrice, exchangeData.balance, 'BUY');
+          const recoveredPosition = this._liveRecoveredPositionStates.get(coin);
+          if (strategy.currentPosition) {
+            if (typeof recoveredPosition?.entryTime === 'string' && Number.isFinite(Date.parse(recoveredPosition.entryTime))) {
+              strategy.currentPosition.entryTime = recoveredPosition.entryTime;
+            }
+          }
+          console.log(`      → 포지션 복구됨${minValue < 5000 ? ' (최소 주문 금액 미만 보유)' : ''}`);
+          syncIssues++;
         } else if (internalPosition && exchangeData) {
           // 둘 다 있는 경우 수량 비교
           const diff = Math.abs(internalPosition.amount - exchangeData.balance);
@@ -4830,73 +5971,181 @@ class MultiCoinTrader {
         }
       }
 
+      if (!positionsComplete) {
+        this._liveAccountStateKnown = false;
+        return false;
+      }
+      this._liveAccountStateKnown = true;
+
+      // Account reads and every managed market's open-order listing must be
+      // complete before the engine can trade. UUID-level uncertainty remains
+      // isolated to its market and is enforced by canExecuteLiveOrder().
+      if ((!pendingOrderStatus.discoveryComplete && !partialMarketRefresh) || !evidenceRecovery.complete) return false;
       if (syncIssues === 0) {
-        console.log(`  ✅ 동기화 완료 - 불일치 없음`);
+        console.log('  ✅ 동기화 완료 - 불일치 없음');
       } else {
         console.log(`  ⚠️  동기화 완료 - ${syncIssues}건 수정됨`);
       }
-
-      // 미체결 주문 확인 및 정리
-      await this.cleanupPendingOrders();
+      for (const market of this._liveRecoveredManagedMarkets) {
+        if (!exchangeHoldings.has(market) && !this.strategies.get(market)?.currentPosition) {
+          this._liveRecoveredManagedMarkets.delete(market);
+        }
+      }
+      this.refreshLiveEvidenceRecoveryState({
+        checkedMarkets: pendingOrderStatus.successfullyQueriedMarkets,
+        orderReadUnknownMarkets: pendingOrderStatus.unknownMarkets,
+        orderPendingMarkets: pendingOrderStatus.pendingMarkets
+      });
+      for (const market of pendingOrderStatus.successfullyQueriedMarkets) {
+        this._liveVerifiedOrderMarkets.set(market, Date.now());
+      }
+      for (const market of pendingOrderStatus.unknownMarkets) this._liveVerifiedOrderMarkets.delete(market);
+      for (const market of pendingOrderStatus.unknownMarkets) this._liveOrderStateUnknownMarkets.add(market);
+      for (const market of pendingOrderStatus.pendingMarkets) this._livePendingOrderMarkets.add(market);
+      this._liveExchangeStateKnown = true;
+      this._lastSyncTime = Date.now();
+      if (this._startupReconciliationPending && this.isRunning &&
+        !this._stopRequested && !this._riskMonitorProtectiveOnly) {
+        this._startupReconciliationPending = false;
+        this._entriesPaused = false;
+        this.stopReason = null;
+      }
+      return true;
 
     } catch (error) {
+      this._liveExchangeStateKnown = false;
       console.error(`  ❌ 동기화 실패: ${error.message}`);
+      return false;
     }
   }
 
   /**
    * 미체결 주문 정리
    */
-  async cleanupPendingOrders() {
-    try {
-      // 대기 중인 주문 조회
-      for (const coin of this.targetCoins) {
-        const pendingOrders = await this.upbit.getOrders(coin, 'wait');
+  async cleanupPendingOrders({ managedMarkets: requestedMarkets = null, preserveUntouchedMarkets = false } = {}) {
+    let complete = true;
+    let discoveryComplete = true;
+    const unknownMarkets = new Set();
+    const pendingMarkets = new Set();
+    const successfullyQueriedMarkets = new Set();
+    const openOrderIds = new Set();
+    const managedMarkets = Array.isArray(requestedMarkets) ? requestedMarkets : this.getLiveManagedMarkets();
+    if (preserveUntouchedMarkets) {
+      for (const market of managedMarkets) {
+        this._liveOrderStateUnknownMarkets.add(market);
+        this._livePendingOrderMarkets.delete(market);
+      }
+    } else {
+      this._liveOrderStateUnknownMarkets = new Set(this.getLiveManagedMarkets());
+      this._livePendingOrderMarkets = new Set();
+    }
+    for (const coin of managedMarkets) {
+      let pendingOrders;
+      try {
+        pendingOrders = await this.upbit.getOrders(coin, ['wait', 'watch']);
+      } catch (error) {
+        console.error(`  ❌ [${coin}] 미체결 주문 조회 실패: ${error.message}`);
+        complete = false;
+        discoveryComplete = false;
+        unknownMarkets.add(coin);
+        continue;
+      }
 
-        if (pendingOrders && pendingOrders.length > 0) {
-          console.log(`  📋 [${coin}] 미체결 주문 ${pendingOrders.length}건 발견`);
+      if (!Array.isArray(pendingOrders)) {
+        console.error(`  ❌ [${coin}] 미체결 주문 응답이 올바르지 않습니다.`);
+        complete = false;
+        discoveryComplete = false;
+        unknownMarkets.add(coin);
+        continue;
+      }
+      this._liveOrderStateUnknownMarkets.delete(coin);
+      successfullyQueriedMarkets.add(coin);
+      if (pendingOrders.length === 0) continue;
 
-          for (const order of pendingOrders) {
-            const orderAge = Date.now() - new Date(order.created_at).getTime();
-            const orderAgeMinutes = Math.floor(orderAge / 60000);
+      console.log(`  📋 [${coin}] 미체결 주문 ${pendingOrders.length}건 발견`);
+      pendingMarkets.add(coin);
+      this._livePendingOrderMarkets.add(coin);
+      for (const order of pendingOrders) {
+        const createdAt = Date.parse(order?.created_at);
+        const uuid = typeof order?.uuid === 'string' ? order.uuid.trim() : '';
+        if (!uuid || !Number.isFinite(createdAt)) {
+          console.error(`    ❌ [${coin}] 미체결 주문 정보가 불완전합니다.`);
+          complete = false;
+          unknownMarkets.add(coin);
+          continue;
+        }
+        openOrderIds.add(uuid);
 
-            // 5분 이상 된 주문은 취소
-            if (orderAgeMinutes >= 5) {
-              console.log(`    🔄 ${orderAgeMinutes}분 경과 주문 취소: ${order.uuid}`);
-              try {
-                await this.upbit.cancelOrder(order.uuid);
-                console.log(`    ✅ 취소됨`);
-              } catch (e) {
-                console.log(`    ⚠️  취소 실패: ${e.message}`);
-              }
-            } else {
-              console.log(`    ⏳ ${order.uuid} - ${orderAgeMinutes}분 경과 (5분 후 자동 취소)`);
-            }
+        const orderAgeMinutes = Math.max(0, Math.floor((Date.now() - createdAt) / 60000));
+        // 5분 이상 된 주문은 취소
+        if (orderAgeMinutes >= 5) {
+          if (!this._liveEngineOrderIds.has(uuid)) {
+            console.log(`    ⚠️  ${uuid} - 오래된 미체결 주문이지만 소유권을 확인할 수 없어 취소하지 않습니다.`);
+            complete = false;
+            continue;
           }
+          console.log(`    🔄 ${orderAgeMinutes}분 경과 주문 취소: ${uuid}`);
+          try {
+            await this.upbit.cancelOrder(uuid);
+            console.log('    ✅ 취소 요청 완료 - 취소/체결 상태를 다시 확인합니다.');
+          } catch (error) {
+            console.log(`    ⚠️  취소 실패: ${error.message}`);
+          }
+          complete = false;
+        } else {
+          console.log(`    ⏳ ${uuid} - ${orderAgeMinutes}분 경과 (5분 후에도 대기 중이면 소유권을 확인합니다)`);
+          complete = false;
         }
       }
-    } catch {
-      // 개별 코인 오류는 무시하고 계속
     }
+    for (const [orderId, market] of this._liveEngineOrderMarkets) {
+      if (successfullyQueriedMarkets.has(market) && !openOrderIds.has(orderId)) {
+        this._liveEngineOrderMarkets.delete(orderId);
+        this._liveEngineOrderIds.delete(orderId);
+      }
+    }
+    return { complete, discoveryComplete, unknownMarkets, pendingMarkets, successfullyQueriedMarkets };
   }
 
   /**
    * 다중 코인 매매 사이클
    */
   async executeTradingCycle() {
+    // 0. 실전 모드: 정기 동기화와 안전 상태 복구를 함께 확인한다.
+    if (!this.dryRun) {
+      const lastSync = this._lastSyncTime || 0;
+      const now = Date.now();
+      const globalExchangeStateUnknown = this._liveExchangeStateKnown !== true;
+      const scopedOrderStateNeedsRecheck = this._liveEvidenceBlockedMarkets.size > 0 ||
+        this._livePendingOrderMarkets.size > 0 || this._liveOrderStateUnknownMarkets.size > 0;
+      const exchangeStateNeedsRecheck = globalExchangeStateUnknown || scopedOrderStateNeedsRecheck;
+      const syncDue = exchangeStateNeedsRecheck || now - lastSync > 10 * 60 * 1000;
+      if (syncDue) {
+        const waitingForScopedRetry = scopedOrderStateNeedsRecheck &&
+          now - this._lastExchangeSyncAttemptTime < this.exchangeSyncRetryMs;
+        const waitingForGlobalRetry = globalExchangeStateUnknown &&
+          now - this._lastExchangeSyncAttemptTime < this.exchangeSyncRetryMs;
+        if (waitingForGlobalRetry) return false;
+        if (!waitingForScopedRetry) {
+          this._lastExchangeSyncAttemptTime = now;
+          const synchronized = await this.syncWithExchange();
+          if (synchronized !== true) {
+            if (this.getCurrentPositionCount() > 0) {
+              this.pauseForSafetyIncident('exchange_state_unverified');
+            }
+            console.error('  🛑 거래소 동기화 실패 - 포지션 상태가 확인될 때까지 분석과 신규 매매를 건너뜁니다.');
+            return false;
+          }
+          this._lastSyncTime = Date.now();
+          this._lastExchangeSyncAttemptTime = this._lastSyncTime;
+        }
+      }
+    }
+
     this.beginAnalysisDataCycle();
     const now = new Date();
     console.log(`\n⏰ [${now.toLocaleString('ko-KR')}] 다중 코인 매매 분석 시작`);
     console.log('='.repeat(80));
-
-    // 0. 실전 모드: 거래소 동기화 (10분마다)
-    if (!this.dryRun) {
-      const lastSync = this._lastSyncTime || 0;
-      if (Date.now() - lastSync > 10 * 60 * 1000) { // 10분
-        await this.syncWithExchange();
-        this._lastSyncTime = Date.now();
-      }
-    }
 
     // 1. 계좌 조회
     const accounts = await this.getAccountInfo();
@@ -4924,6 +6173,7 @@ class MultiCoinTrader {
     const coinAnalyses = [];
     const analysisFailureMarkets = [];
     const analysisFailureCounts = {};
+    const analysisTransportFailureCodes = {};
 
     this.cycleRequestStats = {
       batchTickerRequests: 0,
@@ -4957,8 +6207,13 @@ class MultiCoinTrader {
       } catch (error) {
         console.error(`\n❌ ${coin} 분석 오류:`, error.message);
         const failureCode = classifyAnalysisFailure(error);
+        const transportCode = analysisNetworkErrorCode(error);
         analysisFailureMarkets.push(coin);
         analysisFailureCounts[failureCode] = (analysisFailureCounts[failureCode] || 0) + 1;
+        if (transportCode) {
+          analysisTransportFailureCodes[transportCode] =
+            (analysisTransportFailureCodes[transportCode] || 0) + 1;
+        }
       }
     }
 
@@ -4971,13 +6226,14 @@ class MultiCoinTrader {
     const analysisDataHealth = this.recordAnalysisDataHealth(coinAnalyses, Date.now(), {
       failureCode: analysisFailureCode,
       failureMarkets: analysisFailureMarkets,
-      failureCounts: analysisFailureCounts
+      failureCounts: analysisFailureCounts,
+      transportFailureCodes: analysisTransportFailureCodes
     });
     if (!analysisDataHealth.complete) {
       this.recordPaperIncompleteAnalysisTelemetry(analysisDataHealth);
       if (analysisDataHealth.failClosed && this.isRunning) {
         console.error(`\n🛑 분석 데이터 공백 ${analysisDataHealth.gapDurationSeconds.toFixed(1)}초 초과 - paper/live 관찰을 중지합니다.`);
-        this.stop('analysis_data_gap');
+        this.pauseForSafetyIncident('analysis_data_gap');
       }
       return;
     }
@@ -5037,10 +6293,16 @@ class MultiCoinTrader {
 
     // 7. 매매 실행 (강한 신호 우선)
     for (const analysis of coinAnalyses) {
-      // 현재 KRW 잔액 갱신 (리밸런싱으로 변동 가능)
-      const accounts = await this.getAccountInfo();
-      const updatedKrwBalance = this.getKRWBalance(accounts);
-      const updatedPositions = this.getCurrentPositionCount();
+      let updatedKrwBalance = krwBalance;
+      let updatedPositions = currentPositions;
+      if (analysis.decision?.action !== 'HOLD') {
+        // Refresh immediately before actionable orders so manual/external
+        // account changes still gate BUY/SELL. HOLD returns before reading
+        // either balance, position count, or exchange state.
+        const latestAccounts = await this.getAccountInfo();
+        updatedKrwBalance = this.getKRWBalance(latestAccounts);
+        updatedPositions = this.getCurrentPositionCount();
+      }
 
       await this.executeOrder(
         analysis.coin,
@@ -5281,7 +6543,7 @@ class MultiCoinTrader {
     console.log(`\n⏳ [${coin}] 반등 확인 완료 - ${delayMs}ms 후 주문 재검증`);
     if (!skipDelay) await this.sleep(delayMs);
 
-    if (this._stopRequested) {
+    if (this._stopRequested || this._entriesPaused) {
       this.recordPaperEntryConfirmation(coin, 'cancelled', 'stop_requested');
       this.resolveWinnerShadowBlockedEntryAsNotFilled(coin, decision, 'stop_requested');
       console.log(`  ⛔ [${coin}] 중지 요청으로 진입 취소`);
@@ -5354,13 +6616,32 @@ class MultiCoinTrader {
    * @param {Array} coinAnalyses - 전체 코인 분석 결과 (리밸런싱용)
    */
   async executeOrder(...args) {
-    if (this._orderInProgress) return null;
-    this._orderInProgress = true;
-    try {
-      return await this._executeOrder(...args);
-    } finally {
-      this._orderInProgress = false;
+    const execute = async () => {
+      if (this._orderInProgress) return null;
+      this._orderInProgress = true;
+      try {
+        return await this._executeOrder(...args);
+      } finally {
+        this._orderInProgress = false;
+      }
+    };
+    return this.dryRun ? this.withPortfolioMutationLock(execute) : execute();
+  }
+
+  canExecuteLiveOrder(coin, decision) {
+    if (this.dryRun) return true;
+    if (!this._liveAccountStateKnown) return false;
+    if (this._liveEvidenceBlockedMarkets.has(coin)) return false;
+    if (this._liveOrderStateUnknownMarkets.has(coin) || this._livePendingOrderMarkets.has(coin)) return false;
+
+    const protectiveRiskExit = this._riskMonitorProtectiveOnly &&
+      this._riskMonitorExitInProgress &&
+      decision?.action === 'SELL';
+    const verifiedAt = Number(this._liveVerifiedOrderMarkets.get(coin));
+    if (!protectiveRiskExit && (!Number.isFinite(verifiedAt) || Date.now() - verifiedAt >= 10 * 60 * 1000)) {
+      return false;
     }
+    return this._liveExchangeStateKnown || (protectiveRiskExit && !this._exchangeSyncPromise);
   }
 
   async _executeOrder(
@@ -5374,6 +6655,12 @@ class MultiCoinTrader {
     executionContext = null
   ) {
     if (this._stopRequested) return null;
+    if (!this.canExecuteLiveOrder(coin, decision)) return null;
+    if (this._entriesPaused && !(
+      this._riskMonitorProtectiveOnly &&
+      this._riskMonitorExitInProgress &&
+      decision?.action === 'SELL'
+    )) return null;
     if (!this.dryRun && (this.liveExecutionEvidenceWriteError || this.liveExecutionEvidenceDataError)) {
       const reason = this.liveExecutionEvidenceWriteError || this.liveExecutionEvidenceDataError;
       console.error(`🛑 live execution evidence가 불완전해 신규 주문을 차단합니다: ${reason}`);
@@ -5504,6 +6791,13 @@ class MultiCoinTrader {
         krwBalance * 0.95
       );
 
+      // A LIVE data-gap transition may happen during an awaited confirmation
+      // or investment calculation. Recheck immediately before any BUY dispatch.
+      if (this._entriesPaused || this._stopRequested) {
+        this.resolveWinnerShadowBlockedEntryAsNotFilled(coin, decision, 'entries_paused');
+        return null;
+      }
+
       const baseInvestment = totalAssets * this.investmentRatio;
       console.log(`  💰 투자금액: ${investmentAmount.toLocaleString()}원`);
       console.log(`     (기본 ${baseInvestment.toLocaleString()}원 × ${signalStrength.multiplier} = ${dynamicInvestment.toLocaleString()}원)`);
@@ -5580,7 +6874,7 @@ class MultiCoinTrader {
         console.log(`  예상 가격: ${currentPrice.toLocaleString()} 원`);
         console.log(`  투자 금액: ${investmentAmount.toLocaleString()} 원`);
 
-        const orderResult = await this.upbit.order(coin, 'bid', investmentAmount, null, 'price');
+        const orderResult = await this.submitLiveOrder(coin, 'bid', investmentAmount, null, 'price');
         const orderId = orderResult?.data?.uuid || null;
         const submissionEvidenceRecorded = this.recordLiveExecutionEvidence(this.createLiveExecutionEvidence({
           eventType: orderResult?.success === true ? 'ORDER_SUBMITTED' : 'ORDER_REJECTED',
@@ -5604,7 +6898,7 @@ class MultiCoinTrader {
 
           // 주문 체결 대기 (최대 30초)
           console.log(`  ⏳ 체결 대기 중...`);
-          const fillResult = await this.upbit.waitForOrderFill(orderId, 30000, 1000);
+          const fillResult = await this.waitForLiveOrderFill(coin, orderId, 30000, 1000);
 
           if (fillResult.filled) {
             const filledOrder = fillResult.order;
@@ -5812,7 +7106,7 @@ class MultiCoinTrader {
         console.log(`  예상 가격: ${currentPrice.toLocaleString()} 원`);
         console.log(`  매도 수량: ${sellVolume.toFixed(8)}`);
 
-        const orderResult = await this.upbit.order(coin, 'ask', sellVolume, null, 'market');
+        const orderResult = await this.submitLiveOrder(coin, 'ask', sellVolume, null, 'market');
         const orderId = orderResult?.data?.uuid || null;
         const submissionEvidenceRecorded = this.recordLiveExecutionEvidence(this.createLiveExecutionEvidence({
           eventType: orderResult?.success === true ? 'ORDER_SUBMITTED' : 'ORDER_REJECTED',
@@ -5830,7 +7124,7 @@ class MultiCoinTrader {
 
           // 주문 체결 대기 (최대 30초)
           console.log(`  ⏳ 체결 대기 중...`);
-          const fillResult = await this.upbit.waitForOrderFill(orderId, 30000, 1000);
+          const fillResult = await this.waitForLiveOrderFill(coin, orderId, 30000, 1000);
 
           if (fillResult.filled) {
             const filledOrder = fillResult.order;
@@ -6089,7 +7383,7 @@ class MultiCoinTrader {
       console.log(`    예상 가격: ${currentPrice.toLocaleString()} 원`);
       console.log(`    매도 수량: ${sellVolume.toFixed(8)}`);
 
-      const orderResult = await this.upbit.order(coin, 'ask', sellVolume, null, 'market');
+      const orderResult = await this.submitLiveOrder(coin, 'ask', sellVolume, null, 'market');
       const orderId = orderResult?.data?.uuid || null;
       const submissionEvidenceRecorded = this.recordLiveExecutionEvidence(this.createLiveExecutionEvidence({
         eventType: orderResult?.success === true ? 'ORDER_SUBMITTED' : 'ORDER_REJECTED',
@@ -6107,7 +7401,7 @@ class MultiCoinTrader {
 
         // 주문 체결 대기 (최대 30초)
         console.log(`    ⏳ 체결 대기 중...`);
-        const fillResult = await this.upbit.waitForOrderFill(orderId, 30000, 1000);
+        const fillResult = await this.waitForLiveOrderFill(coin, orderId, 30000, 1000);
 
         if (fillResult?.filled === true) {
           const filledOrder = fillResult.order;

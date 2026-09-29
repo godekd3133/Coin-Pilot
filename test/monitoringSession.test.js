@@ -137,7 +137,7 @@ test('종료된 session은 재개되지 않고 수동 자문은 session 없이�
     const service = new MonitoringSessionService({ stateFile: file, advisor });
     const session = service.createSession({ eventTypes: ['SELL_SIGNAL'], providers: ['claude'], autoConsult: false });
     service.updateSessionStatus(session.id, 'STOPPED');
-    assert.throws(() => service.updateSessionStatus(session.id, 'RUNNING'), /종료된 session/);
+    assert.throws(() => service.updateSessionStatus(session.id, 'RUNNING'), /종료된 알림은 다시 시작할 수 없습니다/);
 
     const event = service.addManualEvent({ type: 'SELL_SIGNAL', coin: 'KRW-ETH', action: 'SELL', reason: '수동 자문 테스트' });
     const consultation = await service.requestConsultation({ eventId: event.id, provider: 'claude' });
@@ -386,7 +386,7 @@ test('CALM-only 또는 VETO_FLAT 표본은 충분한 실효성 표본으로 승�
     assert.equal(effectiveness.providerStats.gpt.actionableEvaluations, 0);
     assert.equal(effectiveness.providerStats.gpt.sufficientEvidence, false);
     assert.equal(effectiveness.sufficientEvidence, false);
-    assert.match(effectiveness.evidenceWarning, /방향성\/veto/);
+    assert.match(effectiveness.evidenceWarning, /매수·매도 방향 또는 주문 보류 결과/);
   } finally {
     for (const candidate of [file, `${file}.tmp-${process.pid}`]) {
       if (fs.existsSync(candidate)) fs.unlinkSync(candidate);
