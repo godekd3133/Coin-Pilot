@@ -25,25 +25,26 @@ class InvalidCandleQueryError extends Error {
   }
 }
 
-function normalizeKrwMarkets(payload) {
+function normalizeKrwMarkets(payload, quote = 'KRW') {
   if (!Array.isArray(payload) || payload.length === 0) {
     throw new TypeError('Market list response must be a non-empty array.');
   }
 
+  const quotePrefix = `${quote}-`;
   const markets = new Set();
   for (const entry of payload) {
     const market = entry?.market;
     if (typeof market !== 'string' || !/^[A-Z0-9]+-[A-Z0-9]+$/.test(market)) {
       throw new TypeError('Market list response contains an invalid market code.');
     }
-    if (market.startsWith('KRW-')) markets.add(market);
+    if (market.startsWith(quotePrefix)) markets.add(market);
   }
 
   if (markets.size === 0) {
-    throw new TypeError('Market list response contains no KRW markets.');
+    throw new TypeError('Market list response contains no markets.');
   }
 
-  const priority = new Map(['KRW-BTC', 'KRW-ETH', 'KRW-XRP', 'KRW-SOL', 'KRW-DOGE']
+  const priority = new Map([`${quote}-BTC`, `${quote}-ETH`, `${quote}-XRP`, `${quote}-SOL`, `${quote}-DOGE`]
     .map((market, index) => [market, index]));
   return [...markets].sort((left, right) => {
     const leftPriority = priority.get(left);
@@ -185,7 +186,7 @@ export default function createMarketRoutes(server) {
     request = (async () => {
       try {
         const payload = await getMarketDataProvider(server).getMarkets();
-        const coins = normalizeKrwMarkets(payload);
+        const coins = normalizeKrwMarkets(payload, server.tradingSystem?.quoteAsset || 'KRW');
         const fetchedAtMs = Date.now();
         const verified = {
           coins,

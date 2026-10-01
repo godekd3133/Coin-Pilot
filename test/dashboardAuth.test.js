@@ -392,7 +392,12 @@ test('인증 활성 서버는 /api/*를 토큰 없이 401로 거부한다', asyn
   try {
     const statusRes = await fetch(`${ctx.baseUrl}/api/auth/status`);
     assert.equal(statusRes.status, 200);
-    assert.deepEqual(await statusRes.json(), { success: true, authRequired: true });
+    assert.deepEqual(await statusRes.json(), {
+      success: true,
+      authRequired: true,
+      exchange: 'upbit',
+      quoteCurrency: 'KRW'
+    });
 
     const noAuth = await fetch(`${ctx.baseUrl}/api/status`);
     assert.equal(noAuth.status, 401);
@@ -671,7 +676,12 @@ test('인증 비활성 서버는 /api를 토큰 없이 서빙하고 루프백에
     const res = await fetch(`${ctx.baseUrl}/api/status`);
     assert.equal(res.status, 200);
     const status = await fetch(`${ctx.baseUrl}/api/auth/status`);
-    assert.deepEqual(await status.json(), { success: true, authRequired: false });
+    assert.deepEqual(await status.json(), {
+      success: true,
+      authRequired: false,
+      exchange: 'upbit',
+      quoteCurrency: 'KRW'
+    });
   } finally {
     await stopDashboard(ctx);
   }

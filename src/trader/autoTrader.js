@@ -1,4 +1,4 @@
-import UpbitAPI from '../api/upbit.js';
+import { createExchangeClient } from '../exchange/exchangeFactory.js';
 import { comprehensiveAnalysis } from '../analysis/technicalIndicators.js';
 import NewsMonitor from '../analysis/newsMonitor.js';
 import TradingStrategy from '../strategy/tradingStrategy.js';
@@ -17,7 +17,7 @@ import { envString } from '../config/envConfig.js';
 class AutoTrader {
   constructor(config) {
     this.config = config;
-    this.upbit = new UpbitAPI(config.accessKey, config.secretKey);
+    this.upbit = createExchangeClient(config);
     this.newsMonitor = new NewsMonitor();
     this.strategy = new TradingStrategy({
       stopLossPercent: config.stopLossPercent,

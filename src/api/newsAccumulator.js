@@ -2,6 +2,8 @@
  * 뉴스 누적 저장소 — 서버 시작 이후 유입된 뉴스를 중복 제거해 보존한다.
  * HTTP/소켓 의존이 없는 순수 저장소이며, 정렬·퇴거·필터만 담당한다.
  */
+import { baseOfMarket } from '../exchange/marketCodes.js';
+
 export const MAX_NEWS_RETENTION_LIMIT = 2000;
 const NEWS_ACCUMULATION_BATCH_SIZE = 2000;
 
@@ -81,7 +83,7 @@ export class NewsAccumulator {
     let filtered = this.items;
 
     if (coin) {
-      const symbol = coin.replace('KRW-', '').toLowerCase();
+      const symbol = baseOfMarket(coin).toLowerCase();
       filtered = filtered.filter(news => {
         const title = (news.title || '').toLowerCase();
         const content = (news.content || '').toLowerCase();

@@ -37,6 +37,7 @@ import { DashboardReadCache } from './dashboardReadCache.js';
 import { DashboardReadiness } from './dashboardReadiness.js';
 import { OptimizationScheduler } from './optimizationScheduler.js';
 import { NotificationMonitor } from './notificationMonitor.js';
+import { quoteOfSystem } from '../exchange/marketCodes.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -585,11 +586,11 @@ class DashboardServer {
         const portfolioHoldings = isDryRun
           ? this.tradingSystem.virtualPortfolio?.holdings
           : new Map((Array.isArray(liveAccounts) ? liveAccounts : [])
-            .filter(account => account?.currency && account.currency !== 'KRW')
+            .filter(account => account?.currency && account.currency !== quoteOfSystem(this.tradingSystem))
             .map(account => {
               const amount = Number(account.balance);
               const avgPrice = Number(account.avg_buy_price) || 0;
-              return [`KRW-${account.currency}`, { amount, avgPrice }];
+              return [`${quoteOfSystem(this.tradingSystem)}-${account.currency}`, { amount, avgPrice }];
             })
             .filter(([, holding]) => Number.isFinite(holding.amount) && holding.amount > 0));
 

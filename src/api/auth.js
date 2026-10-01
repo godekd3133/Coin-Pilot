@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { resolveExchange, quoteAssetForExchange } from '../exchange/exchangeFactory.js';
 
 /**
  * Dashboard access control for the API/socket plane.
@@ -222,7 +223,7 @@ function isMobileGetAllowed(url) {
       new Set(['1h', '24h', '7d', '30d']).has(url.searchParams.get('period'));
   }
 
-  if (/^\/api\/market\/candles\/KRW-[A-Z0-9]{2,15}$/.test(url.pathname)) {
+  if (/^\/api\/market\/candles\/[A-Z0-9]{2,10}-[A-Z0-9]{2,15}$/.test(url.pathname)) {
     if (!queryIs(url, new Set(['unit', 'count']), ['unit', 'count'])) return false;
     return ['1', '5', '15', '60'].includes(url.searchParams.get('unit')) &&
       ['30', '60', '100'].includes(url.searchParams.get('count'));
@@ -239,7 +240,7 @@ function isMobileGetAllowed(url) {
       (!url.searchParams.has('source') || ['general', 'system'].includes(url.searchParams.get('source')));
   }
 
-  if (/^\/api\/news\/KRW-[A-Z0-9]{2,15}$/.test(url.pathname)) {
+  if (/^\/api\/news\/[A-Z0-9]{2,10}-[A-Z0-9]{2,15}$/.test(url.pathname)) {
     return queryIs(url, new Set(['limit']), []) &&
       boundedIntegerQuery(url, 'limit', { min: 1, max: 100, fallback: 50 });
   }
@@ -264,7 +265,7 @@ function isMobileGetAllowed(url) {
     return url.searchParams.size === 0;
   }
 
-  if (/^\/api\/coin-detail\/KRW-[A-Z0-9]{2,15}$/.test(url.pathname)) {
+  if (/^\/api\/coin-detail\/[A-Z0-9]{2,10}-[A-Z0-9]{2,15}$/.test(url.pathname)) {
     return url.searchParams.size === 0;
   }
 
@@ -283,7 +284,7 @@ function hasValidMobileIdempotencyKey(req) {
 }
 
 function isMarketCode(value) {
-  return typeof value === 'string' && /^KRW-[A-Z0-9]{2,15}$/.test(value);
+  return typeof value === 'string' && /^[A-Z0-9]{2,10}-[A-Z0-9]{2,15}$/.test(value);
 }
 
 function isFiniteNumber(value, minimum = -Infinity, maximum = Infinity) {
@@ -305,7 +306,7 @@ function isValidAiSessionBody(body) {
   const providers = Array.isArray(body.providers) ? body.providers : body.providers ? [body.providers] : ['gpt', 'claude'];
   const validProviders = new Set(['gpt', 'claude', 'openai', 'anthropic', 'chatgpt', 'codex', 'both', 'all']);
   const coinsValid = body.coins === undefined || (typeof body.coins === 'string' && body.coins.length <= 1000 &&
-    body.coins.split(',').every(coin => !coin.trim() || /^(?:KRW-)?[A-Z0-9]{2,15}$/i.test(coin.trim())));
+    body.coins.split(',').every(coin => !coin.trim() || /^(?:[A-Z0-9]{2,10}-)?[A-Z0-9]{2,15}$/i.test(coin.trim())));
   return eventTypes.length > 0 && eventTypes.every(type => AI_EVENT_TYPES.has(String(type).toUpperCase())) &&
     providers.length > 0 && providers.every(provider => validProviders.has(String(provider).toLowerCase())) && coinsValid &&
     (body.name === undefined || (typeof body.name === 'string' && body.name.length <= 80)) &&
@@ -345,7 +346,7 @@ function isMobileRequestAllowed(req) {
   }
 
   if (MOBILE_ORDER_PATHS.has(requestPathname) && !hasValidMobileIdempotencyKey(req)) return false;
-  if (requestPathname === '/api/trade/buy') return hasOnlyKeys(body, new Set(['coin', 'amount'])) && isMarketCode(body.coin) && isFiniteNumber(body.amount, 5_000);
+  if (requestPathname === '/api/trade/buy') return hasOnlyKeys(body, new Set(['coin', 'amount'])) && isMarketCode(body.coin) && isFiniteNumber(body.amount, 1);
   if (requestPathname === '/api/trade/sell') return hasOnlyKeys(body, new Set(['coin', 'quantity'])) && isMarketCode(body.coin) && isFiniteNumber(body.quantity, Number.MIN_VALUE);
   if (requestPathname === '/api/trade/quick') {
     return hasOnlyKeys(body, new Set(['coin', 'action', 'amount'])) && isMarketCode(body.coin) &&
@@ -667,8 +668,20 @@ export function createDashboardAuth(env = {}, options = {}) {
     return next(new Error('unauthorized'));
   };
 
+  let exchangeName = 'upbit';
+  let exchangeQuoteAsset = 'KRW';
+  try {
+    exchangeName = resolveExchange(env);
+    exchangeQuoteAsset = quoteAssetForExchange(exchangeName, env);
+  } catch { /* invalid EXCHANGE fails earlier at config load */ }
+
   const statusHandler = (req, res) => {
-    res.json({ success: true, authRequired: resolved.enabled });
+    res.json({
+      success: true,
+      authRequired: resolved.enabled,
+      exchange: exchangeName,
+      quoteCurrency: exchangeQuoteAsset
+    });
   };
 
   const loginHandler = (req, res) => {

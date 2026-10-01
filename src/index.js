@@ -4,7 +4,7 @@ import DashboardServer from './api/dashboardServer.js';
 import { createPublicMarketDataSource } from './api/publicMarketDataSource.js';
 import { createPublicMarketSnapshotStore } from './api/publicMarketSnapshotStore.js';
 import BacktestEngine from './backtest/backtestEngine.js';
-import UpbitAPI from './api/upbit.js';
+import { createExchangeClient, resolveExchange, quoteAssetForExchange } from './exchange/exchangeFactory.js';
 import { LiveCredentialStore } from './api/liveCredentialStore.js';
 import Logger from './utils/logger.js';
 import ParameterOptimizer from './optimization/parameterOptimizer.js';
@@ -112,25 +112,37 @@ function createConfig(env) {
   const optimalParams = isScalpingMode ? null : loadOptimalConfig(env);
   const tradingLimits = resolveTradingLimits({ env, isScalpingMode, optimalParams });
 
+  const exchange = resolveExchange(env);
+  const quoteAsset = quoteAssetForExchange(exchange, env);
+  const defaultCoins = exchange === 'binance'
+    ? [`${quoteAsset}-BTC`, `${quoteAsset}-ETH`, `${quoteAsset}-SOL`]
+    : ['KRW-BTC', 'KRW-ETH', 'KRW-XRP'];
+
   return {
     stateDir: env.COINPILOT_STATE_DIR || null,
+    exchange,
+    quoteAsset,
     strategyMode,
     isScalpingMode,
-    // API 키
-    accessKey: env.UPBIT_ACCESS_KEY || '',
-    secretKey: env.UPBIT_SECRET_KEY || '',
+    // API 키 — 선택된 거래소의 키를 공통 슬롯에 싣는다.
+    accessKey: exchange === 'binance'
+      ? (env.BINANCE_API_KEY || '')
+      : (env.UPBIT_ACCESS_KEY || ''),
+    secretKey: exchange === 'binance'
+      ? (env.BINANCE_API_SECRET || '')
+      : (env.UPBIT_SECRET_KEY || ''),
 
     // 다중 코인 설정 (기본값)
-    // TARGET_COINS=ALL 이면 모든 KRW 마켓 대상 (main에서 동적 로드)
+    // TARGET_COINS=ALL 이면 해당 거래소의 기준통화 마켓 전체 대상 (main에서 동적 로드)
     targetCoins: env.TARGET_COINS === 'ALL'
       ? [] // 나중에 동적으로 로드
       : env.TARGET_COINS
         ? env.TARGET_COINS.split(',')
-        : ['KRW-BTC', 'KRW-ETH', 'KRW-XRP'],
+        : defaultCoins,
     analyzeAllCoins: env.TARGET_COINS === 'ALL',
     ...tradingLimits,
 
-    investmentAmount: env.INVESTMENT_AMOUNT || 50000,
+    investmentAmount: env.INVESTMENT_AMOUNT || (exchange === 'binance' ? 50 : 50000),
     stopLossPercent: isScalpingMode
       ? env.SCALP_STOP_LOSS_PERCENT || 1.2
       : (optimalParams?.stopLossPercent || env.STOP_LOSS_PERCENT || 5),
@@ -358,7 +370,7 @@ function printConfig(config) {
 
 // 백테스팅 루프 (드라이 모드전용) - 보유 코인만 대상
 function startBacktestingLoop(config, logger, trader) {
-  const upbit = new UpbitAPI(config.accessKey, config.secretKey);
+  const upbit = createExchangeClient(config);
 
   const runBacktest = async () => {
     try {
@@ -456,7 +468,7 @@ function startBacktestingLoop(config, logger, trader) {
 
 // 지속적 최적화 루프 (드라이 모드에서 더 짧은 간격)
 function startOptimizationLoop(config, logger) {
-  const upbit = new UpbitAPI(config.accessKey, config.secretKey);
+  const upbit = createExchangeClient(config);
   const optimizationStoragePaths = resolveOptimizationStoragePaths({
     env: process.env,
     stateDir: config.stateDir,
@@ -632,14 +644,15 @@ async function main() {
   // 설정 로드
   const config = createConfig(env);
 
-  // TARGET_COINS=ALL 인 경우 모든 KRW 마켓 자동 로드
+  // TARGET_COINS=ALL 인 경우 기준통화 마켓 전체 자동 로드
   if (config.analyzeAllCoins || config.targetCoins.length === 0) {
-    console.log('\n🔍 모든 KRW 마켓 코인 로드 중...');
+    const quotePrefix = `${config.quoteAsset}-`;
+    console.log(`\n🔍 모든 ${config.quoteAsset} 마켓 코인 로드 중...`);
     try {
-      const upbit = new UpbitAPI(config.accessKey, config.secretKey);
+      const upbit = createExchangeClient(config);
       const markets = await upbit.getMarkets();
       const krwMarkets = markets
-        .filter(m => m.market.startsWith('KRW-'))
+        .filter(m => m.market.startsWith(quotePrefix))
         .map(m => m.market);
 
       if (config.isScalpingMode) {
@@ -695,7 +708,8 @@ async function main() {
       });
       publicMarketDataSource = createPublicMarketDataSource({
         requestTimeoutMs: config.upbitRequestTimeoutMs,
-        snapshotStore: publicMarketSnapshotStore
+        snapshotStore: publicMarketSnapshotStore,
+        exchangeClient: config.exchange === 'binance' ? createExchangeClient(config) : null
       });
       return new MultiCoinTrader(config, { publicMarketDataSource });
     });
@@ -716,9 +730,7 @@ async function main() {
         liveCredentialStore,
         liveCredentialSetupMode: config.liveCredentialSetupMode,
         validateLiveCredentials: async ({ accessKey, secretKey }) => {
-          const credentialProbe = new UpbitAPI(accessKey, secretKey, {
-            requestTimeoutMs: config.upbitRequestTimeoutMs
-          });
+          const credentialProbe = createExchangeClient({ ...config, accessKey, secretKey });
           const accounts = await credentialProbe.getAccounts();
           return Array.isArray(accounts);
         },

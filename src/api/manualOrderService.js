@@ -1,6 +1,7 @@
 import { inspectMarketQuoteFreshness } from './marketQuoteFreshness.js';
 import { MARKET_DATA_FRESHNESS } from './marketDataProvider.js';
 import { appendSmartTradeHistory } from './smartTradeHistory.js';
+import { baseOfMarket, marketsForQuote, quoteOfSystem } from '../exchange/marketCodes.js';
 import {
   executeLiveOrderWithEvidence,
   hasCompleteObservedLiveFill
@@ -740,7 +741,7 @@ export function createManualOrderService({ tradingSystem, marketDataProvider }) 
 
     // 상위 거래량 코인 분석 (상위 30개)
     const markets = await marketDataProvider.getMarkets();
-    const krwMarkets = markets.filter(m => m.market.startsWith('KRW-')).map(m => m.market);
+    const krwMarkets = marketsForQuote(markets, quoteOfSystem(tradingSystem));
     const requestedTickers = await readFreshTickers(krwMarkets);
     const tickers = requestedTickers.filter(ticker =>
       inspectMarketQuote(ticker, ticker?.market).fresh
@@ -1004,8 +1005,9 @@ export function createManualOrderService({ tradingSystem, marketDataProvider }) 
     } else {
       const accounts = await tradingSystem.getAccountInfo();
       for (const acc of accounts) {
-        if (acc.currency !== 'KRW' && parseFloat(acc.balance) > 0) {
-          holdings.set(`KRW-${acc.currency}`, {
+        const quote = quoteOfSystem(tradingSystem);
+        if (acc.currency !== quote && parseFloat(acc.balance) > 0) {
+          holdings.set(`${quote}-${acc.currency}`, {
             amount: parseFloat(acc.balance),
             avgPrice: parseFloat(acc.avg_buy_price) || 0
           });
@@ -1505,7 +1507,7 @@ export function createManualOrderService({ tradingSystem, marketDataProvider }) 
       status: 200,
       body: {
         success: true,
-        message: `[${isDryRun ? '모의투자' : '실전'}] ${sellCoin.replace('KRW-', '')} 매도 → ${buyCoin.replace('KRW-', '')} 매수 완료`,
+        message: `[${isDryRun ? '모의투자' : '실전'}] ${baseOfMarket(sellCoin)} 매도 → ${baseOfMarket(buyCoin)} 매수 완료`,
         results,
         mode: isDryRun ? 'DRY_RUN' : 'LIVE'
       }

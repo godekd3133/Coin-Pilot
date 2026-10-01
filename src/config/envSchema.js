@@ -4,12 +4,17 @@
 // test/envDocumentation.test.js for the .env.example sync contract.
 export const ENV_SCHEMA = {
   // --- Core ---
+  EXCHANGE: { type: 'string' },
   UPBIT_ACCESS_KEY: { type: 'string', secret: true },
   UPBIT_SECRET_KEY: { type: 'string', secret: true },
   UPBIT_REQUEST_TIMEOUT_MS: { type: 'int', min: 0 },
   UPBIT_MIN_REQUEST_INTERVAL_MS: { type: 'int', min: 0 },
   UPBIT_RATE_COORDINATOR_REQUIRED: { type: 'bool' },
   UPBIT_RATE_COORDINATOR_STATE_DIR: { type: 'string' },
+  BINANCE_API_KEY: { type: 'string', secret: true },
+  BINANCE_API_SECRET: { type: 'string', secret: true },
+  BINANCE_BASE_URL: { type: 'string' },
+  BINANCE_QUOTE_ASSET: { type: 'string' },
   // --- TRADING MODE ---
   DRY_RUN: { type: 'bool' },
   TRADING_STRATEGY: { type: 'string' },

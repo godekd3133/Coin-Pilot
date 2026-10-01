@@ -1,5 +1,6 @@
 import { getMarketDataProvider } from './marketDataProvider.js';
 import { DEFAULT_MARKET_QUOTE_MAX_AGE_SECONDS } from './marketQuoteFreshness.js';
+import { quoteOfSystem } from '../exchange/marketCodes.js';
 
 /** Read one shared, current-price snapshot for a set of KRW markets. */
 export async function readCurrentMarketPrices(server, markets) {
@@ -38,11 +39,12 @@ export function accountValuationMarkets(tradingSystem, accounts = [], positionCo
     const entries = holdings instanceof Map ? holdings.keys() : Object.keys(holdings || {});
     for (const market of entries) markets.add(market);
   } else {
+    const quote = quoteOfSystem(tradingSystem);
     for (const account of accounts) {
-      if (account?.currency === 'KRW') continue;
+      if (account?.currency === quote) continue;
       const amount = Number(account?.balance || 0) + Number(account?.locked || 0);
       if (Number.isFinite(amount) && amount > 0 && account?.currency) {
-        markets.add(`KRW-${account.currency}`);
+        markets.add(`${quote}-${account.currency}`);
       }
     }
   }

@@ -1028,7 +1028,7 @@ function projectMomentumShadowBook(
       } : null,
       benchmark: ledger.config?.benchmarkMarket ? {
         configured: true,
-        market: String(ledger.config.benchmarkMarket).replace(/^KRW-/, ''),
+        market: String(ledger.config.benchmarkMarket).split('-').pop(),
         trendPercent: Number.isFinite(Number(ledger.benchmarkTrendPercent))
           ? Number(ledger.benchmarkTrendPercent)
           : null,
@@ -1113,7 +1113,7 @@ function projectMomentumShadowBook(
         executionModelMarkBlocked: Number(ledger.executionModelMarkBlocked) || 0
       },
       openPositions: Object.entries(ledger.positions || {}).map(([market, position]) => ({
-        asset: String(market).replace(/^KRW-/, ''),
+        asset: String(market).split('-').pop(),
         entryPrice: Number(position.entryPrice) || null,
         decisionEntryPrice: Number.isFinite(Number(position.decisionEntryPrice))
           ? Number(position.decisionEntryPrice)
@@ -1135,7 +1135,7 @@ function projectMomentumShadowBook(
         positionFraction: Number(ledger.config?.positionFraction) || 0,
         maxPositions: Number(ledger.config?.maxPositions) || 0,
         benchmarkMarket: ledger.config?.benchmarkMarket
-          ? String(ledger.config.benchmarkMarket).replace(/^KRW-/, '')
+          ? String(ledger.config.benchmarkMarket).split('-').pop()
           : null,
         benchmarkTrendMinPercent: Number.isFinite(Number(ledger.config?.benchmarkTrendMinPercent))
           ? Number(ledger.config.benchmarkTrendMinPercent)

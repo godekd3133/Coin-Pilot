@@ -10,6 +10,7 @@ import { summarizePaperStrictTradeCostAudit } from '../../research/paperStrictTr
 import { summarizePaperForwardCohort } from '../../research/paperForwardCohort.js';
 import { respondIfPaperEvidenceMutationBlocked } from '../../research/paperEvidenceMutationGuard.js';
 import { API_READ_QUERY_LIMITS, parseBoundedIntegerQuery } from '../queryLimits.js';
+import { quoteOfSystem } from '../../exchange/marketCodes.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -152,7 +153,7 @@ export default function createPortfolioRoutes(server) {
           for (const acc of accounts) {
             const amount = parseFloat(acc.balance || 0) + parseFloat(acc.locked || 0);
             if (acc.currency !== 'KRW' && Number.isFinite(amount) && amount > 0) {
-              holdings.set(`KRW-${acc.currency}`, {
+              holdings.set(`${quoteOfSystem(server.tradingSystem)}-${acc.currency}`, {
                 amount,
                 avgPrice: parseFloat(acc.avg_buy_price) || 0
               });

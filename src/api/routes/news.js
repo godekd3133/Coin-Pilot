@@ -4,6 +4,7 @@ import { resolveLogDirectory } from '../../utils/logger.js';
 import { readLogTail } from '../../utils/readLogTail.js';
 import { fileURLToPath } from 'url';
 import { API_READ_QUERY_LIMITS, parseBoundedIntegerQuery } from '../queryLimits.js';
+import { quoteOfSystem } from '../../exchange/marketCodes.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -78,7 +79,8 @@ export default function createNewsRoutes(server) {
   router.get('/news/:coin', async (req, res) => {
     try {
       const coin = req.params.coin.toUpperCase();
-      const market = coin.startsWith('KRW-') ? coin : `KRW-${coin}`;
+      const quotePrefix = `${quoteOfSystem(server.tradingSystem)}-`;
+      const market = coin.includes('-') ? coin : `${quotePrefix}${coin}`;
       const limit = parseBoundedIntegerQuery(req.query.limit, API_READ_QUERY_LIMITS.coinNews);
 
       if (!server.tradingSystem.newsMonitor) {

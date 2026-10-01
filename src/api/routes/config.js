@@ -587,10 +587,10 @@ export default function createConfigRoutes(server) {
       if (universeUpdate.targetCoins !== undefined) {
         const raw = universeUpdate.targetCoins;
         const validList = Array.isArray(raw) && raw.length > 0 && raw.length <= 500 &&
-          raw.every(code => typeof code === 'string' && /^KRW-[A-Z0-9]{2,15}$/.test(code.trim().toUpperCase()));
+          raw.every(code => typeof code === 'string' && /^[A-Z0-9]{2,10}-[A-Z0-9]{2,15}$/.test(code.trim().toUpperCase()));
         if (!(typeof raw === 'string' && raw.trim().toUpperCase() === 'ALL' || validList)) {
           return res.status(400).json({
-            error: '분석 대상 코인은 KRW- 코드 목록 또는 ALL로 설정해 주세요.',
+            error: '분석 대상 코인은 QUOTE-BASE 코드 목록 또는 ALL로 설정해 주세요.',
             success: false
           });
         }
@@ -793,7 +793,7 @@ export default function createConfigRoutes(server) {
 
       if (server.tradingSystem.upbit) {
         try {
-          const ticker = await getMarketDataProvider(server).getTickers('KRW-BTC', {
+          const ticker = await getMarketDataProvider(server).getTickers(`${server.tradingSystem.quoteAsset || 'KRW'}-BTC`, {
             freshness: MARKET_DATA_FRESHNESS.FRESH
           });
           status.tickerTest = {

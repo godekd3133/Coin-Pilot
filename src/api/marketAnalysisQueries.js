@@ -1,5 +1,6 @@
 import { MARKET_DATA_FRESHNESS } from './marketDataProvider.js';
 import { API_READ_QUERY_LIMITS, parseBoundedIntegerQuery } from './queryLimits.js';
+import { baseOfMarket, marketsForQuote, quoteOfSystem } from '../exchange/marketCodes.js';
 
 /**
  * 대시보드 분석 화면의 read-model 쿼리. 표시 전용이며 전략 인스턴스의
@@ -40,8 +41,9 @@ export function createMarketAnalysisQueries({ tradingSystem, marketDataProvider 
     }
     const accounts = await tradingSystem.getAccountInfo();
     for (const acc of accounts) {
-      if (acc.currency !== 'KRW' && parseFloat(acc.balance) > 0) {
-        holdings.set(`KRW-${acc.currency}`, {
+      const quote = quoteOfSystem(tradingSystem);
+      if (acc.currency !== quote && parseFloat(acc.balance) > 0) {
+        holdings.set(`${quote}-${acc.currency}`, {
           amount: parseFloat(acc.balance),
           avgPrice: parseFloat(acc.avg_buy_price) || 0
         });
@@ -139,7 +141,7 @@ export function createMarketAnalysisQueries({ tradingSystem, marketDataProvider 
 
     // 전체 KRW 마켓에서 기회 탐색 (레거시 종합점수 경로)
     const markets = await marketDataProvider.getMarkets();
-    const krwMarkets = markets.filter(m => m.market.startsWith('KRW-')).map(m => m.market);
+    const krwMarkets = marketsForQuote(markets, quoteOfSystem(tradingSystem));
     const { comprehensiveAnalysis } = await import('../analysis/technicalIndicators.js');
     const tickers = await readFreshTickers(krwMarkets);
 
@@ -448,7 +450,7 @@ export function createMarketAnalysisQueries({ tradingSystem, marketDataProvider 
 
     // 전체 KRW 마켓
     const markets = await marketDataProvider.getMarkets();
-    const krwMarkets = markets.filter(m => m.market.startsWith('KRW-')).map(m => m.market);
+    const krwMarkets = marketsForQuote(markets, quoteOfSystem(tradingSystem));
     const tickers = await readFreshTickers(krwMarkets);
 
     // 거래량 기준 정렬
@@ -570,7 +572,7 @@ export function createMarketAnalysisQueries({ tradingSystem, marketDataProvider 
 
         coinScores.push({
           coin,
-          symbol: coin.replace('KRW-', ''),
+          symbol: baseOfMarket(coin),
           currentPrice,
           change24h: change24h.toFixed(2),
           volume24h,
@@ -641,7 +643,7 @@ export function createMarketAnalysisQueries({ tradingSystem, marketDataProvider 
 
     // 전체 마켓 조회
     const markets = await marketDataProvider.getMarkets();
-    const krwMarkets = markets.filter(m => m.market.startsWith('KRW-')).map(m => m.market);
+    const krwMarkets = marketsForQuote(markets, quoteOfSystem(tradingSystem));
     const tickers = await readFreshTickers(krwMarkets);
 
     // 거래량 기준 상위 50개 분석
@@ -742,7 +744,7 @@ export function createMarketAnalysisQueries({ tradingSystem, marketDataProvider 
 
           buyRecommendations.push({
             coin,
-            symbol: coin.replace('KRW-', ''),
+            symbol: baseOfMarket(coin),
             currentPrice,
             change24h: change24h.toFixed(2),
             volume24h,
@@ -797,7 +799,7 @@ export function createMarketAnalysisQueries({ tradingSystem, marketDataProvider 
 
             sellRecommendations.push({
               coin,
-              symbol: coin.replace('KRW-', ''),
+              symbol: baseOfMarket(coin),
               currentPrice,
               avgPrice: holding.avgPrice,
               holdingAmount: holding.amount,

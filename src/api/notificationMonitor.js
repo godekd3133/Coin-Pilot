@@ -1,4 +1,5 @@
 import { getMarketDataProvider, MARKET_DATA_FRESHNESS } from './marketDataProvider.js';
+import { baseOfMarket, marketsForQuote, quoteOfSystem } from '../exchange/marketCodes.js';
 
 const NOTIFICATION_INTERVAL_MS = 30_000;
 const NOTIFICATION_INITIAL_DELAY_MS = 5_000;
@@ -186,7 +187,7 @@ export class NotificationMonitor {
       // 상위 거래량 코인에서 매수 후보 탐색
       const markets = await marketDataProvider.getMarkets();
       if (!markets || !Array.isArray(markets)) return bundles;
-      const krwMarkets = markets.filter(m => m.market.startsWith('KRW-')).map(m => m.market);
+      const krwMarkets = marketsForQuote(markets, quoteOfSystem(this._getTradingSystem()));
       const allTickers = await marketDataProvider.getTickers(krwMarkets, {
         freshness: MARKET_DATA_FRESHNESS.FRESH
       });
@@ -270,7 +271,7 @@ export class NotificationMonitor {
                 reasons: buyCandidate.buyReasons
               },
               totalScore,
-              summary: `${sellCandidate.coin.replace('KRW-', '')} 매도 → ${buyCandidate.coin.replace('KRW-', '')} 매수`,
+              summary: `${baseOfMarket(sellCandidate.coin)} 매도 → ${baseOfMarket(buyCandidate.coin)} 매수`,
               rationale: `${sellCandidate.sellReasons[0]} → ${buyCandidate.buyReasons[0]}`
             });
           }

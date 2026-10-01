@@ -122,7 +122,7 @@ export class PublicMarketDataSource {
   #inFlightReads = new Map();
   #snapshotStore;
 
-  constructor({ requestTimeoutMs, snapshotStore = null } = {}) {
+  constructor({ requestTimeoutMs, snapshotStore = null, exchangeClient = null } = {}) {
     if (snapshotStore !== null && (
       typeof snapshotStore.recordTickers !== 'function' ||
       typeof snapshotStore.getTickerSnapshot !== 'function' ||
@@ -131,7 +131,15 @@ export class PublicMarketDataSource {
     )) {
       throw new TypeError('snapshotStore must provide recordTickers, getTickerSnapshot, getCachedTickerSnapshot, and flush.');
     }
-    this.#client = new UpbitAPI('', '', { requestTimeoutMs });
+    if (exchangeClient !== null && (
+      typeof exchangeClient !== 'object' ||
+      typeof exchangeClient.getMarkets !== 'function' ||
+      typeof exchangeClient.getTicker !== 'function' ||
+      typeof exchangeClient.getMinuteCandles !== 'function'
+    )) {
+      throw new TypeError('exchangeClient must provide getMarkets, getTicker, and getMinuteCandles.');
+    }
+    this.#client = exchangeClient ?? new UpbitAPI('', '', { requestTimeoutMs });
     this.#snapshotStore = snapshotStore;
     publicMarketDataSources.add(this);
     Object.freeze(this);

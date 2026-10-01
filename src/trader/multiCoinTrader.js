@@ -3,8 +3,9 @@ import { VirtualPortfolioStore } from './virtualPortfolioStore.js';
 import { PositionRiskMonitor, inspectTraderMarketQuote } from './positionRiskMonitor.js';
 import { LiveOrderGateway } from './liveOrderGateway.js';
 import { TradingLifecycle } from './tradingLifecycle.js';
+import { OrderExecutionEngine, hasCompleteLiveFillResult } from './orderExecutionEngine.js';
 import { createLossCircuitBreakerState } from '../risk/lossCircuitBreaker.js';
-import UpbitAPI from '../api/upbit.js';
+import { createExchangeClient } from '../exchange/exchangeFactory.js';
 import { isPublicMarketDataSource } from '../api/publicMarketDataSource.js';
 import {
   getMarketDataAdapterKind,
@@ -76,16 +77,6 @@ function createMarketQuoteFreshnessError(market, freshness) {
 
 
 
-function hasCompleteLiveFillResult(fillResult) {
-  const order = fillResult?.order;
-  const hasObservedNumber = value => value !== null && value !== undefined && Number.isFinite(Number(value));
-  return fillResult?.filled === true &&
-    order &&
-    hasObservedNumber(order.executed_volume) && Number(order.executed_volume) > 0 &&
-    hasObservedNumber(order.avg_price) && Number(order.avg_price) > 0 &&
-    hasObservedNumber(order.paid_fee) && Number(order.paid_fee) >= 0 &&
-    hasObservedNumber(order.remaining_volume) && Number(order.remaining_volume) >= 0;
-}
 
 
 
@@ -167,9 +158,9 @@ class MultiCoinTrader {
     this.paperMinimumStorageMiB = Number.isFinite(parsedStorageMiB) && parsedStorageMiB >= 128
       ? parsedStorageMiB
       : 1024;
-    this.upbit = new UpbitAPI(config.accessKey, config.secretKey, {
-      requestTimeoutMs: config.upbitRequestTimeoutMs
-    });
+    this.exchange = config.exchange || 'upbit';
+    this.quoteAsset = config.quoteAsset || 'KRW';
+    this.upbit = createExchangeClient(config);
     this.publicMarketDataSource = publicMarketDataSource ?? null;
     const selectedMarketDataAdapter = marketDataAdapter === undefined
       ? new UpbitMarketDataAdapter(publicMarketDataSource || (() => this.upbit))
@@ -192,9 +183,7 @@ class MultiCoinTrader {
     });
     this.riskUpbit = publicMarketDataSource
       ? { getTicker: (markets, requestOptions) => publicMarketDataSource.getTicker(markets, requestOptions) }
-      : new UpbitAPI(config.accessKey, config.secretKey, {
-          requestTimeoutMs: config.upbitRequestTimeoutMs
-        });
+      : createExchangeClient(config);
     this.liveManualPrepareOnBoot = config.liveManualPrepareOnBoot === true && config.dryRun === false;
     this.liveManualRiskProtectionEnabled = config.liveManualRiskProtection === true && config.dryRun === false;
     this.newsMonitor = new NewsMonitor();
@@ -216,7 +205,7 @@ class MultiCoinTrader {
 
     // 각 코인별 전략 인스턴스
     this.strategies = new Map();
-    this.targetCoins = config.targetCoins || ['KRW-BTC', 'KRW-ETH'];
+    this.targetCoins = config.targetCoins || [`${this.quoteAsset}-BTC`, `${this.quoteAsset}-ETH`];
 
     // 전략 설정 (공통) - 최적화 파라미터 포함
     this.strategyConfig = {
@@ -488,6 +477,11 @@ class MultiCoinTrader {
   _lifecycle() {
     this._lifecycleRef = this._lifecycleRef || new TradingLifecycle(this);
     return this._lifecycleRef;
+  }
+
+  _orderEngine() {
+    this._orderEngineRef = this._orderEngineRef || new OrderExecutionEngine(this);
+    return this._orderEngineRef;
   }
 
   get isRunning() { return this._lifecycle().isRunning; }
@@ -830,19 +824,19 @@ class MultiCoinTrader {
 
       if (!allowAveragePriceFallback) {
         let totalAssets = 0;
-        const krwAccount = accounts.find(acc => acc.currency === 'KRW');
+        const krwAccount = accounts.find(acc => acc.currency === this.quoteAsset);
         if (krwAccount) {
           totalAssets += parseFloat(krwAccount.balance || 0) + parseFloat(krwAccount.locked || 0);
         }
 
         const coinAccounts = accounts.filter(acc => {
-          if (acc.currency === 'KRW') return false;
+          if (acc.currency === this.quoteAsset) return false;
           const balance = parseFloat(acc.balance || 0) + parseFloat(acc.locked || 0);
           return Number.isFinite(balance) && balance > 0;
         });
         if (coinAccounts.length === 0) return totalAssets;
 
-        const coinMarkets = coinAccounts.map(acc => `KRW-${acc.currency}`);
+        const coinMarkets = coinAccounts.map(acc => `${this.quoteAsset}-${acc.currency}`);
         const priceMap = priceMapOverride instanceof Map ? new Map(priceMapOverride) : new Map();
         if (!(priceMapOverride instanceof Map)) {
           try {
@@ -861,7 +855,7 @@ class MultiCoinTrader {
         }
 
         for (const account of coinAccounts) {
-          const market = `KRW-${account.currency}`;
+          const market = `${this.quoteAsset}-${account.currency}`;
           const price = Number(priceMap.get(market));
           if (!Number.isFinite(price) || price <= 0) return null;
           const balance = parseFloat(account.balance || 0) + parseFloat(account.locked || 0);
@@ -873,15 +867,15 @@ class MultiCoinTrader {
       let totalAssets = 0;
 
       // KRW 잔액
-      const krwAccount = accounts.find(acc => acc.currency === 'KRW');
+      const krwAccount = accounts.find(acc => acc.currency === this.quoteAsset);
       if (krwAccount) {
         totalAssets += parseFloat(krwAccount.balance) + parseFloat(krwAccount.locked || 0);
       }
 
       // 보유 코인 평가액
-      const coinAccounts = accounts.filter(acc => acc.currency !== 'KRW' && parseFloat(acc.balance) > 0);
+      const coinAccounts = accounts.filter(acc => acc.currency !== this.quoteAsset && parseFloat(acc.balance) > 0);
       if (coinAccounts.length > 0) {
-        const coinMarkets = coinAccounts.map(acc => `KRW-${acc.currency}`);
+        const coinMarkets = coinAccounts.map(acc => `${this.quoteAsset}-${acc.currency}`);
         try {
           const tickers = await this.marketDataAdapter.getTickers(coinMarkets);
           // ticker 응답 유효성 검사
@@ -930,8 +924,8 @@ class MultiCoinTrader {
           return [];
         }
         return accounts
-          .filter(acc => acc.currency !== 'KRW' && parseFloat(acc.balance) > 0)
-          .map(acc => `KRW-${acc.currency}`);
+          .filter(acc => acc.currency !== this.quoteAsset && parseFloat(acc.balance) > 0)
+          .map(acc => `${this.quoteAsset}-${acc.currency}`);
       } catch (error) {
         console.error('보유 코인 조회 실패:', error.message);
         return [];
@@ -1651,754 +1645,13 @@ class MultiCoinTrader {
     };
   }
 
-  /**
-   * 반등 후보를 주문 직전에 다시 확인한다.
-   * 지연 동안 가격/캔들이 바뀌면 기존 분석 결과를 재사용하지 않는다.
-   */
-  async confirmScalpingEntry(coin, decision, strategy, marketData = null) {
-    const requestedDelay = Number(decision.entryDelayMs);
-    const minDelay = Math.max(1000, Number(this.entryDelayMinMs) || 1000);
-    const maxDelay = Math.max(minDelay, Number(this.entryDelayMaxMs) || 5000);
-    const skipDelay = marketData?.skipConfirmationDelay === true;
-    const delayMs = skipDelay
-      ? 0
-      : Math.min(maxDelay, Math.max(minDelay, Number.isFinite(requestedDelay)
-        ? requestedDelay
-        : strategy.getEntryDelayMs()));
+  confirmScalpingEntry(...args) { return this._orderEngine().confirmScalpingEntry(...args); }
 
-    this.recordPaperEntryConfirmation(coin, 'attempt', 'pending');
-    console.log(`\n⏳ [${coin}] 반등 확인 완료 - ${delayMs}ms 후 주문 재검증`);
-    if (!skipDelay) await this.sleep(delayMs);
+  executeOrder(...args) { return this._orderEngine().executeOrder(...args); }
 
-    if (this._stopRequested || this._entriesPaused) {
-      this.recordPaperEntryConfirmation(coin, 'cancelled', 'stop_requested');
-      this.resolveWinnerShadowBlockedEntryAsNotFilled(coin, decision, 'stop_requested');
-      console.log(`  ⛔ [${coin}] 중지 요청으로 진입 취소`);
-      return null;
-    }
+  canExecuteLiveOrder(...args) { return this._orderEngine().canExecuteLiveOrder(...args); }
 
-    let ticker;
-    let candles;
-    try {
-      if (marketData?.sharedSnapshot === true) {
-        ticker = marketData.ticker ? [marketData.ticker] : null;
-        candles = marketData.candles;
-      } else {
-        [ticker, candles] = await Promise.all([
-          this.marketDataAdapter.getTickers(coin),
-          this.marketDataAdapter.getMinuteCandles(coin, this.candleUnit, this.candleCount)
-        ]);
-      }
-    } catch (error) {
-      this.recordPaperEntryConfirmation(coin, 'cancelled', 'revalidation_request_failed');
-      this.resolveWinnerShadowBlockedEntryAsNotFilled(coin, decision, 'revalidation_request_failed');
-      console.log(`  ⚠️  [${coin}] 지연 후 재검증 조회 실패: ${error.message}`);
-      return null;
-    }
-
-    const latestTicker = ticker?.[0];
-    const latestPrice = latestTicker?.trade_price;
-    if (!Number.isFinite(latestPrice) || !Array.isArray(candles)) {
-      this.recordPaperEntryConfirmation(coin, 'cancelled', 'invalid_revalidation_payload');
-      this.resolveWinnerShadowBlockedEntryAsNotFilled(coin, decision, 'invalid_revalidation_payload');
-      console.log(`  ⚠️  [${coin}] 지연 후 가격/캔들 데이터가 유효하지 않아 진입 취소`);
-      return null;
-    }
-
-    const marketQuoteFreshness = inspectTraderMarketQuote(
-      latestTicker,
-      coin,
-      this.maxCandleAgeSeconds
-    );
-    if (!marketQuoteFreshness.fresh) {
-      this.recordPaperEntryConfirmation(coin, 'cancelled', marketQuoteFreshness.reason);
-      this.resolveWinnerShadowBlockedEntryAsNotFilled(coin, decision, marketQuoteFreshness.reason);
-      console.log(`  ⛔ [${coin}] 지연 후 거래소 시세 신선도 실패: ${marketQuoteFreshness.reason}`);
-      return null;
-    }
-
-    const candleFreshness = inspectLatestCandleFreshness(candles, {
-      candleUnit: this.candleUnit,
-      maxAgeSeconds: this.maxCandleAgeSeconds
-    });
-    this.recordPaperCandleFreshnessObservation(coin, candleFreshness);
-    if (!candleFreshness.valid) {
-      this.recordPaperCandleFreshnessBlock(candleFreshness.reason, candleFreshness, 'entry_confirmation', coin);
-      this.recordPaperEntryConfirmation(coin, 'cancelled', candleFreshness.reason);
-      this.resolveWinnerShadowBlockedEntryAsNotFilled(coin, decision, candleFreshness.reason);
-      console.log(`  ⛔ [${coin}] 지연 후 캔들 신선도 실패: ${candleFreshness.reason}`);
-      return null;
-    }
-
-    const technicalAnalysis = this.buildTechnicalAnalysis(candles);
-    const validation = strategy.validateEntry(technicalAnalysis, latestPrice, decision);
-    if (!validation.valid) {
-      const reason = validation.reason || 'entry_validation_invalid';
-      this.recordPaperEntryConfirmation(coin, 'cancelled', reason);
-      this.resolveWinnerShadowBlockedEntryAsNotFilled(coin, decision, reason);
-      console.log(`  ⛔ [${coin}] 지연 후 반등 무효화: ${validation.reason}`);
-      return null;
-    }
-
-    this.recordPaperEntryConfirmation(coin, 'confirmed', 'entry_revalidation_passed');
-    console.log(`  ✅ [${coin}] 지연 후 반등 유지 - 현재가 ${latestPrice.toLocaleString()}원`);
-    return {
-      currentPrice: latestPrice,
-      technicalAnalysis,
-      delayMs,
-      candleFreshness,
-      marketQuoteFreshness
-    };
-  }
-
-  /**
-   * 주문 실행
-   * @param {string} coin - 코인
-   * @param {Object} decision - 매매 결정
-   * @param {number} currentPrice - 현재가
-   * @param {number} krwBalance - KRW 잔액
-   * @param {number} coinBalance - 코인 잔액
-   * @param {number} currentPositions - 현재 포지션 수
-   * @param {Array} coinAnalyses - 전체 코인 분석 결과 (리밸런싱용)
-   */
-  async executeOrder(...args) {
-    const execute = async () => {
-      if (this._orderInProgress) return null;
-      this._orderInProgress = true;
-      try {
-        return await this._executeOrder(...args);
-      } finally {
-        this._orderInProgress = false;
-      }
-    };
-    return this.dryRun ? this.withPortfolioMutationLock(execute) : execute();
-  }
-
-  canExecuteLiveOrder(coin, decision) {
-    if (this.dryRun) return true;
-    if (!this._liveAccountStateKnown) return false;
-    if (this._liveEvidenceBlockedMarkets.has(coin)) return false;
-    if (this._liveOrderStateUnknownMarkets.has(coin) || this._livePendingOrderMarkets.has(coin)) return false;
-
-    const riskMonitorExit = (this._riskMonitorProtectiveOnly || this._manualRiskProtection) &&
-      this._riskMonitorExitInProgress &&
-      decision?.action === 'SELL';
-    const verifiedAt = Number(this._liveVerifiedOrderMarkets.get(coin));
-    if (!riskMonitorExit && (!Number.isFinite(verifiedAt) || Date.now() - verifiedAt >= 10 * 60 * 1000)) {
-      return false;
-    }
-    return this._liveExchangeStateKnown || (riskMonitorExit && !this._exchangeSyncPromise);
-  }
-
-  async _executeOrder(
-    coin,
-    decision,
-    currentPrice,
-    krwBalance,
-    coinBalance,
-    currentPositions,
-    coinAnalyses = [],
-    executionContext = null
-  ) {
-    if (this._stopRequested) return null;
-    if (!this.canExecuteLiveOrder(coin, decision)) return null;
-    if (this._entriesPaused && !(
-      (this._riskMonitorProtectiveOnly || this._manualRiskProtection) &&
-      this._riskMonitorExitInProgress &&
-      decision?.action === 'SELL'
-    )) return null;
-    if (!this.dryRun && (this.liveExecutionEvidenceWriteError || this.liveExecutionEvidenceDataError)) {
-      const reason = this.liveExecutionEvidenceWriteError || this.liveExecutionEvidenceDataError;
-      console.error(`🛑 live execution evidence가 불완전해 신규 주문을 차단합니다: ${reason}`);
-      return null;
-    }
-    const strategy = this.getStrategy(coin);
-
-    if (decision.action === 'HOLD') {
-      return;
-    }
-
-    if (decision.action === 'BUY') {
-      const signalStrength = decision.signalStrength || { level: 'WEAK', multiplier: 1 };
-      const isStrongSignal = ['STRONG', 'VERY_STRONG'].includes(signalStrength.level);
-      let entryDelayMs = null;
-
-      // 이미 포지션이 있는 경우
-      if (strategy.currentPosition) {
-        if (!this.allowAveraging) {
-          this.resolveWinnerShadowBlockedEntryAsNotFilled(coin, decision, 'strict_position_already_open');
-          console.log(`\n⚠️  [${coin}] 이미 포지션 보유중 (추가 매수 비활성화)`);
-          return;
-        }
-        // 추가 매수는 STRONG 이상 신호에서만 허용
-        if (!isStrongSignal) {
-          this.resolveWinnerShadowBlockedEntryAsNotFilled(coin, decision, 'averaging_signal_not_strong');
-          console.log(`\n⚠️  [${coin}] 포지션 보유중 - 추가 매수는 STRONG 이상 신호 필요 (현재: ${signalStrength.level})`);
-          return;
-        }
-        console.log(`\n📈 [${coin}] 포지션 보유중 - 강한 신호로 추가 매수 진행`);
-      }
-
-      if (!strategy.currentPosition && currentPositions >= this.maxPositions) {
-        this.resolveWinnerShadowBlockedEntryAsNotFilled(coin, decision, 'max_positions_reached');
-        console.log(`\n⚠️  [${coin}] 최대 포지션 수(${this.maxPositions}개)에 도달하여 진입하지 않음`);
-        return;
-      }
-
-      if (!strategy.currentPosition && this.isStrictEntryBlockedByLossCircuit()) {
-        const circuit = this.getLossCircuitBreakerStatus('strict');
-        const remainingMinutes = Math.ceil((circuit.cooldownRemainingMs || 0) / 60000);
-        this.recordPaperCircuitBlock();
-        this.resolveWinnerShadowBlockedEntryAsNotFilled(coin, decision, 'loss_circuit_breaker');
-        console.log(`\n🛑 [${coin}] 전역 손실 회로차단기 쿨다운 중 - 신규 진입 차단 (${remainingMinutes}분 남음)`);
-        return;
-      }
-
-      const entrySignalKey = decision.entrySignalKey || decision.details?.rebound?.signalKey;
-      if (!strategy.currentPosition && this.isScalpingMode &&
-        this.isStrictEntryBlockedBySignalWindow(entrySignalKey)) {
-        const signalWindow = this.getStrictSignalWindowStatus();
-        this.recordPaperSignalWindowBlock();
-        this.resolveWinnerShadowBlockedEntryAsNotFilled(coin, decision, 'signal_window_limit');
-        console.log(`\n🧭 [${coin}] 동일 signal window 동시 진입 상한 도달 - 신규 진입 차단 (${signalWindow.lastEntryCount}/${signalWindow.maxEntriesPerSignalWindow})`);
-        return;
-      }
-
-      if (this.isScalpingMode && this.config.marketRegimeEnabled === true &&
-        decision.details?.marketRegime?.confirmed !== true) {
-        this.recordPaperMarketRegimeBlock();
-        this.resolveWinnerShadowBlockedEntryAsNotFilled(coin, decision, 'market_regime_blocked');
-        const regime = decision.details?.marketRegime;
-        console.log(`\n⛔ [${coin}] 시장 regime gate 미통과 - breadth ${Number(regime?.breadth || 0).toFixed(2)} / 평균 ${Number(regime?.averageReturnPercent || 0).toFixed(2)}%`);
-        return;
-      }
-
-      // 스캘핑 매수는 신호 발생 시점의 가격을 사용하지 않고,
-      // 1~5초 지연 후 ticker/완료 캔들을 다시 확인한 뒤 진행한다.
-      if (this.isScalpingMode) {
-        const snapshotMarketData = executionContext?.marketDataByCoin instanceof Map
-          ? executionContext.marketDataByCoin.get(coin)
-          : executionContext?.marketDataByCoin?.[coin];
-        const confirmation = await this.confirmScalpingEntry(
-          coin,
-          decision,
-          strategy,
-          snapshotMarketData
-            ? {
-                ...snapshotMarketData,
-                sharedSnapshot: executionContext.sharedSnapshot === true,
-                skipConfirmationDelay: executionContext.skipConfirmationDelay === true
-              }
-            : null
-        );
-        if (!confirmation) return;
-
-        // 지연 중 수동 주문/다른 경로에서 포지션이 먼저 생겼다면
-        // 스캘핑 모드에서는 추가 매수하지 않는다.
-        if (strategy.currentPosition && !this.allowAveraging) {
-          this.resolveWinnerShadowBlockedEntryAsNotFilled(coin, decision, 'position_created_during_confirmation');
-          console.log(`  ⛔ [${coin}] 지연 중 포지션이 생성되어 중복 진입 취소`);
-          return;
-        }
-
-        currentPrice = confirmation.currentPrice;
-        entryDelayMs = confirmation.delayMs;
-        const latestAccounts = await this.getAccountInfo();
-        krwBalance = this.getKRWBalance(latestAccounts);
-        currentPositions = this.getCurrentPositionCount();
-        if (!strategy.currentPosition && currentPositions >= this.maxPositions) {
-          this.resolveWinnerShadowBlockedEntryAsNotFilled(coin, decision, 'max_positions_reached_after_confirmation');
-          console.log(`  ⛔ [${coin}] 지연 중 최대 포지션 수(${this.maxPositions}개)에 도달하여 진입 취소`);
-          return;
-        }
-      }
-
-      // 동적 투자금액 계산 (시드머니 + 신호 강도 기반)
-      const totalAssets = await this.calculateTotalAssets(executionContext?.priceMap);
-      const dynamicInvestment = await this.calculateDynamicInvestmentAmount(totalAssets, signalStrength);
-
-      // 잔액 부족 시 강한 신호면 추가 리밸런싱
-      if (!this.isScalpingMode && krwBalance < dynamicInvestment && isStrongSignal && currentPositions > 0) {
-        console.log(`\n💡 [${coin}] 잔액 부족하지만 강한 신호 - 추가 리밸런싱 검토`);
-
-        const weakestPosition = this.findWeakestPosition(coin, coinAnalyses);
-        if (weakestPosition) {
-          const soldAmount = await this.sellForRebalancing(weakestPosition, coin);
-          if (soldAmount > 0) {
-            krwBalance = this.dryRun ? this.virtualPortfolio.krwBalance : soldAmount;
-          }
-        }
-      }
-
-      const maxInvestment = krwBalance * this.portfolioAllocation;
-      const investmentAmount = Math.min(
-        dynamicInvestment,
-        maxInvestment,
-        krwBalance * 0.95
-      );
-
-      // A LIVE data-gap transition may happen during an awaited confirmation
-      // or investment calculation. Recheck immediately before any BUY dispatch.
-      if (this._entriesPaused || this._stopRequested) {
-        this.resolveWinnerShadowBlockedEntryAsNotFilled(coin, decision, 'entries_paused');
-        return null;
-      }
-
-      const baseInvestment = totalAssets * this.investmentRatio;
-      console.log(`  💰 투자금액: ${investmentAmount.toLocaleString()}원`);
-      console.log(`     (기본 ${baseInvestment.toLocaleString()}원 × ${signalStrength.multiplier} = ${dynamicInvestment.toLocaleString()}원)`);
-
-      if (investmentAmount < 5000) {
-        this.resolveWinnerShadowBlockedEntryAsNotFilled(coin, decision, 'investment_below_minimum');
-        console.log(`\n⚠️  [${coin}] 매수 불가: 잔액 부족 (${krwBalance.toLocaleString()}원)`);
-        return;
-      }
-
-      // A sealed paper session applies its configured adverse fill-cost model.
-      const paperEntryCostModel = this.getStrictPaperExecutionCostModel();
-      const FEE_RATE = paperEntryCostModel?.tradingFeeRate ?? 0.0005;
-      const fee = investmentAmount * FEE_RATE;
-      const actualInvestment = investmentAmount - fee;
-      const entryFillPrice = currentPrice * (1 + (paperEntryCostModel?.slippageRate || 0));
-      const volume = actualInvestment / entryFillPrice;
-
-      if (this.dryRun) {
-        console.log(`\n🧪 [모의투자] ${coin} 매수 주문`);
-        console.log(`  금액: ${investmentAmount.toLocaleString()} 원`);
-        console.log(`  수수료: ${fee.toLocaleString()} 원 (${(FEE_RATE * 100).toFixed(2)}%)`);
-        console.log(`  실투자: ${actualInvestment.toLocaleString()} 원`);
-        console.log(`  수량: ${volume.toFixed(8)}`);
-        console.log(`  가격: ${entryFillPrice.toLocaleString()} 원`);
-
-        // 가상 포트폴리오 업데이트 - 마이너스 방지 체크
-        const currentBalance = this.virtualPortfolio.krwBalance || 0;
-        if (currentBalance < investmentAmount) {
-          this.resolveWinnerShadowBlockedEntryAsNotFilled(coin, decision, 'balance_insufficient');
-          console.log(`\n⚠️  [${coin}] 매수 취소: 실시간 잔액 부족 (${currentBalance.toLocaleString()}원 < ${investmentAmount.toLocaleString()}원)`);
-          return;
-        }
-        this.virtualPortfolio.krwBalance = Math.max(0, currentBalance - investmentAmount);
-        const existing = this.virtualPortfolio.holdings.get(coin) || { amount: 0, avgPrice: 0, entryTime: null };
-        const newAmount = existing.amount + volume;
-        const newAvgPrice = ((existing.amount * existing.avgPrice) + (volume * entryFillPrice)) / newAmount;
-        this.virtualPortfolio.holdings.set(coin, {
-          amount: newAmount,
-          avgPrice: newAvgPrice,
-          entryTime: existing.entryTime || new Date().toISOString() // 최초 매수 시간 유지
-        });
-
-        strategy.openPosition(entryFillPrice, volume, 'BUY');
-        if (paperEntryCostModel && strategy.currentPosition) {
-          strategy.currentPosition.paperExecutionCostModel = paperEntryCostModel.version;
-          strategy.currentPosition.paperExecutionSlippageRate = paperEntryCostModel.slippageRate;
-          strategy.currentPosition.paperExecutionTradingFeeRate = paperEntryCostModel.tradingFeeRate;
-          strategy.currentPosition.paperObservedEntryPrice = currentPrice;
-          strategy.currentPosition.paperEntryFee = fee;
-          strategy.currentPosition.paperInvestmentAmount = investmentAmount;
-        }
-        this.decorateEntryPosition(strategy, decision, {
-          executionPrice: currentPrice,
-          delayMs: entryDelayMs
-        });
-        this.recordStrictSignalWindowEntry(decision.entrySignalKey || decision.details?.rebound?.signalKey);
-        this.saveVirtualPortfolio();
-        console.log(`  잔여 KRW: ${this.virtualPortfolio.krwBalance.toLocaleString()} 원`);
-
-        // 매수 알림
-        this.notifyTrade({
-          type: 'BUY',
-          coin,
-          price: entryFillPrice,
-          amount: investmentAmount,
-          volume,
-          reason: decision.reason,
-          signalStrength: signalStrength.level,
-          mode: 'DRY_RUN'
-        });
-      } else {
-        console.log(`\n💵 [${coin}] 실제 매수 주문 실행`);
-        console.log(`  예상 가격: ${currentPrice.toLocaleString()} 원`);
-        console.log(`  투자 금액: ${investmentAmount.toLocaleString()} 원`);
-
-        const orderResult = await this.submitLiveOrder(coin, 'bid', investmentAmount, null, 'price');
-        const orderId = orderResult?.data?.uuid || null;
-        const submissionEvidenceRecorded = this.recordLiveExecutionEvidence(this.createLiveExecutionEvidence({
-          eventType: orderResult?.success === true ? 'ORDER_SUBMITTED' : 'ORDER_REJECTED',
-          orderId,
-          market: coin,
-          side: 'bid',
-          orderType: 'price',
-          requested: { amount: investmentAmount },
-          referencePrice: currentPrice,
-          signal: {
-            signalKey: decision.entrySignalKey || decision.details?.rebound?.signalKey,
-            signalTime: decision.details?.rebound?.candleTime,
-            referencePrice: decision.entryReferencePrice ?? decision.details?.rebound?.referencePrice,
-            entryDelayMs
-          },
-          error: orderResult?.success === true ? null : orderResult?.error?.message
-        }));
-
-        if (orderResult?.success === true && orderId) {
-          console.log(`  📝 주문 접수: ${orderId}`);
-
-          // 주문 체결 대기 (최대 30초)
-          console.log(`  ⏳ 체결 대기 중...`);
-          const fillResult = await this.waitForLiveOrderFill(coin, orderId, 30000, 1000);
-
-          if (fillResult.filled) {
-            const filledOrder = fillResult.order;
-            const fillEvidenceRecorded = this.recordLiveExecutionEvidence(this.createLiveExecutionEvidence({
-              eventType: fillResult.partial ? 'FILL_PARTIAL' : 'FILL_OBSERVED',
-              orderId,
-              market: coin,
-              side: 'bid',
-              orderType: 'price',
-              requested: { amount: investmentAmount },
-              referencePrice: currentPrice,
-              signal: {
-                signalKey: decision.entrySignalKey || decision.details?.rebound?.signalKey,
-                signalTime: decision.details?.rebound?.candleTime,
-                referencePrice: decision.entryReferencePrice ?? decision.details?.rebound?.referencePrice,
-                entryDelayMs
-              },
-              order: filledOrder,
-              fillResult
-            }));
-            if (!submissionEvidenceRecorded || !fillEvidenceRecorded || !hasCompleteLiveFillResult(fillResult)) {
-              if (!hasCompleteLiveFillResult(fillResult)) {
-                this.liveExecutionEvidenceDataError = 'live fill accounting fields are incomplete';
-              }
-              if (fillResult.partial && !(await this.cancelLiveOrderIfOpen(orderId, filledOrder))) {
-                this.liveExecutionEvidenceDataError = 'live partial order cancellation failed';
-              }
-              console.error(`🛑 [${coin}] live fill evidence가 불완전해 전략 포지션을 확정하지 않습니다.`);
-              return;
-            }
-            const settlementEvidence = await this.recordLiveSettlementReadback({
-              orderId,
-              market: coin,
-              side: 'bid',
-              orderType: 'price',
-              requested: { amount: investmentAmount },
-              referencePrice: currentPrice,
-              order: filledOrder,
-              fillResult
-            });
-            if (!settlementEvidence.recorded) {
-              this.liveExecutionEvidenceDataError = 'live settlement evidence write failed';
-              console.error(`🛑 [${coin}] settlement evidence가 저장되지 않아 전략 포지션을 확정하지 않습니다.`);
-              return;
-            }
-            const actualVolume = Number(filledOrder.executed_volume);
-
-            // Upbit API는 avg_price 필드로 평균 체결가를 제공
-            const actualPrice = Number(filledOrder.avg_price);
-            const actualAmount = actualVolume * actualPrice;
-            const paidFee = Number(filledOrder.paid_fee);
-
-            // 슬리피지 계산
-            const slippage = ((actualPrice - currentPrice) / currentPrice * 100).toFixed(2);
-
-            console.log(`  ✅ 체결 완료!`);
-            console.log(`    실제 체결가: ${actualPrice.toLocaleString()} 원`);
-            console.log(`    체결 수량: ${actualVolume.toFixed(8)}`);
-            console.log(`    체결 금액: ${actualAmount.toLocaleString()} 원`);
-            console.log(`    수수료: ${paidFee.toLocaleString()} 원`);
-            console.log(`    슬리피지: ${slippage}%`);
-
-            if (fillResult.partial) {
-              console.log(`  ⚠️  부분 체결됨 - 잔여: ${filledOrder.remaining_volume}`);
-              if (!(await this.cancelLiveOrderIfOpen(orderId, filledOrder))) {
-                this.liveExecutionEvidenceDataError = 'live partial order cancellation failed';
-                return;
-              }
-            }
-
-            // 실제 체결 데이터로 포지션 오픈
-            strategy.openPosition(actualPrice, actualVolume, 'BUY');
-            this.decorateEntryPosition(strategy, decision, {
-              executionPrice: actualPrice,
-              delayMs: entryDelayMs
-            });
-            this.recordStrictSignalWindowEntry(decision.entrySignalKey || decision.details?.rebound?.signalKey);
-
-            // 매수 알림 (실제 체결 데이터)
-            this.notifyTrade({
-              type: 'BUY',
-              coin,
-              price: actualPrice,
-              amount: actualVolume * actualPrice,
-              volume: actualVolume,
-              reason: decision.reason,
-              signalStrength: signalStrength.level,
-              mode: 'LIVE',
-              orderId,
-              slippage: parseFloat(slippage)
-            });
-          } else {
-            const fillEvidenceRecorded = this.recordLiveExecutionEvidence(this.createLiveExecutionEvidence({
-              eventType: 'FILL_NOT_OBSERVED',
-              orderId,
-              market: coin,
-              side: 'bid',
-              orderType: 'price',
-              requested: { amount: investmentAmount },
-              referencePrice: currentPrice,
-              signal: {
-                signalKey: decision.entrySignalKey || decision.details?.rebound?.signalKey,
-                signalTime: decision.details?.rebound?.candleTime,
-                referencePrice: decision.entryReferencePrice ?? decision.details?.rebound?.referencePrice,
-                entryDelayMs
-              },
-              order: fillResult.order,
-              fillResult,
-              error: fillResult.error
-            }));
-            if (!fillEvidenceRecorded) {
-              console.error(`🛑 [${coin}] 미체결 evidence 저장 실패를 기록하고 주문 취소 결과를 별도 확인해야 합니다.`);
-            }
-            // 미체결 - 주문 취소 시도
-            console.log(`  ⚠️  체결 실패: ${fillResult.error}`);
-            console.log(`  🔄 주문 취소 시도...`);
-
-            try {
-              await this.upbit.cancelOrder(orderId, { priority: 'risk' });
-              console.log(`  ✅ 주문 취소됨`);
-            } catch (cancelError) {
-              console.error(`  ❌ 주문 취소 실패: ${cancelError.message}`);
-              console.log(`  ⚠️  수동 확인 필요 - 주문 ID: ${orderId}`);
-            }
-          }
-        } else {
-          console.error(`  ❌ 주문 실패: ${orderResult.error.message} (${orderResult.error.code})`);
-          // 주문 실패 시 포지션 열지 않음 - 상태 일관성 유지
-        }
-      }
-    }
-
-    if (decision.action === 'SELL') {
-      if (!strategy.currentPosition && coinBalance === 0) {
-        console.log(`\n⚠️  [${coin}] 매도 불가: 보유 수량 없음`);
-        return;
-      }
-
-      const sellVolume = strategy.currentPosition
-        ? strategy.currentPosition.amount
-        : coinBalance;
-
-      // 최소 매도 금액 체크 (5000원)
-      const paperExitCostModel = this.getStrictPaperExecutionCostModel(strategy.currentPosition);
-      const exitFillPrice = currentPrice * (1 - (paperExitCostModel?.slippageRate || 0));
-      const estimatedSellAmount = sellVolume * exitFillPrice;
-      if (estimatedSellAmount < 5000) {
-        console.log(`\n⚠️  [${coin}] 매도 불가: 최소 매도금액(5,000원) 미만 (${estimatedSellAmount.toLocaleString()}원)`);
-        return;
-      }
-
-      if (this.dryRun) {
-        const FEE_RATE = paperExitCostModel?.tradingFeeRate ?? 0.0005;
-        const fee = estimatedSellAmount * FEE_RATE;
-        const actualReceived = estimatedSellAmount - fee;
-
-        console.log(`\n🧪 [모의투자] ${coin} 매도 주문`);
-        console.log(`  수량: ${sellVolume.toFixed(8)}`);
-        console.log(`  예상 금액: ${estimatedSellAmount.toLocaleString()} 원`);
-        console.log(`  수수료: ${fee.toLocaleString()} 원 (${(FEE_RATE * 100).toFixed(2)}%)`);
-        console.log(`  실수령: ${actualReceived.toLocaleString()} 원`);
-
-        // 가상 포트폴리오 업데이트 (수수료 차감)
-        this.virtualPortfolio.krwBalance += actualReceived;
-
-        const holding = this.virtualPortfolio.holdings.get(coin);
-        if (holding) {
-          holding.amount -= sellVolume;
-          if (holding.amount <= 0.00000001) {
-            this.virtualPortfolio.holdings.delete(coin);
-          } else {
-            this.virtualPortfolio.holdings.set(coin, holding);
-          }
-        }
-
-        // 수익률 계산
-        const paperEntryFee = paperExitCostModel ? Number(strategy.currentPosition?.paperEntryFee) : null;
-        const closeOptions = paperEntryFee !== null && Number.isFinite(paperEntryFee) && paperEntryFee >= 0
-          ? { buyFee: paperEntryFee, tradingFeeRate: paperExitCostModel.tradingFeeRate }
-          : {};
-        if (paperExitCostModel && strategy.currentPosition) {
-          strategy.currentPosition.paperObservedExitPrice = currentPrice;
-        }
-        const closedTrade = strategy.closePosition(exitFillPrice, decision.reason, closeOptions);
-        const profitPercent = Number.isFinite(Number(closedTrade?.profitPercent))
-          ? Number(closedTrade.profitPercent).toFixed(2)
-          : '0.00';
-        this.recordPaperStrictTrade(coin, closedTrade, 'CLOSE');
-        this.saveVirtualPortfolio();
-        console.log(`  잔여 KRW: ${this.virtualPortfolio.krwBalance.toLocaleString()} 원`);
-
-        // 매도 알림
-        this.notifyTrade({
-          type: 'SELL',
-          coin,
-          price: exitFillPrice,
-          amount: estimatedSellAmount,
-          volume: sellVolume,
-          reason: decision.reason,
-          profitPercent,
-          mode: 'DRY_RUN'
-        });
-      } else {
-        console.log(`\n💰 [${coin}] 실제 매도 주문 실행`);
-        console.log(`  예상 가격: ${currentPrice.toLocaleString()} 원`);
-        console.log(`  매도 수량: ${sellVolume.toFixed(8)}`);
-
-        const orderResult = await this.submitLiveOrder(coin, 'ask', sellVolume, null, 'market');
-        const orderId = orderResult?.data?.uuid || null;
-        const submissionEvidenceRecorded = this.recordLiveExecutionEvidence(this.createLiveExecutionEvidence({
-          eventType: orderResult?.success === true ? 'ORDER_SUBMITTED' : 'ORDER_REJECTED',
-          orderId,
-          market: coin,
-          side: 'ask',
-          orderType: 'market',
-          requested: { volume: sellVolume },
-          referencePrice: currentPrice,
-          error: orderResult?.success === true ? null : orderResult?.error?.message
-        }));
-
-        if (orderResult?.success === true && orderId) {
-          console.log(`  📝 주문 접수: ${orderId}`);
-
-          // 주문 체결 대기 (최대 30초)
-          console.log(`  ⏳ 체결 대기 중...`);
-          const fillResult = await this.waitForLiveOrderFill(coin, orderId, 30000, 1000);
-
-          if (fillResult.filled) {
-            const filledOrder = fillResult.order;
-            const fillEvidenceRecorded = this.recordLiveExecutionEvidence(this.createLiveExecutionEvidence({
-              eventType: fillResult.partial ? 'FILL_PARTIAL' : 'FILL_OBSERVED',
-              orderId,
-              market: coin,
-              side: 'ask',
-              orderType: 'market',
-              requested: { volume: sellVolume },
-              referencePrice: currentPrice,
-              order: filledOrder,
-              fillResult
-            }));
-            if (!submissionEvidenceRecorded || !fillEvidenceRecorded || !hasCompleteLiveFillResult(fillResult)) {
-              if (!hasCompleteLiveFillResult(fillResult)) {
-                this.liveExecutionEvidenceDataError = 'live fill accounting fields are incomplete';
-              }
-              if (fillResult.partial && !(await this.cancelLiveOrderIfOpen(orderId, filledOrder))) {
-                this.liveExecutionEvidenceDataError = 'live partial order cancellation failed';
-              }
-              console.error(`🛑 [${coin}] live fill evidence가 불완전해 전략 포지션을 확정하지 않습니다.`);
-              return;
-            }
-            const settlementEvidence = await this.recordLiveSettlementReadback({
-              orderId,
-              market: coin,
-              side: 'ask',
-              orderType: 'market',
-              requested: { volume: sellVolume },
-              referencePrice: currentPrice,
-              order: filledOrder,
-              fillResult
-            });
-            if (!settlementEvidence.recorded) {
-              this.liveExecutionEvidenceDataError = 'live settlement evidence write failed';
-              console.error(`🛑 [${coin}] settlement evidence가 저장되지 않아 전략 포지션을 확정하지 않습니다.`);
-              return;
-            }
-            const actualVolume = Number(filledOrder.executed_volume);
-
-            // Upbit API는 avg_price 필드로 평균 체결가를 제공
-            const actualPrice = Number(filledOrder.avg_price);
-            const actualAmount = actualVolume * actualPrice;
-            const paidFee = Number(filledOrder.paid_fee);
-
-            // 슬리피지 계산
-            const slippage = ((actualPrice - currentPrice) / currentPrice * 100).toFixed(2);
-
-            // 수익률 계산 (실제 체결가 기준)
-            const entryPrice = strategy.currentPosition?.entryPrice || currentPrice;
-            const grossProfit = (actualPrice - entryPrice) * actualVolume;
-            const netProfit = grossProfit - paidFee; // 매도 수수료 차감
-            const profitPercent = ((actualPrice - entryPrice) / entryPrice * 100).toFixed(2);
-
-            console.log(`  ✅ 체결 완료!`);
-            console.log(`    실제 체결가: ${actualPrice.toLocaleString()} 원`);
-            console.log(`    체결 수량: ${actualVolume.toFixed(8)}`);
-            console.log(`    체결 금액: ${actualAmount.toLocaleString()} 원`);
-            console.log(`    수수료: ${paidFee.toLocaleString()} 원`);
-            console.log(`    슬리피지: ${slippage}%`);
-            console.log(`    순수익: ${profitPercent}% (${netProfit >= 0 ? '+' : ''}${netProfit.toLocaleString()}원)`);
-
-            if (fillResult.partial) {
-              const remainingVolume = parseFloat(filledOrder.remaining_volume || 0);
-              console.log(`  ⚠️  부분 체결됨 - 미체결 수량: ${remainingVolume.toFixed(8)}`);
-              // 부분 체결 시 남은 수량 처리 필요 알림
-              console.log(`  ⚠️  미체결 수량은 수동 확인 필요`);
-            }
-
-            if (fillResult.partial && !(await this.cancelLiveOrderIfOpen(orderId, filledOrder))) {
-              this.liveExecutionEvidenceDataError = 'live partial order cancellation failed';
-              return;
-            }
-
-            // 실제 체결 데이터로 포지션을 갱신한다. 부분 체결은 잔여
-            // 포지션을 유지하고, 취소 후 확인된 수량만 기록한다.
-            const isFullSell = !fillResult.partial ||
-              actualVolume >= strategy.currentPosition?.amount - 0.00000001;
-            const closedTrade = isFullSell
-              ? strategy.closePosition(actualPrice, decision.reason)
-              : strategy.recordPartialSell(actualPrice, actualVolume, decision.reason);
-            this.registerRuntimeLoss(closedTrade);
-
-            // 매도 알림 (실제 체결 데이터)
-            this.notifyTrade({
-              type: 'SELL',
-              coin,
-              price: actualPrice,
-              amount: actualAmount,
-              volume: actualVolume,
-              reason: decision.reason,
-              profitPercent: parseFloat(profitPercent),
-              profitAmount: netProfit,
-              fee: paidFee,
-              mode: 'LIVE',
-              orderId,
-              slippage: parseFloat(slippage)
-            });
-          } else {
-            const fillEvidenceRecorded = this.recordLiveExecutionEvidence(this.createLiveExecutionEvidence({
-              eventType: 'FILL_NOT_OBSERVED',
-              orderId,
-              market: coin,
-              side: 'ask',
-              orderType: 'market',
-              requested: { volume: sellVolume },
-              referencePrice: currentPrice,
-              order: fillResult.order,
-              fillResult,
-              error: fillResult.error
-            }));
-            if (!fillEvidenceRecorded) {
-              console.error(`🛑 [${coin}] 미체결 evidence 저장 실패를 기록하고 주문 상태를 별도 확인해야 합니다.`);
-            }
-            // 미체결 - 마켓 주문이므로 이 경우는 드묾
-            console.log(`  ⚠️  체결 실패: ${fillResult.error}`);
-            console.log(`  ⚠️  포지션 상태 유지됨 - 수동 확인 필요`);
-            console.log(`  ⚠️  주문 ID: ${orderId}`);
-          }
-        } else {
-          console.error(`  ❌ 주문 실패: ${orderResult.error.message} (${orderResult.error.code})`);
-          // 주문 실패 시 포지션 유지 - 수동 확인 필요
-          console.log(`  ⚠️  포지션 상태 유지됨 - 수동 확인 필요`);
-        }
-      }
-    }
-  }
+  _executeOrder(...args) { return this._orderEngine()._executeOrder(...args); }
 
   /**
    * 현재 포지션 수 조회
@@ -2608,7 +1861,7 @@ class MultiCoinTrader {
           // 잔액 확인
           try {
             const accounts = await this.upbit.getAccounts({ priority: 'risk' });
-            const krwAccount = accounts.find(acc => acc.currency === 'KRW');
+            const krwAccount = accounts.find(acc => acc.currency === this.quoteAsset);
             const assetAccount = accounts.find(acc => acc.currency === coin.split('-')[1]);
             const settlementEvidenceRecorded = this.recordLiveExecutionEvidence(this.createLiveExecutionEvidence({
               eventType: 'SETTLEMENT_READBACK',
@@ -2728,7 +1981,7 @@ class MultiCoinTrader {
     if (this.dryRun) {
       // 가상 포트폴리오에서 잔액 반환
       const accounts = [
-        { currency: 'KRW', balance: String(this.virtualPortfolio.krwBalance), locked: '0', avg_buy_price: '0' }
+        { currency: this.quoteAsset, balance: String(this.virtualPortfolio.krwBalance), locked: '0', avg_buy_price: '0' }
       ];
 
       // 보유 코인 추가
@@ -2751,7 +2004,7 @@ class MultiCoinTrader {
    * KRW 잔액 조회 (사용 가능 금액만)
    */
   getKRWBalance(accounts) {
-    const krwAccount = accounts.find(acc => acc.currency === 'KRW');
+    const krwAccount = accounts.find(acc => acc.currency === this.quoteAsset);
     if (!krwAccount) return 0;
     // balance는 사용 가능한 금액, locked는 주문 중인 금액 (별도 관리됨)
     return parseFloat(krwAccount.balance) || 0;
@@ -2761,7 +2014,7 @@ class MultiCoinTrader {
    * KRW 총 잔액 조회 (locked 포함)
    */
   getKRWTotalBalance(accounts) {
-    const krwAccount = accounts.find(acc => acc.currency === 'KRW');
+    const krwAccount = accounts.find(acc => acc.currency === this.quoteAsset);
     if (!krwAccount) return 0;
 
     const balance = parseFloat(krwAccount.balance) || 0;

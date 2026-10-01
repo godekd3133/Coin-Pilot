@@ -486,15 +486,15 @@ export class TradingLifecycle {
         resolved = [];
         for (const entry of targetCoins) {
           const code = String(entry || '').trim().toUpperCase();
-          if (!/^KRW-[A-Z0-9]{2,15}$/.test(code) || seen.has(code)) continue;
+          if (!/^[A-Z0-9]{2,10}-[A-Z0-9]{2,15}$/.test(code) || seen.has(code)) continue;
           seen.add(code);
           resolved.push(code);
         }
         if (resolved.length === 0) {
-          throw new Error('targetCoins must contain at least one valid KRW-* market');
+          throw new Error(`targetCoins must contain at least one valid ${this.owner.quoteAsset}-* market`);
         }
       } else {
-        throw new Error('targetCoins must be an array of KRW-* codes or "ALL"');
+        throw new Error(`targetCoins must be an array of ${this.owner.quoteAsset}-* codes or "ALL"`);
       }
       this.owner.targetCoins = resolved;
       this.owner.config.targetCoins = [...resolved];
@@ -516,9 +516,9 @@ export class TradingLifecycle {
     const markets = await this.owner.marketDataAdapter.getMarkets();
     const krwMarkets = (Array.isArray(markets) ? markets : [])
       .map(entry => entry?.market)
-      .filter(market => typeof market === 'string' && market.startsWith('KRW-'));
+      .filter(market => typeof market === 'string' && market.startsWith(`${this.owner.quoteAsset}-`));
     if (krwMarkets.length === 0) {
-      throw new Error('KRW 마켓 목록을 불러오지 못했습니다.');
+      throw new Error(`${this.owner.quoteAsset} 마켓 목록을 불러오지 못했습니다.`);
     }
     if (!this.owner.isScalpingMode) return krwMarkets;
     const tickers = await this.owner.marketDataAdapter.getTickers(krwMarkets);

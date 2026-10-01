@@ -1,6 +1,7 @@
 import express from 'express';
 import { accountValuationMarkets, readCurrentMarketPrices } from '../marketValuation.js';
 import { projectReadOnlyPaperAccount, projectReadOnlyPaperPositions } from '../readOnlyPaperPortfolio.js';
+import { quoteOfSystem } from '../../exchange/marketCodes.js';
 
 async function getObserverAccountInfo(server) {
   if (typeof server.getObserverCachedAccountInfo === 'function') {
@@ -25,6 +26,8 @@ export default function createAccountRoutes(server) {
       res.json({
         isRunning: server.tradingSystem.isRunning,
         mode: server.tradingSystem.dryRun ? 'DRY_RUN' : 'LIVE',
+        exchange: server.tradingSystem.exchange || 'upbit',
+        quoteCurrency: server.tradingSystem.quoteAsset || 'KRW',
         ...runtimeSafety,
         liveManualPrepared: server.tradingSystem.liveManualPrepared === true,
         liveManualPrepareOnBoot: server.tradingSystem.liveManualPrepareOnBoot === true,
@@ -244,7 +247,7 @@ export default function createAccountRoutes(server) {
         for (const acc of accounts) {
           if (acc.currency !== 'KRW' && parseFloat(acc.balance) > 0) {
             coinList.push({
-              coin: `KRW-${acc.currency}`,
+              coin: `${quoteOfSystem(server.tradingSystem)}-${acc.currency}`,
               amount: parseFloat(acc.balance),
               avgPrice: parseFloat(acc.avg_buy_price) || 0
             });

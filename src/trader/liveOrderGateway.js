@@ -705,6 +705,7 @@ export class LiveOrderGateway {
       const accounts = await this.owner.upbit.getAccounts({ priority: 'risk' });
       if (!Array.isArray(accounts)) throw new Error('거래소 계좌 응답이 올바르지 않습니다.');
       const exchangeHoldings = new Map();
+      const quote = this.owner.quoteAsset || 'KRW';
       const isFiniteNonnegativeField = value =>
         (typeof value === 'number' || (typeof value === 'string' && value.trim() !== '')) &&
         Number.isFinite(Number(value)) && Number(value) >= 0;
@@ -717,14 +718,14 @@ export class LiveOrderGateway {
           console.error('  ❌ 거래소 계좌 응답에 통화 또는 잔고 값이 잘못된 행이 있습니다.');
           return false;
         }
-        if (acc.currency === 'KRW') continue;
+        if (acc.currency === quote) continue;
 
         const balance = Number(acc.balance);
         const locked = Number(acc.locked);
         const totalBalance = balance + locked;
 
         if (totalBalance > 0) {
-          const market = `KRW-${acc.currency}`;
+          const market = `${quote}-${acc.currency}`;
           exchangeHoldings.set(market, {
             balance: totalBalance,
             avgPrice: Number(acc.avg_buy_price || 0)
