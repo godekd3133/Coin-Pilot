@@ -2,6 +2,13 @@
  * 기술적 지표 계산 모듈
  */
 
+import {
+  calculateRsiSeries,
+  computeReboundPoint,
+  decideReboundSignal,
+  emptyReboundSignal
+} from './reboundSignal.js';
+
 /**
  * RSI (Relative Strength Index) 계산
  * @param {Array} candles - 캔들 데이터 배열 (최신 데이터가 앞에)
@@ -235,6 +242,13 @@ export function analyzeVolume(candles, period = 20) {
  * @param {Object} config - 반등 확인 설정
  * @returns {Object} 반등 상태와 신호 식별자
  */
+/**
+ * 라이브 완료-캔들 반등 평가 — 최신-first 캔들 배열을 받아 진행 중 캔들(0)을
+ * 버리고, 가장 최근 완료 캔들을 공유 평가기(reboundSignal.js)에 넘긴다.
+ * 결정 계약 자체는 decideReboundSignal이 소유하므로 백테스트와 드리프트하지
+ * 않는다. 반환 shape는 라이브 호출자 계약을 유지한다(available:false 객체 +
+ * OHLC 보조 필드 + nullable oversoldReferenceClose).
+ */
 export function calculateClosedCandleRebound(candles, config = {}) {
   const {
     rsiPeriod = 14,
@@ -263,47 +277,30 @@ export function calculateClosedCandleRebound(candles, config = {}) {
     emaPeriod = 20
   } = config;
 
-  const noSignal = {
-    available: false,
-    oversold: false,
-    previousWasOversold: false,
-    oversoldCandleAge: null,
-    oversoldRsi: null,
-    oversoldReferenceClose: null,
-    currentWasOversold: false,
-    reboundConfirmed: false,
-    bullishCandle: false,
-    priceChangePercent: 0,
-    reboundPriceChangePercent: 0,
-    rsi: null,
-    previousRsi: null,
-    rsiRecovery: 0,
-    currentClose: null,
-    previousClose: null,
-    referencePrice: null,
-    volumeRatio: null,
-    volumeConfirmed: false,
-    signalRangePercent: null,
-    volatilityConfirmed: false,
-    signalRangeFloorConfirmed: false,
-    reboundCeilingConfirmed: false,
-    closeStrength: null,
-    closeStrengthConfirmed: false,
-    trendSlopePercent: null,
-    trendConfirmed: false,
-    previousHighBreak: false,
-    previousHighBreakConfirmed: false,
+  const resolved = {
+    rsiPeriod,
+    rsiOversold,
+    rsiOverbought,
+    oversoldLookback,
+    minReboundPercent,
+    minRsiRecovery,
+    minVolumeRatio,
+    volumeLookback,
+    minCloseStrength,
+    trendPeriod,
+    trendSlopeLookback,
+    minTrendSlopePercent,
+    requirePreviousHighBreak,
+    maxSignalRangePercent,
+    minSignalRangePercent,
+    maxReboundPercent,
+    requireReboundBelowOverbought,
     signalProfile,
-    profileConfirmed: false,
-    momentumRsiConfirmed: false,
-    reboundOverboughtConfirmed: false,
-    momentumBreakoutConfirmed: false,
-    bollingerReclaim: false,
-    emaTrendConfirmed: false,
-    rejectionReasons: [],
-    signalKey: null,
-    candleTime: null
+    bbPeriod,
+    bbStdDev,
+    emaPeriod
   };
+  const noSignal = emptyReboundSignal(signalProfile);
 
   // 진행 중 캔들(0)을 제외한 완료 캔들에서 현재/직전 봉과 RSI를 계산한다.
   const closedCandles = Array.isArray(candles) ? candles.slice(1) : [];
@@ -325,245 +322,26 @@ export function calculateClosedCandleRebound(candles, config = {}) {
     return noSignal;
   }
 
-  let rsi;
-  let previousRsi;
-  try {
-    rsi = calculateRSI(closedCandles, rsiPeriod);
-    previousRsi = calculateRSI(closedCandles.slice(1), rsiPeriod);
-  } catch {
-    return noSignal;
-  }
-
-  const priceChangePercent = ((currentClose - previousClose) / previousClose) * 100;
-  const immediateRsiRecovery = rsi - previousRsi;
-  const bullishCandle = currentClose > currentOpen && currentClose > previousClose;
-  const candleRange = currentHigh - currentLow;
-  const configuredMaxSignalRangePercent = Number(maxSignalRangePercent);
-  const configuredMinSignalRangePercent = Number(minSignalRangePercent);
-  const signalRangePercent = previousClose > 0 && Number.isFinite(candleRange)
-    ? (candleRange / previousClose) * 100
-    : null;
-  const volatilityConfirmed = !Number.isFinite(configuredMaxSignalRangePercent) ||
-    configuredMaxSignalRangePercent <= 0 ||
-    signalRangePercent === null ||
-    signalRangePercent <= configuredMaxSignalRangePercent;
-  const signalRangeFloorConfirmed = !Number.isFinite(configuredMinSignalRangePercent) ||
-    configuredMinSignalRangePercent <= 0 ||
-    signalRangePercent === null ||
-    signalRangePercent >= configuredMinSignalRangePercent;
-  const closeStrength = candleRange > 0 ? (currentClose - currentLow) / candleRange : 1;
-  const currentVolume = Number(currentCandle?.candle_acc_trade_volume);
-  const volumeHistory = closedCandles
-    .slice(1, volumeLookback + 1)
-    .map(candle => Number(candle?.candle_acc_trade_volume))
-    .filter(Number.isFinite);
-  const averageVolume = volumeHistory.length > 0
-    ? volumeHistory.reduce((sum, volume) => sum + volume, 0) / volumeHistory.length
-    : 0;
-  const volumeRatio = Number.isFinite(currentVolume) && averageVolume > 0
-    ? currentVolume / averageVolume
-    : null;
-  const volumeConfirmed = volumeRatio === null || volumeRatio >= minVolumeRatio;
-  const closeStrengthConfirmed = closeStrength >= minCloseStrength;
-  const previousHighBreak = Number.isFinite(previousHigh) && currentClose > previousHigh;
-  const previousHighBreakConfirmed = !requirePreviousHighBreak || previousHighBreak;
-
-  const band = candlesForBand => {
-    const prices = candlesForBand.map(candle => Number(candle?.trade_price)).filter(Number.isFinite);
-    if (prices.length < bbPeriod) return null;
-    const middle = prices.reduce((sum, price) => sum + price, 0) / prices.length;
-    const variance = prices.reduce((sum, price) => sum + Math.pow(price - middle, 2), 0) / prices.length;
-    const deviation = Math.sqrt(variance);
-    return { lower: middle - deviation * bbStdDev, upper: middle + deviation * bbStdDev };
-  };
-  const currentBand = band(closedCandles.slice(0, bbPeriod));
-  const previousBand = band(closedCandles.slice(1, bbPeriod + 1));
-  const bollingerReclaim = Boolean(
-    currentBand && previousBand &&
-    previousClose < previousBand.lower &&
-    currentClose >= currentBand.lower &&
-    currentClose > previousClose
-  );
-
-  const ema = candlesForEma => {
-    const prices = candlesForEma.map(candle => Number(candle?.trade_price)).filter(Number.isFinite).reverse();
-    if (prices.length < emaPeriod) return null;
-    const multiplier = 2 / (emaPeriod + 1);
-    let value = prices[0];
-    for (let index = 1; index < prices.length; index += 1) {
-      value = (prices[index] - value) * multiplier + value;
-    }
-    return value;
-  };
-  const currentEma = ema(closedCandles.slice(0, emaPeriod));
-  const previousEma = ema(closedCandles.slice(1, emaPeriod + 1));
-  const emaSlopePercent = currentEma && previousEma
-    ? ((currentEma - previousEma) / previousEma) * 100
-    : null;
-  const emaTrendConfirmed = currentEma !== null && previousEma !== null &&
-    currentClose >= currentEma && emaSlopePercent >= 0;
-  const momentumRsiConfirmed = rsi < rsiOverbought;
-  const reboundOverboughtConfirmed = !requireReboundBelowOverbought || rsi < rsiOverbought;
-  const profileConfirmed = signalProfile === 'bb_reclaim'
-    ? bollingerReclaim
-    : signalProfile === 'trend_rebound'
-      ? emaTrendConfirmed
-      : signalProfile === 'momentum_breakout'
-        ? emaTrendConfirmed && previousHighBreak && momentumRsiConfirmed
-        : true;
-  let trendSlopePercent = null;
-  let trendConfirmed = true;
-  if (closedCandles.length >= trendPeriod + trendSlopeLookback) {
-    const currentTrendPrices = closedCandles
-      .slice(0, trendPeriod)
-      .map(candle => Number(candle?.trade_price))
-      .filter(Number.isFinite);
-    const previousTrendPrices = closedCandles
-      .slice(trendSlopeLookback, trendSlopeLookback + trendPeriod)
-      .map(candle => Number(candle?.trade_price))
-      .filter(Number.isFinite);
-    const currentTrendAverage = currentTrendPrices.reduce((sum, price) => sum + price, 0) / currentTrendPrices.length;
-    const previousTrendAverage = previousTrendPrices.reduce((sum, price) => sum + price, 0) / previousTrendPrices.length;
-    if (previousTrendAverage > 0 && currentTrendPrices.length > 0 && previousTrendPrices.length > 0) {
-      trendSlopePercent = ((currentTrendAverage - previousTrendAverage) / previousTrendAverage) * 100;
-      trendConfirmed = trendSlopePercent >= minTrendSlopePercent;
-    }
-  }
-  const lookback = Math.max(1, Math.floor(Number(oversoldLookback) || 1));
-  const oversoldCandidates = [];
-  for (let offset = 1; offset <= lookback; offset += 1) {
-    const candidateCandle = closedCandles[offset];
-    if (!candidateCandle) continue;
-    try {
-      const candidateRsi = calculateRSI(closedCandles.slice(offset), rsiPeriod);
-      if (candidateRsi <= rsiOversold) {
-        oversoldCandidates.push({
-          age: offset,
-          rsi: candidateRsi,
-          close: Number(candidateCandle?.trade_price)
-        });
-      }
-    } catch {
-      // The current RSI calculation already determines availability. A
-      // shorter lookback slice may still be too short for this candidate.
-    }
-  }
-  // Use the deepest RSI washout as the recovery reference. Ties prefer the
-  // most recent candle so the signal cannot benefit from an unnecessarily old
-  // low price.
-  oversoldCandidates.sort((a, b) => a.rsi - b.rsi || a.age - b.age);
-  const oversoldReference = oversoldCandidates[0] || null;
-  const previousWasOversold = oversoldCandidates.length > 0;
-  const currentWasOversold = rsi <= rsiOversold;
-  const oversoldReferenceClose = Number(oversoldReference?.close);
-  const reboundPriceChangePercent = Number.isFinite(oversoldReferenceClose) && oversoldReferenceClose > 0
-    ? ((currentClose - oversoldReferenceClose) / oversoldReferenceClose) * 100
-    : priceChangePercent;
-  const rsiRecovery = oversoldReference ? rsi - oversoldReference.rsi : immediateRsiRecovery;
-  const configuredMaxReboundPercent = Number(maxReboundPercent);
-  const reboundCeilingConfirmed = signalProfile === 'momentum_breakout' ||
-    !Number.isFinite(configuredMaxReboundPercent) ||
-    configuredMaxReboundPercent <= 0 ||
-    reboundPriceChangePercent <= configuredMaxReboundPercent;
-  const oversoldReboundConfirmed = previousWasOversold &&
-    bullishCandle &&
-    reboundPriceChangePercent >= minReboundPercent &&
-    rsiRecovery >= minRsiRecovery &&
-    volumeConfirmed &&
-    volatilityConfirmed &&
-    signalRangeFloorConfirmed &&
-    closeStrengthConfirmed &&
-    trendConfirmed &&
-    previousHighBreakConfirmed &&
-    reboundOverboughtConfirmed &&
-    reboundCeilingConfirmed &&
-    profileConfirmed;
-  const momentumBreakoutConfirmed = signalProfile === 'momentum_breakout' &&
-    bullishCandle &&
-    priceChangePercent >= minReboundPercent &&
-    momentumRsiConfirmed &&
-    volumeConfirmed &&
-    volatilityConfirmed &&
-    closeStrengthConfirmed &&
-    trendConfirmed &&
-    previousHighBreak &&
-    profileConfirmed;
-  const reboundConfirmed = signalProfile === 'momentum_breakout'
-    ? momentumBreakoutConfirmed
-    : oversoldReboundConfirmed;
-
-  const rejectionReasons = [];
-  if (signalProfile !== 'momentum_breakout' && !previousWasOversold) rejectionReasons.push('previous_rsi_not_oversold');
-  if (!bullishCandle) rejectionReasons.push('bullish_rebound_not_confirmed');
-  if (signalProfile === 'momentum_breakout') {
-    if (priceChangePercent < minReboundPercent) rejectionReasons.push('breakout_move_below_threshold');
-    if (!momentumRsiConfirmed) rejectionReasons.push('rsi_overbought_blocked');
-  } else {
-    if (reboundPriceChangePercent < minReboundPercent) rejectionReasons.push('price_rebound_below_threshold');
-    if (!reboundCeilingConfirmed) rejectionReasons.push('price_rebound_above_threshold');
-    if (rsiRecovery < minRsiRecovery) rejectionReasons.push('rsi_recovery_below_threshold');
-    if (!reboundOverboughtConfirmed) rejectionReasons.push('rsi_overbought_blocked');
-  }
-  if (!volumeConfirmed) rejectionReasons.push('volume_confirmation_failed');
-  if (!volatilityConfirmed) rejectionReasons.push('signal_range_too_wide');
-  if (!signalRangeFloorConfirmed) rejectionReasons.push('signal_range_too_narrow');
-  if (!closeStrengthConfirmed) rejectionReasons.push('close_strength_failed');
-  if (!trendConfirmed) rejectionReasons.push('trend_filter_failed');
-  if (!previousHighBreakConfirmed) rejectionReasons.push('previous_high_break_failed');
-  if (!profileConfirmed) rejectionReasons.push(`${signalProfile}_profile_failed`);
-
-  const signalCandle = currentCandle;
-  const candleTime = signalCandle?.candle_date_time_utc ||
-    signalCandle?.candle_date_time_kst ||
-    signalCandle?.timestamp ||
-    null;
+  const chronological = closedCandles.slice().reverse();
+  const rsiSeries = calculateRsiSeries(chronological, rsiPeriod);
+  const index = chronological.length - 1;
+  // 라이브 계약의 트렌드 평가 경계는 완료 캔들 개수 기준이므로
+  // (length >= trendPeriod + trendSlopeLookback) index 기준으로는 1 빠르다.
+  const point = computeReboundPoint(chronological, index, rsiSeries, resolved, {
+    trendMinIndex: trendPeriod + trendSlopeLookback - 1
+  });
+  const decision = decideReboundSignal({ candles: chronological, index, point, rsiSeries, config: resolved });
+  if (!decision) return noSignal;
 
   return {
-    available: true,
-    oversold: previousWasOversold || currentWasOversold,
-    previousWasOversold,
-    oversoldCandleAge: oversoldReference?.age ?? null,
-    oversoldRsi: oversoldReference?.rsi ?? null,
-    oversoldReferenceClose: Number.isFinite(oversoldReferenceClose) ? oversoldReferenceClose : null,
-    currentWasOversold,
-    reboundConfirmed,
-    bullishCandle,
-    priceChangePercent,
-    reboundPriceChangePercent,
-    rsi,
-    previousRsi,
-    rsiRecovery,
-    immediateRsiRecovery,
-    currentClose,
-    previousClose,
+    ...decision,
+    oversoldReferenceClose: Number.isFinite(Number(decision.oversoldReference?.close))
+      ? Number(decision.oversoldReference.close)
+      : null,
     currentHigh: Number.isFinite(currentHigh) ? currentHigh : null,
     currentLow: Number.isFinite(currentLow) ? currentLow : null,
     previousHigh: Number.isFinite(previousHigh) ? previousHigh : null,
-    previousLow: Number.isFinite(previousLow) ? previousLow : null,
-    referencePrice: currentClose,
-    volumeRatio,
-    volumeConfirmed,
-    signalRangePercent,
-    volatilityConfirmed,
-    signalRangeFloorConfirmed,
-    reboundCeilingConfirmed,
-    closeStrength,
-    closeStrengthConfirmed,
-    trendSlopePercent,
-    trendConfirmed,
-    previousHighBreak,
-    previousHighBreakConfirmed,
-    signalProfile,
-    profileConfirmed,
-    momentumRsiConfirmed,
-    reboundOverboughtConfirmed,
-    momentumBreakoutConfirmed,
-    bollingerReclaim,
-    emaTrendConfirmed,
-    emaSlopePercent,
-    rejectionReasons,
-    signalKey: candleTime ? String(candleTime) : `${currentClose}:${previousClose}`,
-    candleTime
+    previousLow: Number.isFinite(previousLow) ? previousLow : null
   };
 }
 

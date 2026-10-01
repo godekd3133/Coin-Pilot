@@ -1,6 +1,17 @@
 import { calculateCostAdjustedBreakEvenPrice } from '../strategy/protectionPrices.js';
 import { createLossCircuitBreakerState, isLossCircuitCoolingDown, registerLoss } from '../risk/lossCircuitBreaker.js';
 import { resolveScalpingVolatilitySizing } from '../research/scalpingVolatility.js';
+import {
+  calculateBandAtIndex,
+  calculateRsiSeries,
+  calculateWindowEma,
+  computeReboundPoint,
+  decideReboundSignal,
+  getClose,
+  getHigh,
+  getLow,
+  getOpen
+} from '../analysis/reboundSignal.js';
 
 const DEFAULT_CONFIG = {
   initialBalance: 1_000_000,
@@ -515,94 +526,6 @@ export function splitHistoricalCandleSegments(rawCandles, candleUnit = 1, option
   };
 }
 
-function getOpen(candle) {
-  return number(candle?.opening_price, number(candle?.trade_price));
-}
-
-function getClose(candle) {
-  return number(candle?.trade_price, getOpen(candle));
-}
-
-function getHigh(candle) {
-  return number(candle?.high_price, Math.max(getOpen(candle), getClose(candle)));
-}
-
-function getLow(candle) {
-  return number(candle?.low_price, Math.min(getOpen(candle), getClose(candle)));
-}
-
-/**
- * Wilder RSI values for every chronological close. The live helper calculates
- * a full history slice for each signal; a backtest must reuse this series or
- * long walk-forward runs become needlessly quadratic.
- */
-function calculateRsiSeries(candles, period) {
-  const prices = candles.map(getClose);
-  const values = Array(prices.length).fill(null);
-  if (prices.length < period + 1) return values;
-
-  let gains = 0;
-  let losses = 0;
-  for (let index = 1; index <= period; index += 1) {
-    const difference = prices[index] - prices[index - 1];
-    if (difference >= 0) gains += difference;
-    else losses -= difference;
-  }
-
-  let avgGain = gains / period;
-  let avgLoss = losses / period;
-  values[period] = avgLoss === 0 ? 100 : 100 - (100 / (1 + (avgGain / avgLoss)));
-
-  for (let index = period + 1; index < prices.length; index += 1) {
-    const difference = prices[index] - prices[index - 1];
-    const currentGain = difference >= 0 ? difference : 0;
-    const currentLoss = difference < 0 ? -difference : 0;
-    avgGain = (avgGain * (period - 1) + currentGain) / period;
-    avgLoss = (avgLoss * (period - 1) + currentLoss) / period;
-    values[index] = avgLoss === 0 ? 100 : 100 - (100 / (1 + (avgGain / avgLoss)));
-  }
-
-  return values;
-}
-
-function calculateBandAtIndex(closes, endIndex, period, stdDev) {
-  const normalizedPeriod = Math.max(1, Math.floor(number(period, 20)));
-  const startIndex = Math.max(0, endIndex - normalizedPeriod + 1);
-  const length = endIndex - startIndex + 1;
-  if (endIndex < 0 || length < normalizedPeriod) return null;
-
-  let sum = 0;
-  let squaredSum = 0;
-  for (let index = startIndex; index <= endIndex; index += 1) {
-    const price = closes[index];
-    sum += price;
-  }
-  const middle = sum / length;
-  for (let index = startIndex; index <= endIndex; index += 1) {
-    squaredSum += Math.pow(closes[index] - middle, 2);
-  }
-  const variance = squaredSum / length;
-  const deviation = Math.sqrt(variance);
-  return {
-    lower: middle - deviation * stdDev,
-    upper: middle + deviation * stdDev
-  };
-}
-
-function calculateWindowEma(closes, endIndex, period) {
-  const normalizedPeriod = Math.max(1, Math.floor(number(period, 20)));
-  const startIndex = Math.max(0, endIndex - normalizedPeriod + 1);
-  const length = endIndex - startIndex + 1;
-  if (endIndex < 0 || length < normalizedPeriod) return null;
-
-  const multiplier = 2 / (normalizedPeriod + 1);
-  let value = closes[startIndex];
-  for (let index = startIndex + 1; index <= endIndex; index += 1) {
-    value = (closes[index] - value) * multiplier + value;
-  }
-  return value;
-}
-
 /**
  * Precompute the candle-local features that do not change across most tuning
  * candidates. The previous implementation recalculated short rolling windows
@@ -746,232 +669,16 @@ export function createScalpingFeatureCache(rawCandles) {
   };
 }
 
+/**
+ * Evaluate one completed candle under the shared rebound contract. Feature
+ * rows may come from the tuning-grid cache (buildReboundFeatureSet) or the
+ * canonical per-index producer; the decision itself always runs through
+ * decideReboundSignal so live and backtest cannot drift apart.
+ */
 function calculateReboundAtIndex(candles, index, rsiSeries, config, featureSet = null) {
-  const currentCandle = candles[index];
-  const previousCandle = candles[index - 1];
-  const cachedPoint = featureSet?.points?.[index] || null;
-  const currentClose = cachedPoint?.currentClose ?? getClose(currentCandle);
-  const previousClose = cachedPoint?.previousClose ?? getClose(previousCandle);
-  const currentOpen = cachedPoint?.currentOpen ?? getOpen(currentCandle);
-  const rsi = cachedPoint?.rsi ?? rsiSeries[index];
-  const previousRsi = cachedPoint?.previousRsi ?? rsiSeries[index - 1];
-
-  if (!Number.isFinite(rsi) || !Number.isFinite(previousRsi) || previousClose <= 0) {
-    return null;
-  }
-
-  const priceChangePercent = cachedPoint?.priceChangePercent ?? ((currentClose - previousClose) / previousClose) * 100;
-  const immediateRsiRecovery = rsi - previousRsi;
-  const bullishCandle = cachedPoint?.bullishCandle ?? (currentClose > currentOpen && currentClose > previousClose);
-  const currentHigh = cachedPoint?.currentHigh ?? getHigh(currentCandle);
-  const currentLow = cachedPoint?.currentLow ?? getLow(currentCandle);
-  const candleRange = currentHigh - currentLow;
-  const configuredMaxSignalRangePercent = Number(config.maxSignalRangePercent);
-  const configuredMinSignalRangePercent = Number(config.minSignalRangePercent);
-  const signalRangePercent = cachedPoint?.signalRangePercent ?? (previousClose > 0 && Number.isFinite(candleRange)
-    ? (candleRange / previousClose) * 100
-    : null);
-  const volatilityConfirmed = !Number.isFinite(configuredMaxSignalRangePercent) ||
-    configuredMaxSignalRangePercent <= 0 ||
-    signalRangePercent === null ||
-    signalRangePercent <= configuredMaxSignalRangePercent;
-  const signalRangeFloorConfirmed = !Number.isFinite(configuredMinSignalRangePercent) ||
-    configuredMinSignalRangePercent <= 0 ||
-    signalRangePercent === null ||
-    signalRangePercent >= configuredMinSignalRangePercent;
-  const closeStrength = cachedPoint?.closeStrength ?? (candleRange > 0 ? (currentClose - currentLow) / candleRange : 1);
-  const currentVolume = cachedPoint?.currentVolume ?? number(currentCandle?.candle_acc_trade_volume, NaN);
-  const volumeHistory = cachedPoint
-    ? null
-    : candles
-      .slice(Math.max(0, index - config.volumeLookback), index)
-      .map(candle => number(candle?.candle_acc_trade_volume, NaN))
-      .filter(Number.isFinite);
-  const averageVolume = cachedPoint?.averageVolume ?? (volumeHistory?.length > 0
-    ? volumeHistory.reduce((sum, volume) => sum + volume, 0) / volumeHistory.length
-    : 0);
-  const volumeRatio = cachedPoint?.volumeRatio ?? (Number.isFinite(currentVolume) && averageVolume > 0
-    ? currentVolume / averageVolume
-    : null);
-  const volumeConfirmed = volumeRatio === null || volumeRatio >= config.minVolumeRatio;
-  const closeStrengthConfirmed = closeStrength >= config.minCloseStrength;
-  const previousHigh = cachedPoint?.previousHigh ?? getHigh(previousCandle);
-  const previousHighBreak = currentClose > previousHigh;
-  const previousHighBreakConfirmed = !config.requirePreviousHighBreak || previousHighBreak;
-  let currentBand = cachedPoint?.currentBand ?? null;
-  let previousBand = cachedPoint?.previousBand ?? null;
-  if (!cachedPoint) {
-    const calculateBand = selectedCandles => {
-      const prices = selectedCandles.map(getClose);
-      if (prices.length < config.bbPeriod) return null;
-      const middle = prices.reduce((sum, price) => sum + price, 0) / prices.length;
-      const variance = prices.reduce((sum, price) => sum + Math.pow(price - middle, 2), 0) / prices.length;
-      const deviation = Math.sqrt(variance);
-      return { lower: middle - deviation * config.bbStdDev, upper: middle + deviation * config.bbStdDev };
-    };
-    currentBand = calculateBand(candles.slice(Math.max(0, index - config.bbPeriod + 1), index + 1).reverse());
-    previousBand = calculateBand(candles.slice(Math.max(0, index - config.bbPeriod), index).reverse());
-  }
-  const bollingerReclaim = Boolean(
-    currentBand && previousBand &&
-    previousClose < previousBand.lower &&
-    currentClose >= currentBand.lower &&
-    currentClose > previousClose
-  );
-  let currentEma = cachedPoint?.currentEma ?? null;
-  let previousEma = cachedPoint?.previousEma ?? null;
-  if (!cachedPoint) {
-    const calculateEma = selectedCandles => {
-      const prices = selectedCandles.map(getClose);
-      if (prices.length < config.emaPeriod) return null;
-      const multiplier = 2 / (config.emaPeriod + 1);
-      let value = prices[0];
-      for (let cursor = 1; cursor < prices.length; cursor += 1) {
-        value = (prices[cursor] - value) * multiplier + value;
-      }
-      return value;
-    };
-    currentEma = calculateEma(candles.slice(Math.max(0, index - config.emaPeriod + 1), index + 1));
-    previousEma = calculateEma(candles.slice(Math.max(0, index - config.emaPeriod), index));
-  }
-  const emaSlopePercent = cachedPoint?.emaSlopePercent ?? (currentEma && previousEma
-    ? ((currentEma - previousEma) / previousEma) * 100
-    : null);
-  const emaTrendConfirmed = cachedPoint?.emaTrendConfirmed ?? (currentEma !== null && previousEma !== null &&
-    currentClose >= currentEma && emaSlopePercent >= 0);
-  const momentumRsiConfirmed = rsi < config.rsiOverbought;
-  const profileConfirmed = config.signalProfile === 'bb_reclaim'
-    ? bollingerReclaim
-    : config.signalProfile === 'trend_rebound'
-      ? emaTrendConfirmed
-      : config.signalProfile === 'momentum_breakout'
-        ? emaTrendConfirmed && previousHighBreak && momentumRsiConfirmed
-        : true;
-  let trendSlopePercent = cachedPoint?.trendSlopePercent ?? null;
-  let trendConfirmed = cachedPoint
-    ? (trendSlopePercent === null || trendSlopePercent >= config.minTrendSlopePercent)
-    : true;
-  if (!cachedPoint && index >= config.trendPeriod + config.trendSlopeLookback) {
-    const currentTrendPrices = candles
-      .slice(index - config.trendPeriod + 1, index + 1)
-      .map(getClose);
-    const previousTrendPrices = candles
-      .slice(index - config.trendSlopeLookback - config.trendPeriod + 1, index - config.trendSlopeLookback + 1)
-      .map(getClose);
-    const currentTrendAverage = currentTrendPrices.reduce((sum, price) => sum + price, 0) / currentTrendPrices.length;
-    const previousTrendAverage = previousTrendPrices.reduce((sum, price) => sum + price, 0) / previousTrendPrices.length;
-    if (previousTrendAverage > 0) {
-      trendSlopePercent = ((currentTrendAverage - previousTrendAverage) / previousTrendAverage) * 100;
-      trendConfirmed = trendSlopePercent >= config.minTrendSlopePercent;
-    }
-  }
-  const lookback = Math.max(1, Math.floor(number(config.oversoldLookback, 1)));
-  const oversoldCandidates = [];
-  for (let offset = 1; offset <= lookback; offset += 1) {
-    const candidateRsi = rsiSeries[index - offset];
-    const candidateCandle = candles[index - offset];
-    if (Number.isFinite(candidateRsi) && candidateRsi <= config.rsiOversold && candidateCandle) {
-      oversoldCandidates.push({
-        age: offset,
-        rsi: candidateRsi,
-        close: getClose(candidateCandle)
-      });
-    }
-  }
-  oversoldCandidates.sort((a, b) => a.rsi - b.rsi || a.age - b.age);
-  const oversoldReference = oversoldCandidates[0] || null;
-  const previousWasOversold = oversoldCandidates.length > 0;
-  const currentWasOversold = rsi <= config.rsiOversold;
-  const oversoldReferenceClose = number(oversoldReference?.close, previousClose);
-  const reboundPriceChangePercent = oversoldReferenceClose > 0
-    ? ((currentClose - oversoldReferenceClose) / oversoldReferenceClose) * 100
-    : priceChangePercent;
-  const rsiRecovery = oversoldReference ? rsi - oversoldReference.rsi : immediateRsiRecovery;
-  const configuredMaxReboundPercent = Number(config.maxReboundPercent);
-  const reboundCeilingConfirmed = config.signalProfile === 'momentum_breakout' ||
-    !Number.isFinite(configuredMaxReboundPercent) ||
-    configuredMaxReboundPercent <= 0 ||
-    reboundPriceChangePercent <= configuredMaxReboundPercent;
-  const reboundOverboughtConfirmed = config.requireReboundBelowOverbought !== true || rsi < config.rsiOverbought;
-  const candleTime = currentCandle?.candle_date_time_utc || currentCandle?.candle_date_time_kst || currentCandle?.timestamp || null;
-  const oversoldReboundConfirmed = previousWasOversold && bullishCandle &&
-    reboundPriceChangePercent >= config.minReboundPercent &&
-    rsiRecovery >= config.minRsiRecovery &&
-    volumeConfirmed && volatilityConfirmed && signalRangeFloorConfirmed && closeStrengthConfirmed && trendConfirmed && previousHighBreakConfirmed &&
-    reboundOverboughtConfirmed && reboundCeilingConfirmed && profileConfirmed;
-  const momentumBreakoutConfirmed = config.signalProfile === 'momentum_breakout' &&
-    bullishCandle &&
-    priceChangePercent >= config.minReboundPercent &&
-    momentumRsiConfirmed &&
-    volumeConfirmed && volatilityConfirmed && signalRangeFloorConfirmed && closeStrengthConfirmed && trendConfirmed &&
-    previousHighBreak && profileConfirmed;
-  const reboundConfirmed = config.signalProfile === 'momentum_breakout'
-    ? momentumBreakoutConfirmed
-    : oversoldReboundConfirmed;
-
-  const rejectionReasons = [];
-  if (config.signalProfile !== 'momentum_breakout' && !previousWasOversold) rejectionReasons.push('previous_rsi_not_oversold');
-  if (!bullishCandle) rejectionReasons.push('bullish_rebound_not_confirmed');
-  if (config.signalProfile === 'momentum_breakout') {
-    if (priceChangePercent < config.minReboundPercent) rejectionReasons.push('breakout_move_below_threshold');
-    if (!momentumRsiConfirmed) rejectionReasons.push('rsi_overbought_blocked');
-  } else {
-    if (reboundPriceChangePercent < config.minReboundPercent) rejectionReasons.push('price_rebound_below_threshold');
-    if (!reboundCeilingConfirmed) rejectionReasons.push('price_rebound_above_threshold');
-    if (rsiRecovery < config.minRsiRecovery) rejectionReasons.push('rsi_recovery_below_threshold');
-    if (!reboundOverboughtConfirmed) rejectionReasons.push('rsi_overbought_blocked');
-  }
-  if (!volumeConfirmed) rejectionReasons.push('volume_confirmation_failed');
-  if (!volatilityConfirmed) rejectionReasons.push('signal_range_too_wide');
-  if (!signalRangeFloorConfirmed) rejectionReasons.push('signal_range_too_narrow');
-  if (!closeStrengthConfirmed) rejectionReasons.push('close_strength_failed');
-  if (!trendConfirmed) rejectionReasons.push('trend_filter_failed');
-  if (!previousHighBreakConfirmed) rejectionReasons.push('previous_high_break_failed');
-  if (!profileConfirmed) rejectionReasons.push(`${config.signalProfile}_profile_failed`);
-
-  return {
-    available: true,
-    oversold: previousWasOversold || currentWasOversold,
-    previousWasOversold,
-    currentWasOversold,
-    reboundConfirmed,
-    bullishCandle,
-    priceChangePercent,
-    reboundPriceChangePercent,
-    rsi,
-    previousRsi,
-    rsiRecovery,
-    immediateRsiRecovery,
-    oversoldCandleAge: oversoldReference?.age ?? null,
-    oversoldRsi: oversoldReference?.rsi ?? null,
-    oversoldReferenceClose,
-    currentClose,
-    previousClose,
-    volumeRatio,
-    volumeConfirmed,
-    signalRangePercent,
-    volatilityConfirmed,
-    signalRangeFloorConfirmed,
-    reboundCeilingConfirmed,
-    closeStrength,
-    closeStrengthConfirmed,
-    trendSlopePercent,
-    trendConfirmed,
-    previousHighBreak,
-    previousHighBreakConfirmed,
-    signalProfile: config.signalProfile,
-    profileConfirmed,
-    momentumRsiConfirmed,
-    reboundOverboughtConfirmed,
-    momentumBreakoutConfirmed,
-    bollingerReclaim,
-    emaTrendConfirmed,
-    emaSlopePercent,
-    rejectionReasons,
-    referencePrice: currentClose,
-    signalKey: candleTime ? String(candleTime) : `${currentClose}:${previousClose}`,
-    candleTime
-  };
+  const point = featureSet?.points?.[index] ??
+    computeReboundPoint(candles, index, rsiSeries, config);
+  return decideReboundSignal({ candles, index, point, rsiSeries, config });
 }
 
 /**
