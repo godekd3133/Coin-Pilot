@@ -136,15 +136,18 @@ test('dashboard market-list and ticker reads stay behind the selected market-dat
     new URL('../src/api/routes/trading.js', import.meta.url),
     new URL('../src/api/dashboardServer.js', import.meta.url),
     new URL('../src/api/manualOrderService.js', import.meta.url),
-    new URL('../src/api/marketAnalysisQueries.js', import.meta.url)
+    new URL('../src/api/marketAnalysisQueries.js', import.meta.url),
+    new URL('../src/api/dashboardReadCache.js', import.meta.url),
+    new URL('../src/api/notificationMonitor.js', import.meta.url)
   ];
   const routeSources = await Promise.all(routeUrls.map(url => readFile(url, 'utf8')));
 
   assert.match(routeSources[0], /getMarketDataProvider\(server\)\.getMarkets\(\)/);
   assert.match(routeSources[1], /getMarketDataProvider\(server\)/);
-  assert.match(routeSources[2], /marketDataProvider\.getMarkets\(\)/);
   assert.match(routeSources[3], /marketDataProvider\.getMarkets\(\)/);
   assert.match(routeSources[4], /marketDataProvider\.getMarkets\(\)/);
+  // 대시보드의 market-list 읽기는 추출된 NotificationMonitor가 provider를 통해 수행한다.
+  assert.match(routeSources[6], /marketDataProvider\.getMarkets\(\)/);
   for (const source of routeSources) {
     assert.doesNotMatch(source, /(?:server\.)?tradingSystem\.upbit\.getMarkets\s*\(/);
   }
@@ -153,12 +156,16 @@ test('dashboard market-list and ticker reads stay behind the selected market-dat
   const coinDetailStart = dashboardSource.indexOf("this.app.get('/api/coin-detail/:coin'");
   const coinDetailEnd = dashboardSource.indexOf('\n    });', coinDetailStart);
   const coinDetail = dashboardSource.slice(coinDetailStart, coinDetailEnd);
-  const bundleStart = dashboardSource.indexOf('async generateBundleSuggestions()');
-  const bundleEnd = dashboardSource.indexOf('\n  }', bundleStart);
-  const bundleRecommendations = dashboardSource.slice(bundleStart, bundleEnd);
-  const upstreamCache = dashboardSource
-    .split('async getCachedTickerWithMetadata(coins) {')[1]
-    ?.split('async getCachedTicker(coins)')[0];
+  // generateBundleSuggestions lives in the extracted NotificationMonitor and
+  // getCachedTickerWithMetadata in DashboardReadCache — scan those bodies.
+  const notificationSource = routeSources[6];
+  const bundleStart = notificationSource.indexOf('async generateBundleSuggestions()');
+  const bundleEnd = notificationSource.indexOf('\n  }\n\n  /**', bundleStart);
+  const bundleRecommendations = notificationSource.slice(bundleStart, bundleEnd);
+  const cacheSource = routeSources[5];
+  const upstreamCache = cacheSource
+    .split('async getTickerWithMetadata(coins) {')[1]
+    ?.split('async getTicker(coins)')[0];
 
   assert.match(coinDetail, /getMarketDataProvider\(this\)\.getTickers/);
   assert.match(coinDetail, /getMarketDataProvider\(this\)\.getMinuteCandles/);
@@ -166,5 +173,5 @@ test('dashboard market-list and ticker reads stay behind the selected market-dat
   assert.match(bundleRecommendations, /marketDataProvider\.getTickers/);
   assert.match(bundleRecommendations, /marketDataProvider\.getMinuteCandles/);
   assert.doesNotMatch(bundleRecommendations, /this\.tradingSystem\.upbit\.get(?:Ticker|MinuteCandles)\s*\(/);
-  assert.match(upstreamCache, /this\.tradingSystem\.upbit\.getTicker/);
+  assert.match(upstreamCache, /_getTradingSystem\(\)\.upbit\.getTicker/);
 });

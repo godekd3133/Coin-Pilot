@@ -24,7 +24,7 @@ test('scalping validation API uses the configured staging path without falling b
   const trader = createMockTrader();
   trader.config.scalpingValidationOutputFile = reportFile;
   const dashboard = new DashboardServer(trader, 0, {
-    env: { ...process.env, DASHBOARD_TOKEN: '' }
+    env: { ...process.env, DASHBOARD_TOKEN: '', DASHBOARD_READ_ONLY_TOKEN: '', DASHBOARD_MOBILE_TOKEN: '' }
   });
   const httpServer = await dashboard.start();
   const port = httpServer.address().port;

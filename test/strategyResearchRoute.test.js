@@ -31,7 +31,7 @@ test('strategy research route exposes a diagnostic report but hard-forces promot
     }]
   }), 'utf8');
 
-  const dashboard = new DashboardServer(trader, 0, { env: { ...process.env, DASHBOARD_TOKEN: '' } });
+  const dashboard = new DashboardServer(trader, 0, { env: { ...process.env, DASHBOARD_TOKEN: '', DASHBOARD_READ_ONLY_TOKEN: '', DASHBOARD_MOBILE_TOKEN: '' } });
   const httpServer = await dashboard.start();
   const port = httpServer.address().port;
   try {
@@ -54,7 +54,7 @@ test('strategy research route exposes a diagnostic report but hard-forces promot
 test('strategy research route reports an unconfigured report without inventing results', async () => {
   const trader = createMockTrader();
   delete trader.config.higherTimeframeMomentumReportFile;
-  const dashboard = new DashboardServer(trader, 0, { env: { ...process.env, DASHBOARD_TOKEN: '' } });
+  const dashboard = new DashboardServer(trader, 0, { env: { ...process.env, DASHBOARD_TOKEN: '', DASHBOARD_READ_ONLY_TOKEN: '', DASHBOARD_MOBILE_TOKEN: '' } });
   const httpServer = await dashboard.start();
   const port = httpServer.address().port;
   try {
@@ -100,7 +100,7 @@ test('strategy research route projects same-window scalping variants and invalid
     }
   }), 'utf8');
 
-  const dashboard = new DashboardServer(trader, 0, { env: { ...process.env, DASHBOARD_TOKEN: '' } });
+  const dashboard = new DashboardServer(trader, 0, { env: { ...process.env, DASHBOARD_TOKEN: '', DASHBOARD_READ_ONLY_TOKEN: '', DASHBOARD_MOBILE_TOKEN: '' } });
   const httpServer = await dashboard.start();
   const port = httpServer.address().port;
   try {
@@ -201,7 +201,7 @@ test('momentum shadow route projects the latest quote snapshot as read-only evid
   const trader = createMockTrader();
   trader.config.momentumShadowQuoteReportFile = quoteFile;
   trader.config.momentumShadowQuoteHistoryFile = historyFile;
-  const dashboard = new DashboardServer(trader, 0, { env: { ...process.env, DASHBOARD_TOKEN: '' } });
+  const dashboard = new DashboardServer(trader, 0, { env: { ...process.env, DASHBOARD_TOKEN: '', DASHBOARD_READ_ONLY_TOKEN: '', DASHBOARD_MOBILE_TOKEN: '' } });
   const httpServer = await dashboard.start();
   const port = httpServer.address().port;
   try {
@@ -287,7 +287,7 @@ test('momentum shadow quote snapshot marks stale and future reports as not curre
   trader.config.momentumShadowQuoteReportFile = quoteFile;
   trader.config.momentumShadowQuoteMaxAgeSeconds = 60;
   const dashboard = new DashboardServer(trader, 0, {
-    env: { ...process.env, DASHBOARD_TOKEN: '' },
+    env: { ...process.env, DASHBOARD_TOKEN: '', DASHBOARD_READ_ONLY_TOKEN: '', DASHBOARD_MOBILE_TOKEN: '' },
     momentumShadowProjectionCacheMs: 0
   });
   const httpServer = await dashboard.start();
@@ -401,7 +401,7 @@ test('momentum shadow route projects marked equity as read-only research evidenc
   trader.config.momentumShadowRegimeDir = regimeDir;
   trader.config.momentumShadowBenchmarkDir = regimeDir;
   trader.config.momentumShadowQuoteHistoryFile = historyFile;
-  const dashboard = new DashboardServer(trader, 0, { env: { ...process.env, DASHBOARD_TOKEN: '' } });
+  const dashboard = new DashboardServer(trader, 0, { env: { ...process.env, DASHBOARD_TOKEN: '', DASHBOARD_READ_ONLY_TOKEN: '', DASHBOARD_MOBILE_TOKEN: '' } });
   const httpServer = await dashboard.start();
   const port = httpServer.address().port;
   try {
@@ -740,7 +740,7 @@ test('momentum shadow route blocks a negative trade-return confidence bound', as
 
   const trader = createMockTrader();
   trader.config.momentumShadowFixedDir = fixedDir;
-  const dashboard = new DashboardServer(trader, 0, { env: { ...process.env, DASHBOARD_TOKEN: '' } });
+  const dashboard = new DashboardServer(trader, 0, { env: { ...process.env, DASHBOARD_TOKEN: '', DASHBOARD_READ_ONLY_TOKEN: '', DASHBOARD_MOBILE_TOKEN: '' } });
   const httpServer = await dashboard.start();
   const port = httpServer.address().port;
   try {
@@ -814,7 +814,7 @@ test('momentum shadow route does not treat zero realized return as paper profit'
 
   const trader = createMockTrader();
   trader.config.momentumShadowFixedDir = fixedDir;
-  const dashboard = new DashboardServer(trader, 0, { env: { ...process.env, DASHBOARD_TOKEN: '' } });
+  const dashboard = new DashboardServer(trader, 0, { env: { ...process.env, DASHBOARD_TOKEN: '', DASHBOARD_READ_ONLY_TOKEN: '', DASHBOARD_MOBILE_TOKEN: '' } });
   const httpServer = await dashboard.start();
   const port = httpServer.address().port;
   try {
@@ -885,7 +885,7 @@ test('momentum shadow route reports modeled quote boundary evidence separately f
 
   const trader = createMockTrader();
   trader.config.momentumShadowFixedDir = fixedDir;
-  const dashboard = new DashboardServer(trader, 0, { env: { ...process.env, DASHBOARD_TOKEN: '' } });
+  const dashboard = new DashboardServer(trader, 0, { env: { ...process.env, DASHBOARD_TOKEN: '', DASHBOARD_READ_ONLY_TOKEN: '', DASHBOARD_MOBILE_TOKEN: '' } });
   const httpServer = await dashboard.start();
   const port = httpServer.address().port;
   try {
@@ -924,7 +924,7 @@ test('momentum shadow variant readiness is sealed against ambient candidate env'
   process.env.MOMO_SHADOW_POSITION_FRACTION = '0.9';
 
   const trader = createMockTrader();
-  const dashboard = new DashboardServer(trader, 0, { env: { ...process.env, DASHBOARD_TOKEN: '' } });
+  const dashboard = new DashboardServer(trader, 0, { env: { ...process.env, DASHBOARD_TOKEN: '', DASHBOARD_READ_ONLY_TOKEN: '', DASHBOARD_MOBILE_TOKEN: '' } });
   const httpServer = await dashboard.start();
   const port = httpServer.address().port;
   try {

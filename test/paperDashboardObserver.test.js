@@ -94,7 +94,7 @@ test('읽기 전용 paper dashboard는 최신 ledger를 표시하고 원본을 �
     );
     assert.equal(fs.readFileSync(ledgerFile, 'utf8'), JSON.stringify(updated, null, 2));
 
-    const dashboard = new DashboardServer(trader, 0, { env: { ...process.env, DASHBOARD_TOKEN: '' } });
+    const dashboard = new DashboardServer(trader, 0, { env: { ...process.env, DASHBOARD_TOKEN: '', DASHBOARD_READ_ONLY_TOKEN: '', DASHBOARD_MOBILE_TOKEN: '' } });
     const httpServer = await dashboard.start();
     const port = httpServer.address().port;
     try {
@@ -161,7 +161,7 @@ test('portfolio analysis does not substitute average price when the market snaps
   };
   const logger = { debug() {}, info() {}, warn() {}, error() {} };
   const dashboard = new DashboardServer(trader, 0, {
-    env: { ...process.env, DASHBOARD_TOKEN: '' },
+    env: { ...process.env, DASHBOARD_TOKEN: '', DASHBOARD_READ_ONLY_TOKEN: '', DASHBOARD_MOBILE_TOKEN: '' },
     logger,
     manualOrderIdempotencyStore: {
       async initialize() {},
@@ -207,7 +207,7 @@ test('portfolio analysis exposes source time and calculates values from a comple
   };
   const logger = { debug() {}, info() {}, warn() {}, error() {} };
   const dashboard = new DashboardServer(trader, 0, {
-    env: { ...process.env, DASHBOARD_TOKEN: '' },
+    env: { ...process.env, DASHBOARD_TOKEN: '', DASHBOARD_READ_ONLY_TOKEN: '', DASHBOARD_MOBILE_TOKEN: '' },
     logger,
     manualOrderIdempotencyStore: {
       async initialize() {},
@@ -265,7 +265,7 @@ test('읽기 전용 observer는 orphan 미청산 ledger를 UI에서도 fail-clos
   try {
     fs.writeFileSync(ledgerFile, JSON.stringify(ledger, null, 2), 'utf8');
     attachReadOnlyPaperLedger(trader, ledgerFile);
-    const dashboard = new DashboardServer(trader, 0, { env: { ...process.env, DASHBOARD_TOKEN: '' } });
+    const dashboard = new DashboardServer(trader, 0, { env: { ...process.env, DASHBOARD_TOKEN: '', DASHBOARD_READ_ONLY_TOKEN: '', DASHBOARD_MOBILE_TOKEN: '' } });
     const httpServer = await dashboard.start();
     const port = httpServer.address().port;
     try {
@@ -358,7 +358,7 @@ test('읽기 전용 observer의 계좌·보유·구성 API는 paper ledger를 �
       return originalGetAccountInfo(...args);
     };
 
-    const dashboard = new DashboardServer(trader, 0, { env: { ...process.env, DASHBOARD_TOKEN: '' } });
+    const dashboard = new DashboardServer(trader, 0, { env: { ...process.env, DASHBOARD_TOKEN: '', DASHBOARD_READ_ONLY_TOKEN: '', DASHBOARD_MOBILE_TOKEN: '' } });
     const httpServer = await dashboard.start();
     const port = httpServer.address().port;
     const ledgerBytes = fs.readFileSync(ledgerFile, 'utf8');

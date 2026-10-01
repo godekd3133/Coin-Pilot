@@ -110,7 +110,7 @@ test('dashboard and restarted optimizer resolve persistence from one configured 
     ...process.env,
     NODE_ENV: 'production',
     COINPILOT_STATE_DIR: stateDir,
-    DASHBOARD_TOKEN: '',
+    DASHBOARD_TOKEN: '', DASHBOARD_READ_ONLY_TOKEN: '', DASHBOARD_MOBILE_TOKEN: '',
     DASHBOARD_HOST: '127.0.0.1',
     DASHBOARD_ALLOW_INSECURE: 'true'
   };

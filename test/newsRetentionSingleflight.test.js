@@ -67,7 +67,7 @@ test('DashboardServer defaults to a bounded news retention limit and accepts a s
   }
 
   const makeServer = options => new InMemoryDashboardServer({}, 0, {
-    env: { DASHBOARD_TOKEN: '', DASHBOARD_HOST: '' },
+    env: { DASHBOARD_TOKEN: '', DASHBOARD_READ_ONLY_TOKEN: '', DASHBOARD_MOBILE_TOKEN: '', DASHBOARD_HOST: '' },
     logger: { logDir: '/memory', info() {}, error() {} },
     manualOrderIdempotencyStore: {},
     ...options

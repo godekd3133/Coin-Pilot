@@ -41,7 +41,7 @@ function makeTemporaryDashboard(trader, root, port = 0, options = {}) {
   return new TemporaryDashboardServer(trader, port, {
     env: {
       ...process.env,
-      DASHBOARD_TOKEN: '',
+      DASHBOARD_TOKEN: '', DASHBOARD_READ_ONLY_TOKEN: '', DASHBOARD_MOBILE_TOKEN: '',
       DASHBOARD_READ_ONLY_TOKEN: '',
       DASHBOARD_HOST: '127.0.0.1',
       DASHBOARD_ALLOW_INSECURE: '',

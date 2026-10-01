@@ -14,7 +14,7 @@ async function startDashboard(t) {
   trader.config.manualOrderIdempotencyFile = path.join(storageRoot, 'manual_order_idempotency.json');
   t.after(() => fs.rmSync(storageRoot, { recursive: true, force: true }));
   const dashboard = new DashboardServer(trader, 0, {
-    env: { ...process.env, DASHBOARD_TOKEN: '', DASHBOARD_HOST: '', DASHBOARD_ALLOW_INSECURE: '' }
+    env: { ...process.env, DASHBOARD_TOKEN: '', DASHBOARD_READ_ONLY_TOKEN: '', DASHBOARD_MOBILE_TOKEN: '', DASHBOARD_HOST: '', DASHBOARD_ALLOW_INSECURE: '' }
   });
   const server = await dashboard.start();
   t.after(async () => {
@@ -110,7 +110,7 @@ test('virtual wallet persistence failure leaves balances, positions, and history
     virtualPortfolioFile
   });
   const dashboard = new DashboardServer(trader, 0, {
-    env: { ...process.env, DASHBOARD_TOKEN: '', DASHBOARD_HOST: '', DASHBOARD_ALLOW_INSECURE: '' }
+    env: { ...process.env, DASHBOARD_TOKEN: '', DASHBOARD_READ_ONLY_TOKEN: '', DASHBOARD_MOBILE_TOKEN: '', DASHBOARD_HOST: '', DASHBOARD_ALLOW_INSECURE: '' }
   });
   const server = await dashboard.start();
   t.after(async () => {

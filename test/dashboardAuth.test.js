@@ -12,7 +12,7 @@ import {
 import { createMockTrader } from '../src/scripts/runDashboard.js';
 
 function authOffEnv() {
-  return { ...process.env, DASHBOARD_TOKEN: '', DASHBOARD_HOST: '', DASHBOARD_ALLOW_INSECURE: '' };
+  return { ...process.env, DASHBOARD_TOKEN: '', DASHBOARD_READ_ONLY_TOKEN: '', DASHBOARD_MOBILE_TOKEN: '', DASHBOARD_HOST: '', DASHBOARD_ALLOW_INSECURE: '' };
 }
 
 async function startDashboard(env, options = {}) {

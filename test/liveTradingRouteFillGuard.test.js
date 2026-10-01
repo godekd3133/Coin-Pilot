@@ -99,7 +99,7 @@ test('UI live buy does not open a strategy position when the order is not filled
       return { uuid: orderId, state: 'cancel' };
     }
   };
-  const dashboard = new DashboardServer(trader, 0, { env: { ...process.env, DASHBOARD_TOKEN: '' } });
+  const dashboard = new DashboardServer(trader, 0, { env: { ...process.env, DASHBOARD_TOKEN: '', DASHBOARD_READ_ONLY_TOKEN: '', DASHBOARD_MOBILE_TOKEN: '' } });
   const httpServer = await dashboard.start();
   const port = httpServer.address().port;
 

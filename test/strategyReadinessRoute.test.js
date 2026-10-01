@@ -24,7 +24,7 @@ test('strategy readiness reports current configured report, live gate result, an
       throw Object.assign(new Error('Validation report is not current.'), { code: 'report_not_current' });
     }
   };
-  const dashboard = new DashboardServer(trader, 0, { env: { ...process.env, DASHBOARD_TOKEN: '' } });
+  const dashboard = new DashboardServer(trader, 0, { env: { ...process.env, DASHBOARD_TOKEN: '', DASHBOARD_READ_ONLY_TOKEN: '', DASHBOARD_MOBILE_TOKEN: '' } });
   const httpServer = await dashboard.start();
   const url = `http://127.0.0.1:${httpServer.address().port}/api/strategy-readiness`;
   const writeReport = generatedAt => fs.writeFileSync(reportFile, JSON.stringify({
@@ -150,7 +150,7 @@ test('strategy readiness uses the actual MultiCoinTrader validator and blocks in
 
   const trader = createMockTrader();
   trader.config.scalpingValidationOutputFile = reportFile;
-  const dashboard = new DashboardServer(trader, 0, { env: { ...process.env, DASHBOARD_TOKEN: '' } });
+  const dashboard = new DashboardServer(trader, 0, { env: { ...process.env, DASHBOARD_TOKEN: '', DASHBOARD_READ_ONLY_TOKEN: '', DASHBOARD_MOBILE_TOKEN: '' } });
   const httpServer = await dashboard.start();
 
   try {
@@ -180,7 +180,7 @@ test('strategy readiness stays blocked when the runtime promotion validator is u
   const trader = createMockTrader();
   trader.config.scalpingValidationOutputFile = reportFile;
   trader.validatePromotionReport = undefined;
-  const dashboard = new DashboardServer(trader, 0, { env: { ...process.env, DASHBOARD_TOKEN: '' } });
+  const dashboard = new DashboardServer(trader, 0, { env: { ...process.env, DASHBOARD_TOKEN: '', DASHBOARD_READ_ONLY_TOKEN: '', DASHBOARD_MOBILE_TOKEN: '' } });
   const httpServer = await dashboard.start();
 
   try {

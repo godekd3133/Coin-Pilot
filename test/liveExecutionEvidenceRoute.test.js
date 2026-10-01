@@ -8,7 +8,7 @@ import MultiCoinTrader from '../src/trader/multiCoinTrader.js';
 import { createLiveExecutionEvidenceEvent } from '../src/research/liveExecutionEvidence.js';
 
 function authOffEnv() {
-  return { ...process.env, DASHBOARD_TOKEN: '', DASHBOARD_HOST: '', DASHBOARD_ALLOW_INSECURE: '' };
+  return { ...process.env, DASHBOARD_TOKEN: '', DASHBOARD_READ_ONLY_TOKEN: '', DASHBOARD_MOBILE_TOKEN: '', DASHBOARD_HOST: '', DASHBOARD_ALLOW_INSECURE: '' };
 }
 
 async function startDashboard(trader) {
