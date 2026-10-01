@@ -10,10 +10,9 @@ import {
   DEFAULT_CONFIG,
   createScalpingFeatureCache,
   simulateScalping,
-  simulateScalpingPortfolio,
   requiresHistoricalCandleContinuity,
-  marketEntries
 } from './scalpingBacktest.js';
+import { marketEntries, simulateScalpingPortfolio } from './scalpingPortfolioSimulation.js';
 
 export function expandGrid(baseConfig, grid) {
   const keys = Object.keys(grid);

@@ -4,9 +4,9 @@ import {
   calculateQualityScore,
   createScalpingFeatureCache,
   simulateScalpingSegmented,
-  simulateScalping,
-  simulateScalpingPortfolio
+  simulateScalping
 } from '../src/backtest/scalpingBacktest.js';
+import { simulateScalpingPortfolio } from '../src/backtest/scalpingPortfolioSimulation.js';
 import {
   calculateTradeReturnConfidence,
   evaluateStatisticalConfidenceGate
