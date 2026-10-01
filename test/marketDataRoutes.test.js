@@ -115,7 +115,9 @@ test('route ticker and candle reads all go through the market-data provider seam
   const routeUrls = [
     new URL('../src/api/routes/trading.js', import.meta.url),
     new URL('../src/api/routes/config.js', import.meta.url),
-    new URL('../src/api/routes/market.js', import.meta.url)
+    new URL('../src/api/routes/market.js', import.meta.url),
+    new URL('../src/api/manualOrderService.js', import.meta.url),
+    new URL('../src/api/marketAnalysisQueries.js', import.meta.url)
   ];
   const routeSources = await Promise.all(routeUrls.map(url => readFile(url, 'utf8')));
 
@@ -132,13 +134,17 @@ test('dashboard market-list and ticker reads stay behind the selected market-dat
   const routeUrls = [
     new URL('../src/api/routes/market.js', import.meta.url),
     new URL('../src/api/routes/trading.js', import.meta.url),
-    new URL('../src/api/dashboardServer.js', import.meta.url)
+    new URL('../src/api/dashboardServer.js', import.meta.url),
+    new URL('../src/api/manualOrderService.js', import.meta.url),
+    new URL('../src/api/marketAnalysisQueries.js', import.meta.url)
   ];
   const routeSources = await Promise.all(routeUrls.map(url => readFile(url, 'utf8')));
 
   assert.match(routeSources[0], /getMarketDataProvider\(server\)\.getMarkets\(\)/);
-  assert.match(routeSources[1], /getMarketDataProvider\(server\)\.getMarkets\(\)/);
+  assert.match(routeSources[1], /getMarketDataProvider\(server\)/);
   assert.match(routeSources[2], /marketDataProvider\.getMarkets\(\)/);
+  assert.match(routeSources[3], /marketDataProvider\.getMarkets\(\)/);
+  assert.match(routeSources[4], /marketDataProvider\.getMarkets\(\)/);
   for (const source of routeSources) {
     assert.doesNotMatch(source, /(?:server\.)?tradingSystem\.upbit\.getMarkets\s*\(/);
   }

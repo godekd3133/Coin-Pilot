@@ -4,17 +4,24 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import DashboardServer from '../src/api/dashboardServer.js';
-import { executeLiveOrderWithEvidence } from '../src/api/routes/trading.js';
+import { executeLiveOrderWithEvidence } from '../src/api/manualOrderExecution.js';
 import MultiCoinTrader from '../src/trader/multiCoinTrader.js';
 
+const testDir = path.dirname(new URL(import.meta.url).pathname);
 const tradingRouteSource = fs.readFileSync(
-  path.resolve(path.dirname(new URL(import.meta.url).pathname), '../src/api/routes/trading.js'),
+  path.resolve(testDir, '../src/api/routes/trading.js'),
+  'utf8'
+);
+const manualOrderServiceSource = fs.readFileSync(
+  path.resolve(testDir, '../src/api/manualOrderService.js'),
   'utf8'
 );
 
 test('모든 UI 주문 route는 helper 외부에서 raw exchange order를 직접 호출하지 않는다', () => {
-  assert.equal((tradingRouteSource.match(/server\.tradingSystem\.upbit\.order\(/g) || []).length, 0);
-  assert.equal((tradingRouteSource.match(/tradingSystem\.upbit\.order\(/g) || []).length, 0);
+  for (const source of [tradingRouteSource, manualOrderServiceSource]) {
+    assert.equal((source.match(/server\.tradingSystem\.upbit\.order\(/g) || []).length, 0);
+    assert.equal((source.match(/tradingSystem\.upbit\.order\(/g) || []).length, 0);
+  }
   for (const route of ['/trade/quick', '/trade/execute', '/trade/execute-bundle', '/trade/buy', '/trade/sell', '/trade/smart-buy', '/trade/smart-sell']) {
     assert.match(tradingRouteSource, new RegExp(`router\\.post\\(['"]${route.replace('/', '\\/')}`));
   }

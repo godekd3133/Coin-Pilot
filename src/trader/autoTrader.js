@@ -11,7 +11,7 @@ import {
 import {
   executeLiveOrderWithEvidence,
   hasCompleteObservedLiveFill
-} from '../api/routes/trading.js';
+} from '../api/manualOrderExecution.js';
 
 class AutoTrader {
   constructor(config) {

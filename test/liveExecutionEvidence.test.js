@@ -8,7 +8,7 @@ import AutoTrader from '../src/trader/autoTrader.js';
 import {
   executeLiveOrderWithEvidence,
   hasCompleteObservedLiveFill
-} from '../src/api/routes/trading.js';
+} from '../src/api/manualOrderExecution.js';
 import {
   LIVE_EXECUTION_EVIDENCE_SCHEMA,
   compactLiveOrder,

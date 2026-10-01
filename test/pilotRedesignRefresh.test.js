@@ -23,6 +23,7 @@ const redesignScriptAsset = indexSource.match(/<script\s+src=["'](\/pilot-redesi
 const redesignStylesheetAsset = indexSource.match(/<link\s+rel=["']stylesheet["']\s+href=["'](\/pilot-redesign\.css\?v=[^"']+)["']/)?.[1];
 const serviceWorkerCacheName = serviceWorkerSource.match(/const CACHE_NAME = ["']([^"']+)["']/)?.[1];
 const tradingRouteSource = fs.readFileSync(path.join(projectRoot, 'src/api/routes/trading.js'), 'utf8');
+const manualOrderServiceSource = fs.readFileSync(path.join(projectRoot, 'src/api/manualOrderService.js'), 'utf8');
 const coreReadinessFunctionSource = redesignSource.match(
   /function isCoreTradingSnapshotReady\(\{[\s\S]*?\n {4}\}/
 )?.[0];
@@ -2632,7 +2633,7 @@ test('모의투자 시작은 paper 경로를 사용하고 server blocker를 숨�
 test('smart order UI는 mixed fill 결과를 성공으로 오인하지 않는다', () => {
   assert.match(redesignSource, /result\.success === false \? 'warning' : 'success'/);
   assert.match(redesignSource, /result\.failures/);
-  assert.match(tradingRouteSource, /orders\.length === 0 \? 409 : 207/);
+  assert.match(manualOrderServiceSource, /orders\.length === 0 \? 409 : 207/);
 });
 
 test('validation UI는 오래된 report를 최신 raw window 근거와 구분한다', () => {

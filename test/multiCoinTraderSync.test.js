@@ -5,7 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 import axios from 'axios';
 import UpbitAPI from '../src/api/upbit.js';
-import { executeLiveOrderWithEvidence } from '../src/api/routes/trading.js';
+import { executeLiveOrderWithEvidence } from '../src/api/manualOrderExecution.js';
 import { inspectLiveExecutionEvidenceFile } from '../src/research/liveExecutionEvidence.js';
 import MultiCoinTrader from '../src/trader/multiCoinTrader.js';
 
