@@ -444,7 +444,10 @@ export function isTerminalLiveOrderResolution(event) {
   if (!['cancel', 'done'].includes(state)) return false;
   if (event.eventType === 'FILL_NOT_OBSERVED') return executedVolume === 0;
   if (event.eventType === 'FILL_OBSERVED') {
-    return state === 'done' && executedVolume > 0 && remainingVolume === 0 && hasCompleteFillEvidence(event);
+    // 'cancel' 상태 종결도 포함: 시장가 주문이 자금 소진/최소단위 미달로
+    // cancel로 끝나도 회계가 완전하면 전량 체결의 종결이다.
+    return ['done', 'cancel'].includes(state) && executedVolume > 0 &&
+      remainingVolume === 0 && hasCompleteFillEvidence(event);
   }
   if (event.eventType === 'FILL_PARTIAL') {
     return executedVolume > 0 && hasCompleteFillEvidence(event);

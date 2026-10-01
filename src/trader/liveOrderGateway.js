@@ -483,7 +483,7 @@ export class LiveOrderGateway {
     orderType = null,
     request = null
   } = {}) {
-    const order = observedOrder || (typeof this.owner.upbit.getOrder === 'function'
+    let order = observedOrder || (typeof this.owner.upbit.getOrder === 'function'
       ? await this.owner.upbit.getOrder(lookupValue, { identifier: lookupByIdentifier, priority: 'risk' })
       : null);
     if (!order) throw new Error('exchange order readback is unavailable');
@@ -531,6 +531,26 @@ export class LiveOrderGateway {
     const hasObservedNumber = value => value !== null && value !== undefined &&
       !(typeof value === 'string' && value.trim() === '') && Number.isFinite(Number(value));
     const executedVolume = hasObservedNumber(order.executed_volume) ? Number(order.executed_volume) : null;
+    // 시장가 매수(price)는 'cancel' 상태로 종결되며 remaining_volume을 보고하지
+    // 않는다. 잔여가 sub-unit locked KRW 먼지뿐이면 미체결 잔량 0으로,
+    // avg_price가 비어 있으면 체결 내역 합산으로 복원한다.
+    if (resolvedOrderType === 'price' && order.state === 'cancel' &&
+      executedVolume !== null && executedVolume > 0) {
+      const lockedDust = hasObservedNumber(order.locked) ? Number(order.locked) : null;
+      const orderAvgPrice = hasObservedNumber(order.avg_price) ? Number(order.avg_price) : null;
+      const trades = Array.isArray(order.trades) ? order.trades : [];
+      const tradeFunds = trades.reduce((sum, trade) => sum + (hasObservedNumber(trade?.funds) ? Number(trade.funds) : 0), 0);
+      const tradeVolume = trades.reduce((sum, trade) => sum + (hasObservedNumber(trade?.volume) ? Number(trade.volume) : 0), 0);
+      order = {
+        ...order,
+        remaining_volume: hasObservedNumber(order.remaining_volume)
+          ? order.remaining_volume
+          : (lockedDust !== null && lockedDust < 1 ? '0' : order.remaining_volume),
+        avg_price: orderAvgPrice !== null
+          ? order.avg_price
+          : (tradeVolume > 0 && tradeFunds > 0 ? String(tradeFunds / tradeVolume) : order.avg_price)
+      };
+    }
     const remainingVolume = hasObservedNumber(order.remaining_volume) ? Number(order.remaining_volume) : null;
     const averagePrice = hasObservedNumber(order.avg_price) ? Number(order.avg_price) : null;
     const paidFee = hasObservedNumber(order.paid_fee) ? Number(order.paid_fee) : null;
@@ -539,7 +559,7 @@ export class LiveOrderGateway {
       averagePrice !== null && averagePrice > 0 &&
       paidFee !== null && paidFee >= 0;
     if (completeFillAccounting) {
-      const terminalFill = order.state === 'done' && remainingVolume === 0;
+      const terminalFill = ['done', 'cancel'].includes(order.state) && remainingVolume === 0;
       const fillEvent = this.createLiveExecutionEvidence({
         eventType: terminalFill ? 'FILL_OBSERVED' : 'FILL_PARTIAL',
         clientIntentId,
