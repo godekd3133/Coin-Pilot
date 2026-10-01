@@ -3,6 +3,7 @@ node_modules/
 .env.local
 .env.*.local
 logs/
+runtime-state/
 *.log
 .DS_Store
 

@@ -260,7 +260,10 @@ export class BinanceExchange {
     const info = await this._publicRequest('/api/v3/exchangeInfo');
     return (info?.symbols || [])
       .filter(row => row?.status === 'TRADING' && row?.isSpotTradingAllowed === true &&
-        row.quoteAsset === this.quoteAsset)
+        row.quoteAsset === this.quoteAsset &&
+        // QUOTE-BASE 코드로 주소 지정할 수 있는 심볼만 노출한다 — 바이낸스는
+        // CJK 이름 심볼(USDT-币安人生 등)도 상장하므로 비 ASCII 자산은 제외.
+        /^[A-Z0-9]+$/.test(String(row.baseAsset ?? '')))
       .map(row => ({ market: `${row.quoteAsset}-${row.baseAsset}` }));
   }
 

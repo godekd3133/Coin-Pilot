@@ -46,6 +46,22 @@ test('getMarkets returns QUOTE-BASE codes for the configured quote asset', async
   assert.ok(calls().some(c => c.url.includes('/api/v3/exchangeInfo')));
 });
 
+test('getMarkets drops non-ASCII base assets (CJK-listed symbols)', async () => {
+  // Binance lists Chinese-named meme symbols (e.g. USDT-币安人生). A single
+  // exotic code must not poison the whole market list for downstream
+  // normalizeKrwMarkets consumers.
+  stubFetch(() => jsonResponse({
+    symbols: [
+      { symbol: 'BTCUSDT', baseAsset: 'BTC', quoteAsset: 'USDT', status: 'TRADING', isSpotTradingAllowed: true },
+      { symbol: '币安人生USDT', baseAsset: '币安人生', quoteAsset: 'USDT', status: 'TRADING', isSpotTradingAllowed: true },
+      { symbol: 'ETHUSDT', baseAsset: 'ETH', quoteAsset: 'USDT', status: 'TRADING', isSpotTradingAllowed: true }
+    ]
+  }));
+  const exchange = new BinanceExchange({});
+  const markets = await exchange.getMarkets();
+  assert.deepEqual(markets, [{ market: 'USDT-BTC' }, { market: 'USDT-ETH' }]);
+});
+
 test('getTicker normalizes to Upbit field names', async () => {
   stubFetch(() => jsonResponse([{
     symbol: 'BTCUSDT', lastPrice: '100', openPrice: '95', highPrice: '110',

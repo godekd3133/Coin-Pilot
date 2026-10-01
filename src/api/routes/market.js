@@ -34,9 +34,9 @@ function normalizeKrwMarkets(payload, quote = 'KRW') {
   const markets = new Set();
   for (const entry of payload) {
     const market = entry?.market;
-    if (typeof market !== 'string' || !/^[A-Z0-9]+-[A-Z0-9]+$/.test(market)) {
-      throw new TypeError('Market list response contains an invalid market code.');
-    }
+    // 비표준 코드는 목록 전체를 죽이지 않고 건너뛴다 — 바이낸스처럼 CJK
+    // 이름 심볼을 상장하는 거래소의 페이로드에도 대시보드가 살아있어야 한다.
+    if (typeof market !== 'string' || !/^[A-Z0-9]+-[A-Z0-9]+$/.test(market)) continue;
     if (market.startsWith(quotePrefix)) markets.add(market);
   }
 
@@ -195,7 +195,11 @@ export default function createMarketRoutes(server) {
         };
         marketListCache.value = verified;
         return { ...verified, stale: false };
-      } catch {
+      } catch (error) {
+        server?.logger?.error?.('Market list read failed', {
+          error: error?.message || String(error),
+          code: error?.code || null
+        });
         if (marketListCache.value) return { ...marketListCache.value, stale: true };
         throw new MarketListUnavailableError();
       } finally {
