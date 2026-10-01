@@ -285,6 +285,34 @@ export function resolveTerminalLiveOrderReadback(order, {
     };
   }
 
+  // 업비트 시장가/지정가 주문은 잔여분이 최소 단위 미만이면 'cancel'로 종결되며
+  // remaining_volume 자체를 보고하지 않을 수 있다(시장가 매수의 잔여는 locked
+  // KRW 먼지로만 남는다). 체결 수량과 회계가 완전하고 미체결 잔량이 없으면
+  // 'cancel'도 전량 체결의 종결 상태다.
+  const lockedResidual = hasObservedNumber(order.locked) ? Number(order.locked) : null;
+  const residualSettled = remainingVolume === 0 ||
+    (orderType === 'price' && remainingVolume === null &&
+      lockedResidual !== null && lockedResidual < 1);
+  if (order.state === 'cancel' && executedVolume !== null && executedVolume > 0 &&
+    residualSettled && averagePrice !== null && averagePrice > 0 &&
+    paidFee !== null && paidFee >= 0) {
+    return {
+      terminal: true,
+      outcome: 'filled',
+      order: compactOrder,
+      fill: {
+        status: 'filled',
+        orderId: order.uuid,
+        exchangeState: order.state,
+        executedVolume,
+        remainingVolume,
+        averagePrice,
+        paidFee,
+        error: null
+      }
+    };
+  }
+
   return {
     terminal: false,
     reason: ['done', 'cancel'].includes(order.state) &&

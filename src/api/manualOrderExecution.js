@@ -27,12 +27,18 @@ function projectLiveFillResult(fillResult, orderId = null) {
 export function hasCompleteObservedLiveFill(liveExecution) {
   const fill = liveExecution?.fill;
   const hasObservedNumber = value => value !== null && value !== undefined && Number.isFinite(Number(value));
+  // 시장가 매수(price)는 remaining_volume을 보고하지 않는다 — 잔여는 locked
+  // 먼지로만 남으므로 완전성 조건에서 제외한다.
+  const isPriceOrder = liveExecution?.fillResult?.order?.ord_type === 'price';
+  const remainingOk = hasObservedNumber(fill?.remainingVolume)
+    ? Number(fill.remainingVolume) >= 0
+    : isPriceOrder;
   return liveExecution?.evidenceRecorded === true &&
     liveExecution?.fillResult?.filled === true &&
     hasObservedNumber(fill?.executedVolume) && Number(fill.executedVolume) > 0 &&
     hasObservedNumber(fill?.averagePrice) && Number(fill.averagePrice) > 0 &&
     hasObservedNumber(fill?.paidFee) && Number(fill.paidFee) >= 0 &&
-    hasObservedNumber(fill?.remainingVolume) && Number(fill.remainingVolume) >= 0;
+    remainingOk;
 }
 
 function markLiveMarketOrderUnresolved(tradingSystem, market) {

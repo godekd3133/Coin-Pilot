@@ -1683,6 +1683,59 @@ test('a wedged LIVE record resolves terminally from definitive rejection evidenc
   assert.equal(readCount, 1, 'completed replay does not re-query the exchange');
 });
 
+test('a market-price order ending in cancel with full execution recovers as a terminal fill', async t => {
+  // Upbit price bids terminate as state='cancel' once the KRW amount is
+  // exhausted: executed_volume covers the order, remaining_volume is absent,
+  // and only sub-unit locked dust remains. That is a complete fill, not an
+  // unresolved partial.
+  const root = makeRoot(t);
+  let acceptedOrder = null;
+  const firstLive = makeLiveTrader(root, {
+    onSubmit: async (_market, _side, _volume, _price, _orderType, clientIntentId) => {
+      acceptedOrder = makeExchangeOrder(clientIntentId, 'KRW-BTC', 'bid', {
+        state: 'cancel',
+        ord_type: 'price',
+        executed_volume: '2.47524752',
+        paid_fee: '2.4999999952',
+        locked: '0.0000096048'
+      });
+      delete acceptedOrder.remaining_volume;
+      delete acceptedOrder.done_at;
+      throw new Error('fake accepted POST with lost response');
+    },
+    getOrder: async () => ({ ...acceptedOrder })
+  });
+  const server = makeServer(firstLive.trader, root);
+  const firstCtx = await startRoutes(t, server);
+  const first = await postJson(firstCtx, '/api/trade/buy', { coin: 'KRW-BTC', amount: 5000 }, 'price-cancel-fill-key');
+  assert.equal(first.status, 202);
+  await firstCtx.close();
+
+  const restartedLive = makeLiveTrader(root, {
+    getOrder: async (identifier, options) => {
+      assert.equal(identifier, acceptedOrder.identifier);
+      assert.deepEqual(options, { identifier: true });
+      return { ...acceptedOrder };
+    }
+  });
+  const restartedServer = makeServer(restartedLive.trader, root, {
+    storePath: server.manualOrderIdempotencyStore.filePath
+  });
+  const restartedCtx = await startRoutes(t, restartedServer);
+  const recovered = await postJson(restartedCtx, '/api/trade/buy',
+    { coin: 'KRW-BTC', amount: 5000 }, 'price-cancel-fill-key');
+
+  assert.equal(recovered.status, 200);
+  assert.equal(recovered.idempotencyStatus, 'completed');
+  assert.equal(recovered.body.success, true);
+  assert.equal(recovered.body.recovered, true);
+  assert.equal(recovered.body.fill.status, 'filled');
+  assert.equal(recovered.body.fill.executedVolume, 2.47524752);
+  assert.equal(recovered.body.fill.averagePrice, 10000);
+  assert.equal(restartedLive.counts.submits, 0);
+  assert.equal(restartedLive.counts.strategyMutations, 0);
+});
+
 test('a bare 404 readback without rejection evidence still stays unknown (identifier-index lag)', async t => {
   const root = makeRoot(t);
   const firstLive = makeLiveTrader(root, {

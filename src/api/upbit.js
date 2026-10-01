@@ -1042,6 +1042,17 @@ class UpbitAPI {
         }
 
         if (order.state === 'cancel') {
+          // 시장가(price/market) 주문은 잔여분이 최소 단위 미만이면 'cancel'로
+          // 끝나는 것이 정상 종결이다. 체결된 수량이 있고 채워지지 않은 잔량이
+          // 없으면 실질 전량 체결이다.
+          const cancelledExecuted = parseFloat(order.executed_volume || 0);
+          const cancelledRemaining = parseFloat(order.remaining_volume || 0);
+          if (cancelledExecuted > 0 && cancelledRemaining === 0) {
+            return { filled: true, order };
+          }
+          if (cancelledExecuted > 0) {
+            return { filled: false, partial: true, order, error: '부분 체결 후 취소됨' };
+          }
           return { filled: false, order, error: '주문이 취소됨' };
         }
 
