@@ -169,8 +169,12 @@ test('origin guard는 same-origin과 allowlist만 허용한다', () => {
 });
 
 // ------------------------------------------------------------ socket guard
-test('socket middleware는 토큰 없이 거부하고 올바른 토큰은 통과한다', () => {
-  const auth = createDashboardAuth({ DASHBOARD_TOKEN: 'tok', DASHBOARD_READ_ONLY_TOKEN: 'monitor-tok' });
+test('socket middleware는 토큰 없이 거부하고 운영·모바일 토큰은 통과한다', () => {
+  const auth = createDashboardAuth({
+    DASHBOARD_TOKEN: 'tok',
+    DASHBOARD_READ_ONLY_TOKEN: 'monitor-tok',
+    DASHBOARD_MOBILE_TOKEN: 'native-mobile-tok'
+  });
   const rejected = new Promise(resolve => {
     auth.socketMiddleware({ handshake: { auth: {}, headers: {} } }, resolve);
   });
@@ -183,15 +187,20 @@ test('socket middleware는 토큰 없이 거부하고 올바른 토큰은 통과
       resolve
     );
   });
+  const mobileAccepted = new Promise(resolve => {
+    auth.socketMiddleware({ handshake: { auth: { token: 'native-mobile-tok' }, headers: {} } }, resolve);
+  });
   const readOnlyRejected = new Promise(resolve => {
     auth.socketMiddleware({ handshake: { auth: { token: 'monitor-tok' }, headers: {} } }, resolve);
   });
-  return Promise.all([rejected, accepted, bearerHeader, readOnlyRejected]).then(([rej, ok, bearer, readOnly]) => {
-    assert.ok(rej instanceof Error);
-    assert.equal(ok, undefined);
-    assert.equal(bearer, undefined);
-    assert.ok(readOnly instanceof Error);
-  });
+  return Promise.all([rejected, accepted, bearerHeader, mobileAccepted, readOnlyRejected])
+    .then(([rej, ok, bearer, mobile, readOnly]) => {
+      assert.ok(rej instanceof Error);
+      assert.equal(ok, undefined);
+      assert.equal(bearer, undefined);
+      assert.equal(mobile, undefined);
+      assert.ok(readOnly instanceof Error);
+    });
 });
 
 test('읽기 전용 토큰은 정확한 경로, 메서드, 쿼리만 허용한다', () => {
@@ -268,7 +277,113 @@ test('모바일 운영 토큰은 공개 시세 snapshot 읽기를 허용한다',
   };
 
   assert.equal(invoke('/api/market/prices/snapshot').nextCalled, true);
+  assert.equal(invoke('/api/stream').nextCalled, true,
+    'The mobile scope should open the server-sent event stream');
+  assert.equal(invoke('/api/system-status').nextCalled, true);
+  assert.equal(invoke('/api/coin-detail/KRW-BTC').nextCalled, true);
+  assert.deepEqual(invoke('/api/coin-detail/BTC'), { status: 403, nextCalled: false });
   assert.deepEqual(invoke('/api/market/prices/snapshot?extra=1'), { status: 403, nextCalled: false });
+});
+
+test('모바일 운영 토큰은 대상 마켓·포지션 상한 설정 변경을 허용한다', () => {
+  const auth = createDashboardAuth({ DASHBOARD_TOKEN: 'full-token', DASHBOARD_MOBILE_TOKEN: 'mobile-token' });
+  const invoke = body => {
+    let status;
+    let nextCalled = false;
+    const response = {
+      status(value) { status = value; return this; },
+      json() { return this; }
+    };
+    auth.middleware({
+      method: 'POST',
+      originalUrl: '/api/config/update',
+      headers: { authorization: 'Bearer mobile-token' },
+      body
+    }, response, () => {
+      nextCalled = true;
+    });
+    return { status, nextCalled };
+  };
+
+  for (const body of [
+    { targetCoins: ['KRW-BTC', 'KRW-ETH'] },
+    { targetCoins: 'ALL' },
+    { scalpMaxMarkets: 20 },
+    { maxPositions: 3 },
+    { targetCoins: ['KRW-BTC'], scalpMaxMarkets: 10, maxPositions: 2 }
+  ]) {
+    assert.equal(invoke(body).nextCalled, true, `body ${JSON.stringify(body)} should be allowed`);
+  }
+
+  for (const body of [
+    { targetCoins: ['BTC'] },
+    { targetCoins: [] },
+    { targetCoins: 'ALL', secretKey: 'x' },
+    { scalpMaxMarkets: 'ALL' },
+    { apiKey: 'x' }
+  ]) {
+    assert.equal(invoke(body).status, 403, `body ${JSON.stringify(body)} should be forbidden`);
+  }
+});
+
+test('모바일 토큰은 /api/stream SSE를 열고 유니버스 설정을 런타임에 적용한다', async () => {
+  const ctx = await startDashboard({
+    DASHBOARD_TOKEN: 'full-secret',
+    DASHBOARD_MOBILE_TOKEN: 'mobile-secret'
+  });
+  try {
+    const unauthenticated = await fetch(`${ctx.baseUrl}/api/stream`);
+    assert.equal(unauthenticated.status, 401);
+
+    const controller = new AbortController();
+    const stream = await fetch(`${ctx.baseUrl}/api/stream`, {
+      headers: { Authorization: 'Bearer mobile-secret' },
+      signal: controller.signal
+    });
+    assert.equal(stream.status, 200);
+    assert.match(stream.headers.get('content-type'), /text\/event-stream/);
+
+    const update = await fetch(`${ctx.baseUrl}/api/config/update`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', Authorization: 'Bearer mobile-secret' },
+      body: JSON.stringify({ targetCoins: ['KRW-ETH'], scalpMaxMarkets: 7, maxPositions: 2 })
+    });
+    const updated = await update.json();
+    assert.equal(update.status, 200);
+    assert.equal(updated.success, true);
+    assert.deepEqual(updated.universe, { targetCoins: ['KRW-ETH'], scalpMaxMarkets: 7, maxPositions: 2 });
+    assert.deepEqual(ctx.trader.targetCoins, ['KRW-ETH']);
+    assert.equal(ctx.trader.maxPositions, 2);
+    assert.equal(ctx.trader.config.maxScalpMarkets, 7);
+
+    const allUpdate = await fetch(`${ctx.baseUrl}/api/config/update`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', Authorization: 'Bearer mobile-secret' },
+      body: JSON.stringify({ targetCoins: 'ALL' })
+    });
+    const allBody = await allUpdate.json();
+    assert.equal(allUpdate.status, 200);
+    assert.deepEqual(allBody.universe.targetCoins.sort(), ['KRW-BTC', 'KRW-ETH']);
+
+    const invalid = await fetch(`${ctx.baseUrl}/api/config/update`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', Authorization: 'Bearer mobile-secret' },
+      body: JSON.stringify({ scalpMaxMarkets: 0 })
+    });
+    assert.equal(invalid.status, 400);
+
+    const reader = stream.body.getReader();
+    let received = '';
+    while (!received.includes('event: connected')) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      received += new TextDecoder().decode(value);
+    }
+    assert.ok(received.includes('event: connected'));
+    controller.abort();
+  } finally {
+    await stopDashboard(ctx);
+  }
 });
 
 // --------------------------------------------------- integration: auth enabled

@@ -7,7 +7,11 @@ import { createManualOrderIdempotencyMiddleware } from '../manualOrderIdempotenc
 import { getMarketDataProvider } from '../marketDataProvider.js';
 import { createManualOrderService } from '../manualOrderService.js';
 import { createMarketAnalysisQueries } from '../marketAnalysisQueries.js';
-import { recoverSingleManualLiveOrder } from '../manualOrderExecution.js';
+import {
+  attachLiveLegIntent,
+  LIVE_MULTI_LEG_PATHS,
+  recoverManualLiveOrderRequest
+} from '../manualOrderExecution.js';
 
 function respondWithResult(res, result) {
   return res.status(result.status).json(result.body);
@@ -48,7 +52,8 @@ export default function createTradingRoutes(server) {
       '/trade/execute',
       '/trade/quick'
     ]),
-    recoverLiveRequest: (context) => recoverSingleManualLiveOrder(context)
+    liveMultiLegPaths: LIVE_MULTI_LEG_PATHS,
+    recoverLiveRequest: recoverManualLiveOrderRequest
   }));
 
   // 마지막 읽기 전용 스캘핑 워크포워드 검증 결과
@@ -119,7 +124,9 @@ export default function createTradingRoutes(server) {
   // 번들 제안 실행 (매도 후 매수)
   router.post('/trade/execute-bundle', express.json(), async (req, res) => {
     try {
-      return respondWithResult(res, await orderService.executeBundle(req.body || {}));
+      return respondWithResult(res, await orderService.executeBundle(req.body || {}, {
+        attachLegIntent: leg => attachLiveLegIntent(server.manualOrderIdempotencyStore, req, leg)
+      }));
     } catch (error) {
       server.logApiError('/api/trade/execute-bundle', error);
       res.status(500).json({ error: error.message, success: false });
@@ -145,7 +152,9 @@ export default function createTradingRoutes(server) {
   // 스마트 자동 매수
   router.post('/trade/smart-buy', express.json(), async (req, res) => {
     try {
-      return respondWithResult(res, await orderService.smartBuy(req.body || {}));
+      return respondWithResult(res, await orderService.smartBuy(req.body || {}, {
+        attachLegIntent: leg => attachLiveLegIntent(server.manualOrderIdempotencyStore, req, leg)
+      }));
     } catch (error) {
       server.logApiError('/api/trade/smart-buy', error, { totalAmount: req.body?.totalAmount });
       res.status(500).json({ error: error.message, success: false });
@@ -155,7 +164,9 @@ export default function createTradingRoutes(server) {
   // 스마트 자동 매도 (목표 금액만큼 분할 매도)
   router.post('/trade/smart-sell', express.json(), async (req, res) => {
     try {
-      return respondWithResult(res, await orderService.smartSell(req.body || {}));
+      return respondWithResult(res, await orderService.smartSell(req.body || {}, {
+        attachLegIntent: leg => attachLiveLegIntent(server.manualOrderIdempotencyStore, req, leg)
+      }));
     } catch (error) {
       server.logApiError('/api/trade/smart-sell', error, { targetAmount: req.body?.targetAmount });
       res.status(500).json({ error: error.message, success: false });

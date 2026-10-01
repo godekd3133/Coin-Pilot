@@ -451,6 +451,7 @@ class MultiCoinTrader {
           requestTimeoutMs: config.upbitRequestTimeoutMs
         });
     this.liveManualPrepareOnBoot = config.liveManualPrepareOnBoot === true && config.dryRun === false;
+    this.liveManualRiskProtectionEnabled = config.liveManualRiskProtection === true && config.dryRun === false;
     this.newsMonitor = new NewsMonitor();
     this.strategyMode = config.strategyMode || 'oversold_reaction_scalping';
     this.isScalpingMode = this.strategyMode === 'oversold_reaction_scalping';
@@ -595,6 +596,7 @@ class MultiCoinTrader {
     this.liveManualPrepared = false;
     this._riskMonitorProtectiveOnly = false;
     this._riskMonitorExitInProgress = false;
+    this._manualRiskProtection = false;
     this._deferredProtectiveExitIntents = new Map();
     this.stopReason = null;
     this.cycleRequestStats = null;
@@ -973,6 +975,85 @@ class MultiCoinTrader {
         .map(([market]) => market),
       ...(this._liveRecoveredManagedMarkets?.values?.() || [])
     ])];
+  }
+
+  /**
+   * 대시보드 /api/config/update 경유 런타임 대상 마켓·포지션 상한 갱신.
+   * targetCoins: KRW-* 코드 배열 또는 'ALL'(스캘핑에서는 유동성 상위 N개로 해석).
+   * LIVE 모드에서는 새 관리 마켓이 다시 미검증 상태로 표시되어 sync gate가
+   * 재적용된다.
+   */
+  async applyRuntimeMarketUniverse({ targetCoins, scalpMaxMarkets, maxPositions } = {}) {
+    if (scalpMaxMarkets !== undefined) {
+      const value = Number(scalpMaxMarkets);
+      if (!Number.isInteger(value) || value < 1 || value > 500) {
+        throw new Error('scalpMaxMarkets must be an integer from 1 to 500');
+      }
+      this.config.maxScalpMarkets = value;
+    }
+    if (maxPositions !== undefined) {
+      const value = Number(maxPositions);
+      if (!Number.isInteger(value) || value < 1 || value > 50) {
+        throw new Error('maxPositions must be an integer from 1 to 50');
+      }
+      this.maxPositions = value;
+      this.config.maxPositions = value;
+    }
+    if (targetCoins !== undefined && targetCoins !== null) {
+      let resolved;
+      if (typeof targetCoins === 'string' && targetCoins.trim().toUpperCase() === 'ALL') {
+        resolved = await this.resolveAllKrwMarketUniverse();
+      } else if (Array.isArray(targetCoins)) {
+        const seen = new Set();
+        resolved = [];
+        for (const entry of targetCoins) {
+          const code = String(entry || '').trim().toUpperCase();
+          if (!/^KRW-[A-Z0-9]{2,15}$/.test(code) || seen.has(code)) continue;
+          seen.add(code);
+          resolved.push(code);
+        }
+        if (resolved.length === 0) {
+          throw new Error('targetCoins must contain at least one valid KRW-* market');
+        }
+      } else {
+        throw new Error('targetCoins must be an array of KRW-* codes or "ALL"');
+      }
+      this.targetCoins = resolved;
+      this.config.targetCoins = [...resolved];
+      if (resolved.length <= 20) {
+        for (const coin of resolved) this.getStrategy(coin);
+      }
+      if (!this.dryRun) {
+        this._liveOrderStateUnknownMarkets = new Set(this.getLiveManagedMarkets());
+      }
+    }
+    return {
+      targetCoins: [...this.targetCoins],
+      scalpMaxMarkets: this.config.maxScalpMarkets ?? null,
+      maxPositions: this.maxPositions
+    };
+  }
+
+  async resolveAllKrwMarketUniverse() {
+    const markets = await this.marketDataAdapter.getMarkets();
+    const krwMarkets = (Array.isArray(markets) ? markets : [])
+      .map(entry => entry?.market)
+      .filter(market => typeof market === 'string' && market.startsWith('KRW-'));
+    if (krwMarkets.length === 0) {
+      throw new Error('KRW 마켓 목록을 불러오지 못했습니다.');
+    }
+    if (!this.isScalpingMode) return krwMarkets;
+    const tickers = await this.marketDataAdapter.getTickers(krwMarkets);
+    const limit = Math.max(1, Math.floor(Number(this.config.maxScalpMarkets)) || 20);
+    const ranked = [...(Array.isArray(tickers) ? tickers : [])]
+      .filter(ticker => Number.isFinite(Number(ticker?.acc_trade_price_24h)))
+      .sort((a, b) => Number(b.acc_trade_price_24h) - Number(a.acc_trade_price_24h))
+      .slice(0, limit)
+      .map(ticker => ticker.market);
+    if (ranked.length === 0) {
+      throw new Error('유동성 상위 스캘핑 마켓을 찾지 못했습니다.');
+    }
+    return ranked;
   }
 
   async ensureLiveOrderMarketStateVerified(market) {
@@ -4946,6 +5027,8 @@ class MultiCoinTrader {
     this._lastSyncTime = 0;
     this.stopReason = 'exchange_state_unverified';
     this._entriesPaused = true;
+    this._manualRiskProtection = false;
+    this.stopPositionRiskMonitor();
     this.liveManualPrepared = false;
     return { configured: true };
   }
@@ -4969,6 +5052,7 @@ class MultiCoinTrader {
     this._startupReconciliationPending = true;
     this._riskMonitorProtectiveOnly = false;
     this._riskMonitorExitInProgress = false;
+    this._manualRiskProtection = false;
     this.stopReason = 'exchange_state_unverified';
     const synchronized = await this.syncWithExchange({ cancelStaleEngineOrders: false });
     if (synchronized !== true || this._liveExchangeStateKnown !== true || this._liveAccountStateKnown !== true) {
@@ -4984,11 +5068,20 @@ class MultiCoinTrader {
     this._entriesPaused = true;
     this.isRunning = false;
     this.stopReason = 'operator_stop';
+    this._manualRiskProtection = this.liveManualRiskProtectionEnabled === true &&
+      this.positionRiskCheckIntervalMs > 0;
+    if (this._manualRiskProtection) {
+      this.startPositionRiskMonitor();
+      console.log('\n🛡️  수동 LIVE 보호 감시를 시작합니다 - 보유 포지션의 손절·익절·최대보유시간을 감시합니다.');
+    } else if (this.liveManualRiskProtectionEnabled) {
+      console.warn('\n⚠️  수동 LIVE 보호 감시가 요청됐지만 리스크 감시 간격이 0이라 보호를 시작할 수 없습니다.');
+    }
     this.liveManualPrepared = true;
     return {
       ready: true,
       exchangeStateKnown: true,
-      pendingOrderMarkets: [...this._livePendingOrderMarkets]
+      pendingOrderMarkets: [...this._livePendingOrderMarkets],
+      manualRiskProtection: this._manualRiskProtection
     };
   }
 
@@ -5014,6 +5107,7 @@ class MultiCoinTrader {
     this._entriesPaused = this._startupReconciliationPending;
     this._riskMonitorProtectiveOnly = false;
     this._riskMonitorExitInProgress = false;
+    this._manualRiskProtection = false;
     this.stopReason = this._startupReconciliationPending ? 'exchange_state_unverified' : null;
     console.log(`\n🚀 ${this.isScalpingMode ? '과매도 반응 스캘핑' : '다중 코인'} 자동매매 시스템 시작`);
     console.log(`모드: ${this.dryRun ? '모의투자' : '실전투자'}`);
@@ -5241,7 +5335,7 @@ class MultiCoinTrader {
     const status = this.getRiskMonitorStatus(now);
     if (this.riskMonitorState.lastFailureCode === 'RISK_CHECK_STALE' &&
       this.riskMonitorState.continuityEligible === false &&
-      this.isRunning) {
+      (this.isRunning || this._manualRiskProtection)) {
       this.persistRiskMonitorStateIfDue(now, true);
       console.error(
         `\n🛑 늦은 risk ticker 성공 callback으로 확인된 시세 공백 ${status.currentOutageDurationSeconds.toFixed(1)}초 초과 - ` +
@@ -5284,7 +5378,8 @@ class MultiCoinTrader {
     // Explicit request failures already flow through handleRiskMonitorFailure.
     // This guard is specifically for the previously invisible in-flight case
     // where no failure callback has created currentOutageStartedAt yet.
-    if (!status.failClosed || status.staleReason !== 'risk_check_stale' || !this.isRunning) {
+    if (!status.failClosed || status.staleReason !== 'risk_check_stale' ||
+      (!this.isRunning && !this._manualRiskProtection)) {
       return status;
     }
 
@@ -5315,7 +5410,7 @@ class MultiCoinTrader {
    */
   handleRiskMonitorFailure(error) {
     const result = this.recordRiskMonitorFailure(error);
-    if (result.failClosed && this.isRunning) {
+    if (result.failClosed && (this.isRunning || this._manualRiskProtection)) {
       console.error(`\n🛑 리스크 시세 공백 ${result.outageDurationSeconds.toFixed(1)}초 초과 - 신규 매매와 paper 관찰을 중지합니다.`);
       this.pauseForSafetyIncident('risk_data_gap');
     }
@@ -5507,6 +5602,7 @@ class MultiCoinTrader {
     this._stopRequested = true;
     this._entriesPaused = true;
     this._riskMonitorProtectiveOnly = false;
+    this._manualRiskProtection = false;
     this._riskMonitorExitInProgress = false;
     this.isRunning = false;
     this.stopPositionRiskMonitor();
@@ -5598,6 +5694,10 @@ class MultiCoinTrader {
   finishProtectiveMonitoringWhenFlat() {
     if (!this._riskMonitorProtectiveOnly || this.getCurrentPositionCount() > 0) return false;
     this._riskMonitorProtectiveOnly = false;
+    if (this._manualRiskProtection) {
+      console.log('\n✅ 감시 중이던 LIVE 포지션이 모두 닫혔습니다. 수동 보호 감시는 유지되며 신규 진입은 재개하지 않습니다.');
+      return true;
+    }
     this.stopPositionRiskMonitor();
     console.log('\n✅ 감시 중이던 LIVE 포지션이 모두 닫혀 위험 감시가 idle 상태가 됐습니다. 신규 진입은 재개하지 않습니다.');
     return true;
@@ -5610,6 +5710,7 @@ class MultiCoinTrader {
         : !this.dryRun && !this._liveExchangeStateKnown ? 'SYNC_REQUIRED'
         : this.isRunning ? 'RUNNING' : 'STOPPED',
       entriesPaused: this._entriesPaused || this._stopRequested || (!this.dryRun && !this._liveExchangeStateKnown),
+      manualProtectionActive: this._manualRiskProtection === true && this.positionRiskTimer !== null,
       protectiveMonitorActive: this._riskMonitorProtectiveOnly && this.positionRiskTimer !== null,
       stopReason: this.stopReason || (!this.dryRun && !this._liveExchangeStateKnown ? 'exchange_state_unverified' : null),
       exchangeStateKnown: this.dryRun ? null : this._liveExchangeStateKnown
@@ -5662,7 +5763,7 @@ class MultiCoinTrader {
         this.persistRiskMonitorStateIfDue(now);
       }
       this.enforceRiskMonitorFreshness(now);
-      if (!this.isRunning && !this._riskMonitorProtectiveOnly) return;
+      if (!this.isRunning && !this._riskMonitorProtectiveOnly && !this._manualRiskProtection) return;
       this.monitorOpenPositions().catch(error => {
         console.error(`\n❌ 포지션 리스크 모니터 오류: ${error.message}`);
       });
@@ -5676,7 +5777,7 @@ class MultiCoinTrader {
   }
 
   async monitorOpenPositions(snapshotContext = null) {
-    if ((!this.isRunning && !this._riskMonitorProtectiveOnly) ||
+    if ((!this.isRunning && !this._riskMonitorProtectiveOnly && !this._manualRiskProtection) ||
       this._riskCheckInProgress || this._orderInProgress) return;
 
     const riskFreshness = this.enforceRiskMonitorFreshness();
@@ -5764,7 +5865,8 @@ class MultiCoinTrader {
         throw error;
       }
       this.recordRiskMonitorSuccess();
-      if (priceMap.size === 0 || (!this.isRunning && !this._riskMonitorProtectiveOnly)) return;
+      if (priceMap.size === 0 ||
+        (!this.isRunning && !this._riskMonitorProtectiveOnly && !this._manualRiskProtection)) return;
 
       if (strictPositions.length > 0) {
         let currentPositions = this.getCurrentPositionCount();
@@ -5779,7 +5881,8 @@ class MultiCoinTrader {
           }
         };
         for (const { coin, strategy } of strictPositions) {
-          if ((!this.isRunning && !this._riskMonitorProtectiveOnly) || this._orderInProgress) break;
+          if ((!this.isRunning && !this._riskMonitorProtectiveOnly && !this._manualRiskProtection) ||
+            this._orderInProgress) break;
           const currentPrice = priceMap.get(coin);
           if (!Number.isFinite(currentPrice) || !strategy.currentPosition) continue;
 
@@ -5827,7 +5930,8 @@ class MultiCoinTrader {
           }
 
           for (const { coin, strategy, currentPrice, positionCheck, exitIntent } of exitCandidates) {
-            if ((!this.isRunning && !this._riskMonitorProtectiveOnly) || this._orderInProgress) break;
+            if ((!this.isRunning && !this._riskMonitorProtectiveOnly && !this._manualRiskProtection) ||
+              this._orderInProgress) break;
             if (!strategy.currentPosition) {
               this._deferredProtectiveExitIntents.delete(coin);
               continue;
@@ -5839,7 +5943,7 @@ class MultiCoinTrader {
               continue;
             }
 
-            this._riskMonitorExitInProgress = this._riskMonitorProtectiveOnly;
+            this._riskMonitorExitInProgress = this._riskMonitorProtectiveOnly || this._manualRiskProtection;
             try {
               await this.executeOrder(
                 coin,
@@ -6945,14 +7049,14 @@ class MultiCoinTrader {
     if (this._liveEvidenceBlockedMarkets.has(coin)) return false;
     if (this._liveOrderStateUnknownMarkets.has(coin) || this._livePendingOrderMarkets.has(coin)) return false;
 
-    const protectiveRiskExit = this._riskMonitorProtectiveOnly &&
+    const riskMonitorExit = (this._riskMonitorProtectiveOnly || this._manualRiskProtection) &&
       this._riskMonitorExitInProgress &&
       decision?.action === 'SELL';
     const verifiedAt = Number(this._liveVerifiedOrderMarkets.get(coin));
-    if (!protectiveRiskExit && (!Number.isFinite(verifiedAt) || Date.now() - verifiedAt >= 10 * 60 * 1000)) {
+    if (!riskMonitorExit && (!Number.isFinite(verifiedAt) || Date.now() - verifiedAt >= 10 * 60 * 1000)) {
       return false;
     }
-    return this._liveExchangeStateKnown || (protectiveRiskExit && !this._exchangeSyncPromise);
+    return this._liveExchangeStateKnown || (riskMonitorExit && !this._exchangeSyncPromise);
   }
 
   async _executeOrder(
@@ -6968,7 +7072,7 @@ class MultiCoinTrader {
     if (this._stopRequested) return null;
     if (!this.canExecuteLiveOrder(coin, decision)) return null;
     if (this._entriesPaused && !(
-      this._riskMonitorProtectiveOnly &&
+      (this._riskMonitorProtectiveOnly || this._manualRiskProtection) &&
       this._riskMonitorExitInProgress &&
       decision?.action === 'SELL'
     )) return null;

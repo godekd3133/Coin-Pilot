@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
@@ -1367,24 +1368,32 @@ test('single-order LIVE retry recovers a terminal identifier readback and caches
   }
 });
 
-test('LIVE bundle and smart-order retries remain unknown without identifier lookup or plan replay', async t => {
+test('LIVE bundle and smart-order retries remain unknown without leg intents or plan replay', async t => {
   const cases = [
     {
       endpoint: '/api/trade/execute-bundle',
-      body: { sellCoin: 'KRW-BTC', buyCoin: 'KRW-ETH', amount: 5000 }
+      body: { sellCoin: 'KRW-BTC', buyCoin: 'KRW-ETH', amount: 5000 },
+      requestIntent: null
+    },
+    {
+      endpoint: '/api/trade/execute-bundle',
+      body: { sellCoin: 'KRW-BTC', buyCoin: 'KRW-ETH', amount: 5000 },
+      requestIntent: randomUUID()
     },
     {
       endpoint: '/api/trade/smart-buy',
-      body: { totalAmount: 10000, minScore: 60, maxCoins: 1 }
+      body: { totalAmount: 10000, minScore: 60, maxCoins: 1 },
+      requestIntent: randomUUID()
     },
     {
       endpoint: '/api/trade/smart-sell',
-      body: { targetAmount: 1000, strategy: 'worst' }
+      body: { targetAmount: 1000, strategy: 'worst' },
+      requestIntent: randomUUID()
     }
   ];
 
   for (const item of cases) {
-    await t.test(item.endpoint, async t => {
+    await t.test(`${item.endpoint} (requestIntent=${item.requestIntent === null ? 'absent' : 'present'})`, async t => {
       const root = makeRoot(t);
       const live = makeLiveTrader(root);
       const server = makeServer(live.trader, root);
@@ -1394,10 +1403,16 @@ test('LIVE bundle and smart-order retries remain unknown without identifier look
         method: 'POST',
         endpoint: item.endpoint,
         body: item.body,
-        mode: 'LIVE'
+        mode: 'LIVE',
+        clientIntentId: item.requestIntent
       });
       assert.equal(reservation.kind, 'reserved');
-      assert.equal(Object.hasOwn(reservation.record, 'clientIntentId'), false);
+      if (item.requestIntent === null) {
+        assert.equal(Object.hasOwn(reservation.record, 'clientIntentId'), false);
+      } else {
+        assert.equal(reservation.record.clientIntentId, item.requestIntent);
+      }
+      assert.equal(Object.hasOwn(reservation.record, 'legIntents'), false);
       await server.manualOrderIdempotencyStore.markUnknown(reservation.record.recordId, 'simulated_interrupted_plan');
 
       const ctx = await startRoutes(t, server);
@@ -1624,4 +1639,209 @@ test('endpoint canonicalization sorts query keys and retains path identity', () 
   const differentPath = canonicalManualRequestEndpoint({ originalUrl: '/api/trade/sell?a=1&b=2' });
   assert.equal(left, right);
   assert.notEqual(left, differentPath);
+});
+
+test('multi-leg leg intents bind one exchange identifier per leg durably and reject conflicts', async t => {
+  const root = makeRoot(t);
+  const filePath = path.join(root, 'journal.json');
+  const writerLockPath = path.join(root, 'writer.lock');
+  const store = new ManualOrderIdempotencyStore({ filePath, writerLockPath });
+  t.after(() => { try { store.releaseWriterLock(); } catch { /* cleanup */ } });
+
+  const reservation = await store.reserve({
+    profileId: 'operator',
+    idempotencyKey: 'leg-intent-unit',
+    method: 'POST',
+    endpoint: '/api/trade/execute-bundle',
+    body: { sellCoin: 'KRW-BTC', buyCoin: 'KRW-ETH' },
+    mode: 'LIVE',
+    clientIntentId: randomUUID()
+  });
+  assert.equal(reservation.kind, 'reserved');
+  const recordId = reservation.record.recordId;
+  const sellIntent = randomUUID();
+  const buyIntent = randomUUID();
+
+  const attachedSell = await store.attachLegIntent(recordId, 'sell', sellIntent);
+  assert.equal(attachedSell.legIntents.sell, sellIntent);
+  const idempotent = await store.attachLegIntent(recordId, 'sell', sellIntent);
+  assert.equal(idempotent.legIntents.sell, sellIntent);
+  await store.attachLegIntent(recordId, 'buy', buyIntent);
+
+  await assert.rejects(() => store.attachLegIntent(recordId, 'sell', randomUUID()), /already recorded/);
+  await assert.rejects(() => store.attachLegIntent(recordId, 'sell', 'not-a-uuid'));
+  await assert.rejects(() => store.attachLegIntent(recordId, '', randomUUID()));
+
+  store.releaseWriterLock();
+  const reloaded = new ManualOrderIdempotencyStore({ filePath, writerLockPath });
+  t.after(() => { try { reloaded.releaseWriterLock(); } catch { /* cleanup */ } });
+  await reloaded.initialize();
+  const reloadedRecord = reloaded.getRecord(recordId);
+  assert.equal(reloadedRecord.legIntents.sell, sellIntent);
+  assert.equal(reloadedRecord.legIntents.buy, buyIntent);
+  assert.equal(reloadedRecord.state, 'unknown', 'a pending LIVE request reloads as unknown');
+
+  await reloaded.completeRecovered(recordId, { status: 200, body: { success: true } });
+  await assert.rejects(() => reloaded.attachLegIntent(recordId, 'buy2', randomUUID()), /cannot attach/);
+});
+
+test('LIVE bundle records a fresh exchange identifier per leg before dispatch', async t => {
+  const root = makeRoot(t);
+  let server = null;
+  const observedAtPost = [];
+  const live = makeLiveTrader(root, {
+    onSubmit: async (market, side, _volume, _price, _orderType, clientIntentId) => {
+      const record = [...server.manualOrderIdempotencyStore.records.values()][0];
+      const leg = side === 'ask' ? 'sell' : 'buy';
+      observedAtPost.push({ leg, recorded: record?.legIntents?.[leg] === clientIntentId });
+      throw new Error('fake accepted POST with lost response');
+    },
+    getOrder: async () => null
+  });
+  server = makeServer(live.trader, root);
+  const ctx = await startRoutes(t, server);
+  const result = await postJson(ctx, '/api/trade/execute-bundle', {
+    sellCoin: 'KRW-BTC',
+    buyCoin: 'KRW-ETH',
+    buyAmount: 6000
+  }, 'bundle-leg-durable-before-post');
+
+  assert.equal(result.status, 202);
+  assert.equal(result.idempotencyStatus, 'unknown');
+  assert.deepEqual(observedAtPost, [{ leg: 'sell', recorded: true }]);
+  const record = [...server.manualOrderIdempotencyStore.records.values()][0];
+  assert.deepEqual(Object.keys(record.legIntents || {}), ['sell']);
+  assert.notEqual(record.legIntents.sell, record.clientIntentId);
+  assert.equal(live.counts.submits, 1);
+});
+
+test('LIVE bundle retry resolves each journaled leg by identifier without another POST', async t => {
+  const root = makeRoot(t);
+  let sellIntentId = null;
+  let buyIntentId = null;
+  const sellOrder = () => makeExchangeOrder(sellIntentId, 'KRW-BTC', 'ask');
+  const live = makeLiveTrader(root, {
+    onSubmit: async (market, side, _volume, _price, _orderType, clientIntentId) => {
+      if (side === 'ask') {
+        sellIntentId = clientIntentId;
+        return { success: true, data: { uuid: sellOrder().uuid } };
+      }
+      buyIntentId = clientIntentId;
+      throw new Error('fake accepted buy POST with lost response');
+    },
+    getOrder: async () => null
+  });
+  live.trader.waitForLiveOrderFill = async () => ({ filled: true, order: sellOrder() });
+  const server = makeServer(live.trader, root);
+  const ctx = await startRoutes(t, server);
+  const body = { sellCoin: 'KRW-BTC', buyCoin: 'KRW-ETH', buyAmount: 6000 };
+  const key = 'bundle-two-leg-recovery';
+  const first = await postJson(ctx, '/api/trade/execute-bundle', body, key);
+
+  assert.equal(first.status, 202);
+  assert.equal(first.idempotencyStatus, 'unknown');
+  const record = [...server.manualOrderIdempotencyStore.records.values()][0];
+  assert.equal(record.state, 'unknown');
+  assert.deepEqual(Object.keys(record.legIntents || {}), ['sell', 'buy']);
+  assert.equal(record.legIntents.sell, sellIntentId);
+  assert.equal(record.legIntents.buy, buyIntentId);
+  assert.notEqual(record.legIntents.sell, record.legIntents.buy);
+  assert.notEqual(record.legIntents.sell, record.clientIntentId);
+  assert.equal(live.counts.submits, 2);
+  await ctx.close();
+
+  const orderLookups = [];
+  const restartedLive = makeLiveTrader(root, {
+    onSubmit: async () => { throw new Error('retry must never POST'); },
+    getOrder: async (identifier, options) => {
+      orderLookups.push(identifier);
+      assert.deepEqual(options, { identifier: true });
+      if (identifier === sellIntentId) return { ...sellOrder() };
+      if (identifier === buyIntentId) {
+        throw Object.assign(new Error('order_not_found'), { response: { status: 404 } });
+      }
+      return null;
+    }
+  });
+  const restartedServer = makeServer(restartedLive.trader, root, {
+    storePath: server.manualOrderIdempotencyStore.filePath
+  });
+  const restartedCtx = await startRoutes(t, restartedServer);
+  const recovered = await postJson(restartedCtx, '/api/trade/execute-bundle', body, key);
+
+  assert.equal(recovered.status, 200);
+  assert.equal(recovered.idempotencyStatus, 'completed');
+  assert.equal(recovered.body.recovered, true);
+  assert.equal(recovered.body.success, false);
+  assert.equal(recovered.body.partial, true);
+  assert.deepEqual(orderLookups, [sellIntentId, buyIntentId]);
+  const sellLeg = recovered.body.legs.find(leg => leg.leg === 'sell');
+  const buyLeg = recovered.body.legs.find(leg => leg.leg === 'buy');
+  assert.equal(sellLeg.outcome, 'filled');
+  assert.equal(sellLeg.order.state, 'done');
+  assert.equal(buyLeg.outcome, 'not_dispatched');
+  assert.equal(buyLeg.fill.status, 'not_observed');
+  assert.equal(recovered.body.settlement.status, 'not_observed');
+  assert.equal(recovered.body.strategyState.status, 'not_mutated');
+  assert.equal(restartedLive.counts.submits, 0);
+  assert.equal(restartedLive.counts.strategyMutations, 0);
+
+  const replay = await postJson(restartedCtx, '/api/trade/execute-bundle', body, key);
+  assert.equal(replay.status, 200);
+  assert.deepEqual(replay.body, recovered.body);
+  assert.equal(restartedLive.counts.orderReadbacks, 2, 'the completed response replays without another exchange GET');
+});
+
+test('LIVE bundle retry stays unknown while a journaled leg is still non-terminal', async t => {
+  const root = makeRoot(t);
+  let sellIntentId = null;
+  let buyIntentId = null;
+  const sellOrder = () => makeExchangeOrder(sellIntentId, 'KRW-BTC', 'ask');
+  const live = makeLiveTrader(root, {
+    onSubmit: async (market, side, _volume, _price, _orderType, clientIntentId) => {
+      if (side === 'ask') {
+        sellIntentId = clientIntentId;
+        return { success: true, data: { uuid: sellOrder().uuid } };
+      }
+      buyIntentId = clientIntentId;
+      throw new Error('fake accepted buy POST with lost response');
+    },
+    getOrder: async () => null
+  });
+  live.trader.waitForLiveOrderFill = async () => ({ filled: true, order: sellOrder() });
+  const server = makeServer(live.trader, root);
+  const ctx = await startRoutes(t, server);
+  const body = { sellCoin: 'KRW-BTC', buyCoin: 'KRW-ETH', buyAmount: 6000 };
+  const key = 'bundle-open-leg-recovery';
+  const first = await postJson(ctx, '/api/trade/execute-bundle', body, key);
+  assert.equal(first.status, 202);
+  await ctx.close();
+
+  const restartedLive = makeLiveTrader(root, {
+    onSubmit: async () => { throw new Error('retry must never POST'); },
+    getOrder: async (identifier) => {
+      if (identifier === sellIntentId) return { ...sellOrder() };
+      if (identifier === buyIntentId) {
+        return makeExchangeOrder(buyIntentId, 'KRW-ETH', 'bid', {
+          state: 'wait',
+          executed_volume: '0',
+          remaining_volume: '0.4'
+        });
+      }
+      return null;
+    }
+  });
+  const restartedServer = makeServer(restartedLive.trader, root, {
+    storePath: server.manualOrderIdempotencyStore.filePath
+  });
+  const restartedCtx = await startRoutes(t, restartedServer);
+  const retry = await postJson(restartedCtx, '/api/trade/execute-bundle', body, key);
+
+  assert.equal(retry.status, 202);
+  assert.equal(retry.idempotencyStatus, 'unknown');
+  assert.equal(restartedLive.counts.submits, 0);
+  const record = [...restartedServer.manualOrderIdempotencyStore.records.values()][0];
+  assert.equal(record.state, 'unknown');
+  assert.equal(record.legIntents.sell, sellIntentId);
+  assert.equal(record.legIntents.buy, buyIntentId);
 });

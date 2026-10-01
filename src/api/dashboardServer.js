@@ -158,6 +158,20 @@ class DashboardServer {
       }
     });
 
+    // SSE 클라이언트 (GET /api/stream). 네이티브 iOS 앱처럼 Socket.IO를 쓰지
+    // 않는 클라이언트가 같은 브로드캐스트 이벤트를 받을 수 있게 한다.
+    this.sseClients = new Set();
+    this.sseHeartbeat = setInterval(() => {
+      for (const client of this.sseClients) {
+        try {
+          client.write(': hb\n\n');
+        } catch {
+          this.sseClients.delete(client);
+        }
+      }
+    }, 25000);
+    this.sseHeartbeat.unref?.();
+
     // API 응답 캐싱 (rate limit 방지)
     this.cache = new Map();
     this.inFlightAccountRequests = new Map();
@@ -204,7 +218,7 @@ class DashboardServer {
         : update.type === 'session'
           ? 'ai-session-update'
           : 'ai-monitoring-event';
-      this.io.emit(eventName, update);
+      this.emitRealtimeEvent(eventName, update);
     });
 
     this.setupMiddleware();
@@ -557,6 +571,23 @@ class DashboardServer {
     // 기존 모듈로 분리된 라우트는 위에서 마운트됨
     // 아래는 dashboardServer에만 있는 추가 라우트
     // ========================================
+    // 서버발송 이벤트 스트림 — Socket.IO 브로드캐스트와 동일한 이벤트를
+    // 인증된 클라이언트(모바일 토큰 포함)에게 SSE로 전달한다.
+    this.app.get('/api/stream', (req, res) => {
+      res.writeHead(200, {
+        'Content-Type': 'text/event-stream; charset=utf-8',
+        'Cache-Control': 'no-cache, no-transform',
+        Connection: 'keep-alive',
+        'X-Accel-Buffering': 'no'
+      });
+      res.write('retry: 3000\n\n');
+      res.write('event: connected\ndata: {"ok":true}\n\n');
+      this.sseClients.add(res);
+      const cleanup = () => this.sseClients.delete(res);
+      req.on('close', cleanup);
+      res.on('error', cleanup);
+    });
+
     // 시스템 상태 상세 조회
     this.app.get('/api/system-status', async (req, res) => {
       try {
@@ -1048,6 +1079,19 @@ class DashboardServer {
   /**
    * 자동매매 거래 알림 전송
    */
+  emitRealtimeEvent(name, payload) {
+    this.io?.emit(name, payload);
+    if (this.sseClients.size === 0) return;
+    const frame = `event: ${name}\ndata: ${JSON.stringify(payload ?? {})}\n\n`;
+    for (const client of this.sseClients) {
+      try {
+        client.write(frame);
+      } catch {
+        this.sseClients.delete(client);
+      }
+    }
+  }
+
   emitTradeNotification(tradeInfo) {
     if (!this.io) return;
 
@@ -1059,7 +1103,7 @@ class DashboardServer {
       }
     };
 
-    this.io.emit('auto-trade', notification);
+    this.emitRealtimeEvent('auto-trade', notification);
 
     const emoji = tradeInfo.type === 'BUY' ? '🟢' : '🔴';
     const modeLabel = tradeInfo.mode === 'DRY_RUN' ? '[모의]' : '[실전]';
@@ -1090,7 +1134,7 @@ class DashboardServer {
    * 새로운 신호와 속보 체크 후 알림 발송
    */
   async checkAndEmitNotifications() {
-    if (this.io.engine.clientsCount === 0) return;
+    if (this.io.engine.clientsCount === 0 && this.sseClients.size === 0) return;
 
     try {
       // 1. 번들 제안 체크
@@ -1103,7 +1147,7 @@ class DashboardServer {
           // 5분 내 동일 제안 중복 방지
           if (!lastEmit || Date.now() - lastEmit > 5 * 60 * 1000) {
             this.monitoringSessions.ingestBundle(bundle).catch(() => undefined);
-            this.io.emit('new-signal', {
+            this.emitRealtimeEvent('new-signal', {
               type: 'bundle',
               bundle,
               timestamp: new Date().toISOString()
@@ -1315,7 +1359,7 @@ class DashboardServer {
 
         if (!this.lastBreakingNews.has(newsKey)) {
           this.monitoringSessions.ingestNews(news).catch(() => undefined);
-          this.io.emit('breaking-news', {
+          this.emitRealtimeEvent('breaking-news', {
             title: news.title,
             source: news.source,
             url: news.url,
@@ -2044,6 +2088,17 @@ class DashboardServer {
 
   stop() {
     this.stopOptimizationScheduler();
+
+    if (this.sseHeartbeat) {
+      clearInterval(this.sseHeartbeat);
+      this.sseHeartbeat = null;
+    }
+    for (const client of this.sseClients) {
+      try {
+        client.end();
+      } catch { /* already closed */ }
+    }
+    this.sseClients.clear();
 
     if (this.notificationInterval) {
       clearInterval(this.notificationInterval);

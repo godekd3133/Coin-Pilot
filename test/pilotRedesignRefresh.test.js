@@ -22,7 +22,6 @@ const manifestSource = fs.readFileSync(path.join(projectRoot, 'public/manifest.w
 const redesignScriptAsset = indexSource.match(/<script\s+src=["'](\/pilot-redesign\.js\?v=[^"']+)["']/)?.[1];
 const redesignStylesheetAsset = indexSource.match(/<link\s+rel=["']stylesheet["']\s+href=["'](\/pilot-redesign\.css\?v=[^"']+)["']/)?.[1];
 const serviceWorkerCacheName = serviceWorkerSource.match(/const CACHE_NAME = ["']([^"']+)["']/)?.[1];
-const tradingRouteSource = fs.readFileSync(path.join(projectRoot, 'src/api/routes/trading.js'), 'utf8');
 const manualOrderServiceSource = fs.readFileSync(path.join(projectRoot, 'src/api/manualOrderService.js'), 'utf8');
 const coreReadinessFunctionSource = redesignSource.match(
   /function isCoreTradingSnapshotReady\(\{[\s\S]*?\n {4}\}/

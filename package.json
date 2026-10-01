@@ -14,6 +14,7 @@
     "validate:scalping:fixed": "SCALP_VALIDATION_FIXED=true node src/scripts/validateScalping.js",
     "validate:scalping:segments": "node src/scripts/validateScalpingSegments.js",
     "validate:scalping:no-trade-fill": "node src/scripts/validateScalpingNoTradeFill.js",
+    "verify:live-settlement": "node src/scripts/verifyLiveSettlement.js",
     "research:htf-momentum": "node src/scripts/validateHigherTimeframeMomentum.js",
     "research:htf-momentum:fetch": "node src/scripts/fetchHigherTimeframeMomentumCandles.js",
     "research:daily-momentum:fetch": "node src/scripts/fetchDailyMomentumCandles.js",

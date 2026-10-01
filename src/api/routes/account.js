@@ -28,6 +28,7 @@ export default function createAccountRoutes(server) {
         ...runtimeSafety,
         liveManualPrepared: server.tradingSystem.liveManualPrepared === true,
         liveManualPrepareOnBoot: server.tradingSystem.liveManualPrepareOnBoot === true,
+        liveManualRiskProtection: server.tradingSystem.liveManualRiskProtectionEnabled === true,
         upbitCredentialsConfigured: server.liveCredentialStore?.status?.() === true ||
           server.tradingSystem?.liveCredentialsConfigured === true,
         readOnlyObserver: server.tradingSystem.readOnlyObserver === true,

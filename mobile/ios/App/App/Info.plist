@@ -29,6 +29,12 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>CoinPilotDataMode</key>
 	<string>$(COINPILOT_DATA_MODE)</string>
+	<key>CoinPilotPaperServerAddress</key>
+	<string>$(COINPILOT_PAPER_SERVER)</string>
+	<key>CoinPilotLiveServerAddress</key>
+	<string>$(COINPILOT_LIVE_SERVER)</string>
+	<key>CoinPilotDefaultToken</key>
+	<string>$(COINPILOT_DEFAULT_TOKEN)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>UIApplicationSceneManifest</key>

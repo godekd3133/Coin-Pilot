@@ -185,6 +185,15 @@ function validateRecord(record) {
   if (record.clientIntentId !== undefined && !isUuid(record.clientIntentId)) {
     throw new Error('manual order idempotency client intent id is invalid');
   }
+  if (record.legIntents !== undefined) {
+    const legIntents = record.legIntents;
+    if (!legIntents || typeof legIntents !== 'object' || Array.isArray(legIntents) ||
+      Object.keys(legIntents).length === 0 ||
+      Object.entries(legIntents).some(([leg, intent]) =>
+        typeof leg !== 'string' || leg.trim() === '' || leg.length > 64 || !isUuid(intent))) {
+      throw new Error('manual order idempotency leg intents are invalid');
+    }
+  }
   if (record.state === 'completed' &&
     (!Number.isInteger(record.responseStatus) ||
       record.responseStatus < 100 || record.responseStatus > 599 ||
@@ -628,6 +637,39 @@ export class ManualOrderIdempotencyStore {
     });
   }
 
+  /**
+   * Durably bind one exchange-facing clientIntentId to a leg of a pending
+   * multi-leg LIVE request. Routes must attach each leg before dispatch so a
+   * lost response or restart can resolve that leg by GET-only identifier
+   * readback instead of replaying the plan.
+   */
+  async attachLegIntent(recordId, leg, clientIntentId) {
+    await this.initialize();
+    return this.exclusive(async () => {
+      const existing = this.records.get(recordId);
+      if (!existing || !['pending', 'unknown'].includes(existing.state) ||
+        existing.mode !== 'LIVE' || !isUuid(existing.clientIntentId)) {
+        throw new Error('manual order idempotency reservation cannot attach a leg intent');
+      }
+      if (typeof leg !== 'string' || leg.trim() === '' || leg.length > 64 || !isUuid(clientIntentId)) {
+        throw new TypeError('manual order leg intent is invalid');
+      }
+      const legIntents = { ...(existing.legIntents || {}) };
+      const previous = legIntents[leg];
+      if (previous !== undefined) {
+        if (previous === clientIntentId) return cloneJson(existing);
+        throw new Error('manual order leg intent is already recorded');
+      }
+      legIntents[leg] = clientIntentId;
+      const updated = { ...existing, legIntents, updatedAt: this.now() };
+      const nextRecords = new Map(this.records);
+      nextRecords.set(recordId, updated);
+      await this.persistJournal(nextRecords);
+      this.records = nextRecords;
+      return cloneJson(updated);
+    });
+  }
+
   async completeRecovered(recordId, { status, body } = {}) {
     await this.initialize();
     return this.exclusive(async () => {
@@ -792,7 +834,8 @@ const DEFINITIVE_LIVE_NO_SUBMIT_CODES = new Set([
   'trading_paused',
   'exchange_state_unverified',
   'live_order_gate_unavailable',
-  'live_execution_evidence_unavailable'
+  'live_execution_evidence_unavailable',
+  'leg_intent_unavailable'
 ]);
 
 function containsUncertainLiveOutcome(value) {
@@ -865,12 +908,16 @@ function requestResponsePromise(req, res, next, reservation, store, tradingSyste
 export function createManualOrderIdempotencyMiddleware(server, {
   paths,
   liveReconciliationPaths,
+  liveMultiLegPaths,
   recoverLiveRequest
 } = {}) {
   const supportedPaths = paths instanceof Set ? paths : new Set(paths || []);
   const recoverablePaths = liveReconciliationPaths instanceof Set
     ? liveReconciliationPaths
     : new Set(liveReconciliationPaths || []);
+  const multiLegPaths = liveMultiLegPaths instanceof Set
+    ? liveMultiLegPaths
+    : new Set(liveMultiLegPaths || []);
   const inFlightRecordIds = new Set();
   return async function manualOrderIdempotencyMiddleware(req, res, next) {
     if (req.method !== 'POST' || !supportedPaths.has(req.path)) return next();
@@ -907,7 +954,8 @@ export function createManualOrderIdempotencyMiddleware(server, {
     }
 
     const mode = tradingSystem?.dryRun === true ? 'DRY_RUN' : 'LIVE';
-    const clientIntentId = mode === 'LIVE' && recoverablePaths.has(req.path) ? randomUUID() : null;
+    const needsLiveIntent = recoverablePaths.has(req.path) || multiLegPaths.has(req.path);
+    const clientIntentId = mode === 'LIVE' && needsLiveIntent ? randomUUID() : null;
     let reservation;
     try {
       reservation = await store.reserve({
@@ -937,7 +985,7 @@ export function createManualOrderIdempotencyMiddleware(server, {
         return respondWithIdempotencyStatus(res, 202, pendingResponse('pending'), 'pending');
       }
       const canReconcile = reservation.record.mode === 'LIVE' && mode === 'LIVE' &&
-        recoverablePaths.has(req.path) && isUuid(reservation.record.clientIntentId) &&
+        needsLiveIntent && isUuid(reservation.record.clientIntentId) &&
         typeof recoverLiveRequest === 'function' && typeof store.completeRecovered === 'function';
       if (canReconcile) {
         try {
@@ -956,7 +1004,7 @@ export function createManualOrderIdempotencyMiddleware(server, {
         }
         return respondWithIdempotencyStatus(res, 202, unknownResponse(), 'unknown');
       }
-      if (reservation.record.mode === 'LIVE' && recoverablePaths.has(req.path) && mode === 'LIVE') {
+      if (reservation.record.mode === 'LIVE' && needsLiveIntent && mode === 'LIVE') {
         try {
           await store.markUnknown(reservation.record.recordId, 'live_order_intent_unavailable');
         } catch {
@@ -970,7 +1018,7 @@ export function createManualOrderIdempotencyMiddleware(server, {
     if (reservation.kind !== 'reserved' || reservation.record.mode !== mode) {
       return respondWithIdempotencyStatus(res, 202, unknownResponse(), 'unknown');
     }
-    if (mode === 'LIVE' && recoverablePaths.has(req.path)) {
+    if (mode === 'LIVE' && needsLiveIntent) {
       if (!isUuid(reservation.record.clientIntentId)) {
         try {
           await store.markUnknown(reservation.record.recordId, 'live_order_intent_unavailable');
@@ -979,7 +1027,17 @@ export function createManualOrderIdempotencyMiddleware(server, {
         }
         return respondWithIdempotencyStatus(res, 202, unknownResponse(), 'unknown');
       }
-      req.manualOrderClientIntentId = reservation.record.clientIntentId;
+      if (multiLegPaths.has(req.path)) {
+        // A multi-leg plan binds a separate exchange identifier per leg before
+        // dispatch. The request-level id only anchors the journal record; it
+        // must never be reused as an order identifier.
+        req.manualOrderReservation = {
+          recordId: reservation.record.recordId,
+          clientIntentId: reservation.record.clientIntentId
+        };
+      } else {
+        req.manualOrderClientIntentId = reservation.record.clientIntentId;
+      }
     }
 
     const execute = transaction => requestResponsePromise(req, res, next, reservation, store, tradingSystem, transaction);

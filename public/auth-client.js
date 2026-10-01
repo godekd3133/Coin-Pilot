@@ -60,11 +60,21 @@
       authState.verification === 'verified' && authState.tokenScope === 'operator';
   }
 
+  // 실시간 스트림(Socket.IO)은 모바일 운영 스코프도 열 수 있다. 서버 측
+  // socketMiddleware가 같은 토큰을 수락하며, 브라우저 쓰기 권한은 여전히
+  // operator 전용으로 둔다.
+  function canOpenRealtimeStream() {
+    if (authState.resolved === true && authState.authRequired === false && authState.verification === 'not-required') return true;
+    return authState.resolved === true && authState.authenticated === true &&
+      authState.verification === 'verified' &&
+      (authState.tokenScope === 'operator' || authState.tokenScope === 'mobile_operator');
+  }
+
   window.coinPilotAuth = {
     get state() { return authState; },
     ready,
     get canMutate() { return canUseOperatorSocket(); },
-    get canOpenSocket() { return canUseOperatorSocket(); },
+    get canOpenSocket() { return canOpenRealtimeStream(); },
     requestLogin(message = '') { showLogin(message); }
   };
 
@@ -219,7 +229,7 @@
         ? rawIo(urlOrOpts, { ...opts, auth })
         : rawIo({ ...opts, auth });
       socket.on('connect_error', error => {
-        if (canUseOperatorSocket() && /unauthor/i.test(String(error && error.message))) {
+        if (canOpenRealtimeStream() && /unauthor/i.test(String(error && error.message))) {
           showAuthenticationFailure();
         }
       });
@@ -261,7 +271,7 @@
       };
 
       ready.then(() => {
-        if (!canUseOperatorSocket()) return;
+        if (!canOpenRealtimeStream()) return;
         try {
           socket = openSocket(args);
           listeners.forEach(([name, listener, once]) => socket[once ? 'once' : 'on'](name, listener));
@@ -274,7 +284,7 @@
     }
 
     window.io = function wrappedIo(...args) {
-      if (!authState.resolved || !canUseOperatorSocket()) return createDeferredSocket(args);
+      if (!authState.resolved || !canOpenRealtimeStream()) return createDeferredSocket(args);
       return openSocket(args);
     };
     Object.assign(window.io, rawIo);

@@ -17,7 +17,7 @@ enum CoinPilotAuthScope: String, Equatable {
     case operatorFull = "operator"
 
     var canOperate: Bool {
-        self == .mobileOperator
+        self == .mobileOperator || self == .operatorFull
     }
 }
 
@@ -30,6 +30,39 @@ enum CoinPilotWorkspaceMode: String, CaseIterable, Identifiable, Equatable, Hash
     var title: String { self == .live ? "실거래" : "모의투자" }
     var serverMode: String { self == .live ? "LIVE" : "DRY_RUN" }
     var addressDefaultsKey: String { "coinpilot.dashboardUrl.\(rawValue)" }
+}
+
+/// Info.plist에 빌드 타임으로 박는 선택적 서버 기본값. 개인용 앱이 주소/토큰
+/// 입력 없이 바로 서버에 붙도록 한다. 비어 있으면 기존 수동 입력 흐름이며,
+/// 저장된 주소/토큰이 있으면 그쪽이 항상 우선한다.
+struct CoinPilotBundledServerConfig {
+    let paper: URL?
+    let live: URL?
+    let token: String?
+
+    static let none = CoinPilotBundledServerConfig(paper: nil, live: nil, token: nil)
+
+    static func load(bundle: Bundle = .main) -> Self {
+        func address(for key: String) -> URL? {
+            guard let raw = (bundle.object(forInfoDictionaryKey: key) as? String)?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+                  !raw.isEmpty,
+                  let parsed = URL(string: raw),
+                  ServerAddressPolicy.allows(parsed) else { return nil }
+            return parsed
+        }
+        let rawToken = (bundle.object(forInfoDictionaryKey: "CoinPilotDefaultToken") as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return Self(
+            paper: address(for: "CoinPilotPaperServerAddress"),
+            live: address(for: "CoinPilotLiveServerAddress"),
+            token: rawToken?.isEmpty == false ? rawToken : nil
+        )
+    }
+
+    func url(for workspace: CoinPilotWorkspaceMode) -> URL? {
+        workspace == .live ? live : paper
+    }
 }
 
 struct CoinPilotAutomationPresentation: Equatable {
@@ -130,24 +163,24 @@ protocol CoinPilotAPIProviding {
     func authenticationStatus(at serverURL: URL) async throws -> CoinPilotHTTPResponse
     func login(token: String, at serverURL: URL) async throws -> CoinPilotHTTPResponse
     func read(path: String, at serverURL: URL, token: String?) async throws -> CoinPilotHTTPResponse
-    func mobileRead(path: String, at serverURL: URL, token: String) async throws -> CoinPilotHTTPResponse
+    func mobileRead(path: String, at serverURL: URL, token: String?) async throws -> CoinPilotHTTPResponse
     func registerLiveCredentials(
         accessKey: String,
         secretKey: String,
         at serverURL: URL,
-        token: String
+        token: String?
     ) async throws -> CoinPilotHTTPResponse
     func mutate(
         path: String,
         at serverURL: URL,
-        token: String,
+        token: String?,
         body: [String: Any],
         idempotencyKey: String?
     ) async throws -> CoinPilotHTTPResponse
 }
 
 extension CoinPilotAPIProviding {
-    func mobileRead(path: String, at serverURL: URL, token: String) async throws -> CoinPilotHTTPResponse {
+    func mobileRead(path: String, at serverURL: URL, token: String?) async throws -> CoinPilotHTTPResponse {
         throw CoinPilotAPIError.forbidden
     }
 
@@ -155,7 +188,7 @@ extension CoinPilotAPIProviding {
         accessKey: String,
         secretKey: String,
         at serverURL: URL,
-        token: String
+        token: String?
     ) async throws -> CoinPilotHTTPResponse {
         throw CoinPilotAPIError.forbidden
     }
@@ -163,7 +196,7 @@ extension CoinPilotAPIProviding {
     func mutate(
         path: String,
         at serverURL: URL,
-        token: String,
+        token: String?,
         body: [String: Any],
         idempotencyKey: String?
     ) async throws -> CoinPilotHTTPResponse {
@@ -192,6 +225,57 @@ struct CoinPilotPendingManualOrder: Codable, Equatable, Identifiable {
     func bodyDictionary() -> [String: Any]? {
         (try? JSONSerialization.jsonObject(with: requestBody)) as? [String: Any]
     }
+}
+
+/// GET /api/coin-detail/:coin 응답 — 시세+보유+지표+주문 한도.
+struct CoinPilotCoinDetail {
+    let coin: String
+    let currentPrice: Double?
+    let change24hPercent: Double?
+    let high24h: Double?
+    let low24h: Double?
+    let volume24h: Double?
+    let holdingAmount: Double
+    let holdingAvgPrice: Double
+    let holdingValue: Double
+    let holdingProfit: Double
+    let holdingProfitPercent: Double?
+    let krwBalance: Double?
+    let maxBuyAmount: Double?
+    let maxSellAmount: Double?
+    let rsi: Double?
+    let macdHistogram: Double?
+    let bollingerPercentB: Double?
+
+    init?(_ object: [String: Any]) {
+        func num(_ value: Any?) -> Double? {
+            if let number = value as? NSNumber { return number.doubleValue }
+            if let string = value as? String { return Double(string) }
+            return nil
+        }
+        guard let coin = object["coin"] as? String else { return nil }
+        self.coin = coin
+        currentPrice = num(object["currentPrice"])
+        change24hPercent = num(object["change24h"])
+        high24h = num(object["high24h"])
+        low24h = num(object["low24h"])
+        volume24h = num(object["volume24h"])
+        let holding = object["holding"] as? [String: Any] ?? [:]
+        holdingAmount = num(holding["amount"]) ?? 0
+        holdingAvgPrice = num(holding["avgPrice"]) ?? 0
+        holdingValue = num(holding["currentValue"]) ?? 0
+        holdingProfit = num(holding["profit"]) ?? 0
+        holdingProfitPercent = num(holding["profitPercent"])
+        krwBalance = num(object["krwBalance"])
+        maxBuyAmount = num(object["maxBuyAmount"])
+        maxSellAmount = num(object["maxSellAmount"])
+        let indicators = object["indicators"] as? [String: Any] ?? [:]
+        rsi = num(indicators["rsi"])
+        macdHistogram = num(indicators["macd"])
+        bollingerPercentB = num(indicators["bb"])
+    }
+
+    var hasHolding: Bool { holdingAmount > 0 }
 }
 
 struct CoinPilotTuningField: Identifiable {
@@ -314,7 +398,7 @@ final class CoinPilotAPIClient: CoinPilotAPIProviding, @unchecked Sendable {
         return try await send(path: path, method: "GET", at: serverURL, token: token, body: nil)
     }
 
-    func mobileRead(path: String, at serverURL: URL, token: String) async throws -> CoinPilotHTTPResponse {
+    func mobileRead(path: String, at serverURL: URL, token: String?) async throws -> CoinPilotHTTPResponse {
         guard Self.isAllowedMobileReadPath(path) else { throw CoinPilotAPIError.forbidden }
         return try await send(path: path, method: "GET", at: serverURL, token: token, body: nil)
     }
@@ -323,7 +407,7 @@ final class CoinPilotAPIClient: CoinPilotAPIProviding, @unchecked Sendable {
         accessKey: String,
         secretKey: String,
         at serverURL: URL,
-        token: String
+        token: String?
     ) async throws -> CoinPilotHTTPResponse {
         guard serverURL.scheme?.lowercased() == "https",
               accessKey == accessKey.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -346,7 +430,7 @@ final class CoinPilotAPIClient: CoinPilotAPIProviding, @unchecked Sendable {
     func mutate(
         path: String,
         at serverURL: URL,
-        token: String,
+        token: String?,
         body: [String: Any],
         idempotencyKey: String? = nil
     ) async throws -> CoinPilotHTTPResponse {
@@ -481,7 +565,8 @@ final class CoinPilotAPIClient: CoinPilotAPIProviding, @unchecked Sendable {
             "/api/strategy-research", "/api/backtest/results", "/api/optimal-config",
             "/api/optimization-history", "/api/optimization/settings", "/api/ai/providers",
             "/api/ai/monitoring", "/api/ai/events", "/api/ai/consultations",
-            "/api/ai/effectiveness", "/api/ai/sessions", "/api/logs"
+            "/api/ai/effectiveness", "/api/ai/sessions", "/api/logs", "/api/system-status",
+            "/api/stream"
         ]
         if simplePaths.contains(components.path) && (components.queryItems?.isEmpty ?? true) { return true }
 
@@ -534,6 +619,9 @@ final class CoinPilotAPIClient: CoinPilotAPIProviding, @unchecked Sendable {
         if pathValue.range(of: "^/api/backtest/results/[A-Z0-9_-]{1,40}$", options: .regularExpression) != nil {
             return queryItems.isEmpty
         }
+        if pathValue.range(of: "^/api/coin-detail/KRW-[A-Z0-9]{2,15}$", options: .regularExpression) != nil {
+            return queryItems.isEmpty
+        }
         if pathValue == "/api/logs" {
             guard hasOnlyQuery(["type", "lines"]) else { return false }
             if let type = components.queryItems?.first(where: { $0.name == "type" })?.value,
@@ -578,7 +666,8 @@ final class CoinPilotAPIClient: CoinPilotAPIProviding, @unchecked Sendable {
                 "marketRegimeLookback", "marketRegimeMinBreadth", "marketRegimeMinReturnPercent",
                 "requireReboundBelowOverbought", "lossCircuitBreakerCount",
                 "lossCircuitBreakerWindowMinutes", "lossCircuitBreakerCooldownMinutes",
-                "maxRiskDataGapSeconds", "maxAnalysisDataGapSeconds", "maxCandleAgeSeconds"
+                "maxRiskDataGapSeconds", "maxAnalysisDataGapSeconds", "maxCandleAgeSeconds",
+                "targetCoins", "scalpMaxMarkets", "maxPositions"
             ]
             return !keys.isEmpty && keys.isSubset(of: allowed)
         case "/api/control/start", "/api/control/stop", "/api/paper-validation/stop", "/api/portfolio/snapshot", "/api/optimization/run-now":
@@ -593,6 +682,96 @@ final class CoinPilotAPIClient: CoinPilotAPIProviding, @unchecked Sendable {
         case "/api/ai/sessions": return keys.isSubset(of: ["name", "providers", "eventTypes", "autoConsultEventTypes", "autoConsult", "coins", "cooldownSeconds", "evaluationMinutes"]) && keys.contains("eventTypes")
         case "/api/ai/consult": return keys.isSubset(of: ["eventId", "event", "provider", "providers", "sessionId"]) && !keys.isEmpty
         default: return false
+        }
+    }
+}
+
+/// GET /api/stream의 Server-Sent Events 채널. Socket.IO 브로드캐스트와 같은
+/// 이벤트를 받아 대시보드를 갱신한다. 네트워크 오류는 백오프로 재연결하고,
+/// 스트림이 허용되지 않는 자격증명(401/403)은 재시도 없이 종료한다.
+final class CoinPilotLiveEventStream {
+    private var task: Task<Void, Never>?
+    private var activeKey: String?
+    private let onEvent: @MainActor (String) -> Void
+    private let onConnectionChange: @MainActor (Bool) -> Void
+
+    init(
+        onEvent: @escaping @MainActor (String) -> Void,
+        onConnectionChange: @escaping @MainActor (Bool) -> Void
+    ) {
+        self.onEvent = onEvent
+        self.onConnectionChange = onConnectionChange
+    }
+
+    func start(url: URL, token: String?) {
+        let key = "\(url.absoluteString)|\(token ?? "")"
+        if task != nil, activeKey == key { return }
+        stop()
+        activeKey = key
+        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 90)
+        request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+        if let token {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        let onEvent = self.onEvent
+        let onConnectionChange = self.onConnectionChange
+        task = Task.detached(priority: .utility) {
+            await CoinPilotLiveEventStream.run(
+                request: request,
+                onEvent: onEvent,
+                onConnectionChange: onConnectionChange
+            )
+        }
+    }
+
+    func stop() {
+        task?.cancel()
+        task = nil
+        activeKey = nil
+        Task { await onConnectionChange(false) }
+    }
+
+    private static func run(
+        request: URLRequest,
+        onEvent: @MainActor (String) -> Void,
+        onConnectionChange: @MainActor (Bool) -> Void
+    ) async {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.timeoutIntervalForRequest = 90
+        configuration.timeoutIntervalForResource = 0
+        let session = URLSession(configuration: configuration)
+        defer { session.invalidateAndCancel() }
+        var backoffNanos: UInt64 = 2_000_000_000
+        while !Task.isCancelled {
+            do {
+                let (bytes, response) = try await session.bytes(for: request)
+                guard let http = response as? HTTPURLResponse else { continue }
+                guard (200..<300).contains(http.statusCode) else {
+                    if http.statusCode == 401 || http.statusCode == 403 { return }
+                    throw URLError(.badServerResponse)
+                }
+                await onConnectionChange(true)
+                backoffNanos = 2_000_000_000
+                var eventName = ""
+                for try await line in bytes.lines {
+                    if Task.isCancelled { return }
+                    if line.isEmpty {
+                        eventName = ""
+                    } else if line.hasPrefix("event:") {
+                        eventName = line.dropFirst(6).trimmingCharacters(in: .whitespaces)
+                    } else if line.hasPrefix("data:") {
+                        let name = eventName.isEmpty ? "message" : eventName
+                        await onEvent(name)
+                    }
+                }
+                await onConnectionChange(false)
+            } catch is CancellationError {
+                return
+            } catch {
+                await onConnectionChange(false)
+            }
+            try? await Task.sleep(nanoseconds: backoffNanos)
+            backoffNanos = min(backoffNanos * 2, 60_000_000_000)
         }
     }
 }
@@ -1558,7 +1737,7 @@ final class CoinPilotStore: ObservableObject {
         let generation: Int
         let serverURL: URL
         let workspace: CoinPilotWorkspaceMode
-        let token: String
+        let token: String?
     }
 
     @Published private(set) var phase: CoinPilotScreenPhase = .connecting
@@ -1582,6 +1761,8 @@ final class CoinPilotStore: ObservableObject {
     @Published private(set) var connectionMessage: String?
     @Published private(set) var dashboardMessage: String?
     @Published private(set) var isRefreshing = false
+    @Published private(set) var liveEventsConnected = false
+    @Published private(set) var lastLiveEventAt: Date?
     @Published private(set) var isWorking = false
     @Published private(set) var didFinishInitialConnect = false
     @Published private(set) var lastCheckedAt: Date?
@@ -1624,6 +1805,8 @@ final class CoinPilotStore: ObservableObject {
     @Published var selectedMarket = "KRW-BTC"
     @Published private(set) var selectedCandleInterval = 5
     @Published private(set) var candles: [CoinPilotCandle] = []
+    @Published private(set) var marketCoinDetail: CoinPilotCoinDetail?
+    @Published private(set) var systemStatus: [String: Any] = [:]
     @Published private(set) var analysisResults: [CoinPilotAnalysisResult] = []
     @Published private(set) var analysisSummary: [String: Any] = [:]
     @Published private(set) var buyRecommendations: [CoinPilotRecommendation] = []
@@ -1682,6 +1865,9 @@ final class CoinPilotStore: ObservableObject {
     private var mobileFeatureRequestGenerations: [String: Int] = [:]
     private var mobileFeatureGroupGenerations: [String: Int] = [:]
     private var pendingMobileFeatureGroupRefreshes: Set<String> = []
+    private var liveStream: CoinPilotLiveEventStream?
+    private var liveEventRefreshTask: Task<Void, Never>?
+    private let bundledServers: CoinPilotBundledServerConfig
 
     init(
         api: CoinPilotAPIProviding = CoinPilotAPIClient(),
@@ -1693,9 +1879,11 @@ final class CoinPilotStore: ObservableObject {
         offlineReplayResultStore: any CoinPilotOfflineReplayResultPersisting = CoinPilotOfflineReplayFileStore.shared,
         offlineReplaySessionStore: any CoinPilotOfflineReplaySessionPersisting = CoinPilotOfflineReplaySessionCheckpointStore.shared,
         offlineReplaySessionUptime: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
+        bundledServers: CoinPilotBundledServerConfig = .load(),
         now: @escaping () -> Date = Date.init
     ) {
         self.api = api
+        self.bundledServers = bundledServers
         self.now = now
 #if targetEnvironment(simulator) || COINPILOT_TEST_SIMULATOR_TOKEN_STORE
         self.tokens = tokens ?? CoinPilotSimulatorTokenStore()
@@ -1714,6 +1902,7 @@ final class CoinPilotStore: ObservableObject {
         let legacyAddress = UserDefaults.standard.string(forKey: Self.serverDefaultsKey)
         let storedAddress = savedProfileAddress ?? (savedWorkspaceName == nil ? legacyAddress : nil)
         let url = storedAddress.flatMap(URL.init(string:)).flatMap { ServerAddressPolicy.allows($0) ? $0 : nil }
+            ?? bundledServers.url(for: workspace)
         shouldInferWorkspaceFromLegacyURL = savedWorkspaceName == nil && savedProfileAddress == nil && legacyAddress != nil
         let requestedMode = configuredDataMode ??
             (Bundle.main.object(forInfoDictionaryKey: "CoinPilotDataMode") as? String ?? "server")
@@ -1901,8 +2090,7 @@ final class CoinPilotStore: ObservableObject {
 
     var canOperate: Bool {
         !isBundledPreview && !isBundledLocalMarketData &&
-            authenticationRequired &&
-            authenticationScope.canOperate &&
+            (!authenticationRequired || authenticationScope.canOperate) &&
             !isObserverAccount &&
             serverModeMatchesWorkspace
     }
@@ -1944,7 +2132,7 @@ final class CoinPilotStore: ObservableObject {
     var canUseLiveCredentialRegistration: Bool {
         showsLiveCredentialSetup &&
             currentLiveCredentialTransportIsSecure == true &&
-            authenticationRequired && authenticationScope == .mobileOperator
+            (!authenticationRequired || authenticationScope.canOperate)
     }
 
     var canViewTuning: Bool {
@@ -2000,7 +2188,7 @@ final class CoinPilotStore: ObservableObject {
         guard phase == .dashboard, !isBundledPreview else { return "서버 작업공간에서만 주문할 수 있습니다." }
         guard serverModeMatchesWorkspace, status?.mode == activeWorkspace.serverMode,
               account?.mode == activeWorkspace.serverMode else { return "선택한 실거래/모의투자 서버를 확인해 주세요." }
-        guard authenticationRequired, authenticationScope.canOperate else { return "조회 전용 토큰입니다. 모바일 운영 토큰을 연결해야 주문할 수 있습니다." }
+        guard !authenticationRequired || authenticationScope.canOperate else { return "조회 전용 토큰입니다. 운영 토큰을 연결해야 주문할 수 있습니다." }
         guard !isObserverAccount else { return "읽기 전용 서버에서는 주문할 수 없습니다." }
         guard !pendingManualOrderLocked else { return "이전 주문 결과를 확인한 뒤에 새 주문을 보낼 수 있습니다." }
         guard !isSubmittingManualOrder else { return "주문 결과를 확인하고 있습니다." }
@@ -2090,7 +2278,7 @@ final class CoinPilotStore: ObservableObject {
     var tuningBlockReason: String? {
         guard !isBundledLocalMarketData else { return "앱에 저장된 고정 시세만 제공하는 모드라 설정 변경·계좌 연결·주문을 사용할 수 없습니다." }
         guard phase == .dashboard, !isBundledPreview else { return "서버 작업공간에서만 설정을 바꿀 수 있습니다." }
-        guard authenticationRequired, authenticationScope.canOperate else { return "모바일 운영 토큰이 있어야 설정을 변경할 수 있습니다." }
+        guard !authenticationRequired || authenticationScope.canOperate else { return "운영 토큰이 있어야 설정을 변경할 수 있습니다." }
         guard serverModeMatchesWorkspace, status?.mode == activeWorkspace.serverMode else { return "선택한 서버 모드를 확인해 주세요." }
         if status?.isRunning == true { return "자동매매를 중지한 뒤 튜닝값을 바꿀 수 있습니다." }
         if tuningMutationLocked || paperValidationSummary?.active == true {
@@ -2102,7 +2290,7 @@ final class CoinPilotStore: ObservableObject {
     var optimizationBlockReason: String? {
         guard !isBundledLocalMarketData else { return "앱에 저장된 고정 시세만 제공하는 모드라 후보 비교·계좌 연결·주문을 사용할 수 없습니다." }
         guard phase == .dashboard, !isBundledPreview else { return "서버 작업공간에서만 후보 비교를 사용할 수 있습니다." }
-        guard canOperate else { return "모바일 운영 토큰이 있어야 후보 비교를 바꿀 수 있습니다." }
+        guard canOperate else { return "운영 토큰이 있어야 후보 비교를 바꿀 수 있습니다." }
         guard serverModeMatchesWorkspace, status?.mode == activeWorkspace.serverMode else { return "선택한 서버 모드를 확인해 주세요." }
         if tuningMutationLocked || paperValidationSummary?.active == true {
             return tuningMutationReason ?? "모의투자 성과 점검 중에는 후보 비교를 바꿀 수 없습니다."
@@ -2114,7 +2302,7 @@ final class CoinPilotStore: ObservableObject {
         guard activeWorkspace == .paper, tradingMode == "DRY_RUN", !isObserverAccount else {
             return "모의 지갑은 연결된 모의투자 서버에서만 변경할 수 있습니다."
         }
-        guard canOperate else { return "모바일 운영 토큰이 있어야 모의 지갑을 변경할 수 있습니다." }
+        guard canOperate else { return "운영 토큰이 있어야 모의 지갑을 변경할 수 있습니다." }
         if pendingManualOrderLocked { return "이전 지갑 변경 결과를 확인한 뒤 다시 시도해 주세요." }
         if status?.isRunning == true { return "모의 자동매매를 중지한 뒤 가상 잔액을 바꿀 수 있습니다." }
         if paperValidationSummary?.active == true || tuningMutationLocked {
@@ -2182,6 +2370,7 @@ final class CoinPilotStore: ObservableObject {
         UserDefaults.standard.set(workspace.rawValue, forKey: Self.activeWorkspaceDefaultsKey)
         shouldInferWorkspaceFromLegacyURL = false
         _ = beginRequestGeneration()
+        stopLiveStream()
         clearLoadedData()
         isBundledPreview = false
         authenticationRequired = false
@@ -2197,8 +2386,10 @@ final class CoinPilotStore: ObservableObject {
         pendingManualOrderLocked = false
         orderMessage = nil
 
-        guard let stored = UserDefaults.standard.string(forKey: workspace.addressDefaultsKey),
-              let url = URL(string: stored), ServerAddressPolicy.allows(url) else {
+        let storedURL = UserDefaults.standard.string(forKey: workspace.addressDefaultsKey)
+            .flatMap(URL.init(string:))
+            .flatMap { ServerAddressPolicy.allows($0) ? $0 : nil }
+        guard let url = storedURL ?? bundledServers.url(for: workspace) else {
             currentServerURL = nil
             serverAddress = ""
             serverDraft = ""
@@ -2226,6 +2417,7 @@ final class CoinPilotStore: ObservableObject {
             return
         }
         _ = beginRequestGeneration()
+        stopLiveStream()
         isBundledPreview = true
         activeWorkspace = .paper
         UserDefaults.standard.set(CoinPilotWorkspaceMode.paper.rawValue, forKey: Self.activeWorkspaceDefaultsKey)
@@ -2244,6 +2436,7 @@ final class CoinPilotStore: ObservableObject {
     func useServerMode() {
         guard !isBundledLocalMarketData else { return }
         _ = beginRequestGeneration()
+        stopLiveStream()
         isBundledPreview = false
         UserDefaults.standard.set("server", forKey: dataModeDefaultsKey)
         clearLoadedData()
@@ -2303,7 +2496,9 @@ final class CoinPilotStore: ObservableObject {
                 return generation == requestGeneration && serverModeMatchesWorkspace
             }
 
-            guard let token = tokens.token(for: url) else {
+            let savedToken = tokens.token(for: url)
+            let isBundledAddress = bundledServers.url(for: .paper) == url || bundledServers.url(for: .live) == url
+            guard let token = savedToken ?? (isBundledAddress ? bundledServers.token : nil) else {
                 authenticationScope = .unauthenticated
                 phase = .login
                 return false
@@ -2322,10 +2517,7 @@ final class CoinPilotStore: ObservableObject {
                 throw CoinPilotAPIError.forStatusCode(loginResponse.statusCode)
             }
             authenticationScope = Self.authScope(from: loginResponse)
-            guard authenticationScope != .operatorFull else {
-                rejectFullOperatorScope(for: url)
-                return false
-            }
+            if savedToken == nil { _ = tokens.save(token, for: url) }
             let protectedResponse = try await api.read(path: "/api/status", at: url, token: token)
             guard generation == requestGeneration, currentServerURL == url else { return false }
             guard (200..<300).contains(protectedResponse.statusCode) else {
@@ -2405,10 +2597,6 @@ final class CoinPilotStore: ObservableObject {
                 throw CoinPilotAPIError.forStatusCode(loginResponse.statusCode)
             }
             authenticationScope = Self.authScope(from: loginResponse)
-            guard authenticationScope != .operatorFull else {
-                rejectFullOperatorScope(for: url)
-                return false
-            }
             guard tokens.save(token, for: url) else { throw CoinPilotAPIError.keychain }
         } else {
             authenticationScope = .unauthenticated
@@ -2456,11 +2644,13 @@ final class CoinPilotStore: ObservableObject {
             liveCredentialMessage = "실거래 모드가 확인된 HTTPS 서버에서만 키를 등록할 수 있어요."
             return false
         }
-        guard authenticationRequired, authenticationScope == .mobileOperator,
-              let token = tokens.token(for: serverURL), !token.isEmpty else {
-            liveCredentialMessage = "모바일 운영 권한이 있는 서버 토큰으로 로그인해 주세요."
+        guard authenticationRequired
+                ? authenticationScope.canOperate && tokens.token(for: serverURL)?.isEmpty == false
+                : true else {
+            liveCredentialMessage = "운영 권한이 있는 서버 토큰으로 로그인해 주세요."
             return false
         }
+        let token = requestBearerToken(for: serverURL)
         guard accessKey == accessKey.trimmingCharacters(in: .whitespacesAndNewlines),
               secretKey == secretKey.trimmingCharacters(in: .whitespacesAndNewlines),
               !accessKey.isEmpty,
@@ -2573,10 +2763,6 @@ final class CoinPilotStore: ObservableObject {
             let scope = Self.authScope(from: loginResponse)
             authenticationScope = scope
             authenticationRequired = true
-            guard scope != .operatorFull else {
-                rejectFullOperatorScope(for: serverURL)
-                return connectionMessage ?? "전체 운영자 토큰은 iOS에서 사용할 수 없습니다."
-            }
             guard tokens.save(token, for: serverURL) else { throw CoinPilotAPIError.keychain }
 
             await refresh()
@@ -2597,6 +2783,7 @@ final class CoinPilotStore: ObservableObject {
 
     func logOut() {
         _ = beginRequestGeneration()
+        stopLiveStream()
         if let currentServerURL { tokens.delete(for: currentServerURL) }
         clearLoadedData()
         connectionMessage = nil
@@ -2606,7 +2793,61 @@ final class CoinPilotStore: ObservableObject {
         phase = currentServerURL == nil ? .setup : .login
     }
 
+    // /api/stream SSE 채널 — 네이티브 앱은 Socket.IO를 번들하지 않으므로
+    // 같은 브로드캐스트 이벤트를 이 경로로 받는다. 읽기 전용 토큰 등
+    // 스트림이 허용되지 않는 자격증명은 조용히 폴링으로 유지한다.
+    private func syncLiveStream() {
+        guard phase == .dashboard,
+              !isBundledPreview,
+              !isBundledLocalMarketData,
+              let serverURL = currentServerURL,
+              let streamURL = CoinPilotAPIClient.requestURL(path: "/api/stream", serverURL: serverURL) else {
+            stopLiveStream()
+            return
+        }
+        let token = authenticationRequired ? tokens.token(for: serverURL) : nil
+        if authenticationRequired && token == nil {
+            stopLiveStream()
+            return
+        }
+        if liveStream == nil {
+            liveStream = CoinPilotLiveEventStream(
+                onEvent: { [weak self] _ in self?.scheduleLiveEventRefresh() },
+                onConnectionChange: { [weak self] connected in self?.liveEventsConnected = connected }
+            )
+        }
+        liveStream?.start(url: streamURL, token: token)
+    }
+
+    /// 인증이 꺼진 서버(개인용 LAN 모드)에서는 nil을 반환해 Authorization 헤더를
+    /// 생략한다. 인증이 켜진 서버에서는 저장된 토큰이 있어야 쓰기 요청을 보낸다.
+    private func requestBearerToken(for serverURL: URL) -> String? {
+        authenticationRequired ? tokens.token(for: serverURL) : nil
+    }
+
+    private func hasRequestCredentials(for serverURL: URL) -> Bool {
+        !authenticationRequired || tokens.token(for: serverURL) != nil
+    }
+
+    private func stopLiveStream() {
+        liveStream?.stop()
+        liveEventRefreshTask?.cancel()
+        liveEventRefreshTask = nil
+        liveEventsConnected = false
+    }
+
+    private func scheduleLiveEventRefresh() {
+        lastLiveEventAt = now()
+        liveEventRefreshTask?.cancel()
+        liveEventRefreshTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 700_000_000)
+            guard !Task.isCancelled else { return }
+            await self?.refresh()
+        }
+    }
+
     func refresh() async {
+        syncLiveStream()
         guard phase == .dashboard, !isRefreshing else { return }
         if isBundledLocalMarketData {
             await loadBundledLocalMarketData()
@@ -2884,12 +3125,15 @@ final class CoinPilotStore: ObservableObject {
         selectedCandleInterval = requestedInterval
         if selectionChanged {
             candles = []
+            marketCoinDetail = nil
             featureMessages.removeValue(forKey: "market")
+            featureMessages.removeValue(forKey: "market-detail")
             offlineReplayMessage = nil
         }
         guard selectedMarket.range(of: "^KRW-[A-Z0-9]{2,15}$", options: .regularExpression) != nil else {
             featureMessages["market"] = "시장 코드를 확인해 주세요."
             candles = []
+            marketCoinDetail = nil
             return
         }
         if isBundledLocalMarketData {
@@ -2930,6 +3174,23 @@ final class CoinPilotStore: ObservableObject {
         guard let payload = await loadMobileFeature("market", path: path),
               let values = payload as? [[String: Any]] else { return }
         candles = values.enumerated().map { CoinPilotCandle($0.element, index: $0.offset) }
+
+        // 보유·지표·주문 한도는 차트와 별도 채널로 불러오고, 실패해도 차트를 유지한다.
+        if let detailPayload = await loadMobileFeature(
+            "market-detail",
+            path: "/api/coin-detail/\(selectedMarket)"
+        ) as? [String: Any] {
+            marketCoinDetail = CoinPilotCoinDetail(detailPayload)
+        }
+    }
+
+    /// 서버 가동 시간·최근 오류·마지막 거래 등 시스템 요약 (설정 화면 표시용).
+    @discardableResult
+    func loadSystemStatus() async -> Bool {
+        guard let payload = await loadMobileFeature("system", path: "/api/system-status"),
+              let dict = payload as? [String: Any] else { return false }
+        systemStatus = dict
+        return true
     }
 
     @discardableResult
@@ -3672,10 +3933,11 @@ final class CoinPilotStore: ObservableObject {
     private func makeMobileFeatureRequestContext(featureKey: String) -> MobileFeatureRequestContext? {
         guard canOperate,
               let serverURL = currentServerURL,
-              let token = tokens.token(for: serverURL) else {
-            featureMessages[featureKey] = "이 화면의 서버 권한을 확인할 수 없습니다. 모바일 운영 토큰으로 로그인해 주세요."
+              hasRequestCredentials(for: serverURL) else {
+            featureMessages[featureKey] = "이 화면의 서버 권한을 확인할 수 없습니다. 운영 토큰으로 로그인해 주세요."
             return nil
         }
+        let token = requestBearerToken(for: serverURL)
         return MobileFeatureRequestContext(
             generation: requestGeneration,
             serverURL: serverURL,
@@ -3689,7 +3951,7 @@ final class CoinPilotStore: ObservableObject {
             currentServerURL == context.serverURL &&
             activeWorkspace == context.workspace &&
             canOperate &&
-            tokens.token(for: context.serverURL) == context.token
+            requestBearerToken(for: context.serverURL) == context.token
     }
 
     private func isCurrentMobileFeatureContext(_ context: MobileFeatureRequestContext) -> Bool {
@@ -3760,7 +4022,7 @@ final class CoinPilotStore: ObservableObject {
 
     private func loadAIDesk(force: Bool) async -> Bool {
         guard canOperate else {
-            featureMessages["ai"] = "AI 자문을 사용하려면 모바일 운영 토큰으로 로그인해 주세요."
+            featureMessages["ai"] = "AI 자문을 사용하려면 운영 토큰으로 로그인해 주세요."
             return false
         }
         return await refreshMobileFeatureGroup("ai", force: force) { context in
@@ -3946,7 +4208,7 @@ final class CoinPilotStore: ObservableObject {
 
     func recordPortfolioSnapshot() async -> Bool {
         guard !isRecordingSnapshot, canOperate else {
-            featureMessages["snapshot"] = canOperate ? "자산 기록을 이미 저장하고 있습니다." : "모바일 운영 토큰이 필요합니다."
+            featureMessages["snapshot"] = canOperate ? "자산 기록을 이미 저장하고 있습니다." : "운영 토큰이 필요합니다."
             return false
         }
         isRecordingSnapshot = true
@@ -4139,10 +4401,11 @@ final class CoinPilotStore: ObservableObject {
     }
 
     private func performFeatureMutation(_ key: String, path: String, body: [String: Any]) async -> [String: Any]? {
-        guard canOperate, let serverURL = currentServerURL, let token = tokens.token(for: serverURL) else {
-            featureMessages[key] = "모바일 운영 토큰으로 로그인해 주세요."
+        guard canOperate, let serverURL = currentServerURL, hasRequestCredentials(for: serverURL) else {
+            featureMessages[key] = "운영 토큰으로 로그인해 주세요."
             return nil
         }
+        let token = requestBearerToken(for: serverURL)
         guard !isRunningFeatureAction else {
             featureMessages[key] = "다른 변경 요청을 처리하고 있습니다."
             return nil
@@ -4457,7 +4720,7 @@ final class CoinPilotStore: ObservableObject {
     func retryPendingManualOrder() async -> Bool {
         guard pendingManualOrderLocked else { return false }
         guard canOperate else {
-            orderMessage = "저장된 주문 결과를 확인하려면 모바일 운영 토큰이 필요합니다."
+            orderMessage = "저장된 주문 결과를 확인하려면 운영 토큰이 필요합니다."
             return false
         }
         guard let pendingManualOrder else {
@@ -4473,7 +4736,7 @@ final class CoinPilotStore: ObservableObject {
             return false
         }
         guard canOperate else {
-            orderMessage = "모의 지갑을 변경하려면 모바일 운영 토큰이 필요합니다."
+            orderMessage = "모의 지갑을 변경하려면 운영 토큰이 필요합니다."
             return false
         }
         guard amount.isFinite, amount >= 1_000 else {
@@ -4550,11 +4813,12 @@ final class CoinPilotStore: ObservableObject {
         displayAmount: String
     ) async -> Bool {
         guard let serverURL = currentServerURL,
-              let token = tokens.token(for: serverURL),
+              hasRequestCredentials(for: serverURL),
               let requestBody = try? JSONSerialization.data(withJSONObject: body) else {
             orderMessage = "서버 인증 또는 주문 요청을 준비하지 못했습니다."
             return false
         }
+        let token = requestBearerToken(for: serverURL)
         guard !pendingManualOrderLocked, !isSubmittingManualOrder else {
             orderMessage = "이전 요청의 결과를 확인한 뒤 새 주문을 보낼 수 있습니다."
             return false
@@ -4586,8 +4850,12 @@ final class CoinPilotStore: ObservableObject {
         serverURL suppliedURL: URL? = nil
     ) async -> Bool {
         guard let serverURL = suppliedURL ?? currentServerURL,
-              let token = suppliedToken ?? tokens.token(for: serverURL),
               let body = record.bodyDictionary() else {
+            orderMessage = "저장된 주문을 다시 확인할 서버 연결이 없습니다."
+            return false
+        }
+        let token = suppliedToken ?? requestBearerToken(for: serverURL)
+        guard authenticationRequired ? token != nil : true else {
             orderMessage = "저장된 주문을 다시 확인할 서버 연결이 없습니다."
             return false
         }
@@ -4664,11 +4932,12 @@ final class CoinPilotStore: ObservableObject {
 
     func setAutomationRunning(_ shouldRun: Bool) async -> Bool {
         guard canOperate else {
-            dashboardMessage = "조회 전용 연결에서는 자동매매를 변경할 수 없습니다. 모바일 운영 토큰을 연결해 주세요."
+            dashboardMessage = "조회 전용 연결에서는 자동매매를 변경할 수 없습니다. 운영 토큰을 연결해 주세요."
             return false
         }
         guard !isWorking, let serverURL = currentServerURL,
-              let token = tokens.token(for: serverURL) else { return false }
+              hasRequestCredentials(for: serverURL) else { return false }
+        let token = requestBearerToken(for: serverURL)
         let path = shouldRun ? "/api/control/start" : "/api/control/stop"
         let requestURL = serverURL
         let requestWorkspace = activeWorkspace
@@ -4721,6 +4990,15 @@ final class CoinPilotStore: ObservableObject {
             }
             var values = configBody["scalping"] as? [String: Any] ?? [:]
             values["investmentRatio"] = configBody["investmentRatio"]
+            if let targetCoins = configBody["targetCoins"] as? [String] {
+                values["targetCoins"] = targetCoins
+            }
+            if let scalpMaxMarkets = Self.number(configBody["scalpMaxMarkets"]) {
+                values["scalpMaxMarkets"] = scalpMaxMarkets
+            }
+            if let maxPositions = Self.number(configBody["maxPositions"]) {
+                values["maxPositions"] = maxPositions
+            }
             tuningValues = values
             tuningRanges = rangeBody.reduce(into: [:]) { result, item in
                 if let value = item.value as? [String: Any] { result[item.key] = value }
@@ -4742,10 +5020,11 @@ final class CoinPilotStore: ObservableObject {
 
     func saveTuning(_ updates: [String: Any]) async -> Bool {
         guard tuningBlockReason == nil, let serverURL = currentServerURL,
-              let token = tokens.token(for: serverURL) else {
-            tuningMessage = tuningBlockReason ?? "모바일 운영 토큰을 연결해야 튜닝값을 저장할 수 있습니다."
+              hasRequestCredentials(for: serverURL) else {
+            tuningMessage = tuningBlockReason ?? "운영 토큰을 연결해야 튜닝값을 저장할 수 있습니다."
             return false
         }
+        let token = requestBearerToken(for: serverURL)
         guard !updates.isEmpty,
               CoinPilotAPIClient.isAllowedMobileMutation("/api/config/update", body: updates) else {
             tuningMessage = "변경할 설정 항목을 확인해 주세요."
@@ -4833,15 +5112,6 @@ final class CoinPilotStore: ObservableObject {
         return scope
     }
 
-    private func rejectFullOperatorScope(for serverURL: URL) {
-        tokens.delete(for: serverURL)
-        tokenDraft = ""
-        authenticationRequired = true
-        clearLoadedData()
-        phase = .login
-        connectionMessage = "전체 운영자 토큰은 iOS에서 사용할 수 없습니다. 서버의 DASHBOARD_MOBILE_TOKEN을 입력해 주세요."
-    }
-
     private func restorePendingManualOrder(for serverURL: URL) {
         switch pendingOrders.read(for: serverURL) {
         case .missing:
@@ -4883,6 +5153,8 @@ final class CoinPilotStore: ObservableObject {
         trades = []
         paperValidationSummary = nil
         candles = []
+        marketCoinDetail = nil
+        systemStatus = [:]
         analysisResults = []
         analysisSummary = [:]
         buyRecommendations = []
@@ -5113,6 +5385,12 @@ enum CoinPilotFormatting {
     static func quantity(_ value: Double?) -> String {
         guard let value, value.isFinite else { return "수량 미제공" }
         return number(value, fractionDigits: 8)
+    }
+
+    /// RSI, MACD 히스토그램, BB %B 같은 지표 숫자 표기.
+    static func indicator(_ value: Double?, fractionDigits: Int = 2, unavailable: String = "—") -> String {
+        guard let value, value.isFinite else { return unavailable }
+        return number(value, fractionDigits: fractionDigits)
     }
 
     /// 차트 축처럼 좁은 공간에 넣는 원화 표기. 만·억 단위로 줄입니다.

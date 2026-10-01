@@ -80,6 +80,7 @@ function createConfig(env) {
   const dryRun = env.DRY_RUN !== false;
   const liveCredentialSetupMode = env.DASHBOARD_LIVE_CREDENTIAL_SETUP_MODE === true;
   const liveManualPrepareOnBoot = env.DASHBOARD_LIVE_MANUAL_PREPARE_ON_BOOT === true;
+  const liveManualRiskProtection = env.DASHBOARD_LIVE_MANUAL_RISK_PROTECTION === true;
   const dashboardStartTraderOnBoot = env.DASHBOARD_START_TRADER_ON_BOOT !== false;
   if (liveCredentialSetupMode && dryRun) {
     throw new Error('DASHBOARD_LIVE_CREDENTIAL_SETUP_MODE requires DRY_RUN=false.');
@@ -95,6 +96,11 @@ function createConfig(env) {
   if (liveManualPrepareOnBoot && (dryRun || dashboardStartTraderOnBoot)) {
     throw new Error(
       'DASHBOARD_LIVE_MANUAL_PREPARE_ON_BOOT requires DRY_RUN=false and DASHBOARD_START_TRADER_ON_BOOT=false.'
+    );
+  }
+  if (liveManualRiskProtection && !liveManualPrepareOnBoot) {
+    throw new Error(
+      'DASHBOARD_LIVE_MANUAL_RISK_PROTECTION requires DASHBOARD_LIVE_MANUAL_PREPARE_ON_BOOT=true.'
     );
   }
   const strategyMode = env.TRADING_STRATEGY || 'oversold_reaction_scalping';
@@ -279,6 +285,7 @@ function createConfig(env) {
     dryRun,
     liveCredentialSetupMode,
     liveManualPrepareOnBoot,
+    liveManualRiskProtection,
     dashboardStartTraderOnBoot,
     logLevel: env.LOG_LEVEL || 'info',
     enableDashboard: env.ENABLE_DASHBOARD !== false,
@@ -809,7 +816,7 @@ async function main() {
           const manualPreparation = await trader.prepareManualLiveSession();
           trader.liveManualPrepared = manualPreparation.ready === true;
           if (manualPreparation.ready) {
-            console.log('ℹ️  LIVE 수동 준비 완료: 계좌/미체결 주문을 확인했고 자동 진입은 시작하지 않았습니다.');
+            console.log(`ℹ️  LIVE 수동 준비 완료: 계좌/미체결 주문을 확인했고 자동 진입은 시작하지 않았습니다. 수동 보호 감시: ${manualPreparation.manualRiskProtection === true ? 'ON' : 'OFF'}`);
           } else {
             console.warn('⚠️  LIVE 계좌/미체결 주문 상태를 확인할 수 없어 신규 주문을 잠급니다.');
           }

@@ -845,6 +845,7 @@ test('LIVE risk-data gap pauses entries, retries quotes, and allows one protecte
   assert.deepEqual(trader.getRuntimeSafetyStatus(), {
     runtimeState: 'PROTECTIVE_ONLY',
     entriesPaused: true,
+    manualProtectionActive: false,
     protectiveMonitorActive: true,
     stopReason: 'risk_data_gap',
     exchangeStateKnown: true
@@ -938,6 +939,7 @@ test('LIVE risk-data gap pauses entries, retries quotes, and allows one protecte
   assert.deepEqual(trader.getRuntimeSafetyStatus(), {
     runtimeState: 'STOPPED',
     entriesPaused: true,
+    manualProtectionActive: false,
     protectiveMonitorActive: false,
     stopReason: 'risk_data_gap',
     exchangeStateKnown: true
@@ -1065,4 +1067,158 @@ test('an in-flight BUY rechecks entry pause before dispatching its order', async
   assert.equal(orderDispatches, 0);
   assert.equal(otherStrategy.currentPosition !== null, true);
   assert.equal(trader._riskMonitorProtectiveOnly, true);
+});
+
+test('manual LIVE session opt-in arms protective monitoring without enabling entries', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'coinpilot-manual-protection-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+
+  const trader = makeLiveTrader(root, {
+    liveManualPrepareOnBoot: true,
+    liveManualRiskProtection: true
+  });
+  trader.upbit.accessKey = 'access';
+  trader.upbit.secretKey = 'secret';
+  trader.syncWithExchange = async () => {
+    trader._liveExchangeStateKnown = true;
+    trader._liveAccountStateKnown = true;
+    trader._liveOrderStateUnknownMarkets.clear();
+    trader._livePendingOrderMarkets.clear();
+    return true;
+  };
+  t.after(() => trader.stopPositionRiskMonitor());
+
+  const prepared = await trader.prepareManualLiveSession();
+  assert.equal(prepared.ready, true);
+  assert.equal(prepared.manualRiskProtection, true);
+  assert.equal(trader.liveManualPrepared, true);
+  assert.equal(trader._manualRiskProtection, true);
+  assert.equal(trader._riskMonitorProtectiveOnly, false);
+  assert.equal(trader._entriesPaused, true);
+  assert.equal(trader.isRunning, false);
+  assert.notEqual(trader.positionRiskTimer, null);
+  assert.equal(trader.getRuntimeSafetyStatus().manualProtectionActive, true);
+});
+
+test('manual LIVE session without the protection opt-in leaves the monitor off', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'coinpilot-manual-protection-off-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+
+  const trader = makeLiveTrader(root, { liveManualPrepareOnBoot: true });
+  trader.upbit.accessKey = 'access';
+  trader.upbit.secretKey = 'secret';
+  trader.syncWithExchange = async () => {
+    trader._liveExchangeStateKnown = true;
+    trader._liveAccountStateKnown = true;
+    trader._liveOrderStateUnknownMarkets.clear();
+    trader._livePendingOrderMarkets.clear();
+    return true;
+  };
+
+  const prepared = await trader.prepareManualLiveSession();
+  assert.equal(prepared.ready, true);
+  assert.equal(prepared.manualRiskProtection, false);
+  assert.equal(trader._manualRiskProtection, false);
+  assert.equal(trader.positionRiskTimer, null);
+  assert.equal(trader.getRuntimeSafetyStatus().manualProtectionActive, false);
+
+  // Even with an open position the monitor stays inert without the opt-in.
+  trader.getStrategy('KRW-BTC').openPosition(100, 1, 'BUY');
+  let tickerReads = 0;
+  trader.riskUpbit.getTicker = async () => { tickerReads += 1; return [currentTicker('KRW-BTC', 97)]; };
+  await trader.monitorOpenPositions();
+  assert.equal(tickerReads, 0);
+});
+
+test('manual protection dispatches a protective sell while entries stay paused', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'coinpilot-manual-protection-exit-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+
+  const trader = makeLiveTrader(root, {
+    liveManualPrepareOnBoot: true,
+    liveManualRiskProtection: true
+  });
+  trader.upbit.accessKey = 'access';
+  trader.upbit.secretKey = 'secret';
+  trader.syncWithExchange = async () => {
+    trader._liveExchangeStateKnown = true;
+    trader._liveAccountStateKnown = true;
+    trader._liveOrderStateUnknownMarkets.clear();
+    trader._livePendingOrderMarkets.clear();
+    return true;
+  };
+  t.after(() => trader.stopPositionRiskMonitor());
+  await trader.prepareManualLiveSession();
+
+  const strategy = trader.getStrategy('KRW-BTC');
+  strategy.openPosition(100, 1, 'BUY');
+  const exits = [];
+  trader.executeOrder = async (coin, decision) => { exits.push({ coin, decision }); return 'exit'; };
+  trader.getAccountInfo = async () => ([
+    { currency: 'KRW', balance: '900000', locked: '0' },
+    { currency: 'BTC', balance: '1', locked: '0', avg_buy_price: '100' }
+  ]);
+  trader.riskUpbit.getTicker = async () => [currentTicker('KRW-BTC', 97)];
+
+  await trader.monitorOpenPositions();
+  assert.equal(exits.length, 1);
+  assert.equal(exits[0].coin, 'KRW-BTC');
+  assert.equal(exits[0].decision.action, 'SELL');
+  assert.equal(trader._entriesPaused, true);
+  assert.equal(trader.isRunning, false);
+});
+
+test('manual protection permits a protective sell only while the monitor holds the exit flag', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'coinpilot-manual-protection-gate-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+
+  const trader = makeLiveTrader(root, {
+    liveManualPrepareOnBoot: true,
+    liveManualRiskProtection: true
+  });
+  trader._manualRiskProtection = true;
+  trader._liveVerifiedOrderMarkets.clear();
+
+  assert.equal(trader.canExecuteLiveOrder('KRW-BTC', { action: 'BUY' }), false);
+  assert.equal(trader.canExecuteLiveOrder('KRW-BTC', { action: 'SELL' }), false);
+  trader._riskMonitorExitInProgress = true;
+  assert.equal(trader.canExecuteLiveOrder('KRW-BTC', { action: 'SELL' }), true);
+  trader._livePendingOrderMarkets.add('KRW-BTC');
+  assert.equal(trader.canExecuteLiveOrder('KRW-BTC', { action: 'SELL' }), false);
+});
+
+test('a protective drain in a manual session hands monitoring back instead of stopping it', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'coinpilot-manual-protection-drain-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+
+  const trader = makeLiveTrader(root, {
+    liveManualPrepareOnBoot: true,
+    liveManualRiskProtection: true
+  });
+  trader._manualRiskProtection = true;
+  trader._riskMonitorProtectiveOnly = true;
+  trader.startPositionRiskMonitor();
+  t.after(() => trader.stopPositionRiskMonitor());
+
+  assert.equal(trader.finishProtectiveMonitoringWhenFlat(), true);
+  assert.equal(trader._riskMonitorProtectiveOnly, false);
+  assert.equal(trader._manualRiskProtection, true);
+  assert.notEqual(trader.positionRiskTimer, null);
+  assert.equal(trader.getRuntimeSafetyStatus().manualProtectionActive, true);
+});
+
+test('stopping a manual session clears protection and its timer', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'coinpilot-manual-protection-stop-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+
+  const trader = makeLiveTrader(root, {
+    liveManualPrepareOnBoot: true,
+    liveManualRiskProtection: true
+  });
+  trader._manualRiskProtection = true;
+  trader.startPositionRiskMonitor();
+  trader.stop('operator_stop');
+  assert.equal(trader._manualRiskProtection, false);
+  assert.equal(trader.positionRiskTimer, null);
+  assert.equal(trader.getRuntimeSafetyStatus().manualProtectionActive, false);
 });

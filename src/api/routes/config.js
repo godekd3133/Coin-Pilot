@@ -424,6 +424,9 @@ export default function createConfigRoutes(server) {
         investmentRatio: server.tradingSystem.investmentRatio ?? 0.05,
         initialSeedMoney: server.tradingSystem.initialSeedMoney ?? 0,
         strategyMode: server.tradingSystem.strategyMode,
+        targetCoins: server.tradingSystem.targetCoins || [],
+        scalpMaxMarkets: server.tradingSystem.config?.maxScalpMarkets ?? null,
+        maxPositions: server.tradingSystem.maxPositions ?? null,
         scalping: server.tradingSystem.isScalpingMode ? {
           ...Object.fromEntries(Object.keys(CONFIGURATION_RANGES)
             .filter(key => key !== 'investmentRatio' && server.tradingSystem.config?.[key] !== undefined)
@@ -565,12 +568,42 @@ export default function createConfigRoutes(server) {
   });
 
   // 설정 업데이트
-  router.post('/config/update', (req, res) => {
+  router.post('/config/update', async (req, res) => {
     if (respondIfPaperEvidenceMutationBlocked(server.tradingSystem, res, 'config_update')) return;
     try {
       const newConfig = req.body;
       if (!newConfig || typeof newConfig !== 'object' || Array.isArray(newConfig)) {
         return res.status(400).json({ error: '설정 값을 확인해 주세요.', success: false });
+      }
+
+      // env 수준 유니버스/포지션 키는 일반 범위 검증 대신 전용 경로로 적용한다.
+      const universeUpdate = {};
+      for (const key of ['targetCoins', 'scalpMaxMarkets', 'maxPositions']) {
+        if (newConfig[key] !== undefined) {
+          universeUpdate[key] = newConfig[key];
+          delete newConfig[key];
+        }
+      }
+      if (universeUpdate.targetCoins !== undefined) {
+        const raw = universeUpdate.targetCoins;
+        const validList = Array.isArray(raw) && raw.length > 0 && raw.length <= 500 &&
+          raw.every(code => typeof code === 'string' && /^KRW-[A-Z0-9]{2,15}$/.test(code.trim().toUpperCase()));
+        if (!(typeof raw === 'string' && raw.trim().toUpperCase() === 'ALL' || validList)) {
+          return res.status(400).json({
+            error: '분석 대상 코인은 KRW- 코드 목록 또는 ALL로 설정해 주세요.',
+            success: false
+          });
+        }
+      }
+      if (universeUpdate.scalpMaxMarkets !== undefined &&
+        (!Number.isInteger(Number(universeUpdate.scalpMaxMarkets)) ||
+          Number(universeUpdate.scalpMaxMarkets) < 1 || Number(universeUpdate.scalpMaxMarkets) > 500)) {
+        return res.status(400).json({ error: '스캔 마켓 수는 1~500 정수로 설정해 주세요.', success: false });
+      }
+      if (universeUpdate.maxPositions !== undefined &&
+        (!Number.isInteger(Number(universeUpdate.maxPositions)) ||
+          Number(universeUpdate.maxPositions) < 1 || Number(universeUpdate.maxPositions) > 50)) {
+        return res.status(400).json({ error: '최대 동시 포지션 수는 1~50 정수로 설정해 주세요.', success: false });
       }
 
       for (const [key, rawValue] of Object.entries(newConfig)) {
@@ -723,11 +756,23 @@ export default function createConfigRoutes(server) {
         }
       }
 
+      let universeApplied = null;
+      if (Object.keys(universeUpdate).length > 0) {
+        if (typeof server.tradingSystem.applyRuntimeMarketUniverse !== 'function') {
+          return res.status(400).json({
+            error: '이 서버에서는 대상 마켓 변경을 지원하지 않습니다.',
+            success: false
+          });
+        }
+        universeApplied = await server.tradingSystem.applyRuntimeMarketUniverse(universeUpdate);
+      }
+
       res.json({
         message: '설정을 저장했습니다.',
         success: true,
         config: server.tradingSystem.config,
-        investmentRatio: server.tradingSystem.investmentRatio
+        investmentRatio: server.tradingSystem.investmentRatio,
+        universe: universeApplied
       });
     } catch {
       res.status(500).json({ error: '설정을 저장하지 못했습니다. 잠시 후 다시 시도해 주세요.', success: false });

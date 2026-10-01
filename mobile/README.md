@@ -6,9 +6,11 @@ standalone browser dashboard lives under `public/`. `mobile/web` contains a
 server-connection shell and an older native-WebView screen; neither is
 packaged into this SwiftUI target.
 
-For server sign-in, use only the mobile-scoped `DASHBOARD_MOBILE_TOKEN`. Do not
-enter or save the full `DASHBOARD_TOKEN` / `operator` token in iOS; it is
-rejected before protected dashboard data is loaded.
+For server sign-in, enter either the mobile-scoped `DASHBOARD_MOBILE_TOKEN` or
+the full `DASHBOARD_TOKEN` / `operator` token. Both open the dashboard; the
+mobile-scoped token still follows the allowlisted mutation surface while the
+operator token additionally opens Socket.IO directly. The app is single-owner;
+tokens are stored per server in the device Keychain.
 
 The app supports a server data source and two separate bundled profiles:
 fictional `bundled-preview` data for UI examples and `bundled-local` public
@@ -23,11 +25,20 @@ market data supplied explicitly at build time.
   conditional buy/sell orders, bundle suggestions, holdings, portfolio and
   activity history, configuration tuning, presets, candidate optimization,
   news, AI monitoring/consultations, validation reports, and paper-session and
-  virtual-wallet controls. The server address and mobile-scoped operator token
-  are saved on the device; tokens are stored in Keychain separately for each
-  server. Missing or stale server values stay distinguishable from a real zero.
-  iOS reads and writes use explicit route, query, body, mode, and idempotency
-  allowlists. Upbit keys are encrypted and stored by the server after enrollment.
+  virtual-wallet controls. The tuning editor can also retarget the runtime
+  market universe (`targetCoins` as a KRW-code list or `ALL`, plus
+  `scalpMaxMarkets`/`maxPositions`). The server address and an operator token
+  are saved on the device; the full `DASHBOARD_TOKEN` or the mobile-scoped
+  `DASHBOARD_MOBILE_TOKEN` both work, and tokens are stored in Keychain
+  separately for each server. Missing or stale server values stay
+  distinguishable from a real zero. Authenticated scopes receive the same
+  broadcast events as the web dashboard through `GET /api/stream`
+  (Server-Sent Events), and a received event triggers a debounced refresh, so
+  trades/signals/news/AI updates reach the app without Socket.IO. The server
+  also accepts the mobile token on the Socket.IO handshake for clients that
+  bundle that transport. iOS reads and writes use explicit route, query, body,
+  mode, and idempotency allowlists. Upbit keys are encrypted and stored by the
+  server after enrollment.
   The dedicated native enrollment flow sends them only to the matching HTTPS
   LIVE server, then clears the app's input fields; the app cannot retrieve
   registered key values. The trading worker remains server-side. The current
@@ -192,33 +203,40 @@ request is checked again.
 1. Run the CoinPilot Node server on a reachable Mac or server.
 2. Keep dashboard authentication enabled. Configure distinct
    `DASHBOARD_TOKEN`, `DASHBOARD_READ_ONLY_TOKEN`, and `DASHBOARD_MOBILE_TOKEN`
-   values in the server's `.env`. In iOS, use only the value of
-   `DASHBOARD_MOBILE_TOKEN`, which maps to the `mobile_operator` scope. Do not
-   enter or save the full `DASHBOARD_TOKEN` / `operator` token; iOS rejects it
-   before loading protected dashboard data. The mobile token is generated on
-   the server, is not an App Store Connect token, and should stay private and
-   out of source control. It is limited to native dashboard routes and cannot
-   open Socket.IO or retrieve existing exchange credentials. It can authorize
-   the dedicated LIVE credential-registration request described below, but
-   cannot read the saved key values.
-3. In **More → Settings**, enter the Paper server address, then select **실거래**
+   values in the server's `.env`. In iOS, enter the value of either
+   `DASHBOARD_MOBILE_TOKEN` (`mobile_operator` scope) or `DASHBOARD_TOKEN`
+   (`operator` scope); both are accepted and stored per server. Either token is
+   generated on the server, is not an App Store Connect token, and should stay
+   private and out of source control. The mobile token is limited to native
+   dashboard routes plus the `/api/stream` realtime channel and the Socket.IO
+   handshake; it cannot retrieve existing exchange credentials. It can
+   authorize the dedicated LIVE credential-registration request described
+   below, but cannot read the saved key values. The operator token is the
+   broadest scope and is appropriate only for the owner's own device.
+3. If the build has bundled `COINPILOT_PAPER_SERVER`/`COINPILOT_LIVE_SERVER`
+   values, this step is unnecessary: the app connects automatically and the
+   addresses appear prefilled in Settings. Otherwise, in **More → Settings**,
+   enter the Paper server address, then select **실거래**
    and enter the separate LIVE server address. Each workspace must point to a
    process configured for its matching `DRY_RUN` or `LIVE` mode. Use a private
    IPv4, unique-local IPv6 (fc00::/7), or .local address for a same-Wi-Fi server;
    public servers must use HTTPS.
-4. Enter only the matching server's `DASHBOARD_MOBILE_TOKEN` when the app asks.
-   If the app is already open with read-only access, use **More → Settings →
-   서버 토큰 입력 또는 변경** to replace it. A read-only token still permits
-   the limited observer screens but cannot send orders, edit settings, or
-   control sessions. Never enter the full dashboard token in the iOS app. Enter
-   Upbit keys only in the dedicated registration form while connected to the
-   matching HTTPS LIVE server. Registration is available only while that server
-   is stopped and `DASHBOARD_LIVE_CREDENTIAL_SETUP_MODE=true`; the mobile token
-   can register keys but cannot retrieve existing secret values. The app clears
+4. Enter the matching server's `DASHBOARD_MOBILE_TOKEN` or `DASHBOARD_TOKEN`
+   when the app asks. If the app is already open with read-only access, use
+   **More → Settings → 서버 토큰 입력 또는 변경** to replace it. A read-only
+   token still permits the limited observer screens but cannot send orders,
+   edit settings, or control sessions. Enter Upbit keys only in the dedicated
+   registration form while connected to the matching HTTPS LIVE server.
+   Registration is available only while that server is stopped and
+   `DASHBOARD_LIVE_CREDENTIAL_SETUP_MODE=true`; either operating token can
+   register keys but cannot retrieve existing secret values. The app clears
    the input fields after the registration attempt.
 
-Without either dashboard token, the server binds to loopback only; a phone or
-Simulator cannot connect through the server computer's private IP. The app
+Without either dashboard token, the server binds to loopback only unless it is
+started with `DASHBOARD_HOST=0.0.0.0` and `DASHBOARD_ALLOW_INSECURE=true`; a
+phone or Simulator cannot otherwise connect through the server computer's
+private IP. On a trusted private network that opt-out pairing runs an
+unauthenticated LAN dashboard that the app operates without any token. The app
 rejects `localhost` and `127.0.0.1` because those addresses refer to the phone
 itself. Unsigned development Simulator builds keep the test token in process
 memory only because they do not have the physical app's Keychain entitlement;
@@ -237,7 +255,23 @@ Simulator or a connected iPhone. The native target no longer needs the web
 asset staging step.
 
 `COINPILOT_DATA_MODE=server` is the default build mode and omits the sample
-dataset from the installed app. To make a local preview build, set
+dataset from the installed app. Three additional build settings bake a
+single-owner server profile into the bundle so the app connects with zero
+setup: `COINPILOT_PAPER_SERVER` and `COINPILOT_LIVE_SERVER` are the default
+server URLs for the Paper and LIVE workspaces (LAN HTTP and `.local` hostnames
+are allowed; use HTTPS for external servers), and `COINPILOT_DEFAULT_TOKEN` is
+an optional token tried automatically when the bundled server asks for sign-in.
+A saved server address or token always wins over the bundled default. Leaving
+these values empty keeps the manual Settings flow.
+
+The bundled default points at `http://<mac>.local:3000`; for a private LAN
+setup the server can run with **no dashboard tokens at all** by starting it
+with `DASHBOARD_HOST=0.0.0.0` and `DASHBOARD_ALLOW_INSECURE=true`. In that mode
+any device on the network can read and mutate the dashboard, so use it only on
+a trusted home network; the app treats an unauthenticated server as fully
+operable and skips the token prompt entirely.
+
+To make a local preview build, set
 `COINPILOT_DATA_MODE=bundled-preview` in the Xcode build settings or the
 `xcodebuild` command. That build packages the sample dataset and launches into
 Bundled Preview. It can switch back to Server mode in Settings. The sample is

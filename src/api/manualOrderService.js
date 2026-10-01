@@ -706,7 +706,7 @@ export function createManualOrderService({ tradingSystem, marketDataProvider }) 
     };
   }
 
-  async function smartBuy({ totalAmount, minScore = 60, maxCoins = 10 }) {
+  async function smartBuy({ totalAmount, minScore = 60, maxCoins = 10 }, { attachLegIntent = null } = {}) {
     if (!totalAmount || totalAmount < MIN_BUY_KRW) {
       return { status: 400, body: { error: '최소 금액은 5,000원입니다', success: false } };
     }
@@ -897,13 +897,23 @@ export function createManualOrderService({ tradingSystem, marketDataProvider }) 
           reflectStrategyBuyFill(getStrategyFor(tradingSystem, coinData.coin), coinData.price, volume);
         }
       } else {
+        const legIntentId = attachLegIntent ? await attachLegIntent(`buy:${coinData.coin}`) : null;
+        if (!legIntentId) {
+          liveFailures.push({
+            coin: coinData.coin,
+            reason: 'leg_intent_unavailable',
+            orderDispatched: false
+          });
+          continue;
+        }
         const liveExecution = await executeLiveOrderWithEvidence(tradingSystem, {
           market: coinData.coin,
           side: 'bid',
           volume: amountPerCoin,
           orderType: 'price',
           requested: { amount: amountPerCoin },
-          referencePrice: coinData.price
+          referencePrice: coinData.price,
+          clientIntentId: legIntentId
         });
         executionFill = liveExecution.fill;
         if (!hasCompleteObservedLiveFill(liveExecution)) {
@@ -972,7 +982,7 @@ export function createManualOrderService({ tradingSystem, marketDataProvider }) 
     };
   }
 
-  async function smartSell({ targetAmount, strategy = 'worst' }) {
+  async function smartSell({ targetAmount, strategy = 'worst' }, { attachLegIntent = null } = {}) {
     if (!targetAmount || targetAmount < 1000) {
       return { status: 400, body: { error: '목표 매도 금액은 최소 1,000원 이상이어야 합니다', success: false } };
     }
@@ -1153,13 +1163,23 @@ export function createManualOrderService({ tradingSystem, marketDataProvider }) 
           }
         }
       } else {
+        const legIntentId = attachLegIntent ? await attachLegIntent(`sell:${data.coin}`) : null;
+        if (!legIntentId) {
+          liveFailures.push({
+            coin: data.coin,
+            reason: 'leg_intent_unavailable',
+            orderDispatched: false
+          });
+          continue;
+        }
         const liveExecution = await executeLiveOrderWithEvidence(tradingSystem, {
           market: data.coin,
           side: 'ask',
           volume: sellVolume,
           orderType: 'market',
           requested: { volume: sellVolume },
-          referencePrice: currentPrice
+          referencePrice: currentPrice,
+          clientIntentId: legIntentId
         });
         executionFill = liveExecution.fill;
         if (!hasCompleteObservedLiveFill(liveExecution)) {
@@ -1251,7 +1271,7 @@ export function createManualOrderService({ tradingSystem, marketDataProvider }) 
   }
 
   // 번들 제안 실행 (매도 후 매수)
-  async function executeBundle({ sellCoin, sellAmount, buyCoin, buyAmount }) {
+  async function executeBundle({ sellCoin, sellAmount, buyCoin, buyAmount }, { attachLegIntent = null } = {}) {
     if (!sellCoin || !buyCoin) {
       return { status: 400, body: { error: 'sellCoin과 buyCoin은 필수입니다', success: false } };
     }
@@ -1313,13 +1333,26 @@ export function createManualOrderService({ tradingSystem, marketDataProvider }) 
       }
       results.sell = { coin: sellCoin, amount: actualSellAmount, price: sellPrice, grossValue: sellValue, fee: sellFee, value: netSellValue };
     } else {
+      const sellIntentId = attachLegIntent ? await attachLegIntent('sell') : null;
+      if (!sellIntentId) {
+        return {
+          status: 503,
+          body: {
+            success: false,
+            mode: 'LIVE',
+            reason: 'leg_intent_unavailable',
+            message: '요청 저널에 매도 주문 식별자를 기록하지 못해 주문을 보내지 않았습니다.'
+          }
+        };
+      }
       const liveExecution = await executeLiveOrderWithEvidence(tradingSystem, {
         market: sellCoin,
         side: 'ask',
         volume: actualSellAmount,
         orderType: 'market',
         requested: { volume: actualSellAmount },
-        referencePrice: sellPrice
+        referencePrice: sellPrice,
+        clientIntentId: sellIntentId
       });
       results.sell = {
         ...(liveExecution.orderResult || {}),
@@ -1409,13 +1442,27 @@ export function createManualOrderService({ tradingSystem, marketDataProvider }) 
       }
       results.buy = { coin: buyCoin, amount: buyVolume, price: buyPrice, grossValue: investAmount, fee: buyFee, value: actualInvestment };
     } else {
+      const buyIntentId = attachLegIntent ? await attachLegIntent('buy') : null;
+      if (!buyIntentId) {
+        return {
+          status: 503,
+          body: {
+            success: false,
+            mode: 'LIVE',
+            reason: 'leg_intent_unavailable',
+            message: '요청 저널에 매수 주문 식별자를 기록하지 못해 매수를 보내지 않았습니다. 매도 체결은 results.sell에서 확인하세요.',
+            results
+          }
+        };
+      }
       const liveExecution = await executeLiveOrderWithEvidence(tradingSystem, {
         market: buyCoin,
         side: 'bid',
         volume: investAmount,
         orderType: 'price',
         requested: { amount: investAmount },
-        referencePrice: buyPrice
+        referencePrice: buyPrice,
+        clientIntentId: buyIntentId
       });
       results.buy = {
         ...(liveExecution.orderResult || {}),

@@ -9,13 +9,15 @@ probe the host.
 
 ## Capacity gate
 
-The existing operator notes identify this host as the `nano_3_0` bundle: 2
-vCPUs, 0.5 GB RAM, and a 20 GB system disk. The current instance bundle and
-free memory have not been independently checked from this repository. Running
-a second Node process beside Paper on 0.5 GB could cause an out-of-memory
-restart of either service. Check current memory on the host before starting
-`coinpilot-live`; if it lacks headroom, keep the current instance unchanged and
-approve a resize plan first. Checked 2026-09-30 against the public
+Verified on 2026-10-01: the instance is `nano_3_0` — 2 vCPUs, **412 MB**
+usable RAM (0.5 GB nominal), 20 GB disk (15 GB free). `free -m` showed
+136 MB available while Paper's node process used ~55 MB RSS. On the same day
+the Paper process was SIGKILLed once (status=9/KILL, restarted by systemd) —
+memory pressure already kills the single running process. Running a second
+Node process beside Paper on this bundle is NOT currently viable without
+either a Micro-bundle resize or strict `--max-old-space-size` caps on both
+services; Paper already runs with `--max-old-space-size=256`. Checked against
+the public
 [Lightsail pricing](https://aws.amazon.com/lightsail/pricing/) and
 [instance bundle table](https://docs.aws.amazon.com/lightsail/latest/userguide/amazon-lightsail-bundles.html):
 the public-IPv4 Linux Nano bundle is $5/month (0.5 GB, 2 vCPUs, 20 GB), and
@@ -82,14 +84,26 @@ Do not put either Upbit key in this environment file. The native app registers
 the pair once, after which the LIVE service validates it with an account-only
 Upbit request and stores it encrypted under `/var/lib/coinpilot-live/secrets/`.
 
-The example enables `DASHBOARD_LIVE_MANUAL_PREPARE_ON_BOOT` and disables
+The example enables `DASHBOARD_LIVE_MANUAL_PREPARE_ON_BOOT` and
+`DASHBOARD_LIVE_MANUAL_RISK_PROTECTION`, and disables
 `DASHBOARD_START_TRADER_ON_BOOT`. Manual-prepare synchronizes the account and
-open orders but does not start the position-risk timer. A successful manual
-LIVE buy records a strategy position without enabling background risk
-monitoring. The current manual mode therefore requires direct position
-oversight; it is not yet an unattended protection mode. A normal stop can
-switch the same position into protective-only monitoring, which may submit a
-SELL. This behavior awaits an explicit protection policy and recovery tests.
+open orders, then keeps the position-risk monitor armed for manually filled
+positions: strict strategy positions and exchange-recovered holdings are
+watched for stop-loss, take-profit, and max-hold exits on the priority risk
+lane. New automatic entries stay paused; only protective SELLs are
+automated. Set `DASHBOARD_LIVE_MANUAL_RISK_PROTECTION=false` to keep the old
+fully-manual posture, where a manual LIVE buy records a position without any
+background exit monitoring.
+
+Two protection limits remain structural:
+
+- Upbit has no exchange-side stop orders. Protection is a process-owned
+  monitor; if the service is killed hard (`SIGKILL`, host reboot, OOM) the
+  monitor dies with it. `Restart=on-failure` plus boot reconciliation is the
+  liveness backstop, not a guarantee.
+- `TimeoutStopSec=infinity` means a stop waits for the protective drain. A
+  forced power loss still abandons open positions until the next boot
+  re-synchronizes them.
 
 ## Add the HTTPS path without replacing Paper
 
@@ -131,6 +145,77 @@ can therefore remain pending while a position is open or reconciliation is
 unavailable. Check the service journal and wait for the protective drain to
 complete before performing maintenance. Do not add a finite force-kill deadline
 without replacing this process with a separately verified protection owner.
+
+## Recovery semantics for manual LIVE orders
+
+Every manual order path requires an `Idempotency-Key`. Before the first
+exchange POST the request journal durably stores a request-level UUID; single
+orders send that same UUID to Upbit as the order `identifier`. A same-key retry
+after a crash resolves the request with a GET-only identifier readback — the
+route is never replayed, a second POST never happens, and a record whose
+outcome cannot be resolved stays `unknown` until operator reconciliation.
+
+Multi-leg requests (`/api/trade/execute-bundle`, `/api/trade/smart-buy`,
+`/api/trade/smart-sell`) bind a separate fresh UUID to each leg
+(`sell`, `buy`, `buy:<market>`, `sell:<market>`) and persist it in the journal
+before that leg's POST. A same-key retry resolves every journaled leg
+independently; legs recorded as dispatched report their terminal fill, and
+legs that provably never reached the exchange report `not_dispatched`. A
+request with no journaled legs (crash before the first leg was attached)
+stays `unknown` — dynamic plan legs are never recomputed or replayed.
+
+## What this repository has proven vs. what remains operator-verified
+
+Proven by code + tests at this revision:
+
+- `DRY_RUN=false` alone cannot start automatic trading; the scalping
+  `fixed_config` validation gate (promoted + fresh + confidence + no drift)
+  must pass first.
+- Live order intent is persisted before dispatch; a lost response resolves by
+  identifier readback instead of a duplicate order.
+- Orders only become positions after a complete observed fill plus settlement
+  readback is recorded; ambiguous outcomes lock the market.
+- The rate coordinator is a required systemd dependency and the risk lane is
+  prioritized over analysis traffic.
+- Manual LIVE sessions can run unattended position protection via
+  `DASHBOARD_LIVE_MANUAL_RISK_PROTECTION=true` (this revision's change).
+
+Verified on the real host (`coinpilot-paper-seoul`, 52.78.156.161) on
+2026-10-01 via `ops/lightsail/verify-live-host.sh`:
+
+- `nano_3_0` bundle confirmed: **412 MB** total RAM, **136 MB** available.
+  Paper node RSS ≈ 55 MB. LIVE + coordinator add roughly 70-100 MB — thin.
+- **FAIL — `/usr/bin/node` does not exist.** Only `/usr/local/bin/node`
+  v22.23.3 is installed; the LIVE unit's `ExecStart`/`ExecStartPre` paths and
+  the repo's `^24.21.0` engine floor both fail as-shipped. Provision Node
+  24.21+ at `/usr/bin/node` before `systemctl enable`.
+- Paper process was SIGKILLed (status=9/KILL) and restarted by systemd on
+  2026-10-01 — memory pressure already kills the single running process.
+  Adding LIVE on this bundle without a resize or aggressive heap caps is
+  not supported.
+- `coinpilot.service` (Paper): `TimeoutStopSec=60`, no
+  `UPBIT_RATE_COORDINATOR_*` env — the shared public-IP quota is not yet
+  coordinated between Paper and any future LIVE process.
+- `coinpilot-live` and `coinpilot-upbit-rate` units are not installed; the
+  Nginx `/live/` location is not configured; `/etc/coinpilot.env` correctly
+  contains no plaintext Upbit keys.
+- Upbit keys are valid and IP-allowlisted (read + order scopes confirmed via
+  `GET /accounts`/`GET /orders`); the account currently holds ~0.83 KRW and
+  dust GAS, so a round-trip proof first needs a small KRW deposit.
+
+Still requires operator action — do not claim done:
+
+- A real-money order → fill → wallet settlement → realized P&L round trip.
+  Run it with `npm run verify:live-settlement -- --coin KRW-XRP --amount 5100
+  --confirm-real-money` after depositing ≥5,000 KRW; default invocation is a
+  read-only probe. The only recorded live intent (2026-09-28) ended
+  unfilled/cancelled.
+- `systemctl stop`/restart drain behavior on this host after LIVE is
+  installed (script above re-checks `Requires`, `TimeoutStopSec`, and OOM
+  history).
+- Paper process adoption of the shared rate coordinator contract.
+- Multi-process write contention on the portfolio and evidence stores beyond
+  the same-host writer-lock tests.
 
 ## Register Upbit keys in the app
 

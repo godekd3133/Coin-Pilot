@@ -29,7 +29,7 @@ private actor DeferredCoinPilotAPI: CoinPilotAPIProviding {
     private let credentialRegistrationStatusCode: Int
     private var credentialSubmissions: [[String: String]] = []
     private var credentialSubmissionURLs: [String] = []
-    private var credentialSubmissionTokens: [String] = []
+    private var credentialSubmissionTokens: [String?] = []
 
     init(
         heldAccountHosts: Set<String> = [],
@@ -105,7 +105,7 @@ private actor DeferredCoinPilotAPI: CoinPilotAPIProviding {
         )
     }
 
-    func mobileRead(path: String, at serverURL: URL, token: String) async throws -> CoinPilotHTTPResponse {
+    func mobileRead(path: String, at serverURL: URL, token: String?) async throws -> CoinPilotHTTPResponse {
         try await read(path: path, at: serverURL, token: token)
     }
 
@@ -113,7 +113,7 @@ private actor DeferredCoinPilotAPI: CoinPilotAPIProviding {
         accessKey: String,
         secretKey: String,
         at serverURL: URL,
-        token: String
+        token: String?
     ) async throws -> CoinPilotHTTPResponse {
         networkCalls += 1
         mutationPaths.append("/api/live/credentials")
@@ -130,7 +130,7 @@ private actor DeferredCoinPilotAPI: CoinPilotAPIProviding {
     func mutate(
         path: String,
         at serverURL: URL,
-        token: String,
+        token: String?,
         body: [String: Any],
         idempotencyKey: String?
     ) async throws -> CoinPilotHTTPResponse {
@@ -186,7 +186,7 @@ private actor DeferredCoinPilotAPI: CoinPilotAPIProviding {
     func recordedMutationPaths() -> [String] { mutationPaths }
     func recordedCredentialSubmissions() -> [[String: String]] { credentialSubmissions }
     func recordedCredentialSubmissionURLs() -> [String] { credentialSubmissionURLs }
-    func recordedCredentialSubmissionTokens() -> [String] { credentialSubmissionTokens }
+    func recordedCredentialSubmissionTokens() -> [String?] { credentialSubmissionTokens }
     func setLoginTokenScope(_ scope: String?) { loginTokenScope = scope }
     func setFailedPaths(_ paths: Set<String>) { failedPaths = paths }
     func setCancelledPaths(_ paths: Set<String>) { cancelledPaths = paths }
@@ -425,7 +425,7 @@ struct CoinPilotStoreTests {
         try await liveCredentialRegistrationUsesEphemeralKeysAndWaitsForSync()
         try await liveCredentialRegistrationRequiresHttpsAndMobileOperatorScope()
         try await signInUsesAndStoresOnlyTheServerToken()
-        try await fullOperatorScopeFailsClosedAndClearsPriorSession()
+        try await fullOperatorScopeGrantsNativeControl()
         try liveManualPrepareStatusKeepsAutomationControlAvailable()
         try simulatorTokenStoreIsScopedAndVolatile()
         try await simulatorDefaultTokenStoreSupportsReadOnlySignIn()
@@ -459,7 +459,9 @@ struct CoinPilotStoreTests {
         try await staleMarketSourceCannotEnableManualOrder()
         try await incompleteMarketSnapshotKeepsPricesVisibleAndMarksStale()
         try await staleMarketListAndInvalidFetchedAtNeverMarkCurrent()
-        print("CoinPilotStore: 38 scenarios passed")
+        try chartAxisAndPositionFormattingStayNullSafe()
+        try await bundledServerDefaultsConnectAndOperateWithoutAuth()
+        print("CoinPilotStore: 40 scenarios passed")
     }
 
     private static func bundledPreviewMissingResourceDoesNotFallBackToServer() async throws {
@@ -2100,7 +2102,7 @@ struct CoinPilotStoreTests {
         readOnlyStore.liveAccessKeyDraft = "read-only-access-test"
         readOnlyStore.liveSecretKeyDraft = "read-only-secret-test"
         precondition(readOnlyStore.showsLiveCredentialSetup && !readOnlyStore.canUseLiveCredentialRegistration,
-                     "The setup view may explain missing keys, but only mobile_operator may register them.")
+                     "The setup view may explain missing keys, but only an operating scope may register them.")
         let readOnlySubmitted = await readOnlyStore.submitLiveCredentials()
         precondition(!readOnlySubmitted, "A read-only token must not register exchange keys.")
         precondition(readOnlyStore.liveAccessKeyDraft.isEmpty && readOnlyStore.liveSecretKeyDraft.isEmpty,
@@ -2166,7 +2168,7 @@ struct CoinPilotStoreTests {
         precondition(readTokens.allSatisfy { $0 == "read-only-token" }, "Each server read should use the saved token.")
     }
 
-    private static func fullOperatorScopeFailsClosedAndClearsPriorSession() async throws {
+    private static func fullOperatorScopeGrantsNativeControl() async throws {
         let api = DeferredCoinPilotAPI(
             requiresAuth: true,
             statusOverride: ["isRunning": false],
@@ -2193,67 +2195,31 @@ struct CoinPilotStoreTests {
         precondition(initialMutationPaths == ["/api/control/stop"],
                      "Only the mobile-scoped test token should reach the control mutation.")
 
-        let readsBeforeFullScopeUpdate = await api.readRequestCount()
         await api.setLoginTokenScope("operator")
         let fullScopeUpdateMessage = await store.updateServerToken("full-operator-test-token")
-        let readsAfterFullScopeUpdate = await api.readRequestCount()
-        precondition(fullScopeUpdateMessage?.contains("DASHBOARD_MOBILE_TOKEN") == true,
-                     "Replacing a token with full operator scope should explain the required mobile token.")
-        precondition(tokens.token(for: serverURL) == nil,
-                     "A rejected replacement full token must not remain in the native token store.")
-        precondition(store.phase == .login && store.account == nil && store.status == nil,
-                     "Rejecting a full token replacement must clear the prior dashboard view.")
-        precondition(readsAfterFullScopeUpdate == readsBeforeFullScopeUpdate,
-                     "Token replacement must reject full scope before loading protected dashboard data.")
+        precondition(fullScopeUpdateMessage == nil,
+                     "Replacing with a full operator token should succeed for the owner's app.")
+        precondition(tokens.token(for: serverURL) == "full-operator-test-token",
+                     "The accepted full token should replace the saved scoped token.")
+        precondition(store.phase == .dashboard && store.authenticationScope == .operatorFull && store.canOperate,
+                     "The full operator scope should keep the dashboard and grant operation.")
 
-        await api.setLoginTokenScope("mobile_operator")
-        store.serverDraft = serverURL.absoluteString
-        store.tokenDraft = "mobile-operator-test-token-2"
-        let secondMobileSignIn = await store.signIn()
-        precondition(secondMobileSignIn && store.account != nil && store.status != nil,
-                     "The same server should still accept a mobile-scoped token after rejection.")
-        let readsBeforeFullScopeSignIn = await api.readRequestCount()
-
-        await api.setLoginTokenScope("operator")
-        store.tokenDraft = "full-operator-test-token"
-        let fullOperatorSignedIn = await store.signIn()
-        let readsAfterFullScopeSignIn = await api.readRequestCount()
-
-        precondition(!fullOperatorSignedIn, "The full operator scope must be rejected in iOS sign-in.")
-        precondition(store.authenticationScope == .operatorFull,
-                     "The response scope should still be parsed before the full-scope rejection.")
-        precondition(!store.authenticationScope.canOperate,
-                     "The parsed full operator scope must not grant native mutation permission.")
-        precondition(store.connectionMessage?.contains("DASHBOARD_MOBILE_TOKEN") == true,
-                     "The rejected login should clearly tell the user which scoped token to use.")
-        precondition(store.tokenDraft.isEmpty, "The rejected full operator credential should be cleared from the login form.")
-        precondition(tokens.token(for: serverURL) == nil,
-                     "A rejected full operator credential must not remain in the native token store.")
-        precondition(store.phase == .login && store.account == nil && store.status == nil,
-                     "Rejecting a full scope for the same server must clear the prior dashboard view.")
-        precondition(readsAfterFullScopeSignIn == readsBeforeFullScopeSignIn,
-                     "The full operator scope must be rejected before protected dashboard reads.")
-
-        let orderSent = await store.submitManualBuy(coin: "KRW-BTC", amount: 5_000)
-        let walletChanged = await store.updatePaperWallet(amount: 1_000, deposit: true)
-        let controlChanged = await store.setAutomationRunning(false)
-        precondition(!orderSent && !walletChanged && !controlChanged,
-                     "Order, wallet, and control mutations must all fail closed after full-scope rejection.")
-        let mutationPaths = await api.recordedMutationPaths()
-        precondition(mutationPaths == initialMutationPaths,
-                     "The full operator scope must not add any mutation request path.")
+        let controlAfterFull = await store.setAutomationRunning(false)
+        precondition(controlAfterFull, "The full operator scope should reach control mutations too.")
+        let fullScopeMutations = await api.recordedMutationPaths()
+        precondition(fullScopeMutations == ["/api/control/stop", "/api/control/stop"],
+                     "The full operator scope should send the same control mutation paths.")
 
         let restoredTokens = MemoryCoinPilotTokens()
         precondition(restoredTokens.save("legacy-full-operator-token", for: serverURL))
         let restoredStore = CoinPilotStore(api: api, tokens: restoredTokens)
         let restoreConnected = await restoredStore.connect(using: serverURL.absoluteString)
-        let readsAfterRestore = await api.readRequestCount()
-        precondition(!restoreConnected && restoredTokens.token(for: serverURL) == nil,
-                     "A previously saved full operator token must be evicted on reconnect.")
-        precondition(restoredStore.phase == .login && restoredStore.account == nil && restoredStore.status == nil,
-                     "A restored full-scope token must not load dashboard data.")
-        precondition(readsAfterRestore == readsBeforeFullScopeSignIn,
-                     "Reconnect must reject a restored full-scope token before protected reads.")
+        precondition(restoreConnected && restoredStore.authenticationScope == .operatorFull,
+                     "A previously saved full operator token should reconnect and operate.")
+        precondition(restoredStore.phase == .dashboard && restoredStore.account != nil && restoredStore.status != nil,
+                     "A restored full-scope token should load dashboard data.")
+        precondition(restoredStore.canOperate,
+                     "The restored full operator scope should grant native operation rights.")
     }
 
     private static func simulatorTokenStoreIsScopedAndVolatile() throws {
@@ -2556,6 +2522,121 @@ struct CoinPilotStoreTests {
         precondition(store.status?.runtimeState == "PROTECTIVE_ONLY", "The runtime state should reach the app model.")
         precondition(store.status?.protectiveMonitorActive == true, "The app should know that position monitoring remains active.")
         precondition(store.runtimeSafetyMessage?.contains("시세 공백") == true, "The home screen should explain the protective-only state.")
+    }
+
+    private static func chartAxisAndPositionFormattingStayNullSafe() throws {
+        precondition(CoinPilotFormatting.compactWon(123_456_789) == "1.2억원", "차트 축은 억 단위로 줄여야 합니다.")
+        precondition(CoinPilotFormatting.compactWon(12_345_000) == "1,235만원", "차트 축은 만 단위로 줄여야 합니다.")
+        precondition(CoinPilotFormatting.compactWon(9_900) == "9,900원", "만원 미만은 원 단위를 유지해야 합니다.")
+        precondition(CoinPilotFormatting.compactWon(-15_000_000) == "−1,500만원", "음수 금액은 부호를 유지해야 합니다.")
+        precondition(CoinPilotFormatting.compactWon(nil) == "금액 미제공", "평가 불가는 0원이 아니라 미제공으로 표시해야 합니다.")
+        precondition(CoinPilotFormatting.historyAxisLabel("not-a-date", period: .day) == "시각 미제공", "형식이 다른 시각은 미제공으로 표시해야 합니다.")
+        precondition(CoinPilotFormatting.historyAxisLabel("2026-09-29T14:05:00.000Z", period: .month).contains("월"),
+                     "주·월 기간 축은 날짜를 표시해야 합니다.")
+        precondition(CoinPilotFormatting.shortUtcTimestamp("2026-09-29T14:05:00.000Z") == "09.29 14:05",
+                     "캔들 축은 UTC 시각을 그대로 보여야 합니다.")
+        precondition(CoinPilotFormatting.shortUtcTimestamp(nil) == "시각 미제공")
+
+        let position = CoinPilotPosition([
+            "coin": "KRW-BTC",
+            "amount": 0.5,
+            "avgPrice": 100_000,
+            "currentPrice": 101_000,
+            "currentValue": 50_500,
+            "costBasis": 50_000,
+            "profit": 500,
+            "profitPercent": 1.0
+        ])
+        precondition(position.costBasis == 50_000, "계좌 응답의 매입 금액이 포지션 모델에 도달해야 합니다.")
+        precondition(position.entryPrice == 100_000)
+    }
+
+    private static func bundledServerDefaultsConnectAndOperateWithoutAuth() async throws {
+        let defaults = UserDefaults.standard
+        let keys = [
+            "coinpilot.dashboardUrl",
+            "coinpilot.dashboardUrl.paper",
+            "coinpilot.dashboardUrl.live",
+            "coinpilot.native.activeWorkspace",
+            "coinpilot.native.dataMode",
+            "coinpilot.native.dataMode.profile.server"
+        ]
+        let previousValues = keys.map { ($0, defaults.object(forKey: $0)) }
+        defer {
+            for (key, value) in previousValues {
+                if let value {
+                    defaults.set(value, forKey: key)
+                } else {
+                    defaults.removeObject(forKey: key)
+                }
+            }
+        }
+        for key in keys { defaults.removeObject(forKey: key) }
+        defaults.set("paper", forKey: "coinpilot.native.activeWorkspace")
+
+        // Bundled address + bundled token must connect and sign in with no manual entry.
+        let bundledURL = URL(string: "https://bundled-paper.example")!
+        let bundledAPI = DeferredCoinPilotAPI(
+            requiresAuth: true,
+            loginTokenScope: "mobile_operator",
+            isReadOnlyObserver: false
+        )
+        let bundledTokens = MemoryCoinPilotTokens()
+        let bundledStore = CoinPilotStore(
+            api: bundledAPI,
+            tokens: bundledTokens,
+            configuredDataMode: "server",
+            bundledServers: CoinPilotBundledServerConfig(
+                paper: bundledURL,
+                live: nil,
+                token: "bundled-operator-token"
+            )
+        )
+        await bundledStore.bootstrap()
+        precondition(bundledStore.serverDraft == bundledURL.absoluteString,
+                     "The bundled address should become the active server URL.")
+        precondition(bundledStore.phase == .dashboard && bundledStore.canOperate,
+                     "Bundled address and token should open the dashboard without manual entry.")
+        precondition(bundledTokens.token(for: bundledURL) == "bundled-operator-token",
+                     "The bundled token should persist to the per-server store after login.")
+
+        // A private server with dashboard auth disabled must stay fully operable
+        // without any token at all.
+        let openAPI = DeferredCoinPilotAPI(
+            requiresAuth: false,
+            statusOverride: ["isRunning": false],
+            isReadOnlyObserver: false
+        )
+        let openStore = CoinPilotStore(
+            api: openAPI,
+            tokens: MemoryCoinPilotTokens(),
+            configuredDataMode: "server"
+        )
+        let openConnected = await openStore.connect(using: "https://open-lan.example")
+        precondition(openConnected && openStore.canOperate,
+                     "An unauthenticated private server should be fully operable.")
+        let tuned = await openStore.saveTuning(["rsiOversold": 30])
+        precondition(tuned, "A no-auth server should accept tuning saves without a token.")
+        let automationStarted = await openStore.setAutomationRunning(true)
+        precondition(automationStarted, "A no-auth server should accept the automation start request.")
+        let openMutations = await openAPI.recordedMutationPaths()
+        precondition(openMutations == ["/api/config/update", "/api/control/start"],
+                     "No-auth mutations should reach the config and control endpoints.")
+
+        // A saved-address workspace still wins over the bundled default.
+        defaults.set("https://saved-paper.example", forKey: "coinpilot.dashboardUrl.paper")
+        let savedStore = CoinPilotStore(
+            api: DeferredCoinPilotAPI(requiresAuth: false, isReadOnlyObserver: false),
+            tokens: MemoryCoinPilotTokens(),
+            configuredDataMode: "server",
+            bundledServers: CoinPilotBundledServerConfig(
+                paper: bundledURL,
+                live: nil,
+                token: nil
+            )
+        )
+        precondition(savedStore.serverDraft == "https://saved-paper.example",
+                     "A saved server address must take precedence over the bundled default.")
     }
 
     private static func unknownExchangeStateBlocksTheServerTradingStatus() async throws {

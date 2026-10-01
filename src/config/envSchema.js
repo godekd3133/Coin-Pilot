@@ -219,6 +219,7 @@ export const ENV_SCHEMA = {
   DASHBOARD_START_TRADER_ON_BOOT: { type: 'bool' },
   DASHBOARD_LIVE_CREDENTIAL_SETUP_MODE: { type: 'bool' },
   DASHBOARD_LIVE_MANUAL_PREPARE_ON_BOOT: { type: 'bool' },
+  DASHBOARD_LIVE_MANUAL_RISK_PROTECTION: { type: 'bool' },
   COINPILOT_LIVE_CREDENTIALS_FILE: { type: 'string' },
   COINPILOT_LIVE_CREDENTIALS_KEY_FILE: { type: 'string' },
   DASHBOARD_ALLOW_INSECURE: { type: 'bool' },

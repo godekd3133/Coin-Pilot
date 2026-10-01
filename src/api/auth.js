@@ -24,7 +24,8 @@ const READ_ONLY_PATHS = new Set([
   '/api/today-summary',
   '/api/market/prices',
   '/api/market/prices/snapshot',
-  '/api/paper-validation/summary'
+  '/api/paper-validation/summary',
+  '/api/stream'
 ]);
 const READ_ONLY_PORTFOLIO_PERIODS = new Set(['24h', '7d', '30d']);
 
@@ -63,7 +64,9 @@ const MOBILE_READ_PATHS = new Set([
   '/api/ai/consultations',
   '/api/ai/effectiveness',
   '/api/ai/sessions',
-  '/api/logs'
+  '/api/logs',
+  '/api/system-status',
+  '/api/stream'
 ]);
 const MOBILE_CONFIG_KEYS = new Set([
   'investmentRatio',
@@ -94,7 +97,10 @@ const MOBILE_CONFIG_KEYS = new Set([
   'lossCircuitBreakerCooldownMinutes',
   'maxRiskDataGapSeconds',
   'maxAnalysisDataGapSeconds',
-  'maxCandleAgeSeconds'
+  'maxCandleAgeSeconds',
+  'targetCoins',
+  'scalpMaxMarkets',
+  'maxPositions'
 ]);
 const MOBILE_POST_PATHS = new Set([
   '/api/trade/buy',
@@ -258,6 +264,10 @@ function isMobileGetAllowed(url) {
     return url.searchParams.size === 0;
   }
 
+  if (/^\/api\/coin-detail\/KRW-[A-Z0-9]{2,15}$/.test(url.pathname)) {
+    return url.searchParams.size === 0;
+  }
+
   if (url.pathname === '/api/logs') {
     if (!queryIs(url, new Set(['type', 'lines']), [])) return false;
     return (!url.searchParams.has('type') || ['trading', 'error', 'trades'].includes(url.searchParams.get('type'))) &&
@@ -364,6 +374,10 @@ function isMobileRequestAllowed(req) {
       if (key === 'investmentRatio') return isFiniteNumber(value, 0.01, 1);
       if (key === 'marketRegimeEnabled' || key === 'requireReboundBelowOverbought') {
         return typeof value === 'boolean' || value === 'true' || value === 'false';
+      }
+      if (key === 'targetCoins') {
+        return value === 'ALL' ||
+          (Array.isArray(value) && value.length > 0 && value.length <= 500 && value.every(isMarketCode));
       }
       return typeof value === 'number' && Number.isFinite(value);
     });
@@ -649,6 +663,7 @@ export function createDashboardAuth(env = {}, options = {}) {
     const token = socket.handshake?.auth?.token
       || (authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '');
     if (safeTokenEqual(token, resolved.token)) return next();
+    if (safeTokenEqual(token, resolved.mobileToken)) return next();
     return next(new Error('unauthorized'));
   };
 

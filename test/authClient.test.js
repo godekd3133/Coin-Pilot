@@ -184,7 +184,7 @@ test('a saved token from before scope storage is resolved before Socket.IO and s
   assert.equal(client.socketCalls.length, 0);
 });
 
-test('mobile operator tokens stay valid in the browser without attempting the operator-only socket', async () => {
+test('mobile operator tokens stay valid in the browser and may open the realtime socket', async () => {
   const client = await loadAuthClient({
     savedToken: 'native-mobile-token',
     loginResponse: { status: 200, body: { success: true, tokenScope: 'mobile_operator' } },
@@ -200,7 +200,8 @@ test('mobile operator tokens stay valid in the browser without attempting the op
   assert.equal(client.authState().verification, 'verified');
   assert.equal(client.gate(), undefined);
   assert.equal(client.error(), undefined);
-  assert.equal(client.socketCalls.length, 0);
+  assert.equal(client.socketCalls.length, 1);
+  assert.equal(client.window.coinPilotAuth.canMutate, false);
 });
 
 test('saved-token lookup network failure preserves token but keeps mutations and sockets restricted', async () => {
