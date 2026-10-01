@@ -7,6 +7,7 @@ import {
   resolveStagingCheckIntervalMs,
   withStagingOutputDir
 } from './stagingDashboardConfig.js';
+import { envList, envRaw } from '../config/envConfig.js';
 
 dotenv.config();
 
@@ -14,11 +15,11 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const projectRoot = path.resolve(__dirname, '../..');
 const runId = new Date().toISOString().replace(/[^0-9]/g, '').slice(0, 14);
-const outputRoot = path.resolve(process.env.STAGING_OUTPUT_DIR || path.join(projectRoot, '.staging-runtime', runId));
-const port = String(process.env.STAGING_PORT || 3100);
-const markets = process.env.STAGING_TARGET_COINS || 'KRW-BTC,KRW-ETH';
-const checkIntervalMs = resolveStagingCheckIntervalMs(process.env.STAGING_CHECK_INTERVAL_MS);
-const protocol = process.env.DASHBOARD_TLS_CERT_FILE && process.env.DASHBOARD_TLS_KEY_FILE
+const outputRoot = path.resolve(envRaw('STAGING_OUTPUT_DIR') || path.join(projectRoot, '.staging-runtime', runId));
+const port = String(envRaw('STAGING_PORT') || 3100);
+const markets = envList('STAGING_TARGET_COINS', ['KRW-BTC', 'KRW-ETH']).join(',');
+const checkIntervalMs = resolveStagingCheckIntervalMs(envRaw('STAGING_CHECK_INTERVAL_MS'));
+const protocol = envRaw('DASHBOARD_TLS_CERT_FILE') && envRaw('DASHBOARD_TLS_KEY_FILE')
   ? 'https'
   : 'http';
 

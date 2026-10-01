@@ -8,27 +8,22 @@ import {
   historicalTimestampForCandle
 } from '../backtest/scalpingBacktest.js';
 import { fillNoTradeCandleGaps } from '../research/historicalCandleSeries.js';
+import { envBool, envList, envNumber, envRaw } from '../config/envConfig.js';
 
 dotenv.config();
 
 const sleep = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
-const number = (value, fallback) => Number.isFinite(Number(value)) ? Number(value) : fallback;
 
-const markets = [...new Set((process.env.SCALP_HTF_MOMENTUM_MARKETS ||
-  'KRW-BTC,KRW-ETH,KRW-XRP,KRW-SOL')
-  .split(',')
-  .map(market => market.trim().toUpperCase())
-  .filter(Boolean))];
-const baseCandleUnit = Math.max(1, Math.floor(number(process.env.SCALP_HTF_BASE_CANDLE_UNIT, 15)));
-const requestedCandleCount = Math.max(200, Math.floor(number(
-  process.env.SCALP_HTF_MOMENTUM_CANDLE_COUNT,
+const markets = [...new Set(envList('SCALP_HTF_MOMENTUM_MARKETS', ['KRW-BTC','KRW-ETH','KRW-XRP','KRW-SOL'])
+  .map(market => market.toUpperCase()))];
+const baseCandleUnit = Math.max(1, Math.floor(envNumber('SCALP_HTF_BASE_CANDLE_UNIT', 15)));
+const requestedCandleCount = Math.max(200, Math.floor(envNumber('SCALP_HTF_MOMENTUM_CANDLE_COUNT',
   8_000
 )));
-const outputFile = process.env.SCALP_HTF_MOMENTUM_CANDLES_FILE ||
+const outputFile = envRaw('SCALP_HTF_MOMENTUM_CANDLES_FILE') ||
   process.argv[2] || '/private/tmp/coinpilot-htf-momentum-candles.json';
-const fillNoTrade = process.env.SCALP_HTF_MOMENTUM_FILL_NO_TRADE === 'true';
-const maxFillIntervals = Math.max(0, Math.floor(number(
-  process.env.SCALP_HTF_MOMENTUM_MAX_FILL_INTERVALS,
+const fillNoTrade = envBool('SCALP_HTF_MOMENTUM_FILL_NO_TRADE', false);
+const maxFillIntervals = Math.max(0, Math.floor(envNumber('SCALP_HTF_MOMENTUM_MAX_FILL_INTERVALS',
   4
 )));
 
@@ -88,7 +83,7 @@ export async function fetchMarketCandles(upbit, market, asOfTimestamp, options =
 async function main() {
   const asOfTimestamp = Date.now();
   const upbit = new UpbitAPI('', '', {
-    requestTimeoutMs: number(process.env.UPBIT_REQUEST_TIMEOUT_MS, 10_000),
+    requestTimeoutMs: envNumber('UPBIT_REQUEST_TIMEOUT_MS', 10_000),
     minRequestIntervalMs: 180
   });
   const candles = {};

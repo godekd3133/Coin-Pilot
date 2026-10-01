@@ -4,11 +4,12 @@ import path from 'node:path';
 import {
   evaluateDailyMomentumRobustness
 } from '../research/dailyMomentumRobustnessStudy.js';
+import { envNumber, envRaw } from '../config/envConfig.js';
 
 dotenv.config();
 
-const inputFile = process.env.DAILY_MOMENTUM_CANDLES_FILE || process.argv[2];
-const outputFile = process.env.DAILY_MOMENTUM_ROBUSTNESS_REPORT_FILE ||
+const inputFile = envRaw('DAILY_MOMENTUM_CANDLES_FILE') || process.argv[2];
+const outputFile = envRaw('DAILY_MOMENTUM_ROBUSTNESS_REPORT_FILE') ||
   process.argv[3] || '/private/tmp/coinpilot-daily-momentum-benchmark-confirmation.json';
 const confirmationBars = (process.argv[4] || '1,2,3')
   .split(',')
@@ -42,8 +43,8 @@ function main() {
     minUpBars: 2,
     positionFraction: 0.125,
     maxPositions: 2,
-    costPercent: Number.isFinite(Number(process.env.DAILY_MOMENTUM_COST_PERCENT))
-      ? Number(process.env.DAILY_MOMENTUM_COST_PERCENT)
+    costPercent: Number.isFinite(envNumber('DAILY_MOMENTUM_COST_PERCENT', NaN))
+      ? envNumber('DAILY_MOMENTUM_COST_PERCENT', NaN)
       : 0.2,
     benchmarkMarket: 'KRW-BTC',
     benchmarkTrendMinPercent: 2,
@@ -51,10 +52,10 @@ function main() {
     cooldownAfterLossDays: 3,
     maxPortfolioDrawdownPercent: 0,
     maxHoldDays: 3650,
-    entryExecution: process.env.DAILY_MOMENTUM_ENTRY_EXECUTION === 'next_open'
+    entryExecution: envRaw('DAILY_MOMENTUM_ENTRY_EXECUTION') === 'next_open'
       ? 'next_open'
       : 'close',
-    exitExecution: process.env.DAILY_MOMENTUM_EXIT_EXECUTION === 'next_open'
+    exitExecution: envRaw('DAILY_MOMENTUM_EXIT_EXECUTION') === 'next_open'
       ? 'next_open'
       : 'close'
   };

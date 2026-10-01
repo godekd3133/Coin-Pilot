@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import { resolveOptimizationStoragePaths } from '../runtime/optimizationStorage.js';
 import { fetchCompleteUpbitCandleHistory } from '../market-data/completeUpbitCandleHistory.js';
 import { writeOptimizerJsonAtomically } from '../runtime/optimizerHistoryStore.js';
+import { envNumber } from '../config/envConfig.js';
 
 /**
  * 유전 알고리즘 기반 파라미터 최적화
@@ -404,8 +405,8 @@ class ParameterOptimizer {
     console.log('\n🔄 지속적 파라미터 최적화 시작');
     console.log(`간격: ${interval / 3600000}시간마다`);
 
-    const candleUnit = parseInt(process.env.BACKTEST_CANDLE_UNIT) || 15;
-    const candleCount = parseInt(process.env.BACKTEST_CANDLE_COUNT) || 500;
+    const candleUnit = envNumber('BACKTEST_CANDLE_UNIT', NaN) || 15;
+    const candleCount = envNumber('BACKTEST_CANDLE_COUNT', NaN) || 500;
 
     while (true) {
       try {

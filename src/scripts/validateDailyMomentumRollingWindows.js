@@ -6,11 +6,12 @@ import {
   DEFAULT_DAILY_MOMENTUM_ROLLING_WINDOWS,
   evaluateDailyMomentumRollingWindows
 } from '../research/dailyMomentumRollingWindowStudy.js';
+import { envNumber, envRaw } from '../config/envConfig.js';
 
 dotenv.config();
 
-const inputFile = process.env.DAILY_MOMENTUM_ROLLING_CANDLES_FILE || process.argv[2];
-const outputFile = process.env.DAILY_MOMENTUM_ROLLING_REPORT_FILE ||
+const inputFile = envRaw('DAILY_MOMENTUM_ROLLING_CANDLES_FILE') || process.argv[2];
+const outputFile = envRaw('DAILY_MOMENTUM_ROLLING_REPORT_FILE') ||
   process.argv[3] || '/private/tmp/coinpilot-daily-momentum-rolling-report.json';
 
 function loadCandles(file) {
@@ -22,7 +23,7 @@ function loadCandles(file) {
   if (!candles || typeof candles !== 'object' || Array.isArray(candles)) {
     throw new Error('FAIL_CLOSED: daily candle cache 형식이 잘못되었습니다.');
   }
-  const requestedMarkets = (process.env.DAILY_MOMENTUM_ROLLING_MARKETS ||
+  const requestedMarkets = (envRaw('DAILY_MOMENTUM_ROLLING_MARKETS') ||
     Object.keys(candles).join(','))
     .split(',').map(market => market.trim().toUpperCase()).filter(Boolean);
   const markets = [...new Set(requestedMarkets)];
@@ -41,7 +42,7 @@ function parseWindows(value) {
 }
 
 function parseConfig() {
-  const raw = process.env.DAILY_MOMENTUM_ROLLING_CONFIG_JSON;
+  const raw = envRaw('DAILY_MOMENTUM_ROLLING_CONFIG_JSON');
   if (!raw) return { ...DEFAULT_DAILY_MOMENTUM_ROLLING_CONFIG };
   let parsed;
   try { parsed = JSON.parse(raw); }
@@ -55,9 +56,9 @@ function parseConfig() {
 function main() {
   const { candles, markets } = loadCandles(inputFile);
   const report = evaluateDailyMomentumRollingWindows(candles, {
-    windows: parseWindows(process.env.DAILY_MOMENTUM_ROLLING_WINDOWS),
+    windows: parseWindows(envRaw('DAILY_MOMENTUM_ROLLING_WINDOWS')),
     baseConfig: parseConfig(),
-    minimumTradeCount: Number(process.env.DAILY_MOMENTUM_ROLLING_MIN_TRADES) || 30
+    minimumTradeCount: envNumber('DAILY_MOMENTUM_ROLLING_MIN_TRADES', NaN) || 30
   });
   const output = { ...report, inputFile, markets, promoted: false };
   fs.mkdirSync(path.dirname(outputFile), { recursive: true });

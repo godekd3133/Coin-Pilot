@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { findConcurrentPaperSessions, isPaperOwnerAlive } from '../research/paperSessionConcurrency.js';
+import { envString } from '../config/envConfig.js';
 
 function readJson(file) {
   try {
@@ -104,7 +105,7 @@ export function preflightStrictOnlyForward({
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(new URL(import.meta.url).pathname)) {
-  const outputDir = process.argv[2] || process.env.PAPER_SMOKE_OUTPUT_DIR || '.paper-forward-sealed-rsi-strict-only-r1';
+  const outputDir = process.argv[2] || envString('PAPER_SMOKE_OUTPUT_DIR', '.paper-forward-sealed-rsi-strict-only-r1');
   const result = preflightStrictOnlyForward({ outputDir });
   console.log(JSON.stringify(result, null, 2));
   if (!result.ready) process.exitCode = 2;

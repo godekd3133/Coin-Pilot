@@ -12,6 +12,7 @@ import {
   executeLiveOrderWithEvidence,
   hasCompleteObservedLiveFill
 } from '../api/manualOrderExecution.js';
+import { envString } from '../config/envConfig.js';
 
 class AutoTrader {
   constructor(config) {
@@ -29,8 +30,7 @@ class AutoTrader {
     this.isRunning = false;
     this.dryRun = config.dryRun !== false; // 기본값 true
     this.liveExecutionEvidenceFile = config.liveExecutionEvidenceFile ||
-      process.env.LIVE_EXECUTION_EVIDENCE_FILE ||
-      '.coinpilot-runtime/live-execution/evidence.jsonl';
+      envString('LIVE_EXECUTION_EVIDENCE_FILE', '.coinpilot-runtime/live-execution/evidence.jsonl');
     this.liveExecutionEvidenceWriteError = null;
     this.liveExecutionEvidenceDataError = null;
     this.liveExecutionEvidenceStartup = inspectLiveExecutionEvidenceFile(this.liveExecutionEvidenceFile);

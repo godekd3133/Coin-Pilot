@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { summarizePaperForwardCohort } from '../research/paperForwardCohort.js';
+import { envRaw } from '../config/envConfig.js';
 
 function formatCounts(counts = {}) {
   const entries = Object.entries(counts)
@@ -11,8 +12,8 @@ function formatCounts(counts = {}) {
     : '없음';
 }
 
-const rootDir = process.env.PAPER_COHORT_ROOT || process.argv[2] || '.';
-const outputFile = process.env.PAPER_COHORT_OUTPUT_FILE ||
+const rootDir = envRaw('PAPER_COHORT_ROOT') || process.argv[2] || '.';
+const outputFile = envRaw('PAPER_COHORT_OUTPUT_FILE') ||
   process.argv[3] || '/private/tmp/coinpilot-paper-forward-cohort.json';
 
 const report = summarizePaperForwardCohort({ rootDir });

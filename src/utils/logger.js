@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { envRaw } from '../config/envConfig.js';
 
 /**
  * Serialize a log payload to a single JSON line.
@@ -22,7 +23,7 @@ function safeJsonLine(value) {
   });
 }
 
-export function resolveLogDirectory(baseDir = process.cwd(), stagingOutputDir = process.env.STAGING_OUTPUT_DIR) {
+export function resolveLogDirectory(baseDir = process.cwd(), stagingOutputDir = envRaw('STAGING_OUTPUT_DIR')) {
   const rootDir = typeof stagingOutputDir === 'string' && stagingOutputDir.trim()
     ? path.resolve(baseDir, stagingOutputDir)
     : path.resolve(baseDir);

@@ -4,9 +4,10 @@ import {
   PAPER_EXIT_EVIDENCE_SCHEMA,
   summarizePaperExitEvidence
 } from '../research/paperExitEvidence.js';
+import { envRaw } from '../config/envConfig.js';
 
 const ledgerInput = process.argv[2];
-const outputFile = process.env.PAPER_EXIT_EVIDENCE_OUTPUT_FILE ||
+const outputFile = envRaw('PAPER_EXIT_EVIDENCE_OUTPUT_FILE') ||
   process.argv[3] || '/private/tmp/coinpilot-paper-exit-evidence.json';
 
 function resolveLedgerFile(input) {

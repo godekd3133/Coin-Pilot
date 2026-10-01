@@ -5,6 +5,7 @@ import {
   resolveMomentumShadowQuoteRuntimeFile
 } from '../research/momentumShadowQuoteHistory.js';
 import { summarizeMomentumShadowTradeCostAudit } from '../research/momentumShadowTradeCostAudit.js';
+import { envRaw } from '../config/envConfig.js';
 
 dotenv.config();
 
@@ -14,7 +15,7 @@ const ledgerFile = fs.existsSync(ledgerArgumentPath) && fs.statSync(ledgerArgume
   ? path.join(ledgerArgumentPath, 'ledger.json')
   : ledgerArgumentPath;
 const historyFile = path.resolve(
-  process.argv[3] || process.env.MOMO_SHADOW_QUOTE_HISTORY_FILE ||
+  process.argv[3] || envRaw('MOMO_SHADOW_QUOTE_HISTORY_FILE') ||
     resolveMomentumShadowQuoteRuntimeFile('quote-history.jsonl')
 );
 

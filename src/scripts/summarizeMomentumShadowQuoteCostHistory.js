@@ -6,11 +6,12 @@ import {
   summarizeQuoteExecutionCostHistory
 } from '../research/quoteExecutionCostCompatibility.js';
 import { resolveMomentumShadowQuoteRuntimeFile } from '../research/momentumShadowQuoteHistory.js';
+import { envRaw } from '../config/envConfig.js';
 
 dotenv.config();
 
 const historyFile = path.resolve(
-  process.env.MOMO_SHADOW_QUOTE_HISTORY_FILE ||
+  envRaw('MOMO_SHADOW_QUOTE_HISTORY_FILE') ||
     resolveMomentumShadowQuoteRuntimeFile('quote-history.jsonl')
 );
 const depthNotionalArgument = process.argv.find(argument =>
@@ -52,8 +53,8 @@ function main() {
   const result = summarizeQuoteExecutionCostHistory({
     records,
     invalidRecordCount,
-    tradingFee: finiteCompatibilityNumber(process.env.SCALP_VALIDATION_FEE, 0.0005),
-    slippage: finiteCompatibilityNumber(process.env.SCALP_VALIDATION_SLIPPAGE, 0.001),
+    tradingFee: finiteCompatibilityNumber(envRaw('SCALP_VALIDATION_FEE'), 0.0005),
+    slippage: finiteCompatibilityNumber(envRaw('SCALP_VALIDATION_SLIPPAGE'), 0.001),
     minimumReports: 30,
     minimumSamplesPerReport: 5,
     expectedIntervalSeconds: 600,

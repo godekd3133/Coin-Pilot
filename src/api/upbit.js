@@ -7,6 +7,7 @@ import {
   UpbitRateCoordinatorClient,
   resolveUpbitRateCoordinatorPaths
 } from './upbitRateCoordinator.js';
+import { envRaw } from '../config/envConfig.js';
 
 // Upbit documents progressively longer temporary 418 blocks but does not
 // specify a fixed fallback duration. Keep every lane closed for five minutes
@@ -105,7 +106,7 @@ function isEnvironmentFlagEnabled(value) {
 }
 
 function resolveRateCoordinator(options = {}) {
-  const required = isEnvironmentFlagEnabled(process.env.UPBIT_RATE_COORDINATOR_REQUIRED) ||
+  const required = isEnvironmentFlagEnabled(envRaw('UPBIT_RATE_COORDINATOR_REQUIRED')) ||
     options.rateCoordinatorRequired === true;
   if (options.rateCoordinator && typeof options.rateCoordinator.acquireTurn === 'function') {
     return { client: options.rateCoordinator, required };
@@ -114,8 +115,8 @@ function resolveRateCoordinator(options = {}) {
 
   // The portfolio root is profile-scoped; requiring an explicit coordinator
   // root prevents Paper and LIVE from silently creating separate host queues.
-  const stateDir = typeof process.env.UPBIT_RATE_COORDINATOR_STATE_DIR === 'string'
-    ? process.env.UPBIT_RATE_COORDINATOR_STATE_DIR.trim()
+  const stateDir = typeof envRaw('UPBIT_RATE_COORDINATOR_STATE_DIR') === 'string'
+    ? envRaw('UPBIT_RATE_COORDINATOR_STATE_DIR').trim()
     : '';
   if (typeof stateDir !== 'string' || !stateDir.trim()) {
     const error = new Error(
@@ -144,7 +145,7 @@ class UpbitAPI {
     this.rateCoordinatorAvailable = null;
     this.rateCoordinatorFailureCode = null;
     this.random = typeof options.random === 'function' ? options.random : Math.random;
-    const configuredTimeout = options.requestTimeoutMs ?? process.env.UPBIT_REQUEST_TIMEOUT_MS;
+    const configuredTimeout = options.requestTimeoutMs ?? envRaw('UPBIT_REQUEST_TIMEOUT_MS');
     const parsedTimeout = Number(configuredTimeout);
     this.requestTimeoutMs = Number.isFinite(parsedTimeout) && parsedTimeout > 0
       ? parsedTimeout
@@ -158,7 +159,7 @@ class UpbitAPI {
       ? Number(options.riskQueueTimeoutMs)
       : 30_000;
     this.lastRequestTime = 0;
-    const configuredRequestInterval = options.minRequestIntervalMs ?? process.env.UPBIT_MIN_REQUEST_INTERVAL_MS;
+    const configuredRequestInterval = options.minRequestIntervalMs ?? envRaw('UPBIT_MIN_REQUEST_INTERVAL_MS');
     const parsedRequestInterval = Number(configuredRequestInterval);
     this.minRequestInterval = Number.isFinite(parsedRequestInterval) && parsedRequestInterval > 0
       ? Math.max(100, parsedRequestInterval)

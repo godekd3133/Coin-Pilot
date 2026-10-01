@@ -3,13 +3,14 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import UpbitAPI from '../api/upbit.js';
 import { buildPaperExitPathReplay } from '../research/paperExitPathReplay.js';
+import { envRaw } from '../config/envConfig.js';
 
 const INPUT_LIMIT = 20;
 const REQUEST_SPACING_MS = 1_200;
 const CANDLE_COUNT = 80;
 const MINUTE_CANDLE_URL = 'https://api.upbit.com/v1/candles/minutes/1';
 const ledgerInput = process.argv[2];
-const outputFile = process.env.PAPER_EXIT_PATH_REPLAY_OUTPUT_FILE ||
+const outputFile = envRaw('PAPER_EXIT_PATH_REPLAY_OUTPUT_FILE') ||
   process.argv[3] || '/private/tmp/coinpilot-paper-exit-path-replay.json';
 
 function resolveLedgerFile(input) {

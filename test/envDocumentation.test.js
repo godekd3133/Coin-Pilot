@@ -104,28 +104,55 @@ test('.env.example의 모든 할당 키는 ENV_SCHEMA에 선언되어 있다', (
 // envConfig로 이전이 끝난 파일은 직접 `process.env.KEY` 읽기가 금지된다.
 // 재발하면 여기서 실패한다 — 새 파일을 이전할 때마다 목록에 추가한다.
 const TYPED_ENV_MIGRATED_FILES = [
-  'src/config/envConfig.js',
+  'src/ai/aiAdvisorService.js',
+  'src/ai/monitoringSessionService.js',
+  'src/api/liveCredentialStore.js',
+  'src/api/routes/research.js',
+  'src/api/upbit.js',
+  'src/api/upbitRateCoordinator.js',
+  'src/optimization/parameterOptimizer.js',
   'src/research/paperRunnerConfig.js',
-  'src/scripts/runPaperSmoke.js',
-  'src/scripts/validateScalping.js',
-  'src/scripts/validatePortfolio.js',
+  'src/scripts/analyzePaperExitEvidence.js',
+  'src/scripts/analyzePaperExitPathReplay.js',
+  'src/scripts/auditMomentumShadowTradeCosts.js',
+  'src/scripts/checkQuoteExecutionCostCompatibility.js',
   'src/scripts/compareScalpingVariants.js',
+  'src/scripts/fetchDailyMomentumCandles.js',
+  'src/scripts/fetchHigherTimeframeMomentumCandles.js',
+  'src/scripts/measureMomentumShadowQuotes.js',
+  'src/scripts/momentumShadowStatus.js',
+  'src/scripts/preflightMomentumShadowCandidate.js',
+  'src/scripts/preflightStrictOnlyForward.js',
+  'src/scripts/reconcileLiveExecutionEvidence.js',
+  'src/scripts/runAiAdvisorSmoke.js',
+  'src/scripts/runAiHistoricalReplay.js',
+  'src/scripts/runAiReplayRobustness.js',
+  'src/scripts/runBacktest.js',
+  'src/scripts/runDashboard.js',
+  'src/scripts/runOptimization.js',
+  'src/scripts/runPaperDashboard.js',
+  'src/scripts/runPaperSmoke.js',
+  'src/scripts/runRegimeMomentumShadow.js',
+  'src/scripts/runScalpingVariantForward.js',
+  'src/scripts/runStagingDashboard.js',
+  'src/scripts/startMomentumShadowCandidateIfReady.js',
+  'src/scripts/summarizeMomentumShadowQuoteCostHistory.js',
+  'src/scripts/summarizePaperForwardCohort.js',
+  'src/scripts/validateDailyMarketNeutral.js',
+  'src/scripts/validateDailyMomentumBenchmarkConfirmation.js',
+  'src/scripts/validateDailyMomentumRobustness.js',
+  'src/scripts/validateDailyMomentumRollingWindows.js',
+  'src/scripts/validateDailyMomentumVariants.js',
+  'src/scripts/validateHigherTimeframeMomentum.js',
+  'src/scripts/validatePortfolio.js',
+  'src/scripts/validateRegimeMomentum.js',
+  'src/scripts/validateScalping.js',
+  'src/scripts/validateScalpingNoTradeFill.js',
   'src/scripts/validateScalpingSegments.js',
   'src/scripts/validateShadowCandidate.js',
-  'src/api/routes/research.js',
-  'src/scripts/validateDailyMomentumRobustness.js',
-  'src/scripts/runRegimeMomentumShadow.js',
-  'src/scripts/runOptimization.js',
-  'src/scripts/runAiHistoricalReplay.js',
-  'src/scripts/validateRegimeMomentum.js',
-  'src/scripts/validateHigherTimeframeMomentum.js',
-  'src/scripts/startMomentumShadowCandidateIfReady.js',
-  'src/scripts/runScalpingVariantForward.js',
-  'src/scripts/preflightMomentumShadowCandidate.js',
-  'src/ai/aiAdvisorService.js',
-  'src/scripts/validateDailyMarketNeutral.js',
-  'src/scripts/runBacktest.js',
-  'src/scripts/validateScalpingNoTradeFill.js'
+  'src/scripts/verifyMomentumShadowEvidenceSnapshot.js',
+  'src/trader/autoTrader.js',
+  'src/utils/logger.js'
 ];
 
 test('envConfig로 이전된 파일은 직접 env 접근이 없다', () => {
@@ -142,7 +169,8 @@ test('envConfig로 이전된 파일은 직접 env 접근이 없다', () => {
     ).map(match => match[1])
       .concat(
         [...source.matchAll(/process\.env\[['"]([A-Z_][A-Z0-9_]*)['"]\]/g)].map(match => match[1])
-      );
+      )
+      .filter(name => !PLATFORM_ENVS.has(name));
     assert.deepEqual(directReads, [], `${file} must read env through envConfig accessors`);
   }
 });

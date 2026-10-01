@@ -1,16 +1,17 @@
 import dotenv from 'dotenv';
 import DashboardServer from '../api/dashboardServer.js';
 import { attachReadOnlyPaperLedger, createMockTrader } from './runDashboard.js';
+import { envNumber, envRaw } from '../config/envConfig.js';
 
 dotenv.config();
 
 export async function main() {
-  const ledgerFile = process.env.PAPER_DASHBOARD_LEDGER_FILE || process.argv[2];
+  const ledgerFile = envRaw('PAPER_DASHBOARD_LEDGER_FILE') || process.argv[2];
   if (!ledgerFile) {
     throw new Error('PAPER_DASHBOARD_LEDGER_FILE 또는 첫 번째 인자로 paper ledger 경로를 지정하세요.');
   }
 
-  const port = parseInt(process.env.DASHBOARD_PORT) || 3000;
+  const port = envNumber('DASHBOARD_PORT', NaN) || 3000;
   const trader = attachReadOnlyPaperLedger(createMockTrader(), ledgerFile);
   const server = new DashboardServer(trader, port);
   await server.start();

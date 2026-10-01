@@ -6,12 +6,13 @@ import {
   DEFAULT_MOMENTUM_SHADOW_EVIDENCE_SNAPSHOT_FILE,
   verifyMomentumShadowEvidenceSnapshot
 } from '../research/momentumShadowEvidenceSnapshot.js';
+import { envRaw } from '../config/envConfig.js';
 
-const configuredFile = process.env.MOMO_SHADOW_EVIDENCE_SNAPSHOT_FILE || process.argv[2];
+const configuredFile = envRaw('MOMO_SHADOW_EVIDENCE_SNAPSHOT_FILE') || process.argv[2];
 const file = configuredFile
   ? path.resolve(configuredFile)
   : path.resolve(DEFAULT_MOMENTUM_SHADOW_EVIDENCE_SNAPSHOT_FILE);
-const configuredMaxAge = process.env.MOMO_SHADOW_EVIDENCE_MAX_AGE_SECONDS;
+const configuredMaxAge = envRaw('MOMO_SHADOW_EVIDENCE_MAX_AGE_SECONDS');
 const maxAgeSeconds = Number.isFinite(Number(configuredMaxAge)) && Number(configuredMaxAge) >= 60
   ? Number(configuredMaxAge)
   : DEFAULT_MOMENTUM_SHADOW_EVIDENCE_MAX_AGE_SECONDS;

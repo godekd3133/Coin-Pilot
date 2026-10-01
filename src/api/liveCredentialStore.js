@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { envRaw } from '../config/envConfig.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(__dirname, '..', '..');
@@ -83,9 +84,9 @@ export class LiveCredentialStore {
   constructor(options = {}) {
     const directoryPath = options.directoryPath ? path.resolve(options.directoryPath) : null;
     const configuredCredentialsFile = options.credentialsFile ??
-      (directoryPath ? null : process.env.COINPILOT_LIVE_CREDENTIALS_FILE);
+      (directoryPath ? null : envRaw('COINPILOT_LIVE_CREDENTIALS_FILE'));
     const configuredKeyFile = options.keyFile ??
-      (directoryPath ? null : process.env.COINPILOT_LIVE_CREDENTIALS_KEY_FILE);
+      (directoryPath ? null : envRaw('COINPILOT_LIVE_CREDENTIALS_KEY_FILE'));
     this.credentialsFilePath = path.resolve(configuredCredentialsFile ||
       path.join(directoryPath || STORE_DIRECTORY, CREDENTIALS_FILE));
     this.keyFilePath = path.resolve(configuredKeyFile ||

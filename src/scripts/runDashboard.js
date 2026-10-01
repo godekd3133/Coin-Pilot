@@ -6,6 +6,7 @@ import MultiCoinTrader from '../trader/multiCoinTrader.js';
 import DashboardServer from '../api/dashboardServer.js';
 import { createLossCircuitBreakerState } from '../risk/lossCircuitBreaker.js';
 import { summarizePaperStrictTradeCostAudit } from '../research/paperStrictTradeCostAudit.js';
+import { envNumber, envRaw } from '../config/envConfig.js';
 
 dotenv.config();
 
@@ -33,7 +34,7 @@ export function attachReadOnlyPaperLedger(trader, ledgerFile) {
   // missing report is correctly shown as pending instead of borrowing a
   // different session's market universe.
   const configuredValidationReport = trader.config?.scalpingValidationOutputFile ||
-    process.env.SCALP_VALIDATION_OUTPUT_FILE ||
+    envRaw('SCALP_VALIDATION_OUTPUT_FILE') ||
     path.join(path.dirname(resolvedLedgerFile), 'scalping_validation.json');
   trader.config = {
     ...trader.config,
@@ -306,7 +307,7 @@ export function createMockTrader() {
 export async function main() {
   console.log('\n🌐 대시보드 서버 시작...\n');
 
-  const port = parseInt(process.env.DASHBOARD_PORT) || 3000;
+  const port = envNumber('DASHBOARD_PORT', NaN) || 3000;
 
   // 대시보드 전용 모드 (실제 트레이딩은 하지 않음)
   const mockTrader = createMockTrader();

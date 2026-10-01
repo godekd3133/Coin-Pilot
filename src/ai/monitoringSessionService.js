@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { envRaw } from '../config/envConfig.js';
 
 const SCHEMA_VERSION = 1;
 const DEFAULT_MAX_EVENTS = 240;
@@ -404,22 +405,22 @@ function emptyState() {
 export class MonitoringSessionService {
   constructor(options = {}) {
     this.workspaceRoot = options.workspaceRoot || process.cwd();
-    this.stateFile = options.stateFile || options.config?.aiMonitoringFile || process.env.AI_MONITORING_FILE ||
+    this.stateFile = options.stateFile || options.config?.aiMonitoringFile || envRaw('AI_MONITORING_FILE') ||
       path.join(this.workspaceRoot, 'ai_monitoring_sessions.json');
     this.advisor = options.advisor;
     this.maxEvents = Math.max(40, Number(options.maxEvents || DEFAULT_MAX_EVENTS));
     this.maxConsultations = Math.max(40, Number(options.maxConsultations || DEFAULT_MAX_CONSULTATIONS));
     this.maxPriceObservations = Math.max(500, Number(options.maxPriceObservations || DEFAULT_MAX_PRICE_OBSERVATIONS));
     this.defaultEvaluationMinutes = resolveEvaluationMinutes(
-      options.defaultEvaluationMinutes ?? options.config?.aiEvaluationMinutes ?? process.env.AI_EVALUATION_MINUTES,
+      options.defaultEvaluationMinutes ?? options.config?.aiEvaluationMinutes ?? envRaw('AI_EVALUATION_MINUTES'),
       DEFAULT_EVALUATION_MINUTES
     );
     this.evaluationNeutralBandPercent = resolveNeutralBandPercent(
-      options.evaluationNeutralBandPercent ?? options.config?.aiEvaluationNeutralBandPercent ?? process.env.AI_EVALUATION_NEUTRAL_BAND_PERCENT,
+      options.evaluationNeutralBandPercent ?? options.config?.aiEvaluationNeutralBandPercent ?? envRaw('AI_EVALUATION_NEUTRAL_BAND_PERCENT'),
       DEFAULT_NEUTRAL_BAND_PERCENT
     );
     this.minimumEvaluationSamples = Math.max(1, Math.min(10_000, Number(
-      options.minimumEvaluationSamples ?? options.config?.aiEvaluationMinSamples ?? process.env.AI_EVALUATION_MIN_SAMPLES
+      options.minimumEvaluationSamples ?? options.config?.aiEvaluationMinSamples ?? envRaw('AI_EVALUATION_MIN_SAMPLES')
     ) || DEFAULT_MINIMUM_EVALUATION_SAMPLES));
     this.onUpdate = null;
     this.pendingConsultations = new Map();

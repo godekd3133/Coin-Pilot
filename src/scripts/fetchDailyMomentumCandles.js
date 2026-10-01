@@ -3,16 +3,15 @@ import fs from 'node:fs';
 import path from 'node:path';
 import UpbitAPI from '../api/upbit.js';
 import { pathToFileURL } from 'node:url';
+import { envList, envNumber, envString } from '../config/envConfig.js';
 
 dotenv.config();
 
 const sleep = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
-const number = (value, fallback) => Number.isFinite(Number(value)) ? Number(value) : fallback;
-const markets = [...new Set((process.env.DAILY_MOMENTUM_MARKETS ||
-  'KRW-BTC,KRW-ETH,KRW-XRP,KRW-SOL,KRW-DOGE,KRW-ADA,KRW-DOT,KRW-LINK,KRW-ATOM,KRW-NEAR,KRW-ETC,KRW-SUI')
-  .split(',').map(market => market.trim().toUpperCase()).filter(Boolean))];
-const days = Math.max(30, Math.floor(number(process.env.DAILY_MOMENTUM_DAYS, 400)));
-const outputFile = process.env.DAILY_MOMENTUM_CANDLES_FILE || '/private/tmp/coinpilot-daily-momentum-candles.json';
+const markets = [...new Set(envList('DAILY_MOMENTUM_MARKETS', ['KRW-BTC','KRW-ETH','KRW-XRP','KRW-SOL','KRW-DOGE','KRW-ADA','KRW-DOT','KRW-LINK','KRW-ATOM','KRW-NEAR','KRW-ETC','KRW-SUI'])
+  .map(market => market.toUpperCase()))];
+const days = Math.max(30, Math.floor(envNumber('DAILY_MOMENTUM_DAYS', 400)));
+const outputFile = envString('DAILY_MOMENTUM_CANDLES_FILE', '/private/tmp/coinpilot-daily-momentum-candles.json');
 
 export async function fetchMarketCandles(upbit, market, options = {}) {
   const requestedDays = options.days ?? days;

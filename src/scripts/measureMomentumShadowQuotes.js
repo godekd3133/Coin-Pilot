@@ -10,21 +10,20 @@ import {
 import {
   resolveMomentumShadowQuoteRuntimeFile
 } from '../research/momentumShadowQuoteHistory.js';
+import { envList, envNumber, envRaw } from '../config/envConfig.js';
 
 dotenv.config();
 
-const markets = [...new Set((process.env.MOMO_SHADOW_QUOTE_MARKETS ||
-  'KRW-BTC,KRW-ETH,KRW-XRP,KRW-SOL,KRW-DOGE,KRW-ADA,KRW-DOT,KRW-LINK,KRW-ATOM,KRW-NEAR,KRW-ETC,KRW-SUI')
-  .split(',').map(market => market.trim()).filter(Boolean))];
-const sampleCount = Math.max(1, Math.floor(Number(process.env.MOMO_SHADOW_QUOTE_SAMPLES) || 5));
-const intervalMs = Math.max(0, Math.floor(Number(process.env.MOMO_SHADOW_QUOTE_INTERVAL_MS) || 2_000));
-const configuredMaxSpread = Number(process.env.MOMO_SHADOW_QUOTE_MAX_SPREAD_PERCENT);
+const markets = [...new Set(envList('MOMO_SHADOW_QUOTE_MARKETS', ['KRW-BTC','KRW-ETH','KRW-XRP','KRW-SOL','KRW-DOGE','KRW-ADA','KRW-DOT','KRW-LINK','KRW-ATOM','KRW-NEAR','KRW-ETC','KRW-SUI']))];
+const sampleCount = Math.max(1, Math.floor(envNumber('MOMO_SHADOW_QUOTE_SAMPLES', NaN) || 5));
+const intervalMs = Math.max(0, Math.floor(envNumber('MOMO_SHADOW_QUOTE_INTERVAL_MS', NaN) || 2_000));
+const configuredMaxSpread = envNumber('MOMO_SHADOW_QUOTE_MAX_SPREAD_PERCENT', NaN);
 const maxSpreadPercent = Number.isFinite(configuredMaxSpread)
   ? Math.max(0, configuredMaxSpread)
   : 0.5;
-const outputFile = process.env.MOMO_SHADOW_QUOTE_REPORT_FILE ||
+const outputFile = envRaw('MOMO_SHADOW_QUOTE_REPORT_FILE') ||
   resolveMomentumShadowQuoteRuntimeFile('quote-quality.json');
-const historyFile = process.env.MOMO_SHADOW_QUOTE_HISTORY_FILE ||
+const historyFile = envRaw('MOMO_SHADOW_QUOTE_HISTORY_FILE') ||
   resolveMomentumShadowQuoteRuntimeFile('quote-history.jsonl');
 const upbit = new UpbitAPI('', '', { requestTimeoutMs: 10_000 });
 

@@ -6,12 +6,12 @@ import {
   DEFAULT_DAILY_MOMENTUM_VARIANTS,
   evaluateDailyMomentumVariants
 } from '../research/dailyMomentumStudy.js';
+import { envNumber, envRaw, envString } from '../config/envConfig.js';
 
 dotenv.config();
 
-const number = (value, fallback) => Number.isFinite(Number(value)) ? Number(value) : fallback;
-const inputFile = process.env.DAILY_MOMENTUM_CANDLES_FILE || process.argv[2];
-const outputFile = process.env.DAILY_MOMENTUM_REPORT_FILE || '/private/tmp/coinpilot-daily-momentum-report.json';
+const inputFile = envRaw('DAILY_MOMENTUM_CANDLES_FILE') || process.argv[2];
+const outputFile = envString('DAILY_MOMENTUM_REPORT_FILE', '/private/tmp/coinpilot-daily-momentum-report.json');
 
 function loadCandles(file) {
   if (!file || !fs.existsSync(file)) {
@@ -22,7 +22,7 @@ function loadCandles(file) {
   if (!candles || typeof candles !== 'object' || Array.isArray(candles)) {
     throw new Error('FAIL_CLOSED: daily candle cache 형식이 잘못되었습니다.');
   }
-  const requestedMarkets = (process.env.DAILY_MOMENTUM_MARKETS || Object.keys(candles).join(','))
+  const requestedMarkets = (envRaw('DAILY_MOMENTUM_MARKETS') || Object.keys(candles).join(','))
     .split(',').map(market => market.trim().toUpperCase()).filter(Boolean);
   const markets = [...new Set(requestedMarkets)];
   const missing = markets.filter(market => !Array.isArray(candles[market]));
@@ -46,20 +46,20 @@ function main() {
   const { candles, markets } = loadCandles(inputFile);
   const report = evaluateDailyMomentumVariants(candles, {
     variants: DEFAULT_DAILY_MOMENTUM_VARIANTS,
-    segmentCount: Math.max(2, Math.floor(number(process.env.DAILY_MOMENTUM_SEGMENTS, 4))),
+    segmentCount: Math.max(2, Math.floor(envNumber('DAILY_MOMENTUM_SEGMENTS', 4))),
     baseConfig: {
       ...DEFAULT_DAILY_MOMENTUM_CONFIG,
-      initialBalance: number(process.env.DAILY_MOMENTUM_INITIAL_BALANCE, 100_000_000),
-      costPercent: number(process.env.DAILY_MOMENTUM_COST_PERCENT, 0.2),
-      positionFraction: number(process.env.DAILY_MOMENTUM_POSITION_FRACTION, 0.25),
-      maxPositions: Math.max(1, Math.floor(number(process.env.DAILY_MOMENTUM_MAX_POSITIONS, 4))),
-      entryWindowEndTimestamp: process.env.DAILY_MOMENTUM_ENTRY_WINDOW_END_TIMESTAMP?.trim() || null,
-      benchmarkExposureMinPercent: process.env.DAILY_MOMENTUM_BENCHMARK_EXPOSURE_MIN_PERCENT === undefined
+      initialBalance: envNumber('DAILY_MOMENTUM_INITIAL_BALANCE', 100_000_000),
+      costPercent: envNumber('DAILY_MOMENTUM_COST_PERCENT', 0.2),
+      positionFraction: envNumber('DAILY_MOMENTUM_POSITION_FRACTION', 0.25),
+      maxPositions: Math.max(1, Math.floor(envNumber('DAILY_MOMENTUM_MAX_POSITIONS', 4))),
+      entryWindowEndTimestamp: envRaw('DAILY_MOMENTUM_ENTRY_WINDOW_END_TIMESTAMP')?.trim() || null,
+      benchmarkExposureMinPercent: envRaw('DAILY_MOMENTUM_BENCHMARK_EXPOSURE_MIN_PERCENT') === undefined
         ? null
-        : number(process.env.DAILY_MOMENTUM_BENCHMARK_EXPOSURE_MIN_PERCENT, null),
-      benchmarkExposureMaxPercent: process.env.DAILY_MOMENTUM_BENCHMARK_EXPOSURE_MAX_PERCENT === undefined
+        : envNumber('DAILY_MOMENTUM_BENCHMARK_EXPOSURE_MIN_PERCENT', null),
+      benchmarkExposureMaxPercent: envRaw('DAILY_MOMENTUM_BENCHMARK_EXPOSURE_MAX_PERCENT') === undefined
         ? null
-        : number(process.env.DAILY_MOMENTUM_BENCHMARK_EXPOSURE_MAX_PERCENT, null)
+        : envNumber('DAILY_MOMENTUM_BENCHMARK_EXPOSURE_MAX_PERCENT', null)
     }
   });
   const output = {
@@ -69,8 +69,8 @@ function main() {
     promoted: false,
     note: [
       '이 sweep는 동일한 완료 일봉과 비용 가정의 research-only 비교입니다. 어떤 variant도 runtime/live gate를 변경하지 않습니다.',
-      process.env.DAILY_MOMENTUM_ENTRY_WINDOW_END_TIMESTAMP
-        ? `신규 진입은 ${process.env.DAILY_MOMENTUM_ENTRY_WINDOW_END_TIMESTAMP}까지 허용하고 이후에는 기존 포지션의 청산만 추적합니다.`
+      envRaw('DAILY_MOMENTUM_ENTRY_WINDOW_END_TIMESTAMP')
+        ? `신규 진입은 ${envRaw('DAILY_MOMENTUM_ENTRY_WINDOW_END_TIMESTAMP')}까지 허용하고 이후에는 기존 포지션의 청산만 추적합니다.`
         : null
     ].filter(Boolean).join(' ')
   };

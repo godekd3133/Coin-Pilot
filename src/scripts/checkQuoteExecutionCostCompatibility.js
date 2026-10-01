@@ -10,36 +10,37 @@ import {
 import {
   resolveMomentumShadowQuoteRuntimeFile
 } from '../research/momentumShadowQuoteHistory.js';
+import { envRaw } from '../config/envConfig.js';
 
 dotenv.config();
 
 const DEFAULT_MARKETS = ['KRW-BTC', 'KRW-ETH', 'KRW-XRP', 'KRW-SOL'];
 const reportFile = path.resolve(
-  process.env.MOMO_SHADOW_QUOTE_REPORT_FILE ||
+  envRaw('MOMO_SHADOW_QUOTE_REPORT_FILE') ||
     resolveMomentumShadowQuoteRuntimeFile('quote-quality.json')
 );
 const markets = parseCompatibilityMarkets(
-  process.env.SCALP_QUOTE_COMPATIBILITY_MARKETS,
+  envRaw('SCALP_QUOTE_COMPATIBILITY_MARKETS'),
   DEFAULT_MARKETS
 );
 const tradingFee = finiteCompatibilityNumber(
-  process.env.SCALP_VALIDATION_FEE,
+  envRaw('SCALP_VALIDATION_FEE'),
   0.0005
 );
 const slippage = finiteCompatibilityNumber(
-  process.env.SCALP_VALIDATION_SLIPPAGE,
+  envRaw('SCALP_VALIDATION_SLIPPAGE'),
   0.001
 );
 const minimumSamples = Math.max(1, Math.floor(positiveCompatibilityNumber(
-  process.env.SCALP_QUOTE_COMPATIBILITY_MIN_SAMPLES,
+  envRaw('SCALP_QUOTE_COMPATIBILITY_MIN_SAMPLES'),
   5
 )));
 const maxAgeSeconds = finiteCompatibilityNumber(
-  process.env.SCALP_QUOTE_COMPATIBILITY_MAX_AGE_SECONDS,
+  envRaw('SCALP_QUOTE_COMPATIBILITY_MAX_AGE_SECONDS'),
   900
 );
-const outputFile = process.env.SCALP_QUOTE_COMPATIBILITY_OUTPUT_FILE
-  ? path.resolve(process.env.SCALP_QUOTE_COMPATIBILITY_OUTPUT_FILE)
+const outputFile = envRaw('SCALP_QUOTE_COMPATIBILITY_OUTPUT_FILE')
+  ? path.resolve(envRaw('SCALP_QUOTE_COMPATIBILITY_OUTPUT_FILE'))
   : null;
 
 function main() {

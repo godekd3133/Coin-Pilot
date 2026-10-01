@@ -1,13 +1,14 @@
 import dotenv from 'dotenv';
 import AIAdvisorService from '../ai/aiAdvisorService.js';
+import { envRaw } from '../config/envConfig.js';
 
 dotenv.config();
 
 const requireProvider = process.argv.includes('--require-provider');
-const providerSelection = process.env.AI_SMOKE_PROVIDERS || 'both';
+const providerSelection = envRaw('AI_SMOKE_PROVIDERS') || 'both';
 const envNumber = (value, fallback) => Number.isFinite(Number(value)) ? Number(value) : fallback;
 const advisor = new AIAdvisorService({
-  timeoutMs: Number(process.env.AI_ADVISOR_TIMEOUT_MS) || 60_000
+  timeoutMs: envNumber(envRaw('AI_ADVISOR_TIMEOUT_MS'), 60_000)
 });
 
 const event = {
@@ -45,8 +46,8 @@ const consultation = await advisor.ask({
     mode: 'DRY_RUN',
     source: 'synthetic_fixture',
     evaluation: {
-      horizonMinutes: envNumber(process.env.AI_EVALUATION_MINUTES, 5),
-      neutralBandPercent: envNumber(process.env.AI_EVALUATION_NEUTRAL_BAND_PERCENT, 0.3)
+      horizonMinutes: envNumber(envRaw('AI_EVALUATION_MINUTES'), 5),
+      neutralBandPercent: envNumber(envRaw('AI_EVALUATION_NEUTRAL_BAND_PERCENT'), 0.3)
     }
   },
   session: { name: 'AI efficacy smoke', horizon: 'short-term' }

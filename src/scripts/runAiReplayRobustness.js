@@ -1,14 +1,13 @@
 import fs from 'node:fs';
 import dotenv from 'dotenv';
 import assessReplayRobustness from '../ai/replayRobustness.js';
+import { envList, envNumber, envString } from '../config/envConfig.js';
 
 dotenv.config();
 
 const files = process.argv.slice(2).length > 0
   ? process.argv.slice(2)
-  : String(process.env.AI_ROBUSTNESS_REPORT_FILES || '')
-    .split(',')
-    .map(item => item.trim())
+  : envList('AI_ROBUSTNESS_REPORT_FILES', [])
     .filter(Boolean);
 
 if (files.length === 0) {
@@ -19,11 +18,11 @@ if (files.length === 0) {
 try {
   const reports = files.map(file => JSON.parse(fs.readFileSync(file, 'utf8')));
   const result = assessReplayRobustness(reports, {
-    neutralBandPercent: Number(process.env.AI_REPLAY_NEUTRAL_BAND_PERCENT) || 0.3,
-    minimumNonNeutralSamples: Number(process.env.AI_ROBUSTNESS_MIN_NON_NEUTRAL) || 20,
-    scope: process.env.AI_ROBUSTNESS_SCOPE || 'all'
+    neutralBandPercent: envNumber('AI_REPLAY_NEUTRAL_BAND_PERCENT', NaN) || 0.3,
+    minimumNonNeutralSamples: envNumber('AI_ROBUSTNESS_MIN_NON_NEUTRAL', NaN) || 20,
+    scope: envString('AI_ROBUSTNESS_SCOPE', 'all')
   });
-  const outputFile = process.env.AI_ROBUSTNESS_OUTPUT_FILE || '';
+  const outputFile = envString('AI_ROBUSTNESS_OUTPUT_FILE', '');
   if (outputFile) fs.writeFileSync(outputFile, JSON.stringify(result, null, 2), 'utf8');
   console.log(JSON.stringify({ ...result, outputFile: outputFile || null }, null, 2));
   if (result.status === 'INSUFFICIENT_WINDOWS' || result.status === 'INSUFFICIENT_NON_NEUTRAL' || result.status === 'WINDOW_CONFLICT') {

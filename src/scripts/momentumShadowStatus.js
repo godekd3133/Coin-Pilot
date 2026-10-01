@@ -18,6 +18,7 @@ import {
 import { summarizeMomentumShadowQuoteExecutionEvidence } from '../research/momentumShadowQuoteQuality.js';
 import { DEFAULT_QUOTE_EXECUTION_COST_MODEL } from '../research/quoteExecutionCostCompatibility.js';
 import { resolveMomentumShadowExecutionModel } from '../research/momentumShadowExecutionModel.js';
+import { envNumber } from '../config/envConfig.js';
 
 /**
  * Read-only status printer for the momentum shadow books.
@@ -41,7 +42,7 @@ const dirs = process.argv.slice(2).length
     '.paper-momentum-shadow-fixed-hold-2d-spread-v1',
     '.paper-momentum-shadow-fixed-hold-2d-relative-v1'
   ];
-const defaultPollMs = Number(process.env.MOMO_SHADOW_POLL_MS) || 5 * 60 * 1000;
+const defaultPollMs = envNumber('MOMO_SHADOW_POLL_MS', NaN) || 5 * 60 * 1000;
 
 function ownerAlive(pid) {
   const value = Number(pid);
@@ -145,7 +146,7 @@ for (const dir of dirs) {
   const state = orphanReason ? `STOPPED:${orphanReason}` : 'RUNNING';
   const open = Object.entries(l.positions || {});
   const executionModel = resolveMomentumShadowExecutionModel(l.config?.executionModel);
-  const equity = getMomentumShadowEquity(l, Number(process.env.MOMO_SHADOW_INITIAL_BALANCE) || 100_000_000);
+  const equity = getMomentumShadowEquity(l, envNumber('MOMO_SHADOW_INITIAL_BALANCE', NaN) || 100_000_000);
   const benchmarkObservationSchemaVersion = l.benchmarkObservationSchemaVersion === null ||
     l.benchmarkObservationSchemaVersion === undefined ||
     l.benchmarkObservationSchemaVersion === ''
@@ -178,14 +179,14 @@ for (const dir of dirs) {
   const realizedByMarket = summarizeMomentumShadowTradesByMarket(l);
   const realizedReturnPercent = calculateMomentumShadowRealizedReturnPercent(
     l,
-    Number(process.env.MOMO_SHADOW_INITIAL_BALANCE) || 100_000_000
+    envNumber('MOMO_SHADOW_INITIAL_BALANCE', NaN) || 100_000_000
   );
   const confidence = calculateMomentumShadowTradeConfidence(l);
   const quoteExecution = summarizeMomentumShadowQuoteExecutionEvidence(l.trades);
   const observationDays = calculateMomentumShadowObservationDays(l);
   const minimumResearchDays = Math.max(
     1,
-    Number(process.env.MOMO_SHADOW_MIN_RESEARCH_DAYS) ||
+    envNumber('MOMO_SHADOW_MIN_RESEARCH_DAYS', NaN) ||
       DEFAULT_MOMENTUM_SHADOW_MIN_RESEARCH_DAYS
   );
   console.log(`\n=== ${dir} (mode=${l.config?.mode || 'fixed'}) [${state}] ===`);

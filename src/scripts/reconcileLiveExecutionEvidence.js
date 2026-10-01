@@ -4,12 +4,12 @@ import {
   LIVE_EXECUTION_EVIDENCE_SCHEMA,
   inspectLiveExecutionEvidenceFile
 } from '../research/liveExecutionEvidence.js';
+import { envString } from '../config/envConfig.js';
 
 dotenv.config();
 
 const projectRoot = path.resolve(new URL('../..', import.meta.url).pathname);
-const configuredFile = process.env.LIVE_EXECUTION_EVIDENCE_FILE ||
-  '.coinpilot-runtime/live-execution/evidence.jsonl';
+const configuredFile = envString('LIVE_EXECUTION_EVIDENCE_FILE', '.coinpilot-runtime/live-execution/evidence.jsonl');
 const evidenceFile = path.isAbsolute(configuredFile)
   ? configuredFile
   : path.resolve(projectRoot, configuredFile);

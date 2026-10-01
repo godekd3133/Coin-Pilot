@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
+import { envRaw } from '../config/envConfig.js';
 
 const LEGACY_STATE_SCHEMA = 'coinpilot.upbit-rate-coordinator-state.v1';
 const STATE_SCHEMA = 'coinpilot.upbit-rate-coordinator-state.v2';
@@ -546,13 +547,13 @@ function resolveStateRoot(stateDir, { allowTemporaryStateDir = false } = {}) {
 
 function allowTemporaryTestState(options = {}) {
   if (options.allowTemporaryStateDir !== true) return false;
-  if (process.env.NODE_ENV === 'test' || process.env.NODE_TEST_CONTEXT) return true;
+  if (process.env.NODE_ENV === 'test' || envRaw('NODE_TEST_CONTEXT')) return true;
   throw coordinatorError('Temporary coordinator state roots are available only to tests.', 'UPBIT_RATE_COORDINATOR_TEMP_STATE_FORBIDDEN');
 }
 
 function createServerClock(options = {}) {
   const usesTestClockOverrides = options.bootIdentity !== undefined || options.monotonicNow !== undefined;
-  if (usesTestClockOverrides && process.env.NODE_ENV !== 'test' && !process.env.NODE_TEST_CONTEXT) {
+  if (usesTestClockOverrides && process.env.NODE_ENV !== 'test' && !envRaw('NODE_TEST_CONTEXT')) {
     throw coordinatorError('Coordinator clock overrides are available only to tests.', 'UPBIT_RATE_COORDINATOR_TEST_CLOCK_FORBIDDEN');
   }
   const now = typeof options.now === 'function' ? options.now : Date.now;
@@ -569,7 +570,7 @@ function createServerClock(options = {}) {
 }
 
 export function resolveUpbitRateCoordinatorPaths(
-  stateDir = process.env.UPBIT_RATE_COORDINATOR_STATE_DIR || process.env.COINPILOT_STATE_DIR,
+  stateDir = envRaw('UPBIT_RATE_COORDINATOR_STATE_DIR') || envRaw('COINPILOT_STATE_DIR'),
   options = {}
 ) {
   const root = resolveStateRoot(stateDir, { allowTemporaryStateDir: allowTemporaryTestState(options) });
@@ -1122,7 +1123,7 @@ function maxBigInt(left, right) {
 export async function startUpbitRateCoordinatorServer(options = {}) {
   if (options.onRecoveryMarkerCreated !== undefined &&
     (typeof options.onRecoveryMarkerCreated !== 'function' ||
-      (process.env.NODE_ENV !== 'test' && !process.env.NODE_TEST_CONTEXT))) {
+      (process.env.NODE_ENV !== 'test' && !envRaw('NODE_TEST_CONTEXT')))) {
     throw coordinatorError('Recovery marker hooks are available only to tests.', 'UPBIT_RATE_COORDINATOR_TEST_HOOK_FORBIDDEN');
   }
   const clock = createServerClock(options);

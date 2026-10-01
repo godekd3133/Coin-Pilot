@@ -1103,7 +1103,7 @@ async function runWorker(profile, options) {
 
 function createWorkerEnvironment() {
   return {
-    PATH: process.env.PATH || '',
+    PATH: process.env.PATH,
     NODE_ENV: 'test',
     TZ: 'UTC',
     DASHBOARD_TOKEN: SYNTHETIC_DASHBOARD_TOKEN,
