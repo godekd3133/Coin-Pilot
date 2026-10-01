@@ -111,7 +111,8 @@ const TYPED_ENV_MIGRATED_FILES = [
   'src/scripts/validatePortfolio.js',
   'src/scripts/compareScalpingVariants.js',
   'src/scripts/validateScalpingSegments.js',
-  'src/scripts/validateShadowCandidate.js'
+  'src/scripts/validateShadowCandidate.js',
+  'src/api/routes/research.js'
 ];
 
 test('envConfig로 이전된 파일은 직접 env 접근이 없다', () => {

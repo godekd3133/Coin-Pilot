@@ -38,6 +38,7 @@ import {
   summarizeMomentumShadowQuoteExecutionEvidence
 } from '../../research/momentumShadowQuoteQuality.js';
 import { assessQuoteExecutionCostCompatibility } from '../../research/quoteExecutionCostCompatibility.js';
+import { envBool, envList, envNumber, envString } from '../../config/envConfig.js';
 import { summarizeMomentumShadowTradeCostAudit } from '../../research/momentumShadowTradeCostAudit.js';
 import { resolveMomentumShadowExecutionModel } from '../../research/momentumShadowExecutionModel.js';
 import {
@@ -71,7 +72,7 @@ const DEFAULT_SCALP_QUOTE_COMPATIBILITY_MARKETS = [
 function resolveMomentumShadowQuoteHistoryFile(server) {
   const config = server?.tradingSystem?.config || {};
   const configuredHistoryFile = config.momentumShadowQuoteHistoryFile ||
-    process.env.MOMO_SHADOW_QUOTE_HISTORY_FILE ||
+    envString('MOMO_SHADOW_QUOTE_HISTORY_FILE', null) ||
     resolveMomentumShadowQuoteRuntimeFile('quote-history.jsonl');
   return path.isAbsolute(configuredHistoryFile)
     ? configuredHistoryFile
@@ -142,40 +143,41 @@ const csv = value => String(value || '').split(',').map(item => item.trim()).fil
 // readiness check counts all of them as owners — a live fixed-hold book must
 // not be invisible to the baseline or next-open preflights.
 function momentumShadowOwnerDirs(config) {
-  if (process.env.MOMO_SHADOW_OWNER_DIRS) return csv(process.env.MOMO_SHADOW_OWNER_DIRS);
+  const ownerDirsOverride = envList('MOMO_SHADOW_OWNER_DIRS', null);
+  if (ownerDirsOverride) return ownerDirsOverride;
   return [
     config.momentumShadowFixedDir ||
-      process.env.MOMO_SHADOW_FIXED_DIR ||
+      envString('MOMO_SHADOW_FIXED_DIR', null) ||
       path.resolve(PROJECT_ROOT, '.paper-momentum-shadow-v1'),
     config.momentumShadowRegimeDir ||
-      process.env.MOMO_SHADOW_REGIME_DIR ||
+      envString('MOMO_SHADOW_REGIME_DIR', null) ||
       path.resolve(PROJECT_ROOT, '.paper-momentum-shadow-regime'),
     config.momentumShadowBenchmarkDir ||
-      process.env.MOMO_SHADOW_BENCHMARK_DIR ||
+      envString('MOMO_SHADOW_BENCHMARK_DIR', null) ||
       path.resolve(PROJECT_ROOT, '.paper-momentum-shadow-btc-gate-v1'),
     config.momentumShadowVolatilityDir ||
-      process.env.MOMO_SHADOW_VOLATILITY_DIR ||
+      envString('MOMO_SHADOW_VOLATILITY_DIR', null) ||
       path.resolve(PROJECT_ROOT, '.paper-momentum-shadow-vol-target-v1'),
     config.momentumShadowNextOpenDir ||
-      process.env.MOMO_SHADOW_NEXT_OPEN_DIR ||
+      envString('MOMO_SHADOW_NEXT_OPEN_DIR', null) ||
       path.resolve(PROJECT_ROOT, '.paper-momentum-shadow-next-open-v1'),
     config.momentumShadowFixedHoldDir ||
-      process.env.MOMO_SHADOW_FIXED_HOLD_DIR ||
+      envString('MOMO_SHADOW_FIXED_HOLD_DIR', null) ||
       path.resolve(PROJECT_ROOT, '.paper-momentum-shadow-fixed-hold-2d-v1'),
     config.momentumShadowFixedHoldLossCapDir ||
-      process.env.MOMO_SHADOW_FIXED_HOLD_LOSS_CAP_DIR ||
+      envString('MOMO_SHADOW_FIXED_HOLD_LOSS_CAP_DIR', null) ||
       path.resolve(PROJECT_ROOT, '.paper-momentum-shadow-fixed-hold-2d-loss-cap-v1'),
     config.momentumShadowFixedHoldLossCapNoDogeDir ||
-      process.env.MOMO_SHADOW_FIXED_HOLD_LOSS_CAP_NO_DOGE_DIR ||
+      envString('MOMO_SHADOW_FIXED_HOLD_LOSS_CAP_NO_DOGE_DIR', null) ||
       path.resolve(PROJECT_ROOT, '.paper-momentum-shadow-fixed-hold-2d-loss-cap-no-doge-v1'),
     config.momentumShadowFixedHoldSpreadDir ||
-      process.env.MOMO_SHADOW_FIXED_HOLD_SPREAD_DIR ||
+      envString('MOMO_SHADOW_FIXED_HOLD_SPREAD_DIR', null) ||
       path.resolve(PROJECT_ROOT, '.paper-momentum-shadow-fixed-hold-2d-spread-v1'),
     config.momentumShadowFixedHoldRelativeDir ||
-      process.env.MOMO_SHADOW_FIXED_HOLD_RELATIVE_DIR ||
+      envString('MOMO_SHADOW_FIXED_HOLD_RELATIVE_DIR', null) ||
       path.resolve(PROJECT_ROOT, '.paper-momentum-shadow-fixed-hold-2d-relative-v1'),
     config.momentumShadowFixedHoldQuoteCrossDir ||
-      process.env.MOMO_SHADOW_FIXED_HOLD_QUOTE_CROSS_DIR ||
+      envString('MOMO_SHADOW_FIXED_HOLD_QUOTE_CROSS_DIR', null) ||
       path.resolve(PROJECT_ROOT, '.paper-momentum-shadow-fixed-hold-2d-quote-cross-v1')
   ];
 }
@@ -185,7 +187,7 @@ function momentumShadowOwnerDirs(config) {
 // inspects the same file the launcher claims.
 function momentumShadowCandidateSlotFile(config) {
   return config.momentumShadowCandidateSlotFile ||
-    process.env.MOMO_SHADOW_CANDIDATE_SLOT_FILE ||
+    envString('MOMO_SHADOW_CANDIDATE_SLOT_FILE', null) ||
     path.resolve(PROJECT_ROOT, DEFAULT_MOMENTUM_SHADOW_CANDIDATE_SLOT_FILE);
 }
 
@@ -202,10 +204,10 @@ function nonNegativeOrFallback(value, fallback) {
 function momentumShadowQuotePreflightOptions(server) {
   const config = server?.tradingSystem?.config || {};
   const configuredFile = config.momentumShadowQuoteReportFile ||
-    process.env.MOMO_SHADOW_QUOTE_REPORT_FILE ||
+    envString('MOMO_SHADOW_QUOTE_REPORT_FILE', null) ||
     resolveMomentumShadowQuoteRuntimeFile('quote-quality.json');
   const configuredMaxAge = config.momentumShadowQuoteMaxAgeSeconds ??
-    process.env.MOMO_SHADOW_QUOTE_MAX_AGE_SECONDS;
+    envNumber('MOMO_SHADOW_QUOTE_MAX_AGE_SECONDS', NaN);
   return {
     quoteReportFile: path.isAbsolute(configuredFile)
       ? configuredFile
@@ -295,22 +297,21 @@ function projectMomentumShadowQuoteQualitySnapshot(server, fileSnapshot = null) 
       ? Math.floor((now - generatedAtMs) / 1000)
       : null;
     const fresh = ageSeconds !== null && ageSeconds <= maxAgeSeconds;
-    const compatibilityMarkets = csv(
-      config.scalpingQuoteCompatibilityMarkets ||
-      process.env.SCALP_QUOTE_COMPATIBILITY_MARKETS ||
-      DEFAULT_SCALP_QUOTE_COMPATIBILITY_MARKETS.join(',')
-    );
+    const envCompatibilityMarkets = envList('SCALP_QUOTE_COMPATIBILITY_MARKETS', null);
+    const compatibilityMarkets = config.scalpingQuoteCompatibilityMarkets
+      ? csv(config.scalpingQuoteCompatibilityMarkets)
+      : (envCompatibilityMarkets ?? DEFAULT_SCALP_QUOTE_COMPATIBILITY_MARKETS);
     const compatibilityTradingFee = nonNegativeOrFallback(
-      config.tradingFee ?? process.env.SCALP_VALIDATION_FEE,
+      config.tradingFee ?? envNumber('SCALP_VALIDATION_FEE', NaN),
       0.0005
     );
     const compatibilitySlippage = nonNegativeOrFallback(
-      config.slippage ?? process.env.SCALP_VALIDATION_SLIPPAGE,
+      config.slippage ?? envNumber('SCALP_VALIDATION_SLIPPAGE', NaN),
       0.001
     );
     const compatibilityMinimumSamples = Math.max(1, Math.floor(nonNegativeOrFallback(
       config.scalpingQuoteCompatibilityMinSamples ??
-        process.env.SCALP_QUOTE_COMPATIBILITY_MIN_SAMPLES,
+        envNumber('SCALP_QUOTE_COMPATIBILITY_MIN_SAMPLES', NaN),
       5
     )));
     const quoteCostCompatibility = assessQuoteExecutionCostCompatibility({
@@ -370,22 +371,20 @@ function projectMomentumShadowQuoteQualitySnapshot(server, fileSnapshot = null) 
 function projectMomentumShadowCandidateReadiness(server, fileSnapshot = null) {
   const config = server?.tradingSystem?.config || {};
   const benchmarkDir = config.momentumShadowBenchmarkDir ||
-    process.env.MOMO_SHADOW_BENCHMARK_DIR ||
+    envString('MOMO_SHADOW_BENCHMARK_DIR', null) ||
     path.resolve(PROJECT_ROOT, '.paper-momentum-shadow-btc-gate-v1');
   const ownerDirs = momentumShadowOwnerDirs(config);
   return inspectMomentumShadowCandidate({
     targetDir: config.momentumShadowCandidateDir ||
-      process.env.MOMO_SHADOW_CANDIDATE_DIR ||
+      envString('MOMO_SHADOW_CANDIDATE_DIR', null) ||
       path.resolve(PROJECT_ROOT, '.paper-momentum-shadow-btc-gate-v2'),
     benchmarkDir,
     ownerDirs,
     candidateSlotFile: momentumShadowCandidateSlotFile(config),
     expectedConfig: resolveMomentumShadowCandidateConfig(),
-    requireBenchmarkOpen: process.env.MOMO_SHADOW_REQUIRE_BENCHMARK_OPEN !== 'false',
+    requireBenchmarkOpen: envBool('MOMO_SHADOW_REQUIRE_BENCHMARK_OPEN', true),
     ...momentumShadowQuotePreflightOptions(server),
-    minimumPollMs: Number.isFinite(Number(process.env.MOMO_SHADOW_MIN_POLL_MS))
-      ? Number(process.env.MOMO_SHADOW_MIN_POLL_MS)
-      : 15 * 60 * 1000,
+    minimumPollMs: nonNegativeOrFallback(envNumber('MOMO_SHADOW_MIN_POLL_MS', NaN), 15 * 60 * 1000),
     fileSnapshot
   });
 }
@@ -393,10 +392,10 @@ function projectMomentumShadowCandidateReadiness(server, fileSnapshot = null) {
 function projectMomentumShadowVolatilityReadiness(server, fileSnapshot = null) {
   const config = server?.tradingSystem?.config || {};
   const benchmarkDir = config.momentumShadowBenchmarkDir ||
-    process.env.MOMO_SHADOW_BENCHMARK_DIR ||
+    envString('MOMO_SHADOW_BENCHMARK_DIR', null) ||
     path.resolve(PROJECT_ROOT, '.paper-momentum-shadow-btc-gate-v1');
   const volatilityDir = config.momentumShadowVolatilityDir ||
-    process.env.MOMO_SHADOW_VOLATILITY_DIR ||
+    envString('MOMO_SHADOW_VOLATILITY_DIR', null) ||
     path.resolve(PROJECT_ROOT, '.paper-momentum-shadow-vol-target-v1');
   const ownerDirs = momentumShadowOwnerDirs(config);
   // Variant contracts are sealed against ambient env: only the candidate's
@@ -414,11 +413,9 @@ function projectMomentumShadowVolatilityReadiness(server, fileSnapshot = null) {
     ownerDirs,
     candidateSlotFile: momentumShadowCandidateSlotFile(config),
     expectedConfig,
-    requireBenchmarkOpen: process.env.MOMO_SHADOW_REQUIRE_BENCHMARK_OPEN !== 'false',
+    requireBenchmarkOpen: envBool('MOMO_SHADOW_REQUIRE_BENCHMARK_OPEN', true),
     ...momentumShadowQuotePreflightOptions(server),
-    minimumPollMs: Number.isFinite(Number(process.env.MOMO_SHADOW_MIN_POLL_MS))
-      ? Number(process.env.MOMO_SHADOW_MIN_POLL_MS)
-      : 15 * 60 * 1000,
+    minimumPollMs: nonNegativeOrFallback(envNumber('MOMO_SHADOW_MIN_POLL_MS', NaN), 15 * 60 * 1000),
     fileSnapshot
   });
 }
@@ -426,10 +423,10 @@ function projectMomentumShadowVolatilityReadiness(server, fileSnapshot = null) {
 function projectMomentumShadowNextOpenReadiness(server, fileSnapshot = null) {
   const config = server?.tradingSystem?.config || {};
   const benchmarkDir = config.momentumShadowBenchmarkDir ||
-    process.env.MOMO_SHADOW_BENCHMARK_DIR ||
+    envString('MOMO_SHADOW_BENCHMARK_DIR', null) ||
     path.resolve(PROJECT_ROOT, '.paper-momentum-shadow-btc-gate-v1');
   const nextOpenDir = config.momentumShadowNextOpenDir ||
-    process.env.MOMO_SHADOW_NEXT_OPEN_DIR ||
+    envString('MOMO_SHADOW_NEXT_OPEN_DIR', null) ||
     path.resolve(PROJECT_ROOT, '.paper-momentum-shadow-next-open-v1');
   const ownerDirs = momentumShadowOwnerDirs(config);
   const expectedConfig = resolveMomentumShadowCandidateConfig({
@@ -455,11 +452,9 @@ function projectMomentumShadowNextOpenReadiness(server, fileSnapshot = null) {
     ownerDirs,
     candidateSlotFile: momentumShadowCandidateSlotFile(config),
     expectedConfig,
-    requireBenchmarkOpen: process.env.MOMO_SHADOW_REQUIRE_BENCHMARK_OPEN !== 'false',
+    requireBenchmarkOpen: envBool('MOMO_SHADOW_REQUIRE_BENCHMARK_OPEN', true),
     ...momentumShadowQuotePreflightOptions(server),
-    minimumPollMs: Number.isFinite(Number(process.env.MOMO_SHADOW_MIN_POLL_MS))
-      ? Number(process.env.MOMO_SHADOW_MIN_POLL_MS)
-      : 15 * 60 * 1000,
+    minimumPollMs: nonNegativeOrFallback(envNumber('MOMO_SHADOW_MIN_POLL_MS', NaN), 15 * 60 * 1000),
     fileSnapshot
   });
 }
@@ -473,30 +468,30 @@ function projectMomentumShadowFixedHoldReadiness(server, {
 } = {}, fileSnapshot = null) {
   const config = server?.tradingSystem?.config || {};
   const benchmarkDir = config.momentumShadowBenchmarkDir ||
-    process.env.MOMO_SHADOW_BENCHMARK_DIR ||
+    envString('MOMO_SHADOW_BENCHMARK_DIR', null) ||
     path.resolve(PROJECT_ROOT, '.paper-momentum-shadow-btc-gate-v1');
   const fixedHoldDir = excludeDoge
     ? config.momentumShadowFixedHoldLossCapNoDogeDir ||
-      process.env.MOMO_SHADOW_FIXED_HOLD_LOSS_CAP_NO_DOGE_DIR ||
+      envString('MOMO_SHADOW_FIXED_HOLD_LOSS_CAP_NO_DOGE_DIR', null) ||
       path.resolve(PROJECT_ROOT, '.paper-momentum-shadow-fixed-hold-2d-loss-cap-no-doge-v1')
     : quoteCross
     ? config.momentumShadowFixedHoldQuoteCrossDir ||
-      process.env.MOMO_SHADOW_FIXED_HOLD_QUOTE_CROSS_DIR ||
+      envString('MOMO_SHADOW_FIXED_HOLD_QUOTE_CROSS_DIR', null) ||
       path.resolve(PROJECT_ROOT, '.paper-momentum-shadow-fixed-hold-2d-quote-cross-v1')
     : stopLossPercent > 0
     ? config.momentumShadowFixedHoldLossCapDir ||
-      process.env.MOMO_SHADOW_FIXED_HOLD_LOSS_CAP_DIR ||
+      envString('MOMO_SHADOW_FIXED_HOLD_LOSS_CAP_DIR', null) ||
       path.resolve(PROJECT_ROOT, '.paper-momentum-shadow-fixed-hold-2d-loss-cap-v1')
     : relativeTrendMinPercent !== null
     ? config.momentumShadowFixedHoldRelativeDir ||
-      process.env.MOMO_SHADOW_FIXED_HOLD_RELATIVE_DIR ||
+      envString('MOMO_SHADOW_FIXED_HOLD_RELATIVE_DIR', null) ||
       path.resolve(PROJECT_ROOT, '.paper-momentum-shadow-fixed-hold-2d-relative-v1')
     : spreadGuard
       ? config.momentumShadowFixedHoldSpreadDir ||
-        process.env.MOMO_SHADOW_FIXED_HOLD_SPREAD_DIR ||
+        envString('MOMO_SHADOW_FIXED_HOLD_SPREAD_DIR', null) ||
         path.resolve(PROJECT_ROOT, '.paper-momentum-shadow-fixed-hold-2d-spread-v1')
       : config.momentumShadowFixedHoldDir ||
-        process.env.MOMO_SHADOW_FIXED_HOLD_DIR ||
+        envString('MOMO_SHADOW_FIXED_HOLD_DIR', null) ||
         path.resolve(PROJECT_ROOT, '.paper-momentum-shadow-fixed-hold-2d-v1');
   const ownerDirs = momentumShadowOwnerDirs(config);
   const expectedConfig = resolveMomentumShadowCandidateConfig({
@@ -540,12 +535,10 @@ function projectMomentumShadowFixedHoldReadiness(server, {
     ownerDirs,
     candidateSlotFile: momentumShadowCandidateSlotFile(config),
     expectedConfig,
-    requireBenchmarkOpen: process.env.MOMO_SHADOW_REQUIRE_BENCHMARK_OPEN !== 'false',
+    requireBenchmarkOpen: envBool('MOMO_SHADOW_REQUIRE_BENCHMARK_OPEN', true),
     requireQuoteQuality: spreadGuard || quoteCross,
     ...momentumShadowQuotePreflightOptions(server),
-    minimumPollMs: Number.isFinite(Number(process.env.MOMO_SHADOW_MIN_POLL_MS))
-      ? Number(process.env.MOMO_SHADOW_MIN_POLL_MS)
-      : 15 * 60 * 1000,
+    minimumPollMs: nonNegativeOrFallback(envNumber('MOMO_SHADOW_MIN_POLL_MS', NaN), 15 * 60 * 1000),
     fileSnapshot
   });
 }
@@ -558,7 +551,7 @@ const momentumShadowBookDefinitions = server => {
       label: '진입 후 72시간 유지',
       description: '현재 진입계약 · 72시간 종료',
       directory: config.momentumShadowFixedDir ||
-        process.env.MOMO_SHADOW_FIXED_DIR ||
+        envString('MOMO_SHADOW_FIXED_DIR', null) ||
         path.resolve(PROJECT_ROOT, '.paper-momentum-shadow-v1')
     },
     {
@@ -566,7 +559,7 @@ const momentumShadowBookDefinitions = server => {
       label: '추세 약화 시 청산',
       description: '현재 진입계약 · 추세 off 종료',
       directory: config.momentumShadowRegimeDir ||
-        process.env.MOMO_SHADOW_REGIME_DIR ||
+        envString('MOMO_SHADOW_REGIME_DIR', null) ||
         path.resolve(PROJECT_ROOT, '.paper-momentum-shadow-regime')
     },
     {
@@ -574,7 +567,7 @@ const momentumShadowBookDefinitions = server => {
       label: '비트코인 추세 필터',
       description: 'BTC 7일 추세 gate · benchmark off 청산',
       directory: config.momentumShadowBenchmarkDir ||
-        process.env.MOMO_SHADOW_BENCHMARK_DIR ||
+        envString('MOMO_SHADOW_BENCHMARK_DIR', null) ||
         path.resolve(PROJECT_ROOT, '.paper-momentum-shadow-btc-gate-v1')
     },
     {
@@ -582,7 +575,7 @@ const momentumShadowBookDefinitions = server => {
       label: '변동성에 따라 비중 조절',
       description: '목표 일변동성 1% · 고변동 종목 비중 축소',
       directory: config.momentumShadowVolatilityDir ||
-        process.env.MOMO_SHADOW_VOLATILITY_DIR ||
+        envString('MOMO_SHADOW_VOLATILITY_DIR', null) ||
         path.resolve(PROJECT_ROOT, '.paper-momentum-shadow-vol-target-v1')
     },
     {
@@ -590,7 +583,7 @@ const momentumShadowBookDefinitions = server => {
       label: '거래 비용 반영 · 다음 날 시가 진입',
       description: 'cost 0.3% · 다음 일봉 시작가 체결',
       directory: config.momentumShadowNextOpenDir ||
-        process.env.MOMO_SHADOW_NEXT_OPEN_DIR ||
+        envString('MOMO_SHADOW_NEXT_OPEN_DIR', null) ||
         path.resolve(PROJECT_ROOT, '.paper-momentum-shadow-next-open-v1')
     },
     {
@@ -598,7 +591,7 @@ const momentumShadowBookDefinitions = server => {
       label: '2일 뒤 청산',
       description: 'cost 0.3% · 다음 시가 진입 · 48시간 종료',
       directory: config.momentumShadowFixedHoldDir ||
-        process.env.MOMO_SHADOW_FIXED_HOLD_DIR ||
+        envString('MOMO_SHADOW_FIXED_HOLD_DIR', null) ||
         path.resolve(PROJECT_ROOT, '.paper-momentum-shadow-fixed-hold-2d-v1')
     },
     {
@@ -606,7 +599,7 @@ const momentumShadowBookDefinitions = server => {
       label: '2일 보유 · 종가 기준 손실 제한',
       description: 'cost 0.3% · 다음 시가 진입 · 48시간 종료 · 완료 일봉 종가 손실 상한 4%',
       directory: config.momentumShadowFixedHoldLossCapDir ||
-        process.env.MOMO_SHADOW_FIXED_HOLD_LOSS_CAP_DIR ||
+        envString('MOMO_SHADOW_FIXED_HOLD_LOSS_CAP_DIR', null) ||
         path.resolve(PROJECT_ROOT, '.paper-momentum-shadow-fixed-hold-2d-loss-cap-v1')
     },
     {
@@ -614,7 +607,7 @@ const momentumShadowBookDefinitions = server => {
       label: '2일 보유 · 호가 제한',
       description: 'cost 0.3% · 다음 시가 진입 · 48시간 종료 · spread 0.5% 이하',
       directory: config.momentumShadowFixedHoldSpreadDir ||
-        process.env.MOMO_SHADOW_FIXED_HOLD_SPREAD_DIR ||
+        envString('MOMO_SHADOW_FIXED_HOLD_SPREAD_DIR', null) ||
         path.resolve(PROJECT_ROOT, '.paper-momentum-shadow-fixed-hold-2d-spread-v1')
     },
     {
@@ -622,7 +615,7 @@ const momentumShadowBookDefinitions = server => {
       label: '2일 보유 · 비트코인 대비 강한 추세',
       description: 'cost 0.3% · 다음 시가 진입 · 48시간 종료 · BTC 대비 상대추세 우위',
       directory: config.momentumShadowFixedHoldRelativeDir ||
-        process.env.MOMO_SHADOW_FIXED_HOLD_RELATIVE_DIR ||
+        envString('MOMO_SHADOW_FIXED_HOLD_RELATIVE_DIR', null) ||
         path.resolve(PROJECT_ROOT, '.paper-momentum-shadow-fixed-hold-2d-relative-v1')
     },
     {
@@ -630,7 +623,7 @@ const momentumShadowBookDefinitions = server => {
       label: '2일 보유 · 매수·매도 호가 기준',
       description: 'cost 0.3% · 다음 시가 진입 · 48시간 종료 · best ask 매수 · best bid 매도/평가',
       directory: config.momentumShadowFixedHoldQuoteCrossDir ||
-        process.env.MOMO_SHADOW_FIXED_HOLD_QUOTE_CROSS_DIR ||
+        envString('MOMO_SHADOW_FIXED_HOLD_QUOTE_CROSS_DIR', null) ||
         path.resolve(PROJECT_ROOT, '.paper-momentum-shadow-fixed-hold-2d-quote-cross-v1')
     }
   ];
@@ -722,7 +715,7 @@ function projectMomentumShadowBook(
       ? Math.round((Date.now() - heartbeatMs) / 1000)
       : null;
     const pollMs = Number(ledger.config?.pollMs) ||
-      Number(process.env.MOMO_SHADOW_POLL_MS) ||
+      envNumber('MOMO_SHADOW_POLL_MS', null) ||
       (definition.key === 'benchmark' ? 15 * 60 * 1000 : 5 * 60 * 1000);
     const heartbeatLimitMs = Math.max(600_000, pollMs * 5);
     const live = ownerAlive(ledger.ownerPid);
@@ -780,7 +773,7 @@ function projectMomentumShadowBook(
     const minimumResearchDays = Math.max(
       1,
       Number(server?.tradingSystem?.config?.momentumShadowMinResearchDays) ||
-        Number(process.env.MOMO_SHADOW_MIN_RESEARCH_DAYS) ||
+        envNumber('MOMO_SHADOW_MIN_RESEARCH_DAYS', null) ||
         DEFAULT_MOMENTUM_SHADOW_MIN_RESEARCH_DAYS
     );
     const observationDays = calculateMomentumShadowObservationDays(ledger);
@@ -1190,11 +1183,11 @@ function projectMomentumShadowBook(
 
 function resolveReportFile(server) {
   const configured = server?.tradingSystem?.config?.scalpingVariantReportFile ||
-    process.env.SCALP_VARIANT_REPORT_FILE ||
+    envString('SCALP_VARIANT_REPORT_FILE', null) ||
     server?.tradingSystem?.config?.higherTimeframeMomentumReportFile ||
-    process.env.SCALP_HTF_MOMENTUM_REPORT_FILE ||
-    process.env.SCALP_HTF_MOMENTUM_OUTPUT_FILE ||
-    process.env.DAILY_MOMENTUM_ROBUSTNESS_REPORT_FILE ||
+    envString('SCALP_HTF_MOMENTUM_REPORT_FILE', null) ||
+    envString('SCALP_HTF_MOMENTUM_OUTPUT_FILE', null) ||
+    envString('DAILY_MOMENTUM_ROBUSTNESS_REPORT_FILE', null) ||
     '';
   if (!configured) return null;
   return path.isAbsolute(configured) ? configured : path.resolve(PROJECT_ROOT, configured);
@@ -1226,7 +1219,7 @@ export default function createResearchRoutes(server, {
 
   const getLiveExecutionEvidenceStatus = (fileSnapshot = null) => projectLiveExecutionEvidenceStatus({
     filePath: server?.tradingSystem?.liveExecutionEvidenceFile ||
-      process.env.LIVE_EXECUTION_EVIDENCE_FILE ||
+      envString('LIVE_EXECUTION_EVIDENCE_FILE', null) ||
       '.coinpilot-runtime/live-execution/evidence.jsonl',
     liveMode: server?.tradingSystem?.dryRun === false,
     runtimeWriteError: server?.tradingSystem?.liveExecutionEvidenceWriteError,
@@ -1257,7 +1250,7 @@ export default function createResearchRoutes(server, {
     }
 
     const fileSnapshot = createRequestLocalFileSnapshot();
-    const fallbackInitialBalance = Number(process.env.MOMO_SHADOW_INITIAL_BALANCE) || 100_000_000;
+    const fallbackInitialBalance = envNumber('MOMO_SHADOW_INITIAL_BALANCE', null) || 100_000_000;
     const quoteHistorySource = readMomentumShadowQuoteHistoryRecords(server, fileSnapshot);
     const books = momentumShadowBookDefinitions(server)
       .map(definition => projectMomentumShadowBook(
