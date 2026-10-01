@@ -1048,6 +1048,15 @@ class UpbitAPI {
           const cancelledExecuted = parseFloat(order.executed_volume || 0);
           const cancelledRemaining = parseFloat(order.remaining_volume || 0);
           if (cancelledExecuted > 0 && cancelledRemaining === 0) {
+            // 'cancel' 종결된 시장가 주문은 avg_price가 비어 있다 — 체결 내역
+            // 합산으로 평균가를 복원해 후속 회계가 가능하게 한다.
+            if (order.avg_price === null || order.avg_price === undefined ||
+              !Number.isFinite(Number(order.avg_price))) {
+              const trades = Array.isArray(order.trades) ? order.trades : [];
+              const funds = trades.reduce((sum, trade) => sum + (Number(trade?.funds) || 0), 0);
+              const volume = trades.reduce((sum, trade) => sum + (Number(trade?.volume) || 0), 0);
+              if (volume > 0 && funds > 0) order.avg_price = String(funds / volume);
+            }
             return { filled: true, order };
           }
           if (cancelledExecuted > 0) {

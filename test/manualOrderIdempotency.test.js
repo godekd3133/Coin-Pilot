@@ -1696,8 +1696,11 @@ test('a market-price order ending in cancel with full execution recovers as a te
         state: 'cancel',
         ord_type: 'price',
         executed_volume: '2.47524752',
+        avg_price: null,
         paid_fee: '2.4999999952',
-        locked: '0.0000096048'
+        locked: '0.0000096048',
+        // cancel-종결 시장가 주문은 avg_price를 채우지 않는다 — trades로 유도
+        trades: [{ market: 'KRW-BTC', price: '2020', volume: '2.47524752', funds: '4999.9999904', side: 'bid' }]
       });
       delete acceptedOrder.remaining_volume;
       delete acceptedOrder.done_at;
@@ -1731,7 +1734,7 @@ test('a market-price order ending in cancel with full execution recovers as a te
   assert.equal(recovered.body.recovered, true);
   assert.equal(recovered.body.fill.status, 'filled');
   assert.equal(recovered.body.fill.executedVolume, 2.47524752);
-  assert.equal(recovered.body.fill.averagePrice, 10000);
+  assert.ok(Math.abs(recovered.body.fill.averagePrice - 2020) < 0.01);
   assert.equal(restartedLive.counts.submits, 0);
   assert.equal(restartedLive.counts.strategyMutations, 0);
 });

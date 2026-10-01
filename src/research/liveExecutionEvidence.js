@@ -244,11 +244,20 @@ export function resolveTerminalLiveOrderReadback(order, {
   const executedVolume = hasObservedNumber(order.executed_volume) ? Number(order.executed_volume) : null;
   const remainingVolume = hasObservedNumber(order.remaining_volume) ? Number(order.remaining_volume) : null;
   const averagePrice = hasObservedNumber(order.avg_price) ? Number(order.avg_price) : null;
+  // 'cancel' 상태로 끝난 시장가 주문은 avg_price를 채우지 않는다 — 체결 내역의
+  // funds/volume 합산으로 평균가를 복원한다.
+  const derivedAvgPrice = averagePrice !== null ? averagePrice : (() => {
+    const trades = Array.isArray(order.trades) ? order.trades : [];
+    if (trades.length === 0) return null;
+    const funds = trades.reduce((sum, trade) => sum + (hasObservedNumber(trade.funds) ? Number(trade.funds) : 0), 0);
+    const volume = trades.reduce((sum, trade) => sum + (hasObservedNumber(trade.volume) ? Number(trade.volume) : 0), 0);
+    return volume > 0 && funds > 0 ? funds / volume : null;
+  })();
   const paidFee = hasObservedNumber(order.paid_fee) ? Number(order.paid_fee) : null;
   const compactOrder = compactLiveOrder(order);
 
   if (order.state === 'done' && executedVolume > 0 && remainingVolume === 0 &&
-    averagePrice !== null && averagePrice > 0 && paidFee !== null && paidFee >= 0) {
+    derivedAvgPrice !== null && derivedAvgPrice > 0 && paidFee !== null && paidFee >= 0) {
     return {
       terminal: true,
       outcome: 'filled',
@@ -259,7 +268,7 @@ export function resolveTerminalLiveOrderReadback(order, {
         exchangeState: order.state,
         executedVolume,
         remainingVolume,
-        averagePrice,
+        averagePrice: derivedAvgPrice,
         paidFee,
         error: null
       }
@@ -294,7 +303,7 @@ export function resolveTerminalLiveOrderReadback(order, {
     (orderType === 'price' && remainingVolume === null &&
       lockedResidual !== null && lockedResidual < 1);
   if (order.state === 'cancel' && executedVolume !== null && executedVolume > 0 &&
-    residualSettled && averagePrice !== null && averagePrice > 0 &&
+    residualSettled && derivedAvgPrice !== null && derivedAvgPrice > 0 &&
     paidFee !== null && paidFee >= 0) {
     return {
       terminal: true,
@@ -306,7 +315,7 @@ export function resolveTerminalLiveOrderReadback(order, {
         exchangeState: order.state,
         executedVolume,
         remainingVolume,
-        averagePrice,
+        averagePrice: derivedAvgPrice,
         paidFee,
         error: null
       }
