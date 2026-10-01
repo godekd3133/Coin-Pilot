@@ -132,7 +132,7 @@ export class LiveOrderGateway {
         syncDirectoryForLiveEvidence(directory);
         this._liveEvidenceDirectorySynced = true;
       }
-      if (event.eventType === 'ORDER_INTENT' &&
+      if ((event.eventType === 'ORDER_INTENT' || event.eventType === 'ORDER_REJECTED') &&
         !addLiveOrderIntentEvidence(this.liveOrderIntentEvidenceIndex, event)) {
         this.liveExecutionEvidenceDataError = 'live order intent index update failed after append';
         return false;

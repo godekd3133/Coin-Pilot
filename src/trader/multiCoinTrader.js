@@ -2,6 +2,7 @@ import { PaperValidationJournal, resolveSignalWindowEntryLimit } from './paperVa
 import { VirtualPortfolioStore } from './virtualPortfolioStore.js';
 import { PositionRiskMonitor, inspectTraderMarketQuote } from './positionRiskMonitor.js';
 import { LiveOrderGateway } from './liveOrderGateway.js';
+import { TradingLifecycle } from './tradingLifecycle.js';
 import { createLossCircuitBreakerState } from '../risk/lossCircuitBreaker.js';
 import UpbitAPI from '../api/upbit.js';
 import { isPublicMarketDataSource } from '../api/publicMarketDataSource.js';
@@ -27,9 +28,6 @@ import {
 } from '../risk/analysisDataHealth.js';
 
 import { inspectLiveExecutionEvidenceFile } from '../research/liveExecutionEvidence.js';
-import { assessScalpingValidationReportFreshness } from '../research/scalpingValidationFreshness.js';
-import { LIVE_GATE_COMPARABLE_KEYS } from '../research/scalpingValidationConfig.js';
-import fs from 'fs';
 import path from 'path';
 import os from 'os';
 
@@ -486,6 +484,34 @@ class MultiCoinTrader {
     return this._riskMonitorRef;
   }
 
+  // ── TradingLifecycle 위임 ───────────────────────────────────────
+  _lifecycle() {
+    this._lifecycleRef = this._lifecycleRef || new TradingLifecycle(this);
+    return this._lifecycleRef;
+  }
+
+  get isRunning() { return this._lifecycle().isRunning; }
+  set isRunning(v) { this._lifecycle().isRunning = v; }
+  get _entriesPaused() { return this._lifecycle()._entriesPaused; }
+  set _entriesPaused(v) { this._lifecycle()._entriesPaused = v; }
+  get _gracefulShutdownPromise() { return this._lifecycle()._gracefulShutdownPromise; }
+  set _gracefulShutdownPromise(v) { this._lifecycle()._gracefulShutdownPromise = v; }
+  get stopReason() { return this._lifecycle().stopReason; }
+  set stopReason(v) { this._lifecycle().stopReason = v; }
+  get _stopRequested() { return this._lifecycle()._stopRequested; }
+  set _stopRequested(v) { this._lifecycle()._stopRequested = v; }
+  get _startPromise() { return this._lifecycle()._startPromise; }
+  set _startPromise(v) { this._lifecycle()._startPromise = v; }
+  get _orderInProgress() { return this._lifecycle()._orderInProgress; }
+  set _orderInProgress(v) { this._lifecycle()._orderInProgress = v; }
+  get liveManualPrepared() { return this._lifecycle().liveManualPrepared; }
+  set liveManualPrepared(v) { this._lifecycle().liveManualPrepared = v; }
+  get _manualRiskProtection() { return this._lifecycle()._manualRiskProtection; }
+  set _manualRiskProtection(v) { this._lifecycle()._manualRiskProtection = v; }
+  get _deferredProtectiveExitIntents() { return this._lifecycle()._deferredProtectiveExitIntents; }
+  set _deferredProtectiveExitIntents(v) { this._lifecycle()._deferredProtectiveExitIntents = v; }
+  get _startupSafetyHold() { return this._lifecycle()._startupSafetyHold; }
+  set _startupSafetyHold(v) { this._lifecycle()._startupSafetyHold = v; }
   // ── LiveOrderGateway 위임 ───────────────────────────────────────
   _liveGateway() {
     this._liveGw = this._liveGw || new LiveOrderGateway(this);
@@ -634,97 +660,11 @@ class MultiCoinTrader {
     return this.strategies.get(coin);
   }
 
-  getLiveManagedMarkets() {
-    return [...new Set([
-      ...this.targetCoins,
-      ...(this._liveOrderStateUnknownMarkets?.values?.() || []),
-      ...(this._livePendingOrderMarkets?.values?.() || []),
-      ...(this._manualOrderReconciliationMarkets?.values?.() || []),
-      ...[...this.strategies.entries()]
-        .filter(([, strategy]) => strategy?.currentPosition)
-        .map(([market]) => market),
-      ...(this._liveRecoveredManagedMarkets?.values?.() || [])
-    ])];
-  }
+  getLiveManagedMarkets(...args) { return this._lifecycle().getLiveManagedMarkets(...args); }
 
-  /**
-   * 대시보드 /api/config/update 경유 런타임 대상 마켓·포지션 상한 갱신.
-   * targetCoins: KRW-* 코드 배열 또는 'ALL'(스캘핑에서는 유동성 상위 N개로 해석).
-   * LIVE 모드에서는 새 관리 마켓이 다시 미검증 상태로 표시되어 sync gate가
-   * 재적용된다.
-   */
-  async applyRuntimeMarketUniverse({ targetCoins, scalpMaxMarkets, maxPositions } = {}) {
-    if (scalpMaxMarkets !== undefined) {
-      const value = Number(scalpMaxMarkets);
-      if (!Number.isInteger(value) || value < 1 || value > 500) {
-        throw new Error('scalpMaxMarkets must be an integer from 1 to 500');
-      }
-      this.config.maxScalpMarkets = value;
-    }
-    if (maxPositions !== undefined) {
-      const value = Number(maxPositions);
-      if (!Number.isInteger(value) || value < 1 || value > 50) {
-        throw new Error('maxPositions must be an integer from 1 to 50');
-      }
-      this.maxPositions = value;
-      this.config.maxPositions = value;
-    }
-    if (targetCoins !== undefined && targetCoins !== null) {
-      let resolved;
-      if (typeof targetCoins === 'string' && targetCoins.trim().toUpperCase() === 'ALL') {
-        resolved = await this.resolveAllKrwMarketUniverse();
-      } else if (Array.isArray(targetCoins)) {
-        const seen = new Set();
-        resolved = [];
-        for (const entry of targetCoins) {
-          const code = String(entry || '').trim().toUpperCase();
-          if (!/^KRW-[A-Z0-9]{2,15}$/.test(code) || seen.has(code)) continue;
-          seen.add(code);
-          resolved.push(code);
-        }
-        if (resolved.length === 0) {
-          throw new Error('targetCoins must contain at least one valid KRW-* market');
-        }
-      } else {
-        throw new Error('targetCoins must be an array of KRW-* codes or "ALL"');
-      }
-      this.targetCoins = resolved;
-      this.config.targetCoins = [...resolved];
-      if (resolved.length <= 20) {
-        for (const coin of resolved) this.getStrategy(coin);
-      }
-      if (!this.dryRun) {
-        this._liveOrderStateUnknownMarkets = new Set(this.getLiveManagedMarkets());
-      }
-    }
-    return {
-      targetCoins: [...this.targetCoins],
-      scalpMaxMarkets: this.config.maxScalpMarkets ?? null,
-      maxPositions: this.maxPositions
-    };
-  }
+  applyRuntimeMarketUniverse(...args) { return this._lifecycle().applyRuntimeMarketUniverse(...args); }
 
-  async resolveAllKrwMarketUniverse() {
-    const markets = await this.marketDataAdapter.getMarkets();
-    const krwMarkets = (Array.isArray(markets) ? markets : [])
-      .map(entry => entry?.market)
-      .filter(market => typeof market === 'string' && market.startsWith('KRW-'));
-    if (krwMarkets.length === 0) {
-      throw new Error('KRW 마켓 목록을 불러오지 못했습니다.');
-    }
-    if (!this.isScalpingMode) return krwMarkets;
-    const tickers = await this.marketDataAdapter.getTickers(krwMarkets);
-    const limit = Math.max(1, Math.floor(Number(this.config.maxScalpMarkets)) || 20);
-    const ranked = [...(Array.isArray(tickers) ? tickers : [])]
-      .filter(ticker => Number.isFinite(Number(ticker?.acc_trade_price_24h)))
-      .sort((a, b) => Number(b.acc_trade_price_24h) - Number(a.acc_trade_price_24h))
-      .slice(0, limit)
-      .map(ticker => ticker.market);
-    if (ranked.length === 0) {
-      throw new Error('유동성 상위 스캘핑 마켓을 찾지 못했습니다.');
-    }
-    return ranked;
-  }
+  resolveAllKrwMarketUniverse(...args) { return this._lifecycle().resolveAllKrwMarketUniverse(...args); }
 
   ensureLiveOrderMarketStateVerified(...args) { return this._liveGateway().ensureLiveOrderMarketStateVerified(...args); }
 
@@ -1178,309 +1118,17 @@ class MultiCoinTrader {
       typeof this.upbit?.secretKey === 'string' && this.upbit.secretKey.trim().length > 0;
   }
 
-  configureUpbitCredentials({ accessKey, secretKey } = {}) {
-    const nextAccessKey = typeof accessKey === 'string' ? accessKey.trim() : '';
-    const nextSecretKey = typeof secretKey === 'string' ? secretKey.trim() : '';
-    if (!nextAccessKey || !nextSecretKey) throw new Error('Upbit Access Key와 Secret Key를 모두 입력하세요.');
-    if (this.dryRun) throw new Error('모의투자 서버에는 실계정 키를 등록할 수 없습니다.');
-    if (this.isRunning || this._orderInProgress || this._riskCheckInProgress || this._gracefulShutdownPromise) {
-      throw new Error('실행 중이거나 주문을 확인 중일 때는 거래소 키를 바꿀 수 없습니다.');
-    }
-    if (this.liveCredentialsConfigured) {
-      throw new Error('이미 LIVE 키가 설정되어 있어 이 경로로 키를 교체할 수 없습니다.');
-    }
-    const onlyStartupMarketsAreUnverified =
-      this._liveAccountStateKnown !== true &&
-      this._liveExchangeStateKnown !== true &&
-      (this._livePendingOrderMarkets?.size || 0) === 0 &&
-      (this._liveEvidenceBlockedMarkets?.size || 0) === 0 &&
-      (this._liveUnresolvedOrderIds?.size || 0) === 0 &&
-      (this._liveUnresolvedOrderIntents?.size || 0) === 0;
-    if (this.getCurrentPositionCount() > 0 ||
-        (this.hasUnresolvedLiveOrderState() && !onlyStartupMarketsAreUnverified)) {
-      throw new Error('보유 자산이나 확인이 끝나지 않은 주문이 있어 거래소 키를 바꿀 수 없습니다.');
-    }
+  configureUpbitCredentials(...args) { return this._lifecycle().configureUpbitCredentials(...args); }
 
-    this.config.accessKey = nextAccessKey;
-    this.config.secretKey = nextSecretKey;
-    this.upbit.accessKey = nextAccessKey;
-    this.upbit.secretKey = nextSecretKey;
-    if (this.riskUpbit instanceof UpbitAPI) {
-      this.riskUpbit.accessKey = nextAccessKey;
-      this.riskUpbit.secretKey = nextSecretKey;
-    }
-    this._liveAccountStateKnown = false;
-    this._liveExchangeStateKnown = false;
-    this._liveVerifiedOrderMarkets.clear();
-    this._liveOrderStateUnknownMarkets = new Set(this.getLiveManagedMarkets());
-    this._livePendingOrderMarkets.clear();
-    this._lastSyncTime = 0;
-    this.stopReason = 'exchange_state_unverified';
-    this._entriesPaused = true;
-    this._manualRiskProtection = false;
-    this.stopPositionRiskMonitor();
-    this.liveManualPrepared = false;
-    return { configured: true };
-  }
+  prepareManualLiveSession(...args) { return this._lifecycle().prepareManualLiveSession(...args); }
 
-  /**
-   * Read-only LIVE account/order reconciliation for a dashboard that starts
-   * without the automatic trading loop. Existing exchange orders are left in
-   * place and keep their markets locked until they settle or are handled by
-   * the user.
-   */
-  async prepareManualLiveSession() {
-    if (this.dryRun) throw new Error('Manual LIVE preparation requires a LIVE server.');
-    if (!this.liveManualPrepareOnBoot) throw new Error('Manual LIVE mode is not enabled for this server.');
-    if (!this.liveCredentialsConfigured) throw new Error('Upbit credentials have not been registered.');
-    if (this.isRunning || this._orderInProgress || this._riskCheckInProgress || this._gracefulShutdownPromise) {
-      throw new Error('The LIVE trader is busy and cannot enter manual-only mode.');
-    }
+  start(...args) { return this._lifecycle().start(...args); }
 
-    this._stopRequested = false;
-    this._entriesPaused = true;
-    this._startupReconciliationPending = true;
-    this._riskMonitorProtectiveOnly = false;
-    this._riskMonitorExitInProgress = false;
-    this._manualRiskProtection = false;
-    this.stopReason = 'exchange_state_unverified';
-    const synchronized = await this.syncWithExchange({ cancelStaleEngineOrders: false });
-    if (synchronized !== true || this._liveExchangeStateKnown !== true || this._liveAccountStateKnown !== true) {
-      this._startupReconciliationPending = false;
-      this._entriesPaused = true;
-      this.isRunning = false;
-      this.stopReason = 'exchange_state_unverified';
-      this.liveManualPrepared = false;
-      return { ready: false, reason: 'exchange_state_unverified' };
-    }
+  performStart(...args) { return this._lifecycle().performStart(...args); }
 
-    this._startupReconciliationPending = false;
-    this._entriesPaused = true;
-    this.isRunning = false;
-    this.stopReason = 'operator_stop';
-    this._manualRiskProtection = this.liveManualRiskProtectionEnabled === true &&
-      this.positionRiskCheckIntervalMs > 0;
-    if (this._manualRiskProtection) {
-      this.startPositionRiskMonitor();
-      console.log('\n🛡️  수동 LIVE 보호 감시를 시작합니다 - 보유 포지션의 손절·익절·최대보유시간을 감시합니다.');
-    } else if (this.liveManualRiskProtectionEnabled) {
-      console.warn('\n⚠️  수동 LIVE 보호 감시가 요청됐지만 리스크 감시 간격이 0이라 보호를 시작할 수 없습니다.');
-    }
-    this.liveManualPrepared = true;
-    return {
-      ready: true,
-      exchangeStateKnown: true,
-      pendingOrderMarkets: [...this._livePendingOrderMarkets],
-      manualRiskProtection: this._manualRiskProtection
-    };
-  }
+  assertLiveValidationGate(...args) { return this._lifecycle().assertLiveValidationGate(...args); }
 
-  start() {
-    if (this._startPromise) return this._startPromise;
-    const startPromise = this.performStart();
-    this._startPromise = startPromise;
-    startPromise.then(
-      () => { if (this._startPromise === startPromise) this._startPromise = null; },
-      () => { if (this._startPromise === startPromise) this._startPromise = null; }
-    );
-    return startPromise;
-  }
-
-  async performStart() {
-    if (this._riskMonitorProtectiveOnly) {
-      throw new Error('보호 전용 상태에서는 자동매매를 다시 시작할 수 없습니다. 열린 LIVE 포지션이 모두 정리된 뒤 새 trader 인스턴스로 시작하세요.');
-    }
-    this.assertLiveValidationGate();
-    this._stopRequested = false;
-    this._startupSafetyHold = false;
-    this._startupReconciliationPending = !this.dryRun;
-    this._entriesPaused = this._startupReconciliationPending;
-    this._riskMonitorProtectiveOnly = false;
-    this._riskMonitorExitInProgress = false;
-    this._manualRiskProtection = false;
-    this.stopReason = this._startupReconciliationPending ? 'exchange_state_unverified' : null;
-    console.log(`\n🚀 ${this.isScalpingMode ? '과매도 반응 스캘핑' : '다중 코인'} 자동매매 시스템 시작`);
-    console.log(`모드: ${this.dryRun ? '모의투자' : '실전투자'}`);
-
-    console.log(`분석 대상: ${this.targetCoins.length}개 코인`);
-
-    console.log(`포지션 제한: ${this.maxPositions}개`);
-
-    // 투자 비율 표시
-    console.log(`투자 비율: 총자산의 ${(this.investmentRatio * 100).toFixed(1)}% (최소 ${this.MIN_ORDER_AMOUNT.toLocaleString()}원)`);
-
-    // 실전 모드: 초기 시드머니 자동 기록 (최초 1회)
-    if (!this.dryRun && this.initialSeedMoney === 0) {
-      await this.saveInitialSeedMoney();
-    }
-
-    // 초기 시드머니 표시
-    if (this.initialSeedMoney > 0) {
-      console.log(`초기 시드머니: ${this.initialSeedMoney.toLocaleString()}원`);
-    }
-
-    console.log('─'.repeat(80));
-
-    if (this._startupReconciliationPending) {
-      while (!this._liveExchangeStateKnown && !this._stopRequested) {
-        while (this._orderInProgress || this._riskCheckInProgress) {
-          await new Promise(resolve => setTimeout(resolve, 25));
-        }
-        const synchronized = await this.syncWithExchange();
-        if (synchronized) {
-          this._lastSyncTime = Date.now();
-          break;
-        }
-        if (this._liveAccountStateKnown && this.getCurrentPositionCount() > 0) {
-          this._startupSafetyHold = true;
-          this.pauseForSafetyIncident('exchange_state_unverified');
-        }
-        if (!this._stopRequested) await this.sleep(this.exchangeSyncRetryMs);
-      }
-
-      if (this._stopRequested || this._riskMonitorProtectiveOnly || this._startupSafetyHold) return;
-      if (!this._liveExchangeStateKnown) return;
-      this._startupReconciliationPending = false;
-      this._entriesPaused = false;
-      this.stopReason = null;
-    }
-
-    this.isRunning = true;
-    this.startPositionRiskMonitor();
-    this.startAnalysisDataWatchdog();
-    if (!this.dryRun && this.getCurrentPositionCount() > 0) {
-      await this.monitorOpenPositions();
-    }
-
-    // 스캘핑은 뉴스 수집 지연과 장기 감성을 매수 조건에서 제외한다.
-    if (this.useNews) {
-      await this.updateNews();
-    } else {
-      this.newsData = null;
-      console.log('🧭 스캘핑 모드: 뉴스 분석 없이 가격 반등만 감시합니다.');
-    }
-
-    // 주기적 실행
-    while (this.isRunning) {
-      try {
-        await this.executeTradingCycle();
-        await this.recordPaperValidationSnapshot('trading_cycle');
-        await this.sleep(this.config.checkInterval || 60000);
-      } catch (error) {
-        console.error('\n❌ 매매 사이클 오류:', error.message);
-        await this.sleep(10000);
-      }
-    }
-  }
-
-  /**
-   * 스캘핑 실전 주문은 읽기 전용 워크포워드 검증이 전체 마켓에서
-   * 통과하기 전까지 시작하지 않는다. DRY_RUN에는 적용하지 않는다.
-   */
-  assertLiveValidationGate() {
-    if (this.dryRun) return;
-    if (this.positionRiskCheckIntervalMs <= 0) {
-      throw new Error('실전 매매 차단: 포지션 위험 감시를 비활성화할 수 없습니다. SCALP_RISK_CHECK_INTERVAL_MS를 0보다 크게 설정하세요.');
-    }
-    if (this.maxRiskDataGapSeconds <= 0) {
-      throw new Error('실전 매매 차단: 리스크 데이터 공백 감지를 비활성화할 수 없습니다. SCALP_MAX_RISK_DATA_GAP_SECONDS를 0보다 크게 설정하세요.');
-    }
-    if (!this.isScalpingMode) return;
-    if (this.config.requireValidationPassForLive === false) {
-      throw Object.assign(
-        new Error('실전 스캘핑 차단: 실전 검증 게이트를 비활성화할 수 없습니다. SCALP_REQUIRE_VALIDATION_PASS=true로 설정하고 최신 fixed_config 검증을 통과하세요.'),
-        { code: 'live_validation_bypass_not_supported' }
-      );
-    }
-
-    const reportFile = this.config.scalpingValidationOutputFile ||
-      process.env.SCALP_VALIDATION_OUTPUT_FILE ||
-      'scalping_validation.json';
-    if (!fs.existsSync(reportFile)) {
-      throw new Error(`실전 스캘핑 차단: ${path.basename(reportFile)} 검증 리포트가 없습니다. 먼저 npm run validate:scalping을 실행하세요.`);
-    }
-
-    let report;
-    try {
-      report = JSON.parse(fs.readFileSync(reportFile, 'utf8'));
-    } catch (error) {
-      throw new Error(`실전 스캘핑 차단: 검증 리포트를 읽을 수 없습니다 (${error.message})`, { cause: error });
-    }
-
-    this.validatePromotionReport(report);
-  }
-
-  validatePromotionReport(report, { now = Date.now(), maxAgeSeconds } = {}) {
-    if (!report || report.validationMode !== 'fixed_config') {
-      throw new Error('실전 스캘핑 차단: 현재 runtime 설정을 고정 검증한 fixed_config 리포트가 필요합니다. tuned 리포트는 live 승격에 사용할 수 없습니다.');
-    }
-    if (report.strategyMode !== this.strategyMode) {
-      throw new Error(`실전 스캘핑 차단: validation report 전략 모드가 다릅니다 (${report.strategyMode || 'unknown'}).`);
-    }
-    if (!Array.isArray(report.markets) || report.markets.length === 0) {
-      throw new Error('실전 스캘핑 차단: 검증 대상 market 목록이 비어 있습니다.');
-    }
-
-    const currentSnapshot = this.getPaperValidationConfigSnapshot();
-    const comparableKeys = LIVE_GATE_COMPARABLE_KEYS;
-    const reportConfig = report.config || {};
-    const backwardCompatibleReportDefaults = {
-      maxRiskDataGapSeconds: 30,
-      maxAnalysisDataGapSeconds: this.isScalpingMode ? 60 : 0
-    };
-    const missingKeys = comparableKeys.filter(key =>
-      reportConfig[key] === undefined &&
-      !Object.prototype.hasOwnProperty.call(backwardCompatibleReportDefaults, key)
-    );
-    if (missingKeys.length > 0) {
-      throw new Error(`실전 스캘핑 차단: fixed validation report 설정이 불완전합니다 (${missingKeys.join(', ')}).`);
-    }
-    const configDrift = comparableKeys
-      .filter(key => {
-        const reportValue = reportConfig[key] === undefined &&
-          Object.prototype.hasOwnProperty.call(backwardCompatibleReportDefaults, key)
-          ? backwardCompatibleReportDefaults[key]
-          : reportConfig[key];
-        return JSON.stringify(reportValue) !== JSON.stringify(currentSnapshot[key]);
-      });
-    if (configDrift.length > 0) {
-      throw new Error(`실전 스캘핑 차단: validation report와 현재 runtime 설정이 다릅니다 (${configDrift.join(', ')}). fixed validation을 다시 실행하세요.`);
-    }
-
-    const confidenceSummary = report.statisticalConfidence;
-    const confidenceRowsComplete = Array.isArray(report.results) &&
-      report.results.length === report.markets.length &&
-      report.results.every(result => {
-        const gate = result.validation?.gate?.statisticalConfidence;
-        return gate?.required === true &&
-          gate.training?.passed === true &&
-          gate.validation?.passed === true;
-      });
-    if (confidenceSummary?.required !== true ||
-      confidenceSummary?.method !== 'one_sided_t_mean' ||
-      confidenceSummary?.passed !== true ||
-      !confidenceRowsComplete) {
-      throw new Error('실전 스캘핑 차단: 95% 거래수익 신뢰도 게이트가 없거나 통과하지 않았습니다. 최신 fixed validation을 다시 실행하세요.');
-    }
-
-    if (report.promoted !== true) {
-      const promoted = Array.isArray(report.promotedMarkets) ? report.promotedMarkets.length : 0;
-      const total = Array.isArray(report.markets) ? report.markets.length : 0;
-      throw new Error(`실전 스캘핑 차단: 전체 워크포워드 게이트 미통과 (${promoted}/${total}). DRY_RUN=true로 계속 검증하세요.`);
-    }
-
-    const freshness = assessScalpingValidationReportFreshness(report.generatedAt, {
-      now,
-      ...(maxAgeSeconds === undefined ? {} : { maxAgeSeconds })
-    });
-    if (!freshness.fresh) {
-      const error = new Error(
-        `실전 스캘핑 차단: 검증 리포트가 오래되었거나 작성 시각을 확인할 수 없습니다 (${freshness.reason}). 최신 fixed validation을 다시 실행하세요.`
-      );
-      error.code = 'report_not_current';
-      throw error;
-    }
-  }
+  validatePromotionReport(...args) { return this._lifecycle().validatePromotionReport(...args); }
 
   syncRiskMonitorState(...args) { return this._riskMonitor().syncRiskMonitorState(...args); }
 
@@ -1510,126 +1158,19 @@ class MultiCoinTrader {
 
   recordPaperIncompleteAnalysisTelemetry(...args) { return this._paperJournal().recordPaperIncompleteAnalysisTelemetry(...args); }
 
-  stop(reason = null) {
-    console.log('\n⏹️  다중 코인 자동매매 시스템 중지');
-    if (reason) this.stopReason = reason;
-    this._stopRequested = true;
-    this._entriesPaused = true;
-    this._riskMonitorProtectiveOnly = false;
-    this._manualRiskProtection = false;
-    this._riskMonitorExitInProgress = false;
-    this.isRunning = false;
-    this.stopPositionRiskMonitor();
-    this.stopAnalysisDataWatchdog();
-  }
+  stop(...args) { return this._lifecycle().stop(...args); }
 
-  pauseForSafetyIncident(reason) {
-    const hasLivePosition = !this.dryRun && this.getCurrentPositionCount() > 0;
-    if (!hasLivePosition || this.positionRiskCheckIntervalMs <= 0) {
-      this.stop(reason);
-      return false;
-    }
+  pauseForSafetyIncident(...args) { return this._lifecycle().pauseForSafetyIncident(...args); }
 
-    if (this._riskMonitorProtectiveOnly) return true;
-    console.error(
-      `\n🛡️  ${reason} - 분석과 신규 진입을 멈추고 기존 LIVE 포지션의 위험 감시를 유지합니다.`
-    );
-    this.stopReason = reason;
-    this.isRunning = false;
-    this._stopRequested = false;
-    this._entriesPaused = true;
-    this._riskMonitorProtectiveOnly = true;
-    this.stopAnalysisDataWatchdog();
-    this.startPositionRiskMonitor();
-    return true;
-  }
+  requestGracefulShutdown(...args) { return this._lifecycle().requestGracefulShutdown(...args); }
 
-  requestGracefulShutdown(reason = 'operator_shutdown') {
-    if (this._gracefulShutdownPromise) return this._gracefulShutdownPromise;
-    const shutdownPromise = this.performGracefulShutdown(reason);
-    this._gracefulShutdownPromise = shutdownPromise;
-    shutdownPromise.then(
-      () => { if (this._gracefulShutdownPromise === shutdownPromise) this._gracefulShutdownPromise = null; },
-      () => { if (this._gracefulShutdownPromise === shutdownPromise) this._gracefulShutdownPromise = null; }
-    );
-    return shutdownPromise;
-  }
+  performGracefulShutdown(...args) { return this._lifecycle().performGracefulShutdown(...args); }
 
-  async performGracefulShutdown(reason = 'operator_shutdown') {
-    this._stopRequested = true;
-    this._entriesPaused = true;
-    this.isRunning = false;
-    this.stopAnalysisDataWatchdog();
+  waitForProtectiveDrain(...args) { return this._lifecycle().waitForProtectiveDrain(...args); }
 
-    // Let an already-submitted order finish and reconcile before deciding
-    // whether the process is flat. No new order can enter while we wait.
-    while (this._orderInProgress || this._riskCheckInProgress) {
-      await new Promise(resolve => setTimeout(resolve, 25));
-    }
+  finishProtectiveMonitoringWhenFlat(...args) { return this._lifecycle().finishProtectiveMonitoringWhenFlat(...args); }
 
-    if (!this.dryRun && this.getCurrentPositionCount() > 0 && !this._riskMonitorProtectiveOnly) {
-      this.pauseForSafetyIncident(reason);
-    }
-
-    if (!this.dryRun) {
-      // A local strategy map can be empty or stale after a restart, lost order
-      // response, or partial fill. Do not decide that LIVE is flat until both
-      // account balances and target-market open orders have been reconciled.
-      while (true) {
-        const synchronized = await this.syncWithExchange();
-        if (synchronized === true && !this.hasUnresolvedLiveOrderState()) {
-          this._lastSyncTime = Date.now();
-          break;
-        }
-        console.error(synchronized === true
-          ? '🛑 미해결 LIVE 주문 상태가 남아 있어 종료를 보류하고 재조회합니다.'
-          : '🛑 LIVE 거래소 상태를 확인할 수 없어 종료를 보류하고 재조회합니다.');
-        await this.sleep(this.exchangeSyncRetryMs);
-      }
-    }
-
-    if (!this.dryRun && this.getCurrentPositionCount() > 0) {
-      if (this.positionRiskCheckIntervalMs <= 0) {
-        throw new Error('LIVE 포지션이 남아 있지만 리스크 모니터가 비활성화되어 안전하게 종료할 수 없습니다.');
-      }
-      return this.pauseForSafetyIncident(reason);
-    }
-    this.stop(reason);
-    return false;
-  }
-
-  async waitForProtectiveDrain() {
-    while (this._riskMonitorProtectiveOnly) {
-      await new Promise(resolve => setTimeout(resolve, 250));
-    }
-    return this.getCurrentPositionCount() === 0;
-  }
-
-  finishProtectiveMonitoringWhenFlat() {
-    if (!this._riskMonitorProtectiveOnly || this.getCurrentPositionCount() > 0) return false;
-    this._riskMonitorProtectiveOnly = false;
-    if (this._manualRiskProtection) {
-      console.log('\n✅ 감시 중이던 LIVE 포지션이 모두 닫혔습니다. 수동 보호 감시는 유지되며 신규 진입은 재개하지 않습니다.');
-      return true;
-    }
-    this.stopPositionRiskMonitor();
-    console.log('\n✅ 감시 중이던 LIVE 포지션이 모두 닫혀 위험 감시가 idle 상태가 됐습니다. 신규 진입은 재개하지 않습니다.');
-    return true;
-  }
-
-  getRuntimeSafetyStatus() {
-    return {
-      runtimeState: this._riskMonitorProtectiveOnly
-        ? 'PROTECTIVE_ONLY'
-        : !this.dryRun && !this._liveExchangeStateKnown ? 'SYNC_REQUIRED'
-        : this.isRunning ? 'RUNNING' : 'STOPPED',
-      entriesPaused: this._entriesPaused || this._stopRequested || (!this.dryRun && !this._liveExchangeStateKnown),
-      manualProtectionActive: this._manualRiskProtection === true && this.positionRiskTimer !== null,
-      protectiveMonitorActive: this._riskMonitorProtectiveOnly && this.positionRiskTimer !== null,
-      stopReason: this.stopReason || (!this.dryRun && !this._liveExchangeStateKnown ? 'exchange_state_unverified' : null),
-      exchangeStateKnown: this.dryRun ? null : this._liveExchangeStateKnown
-    };
-  }
+  getRuntimeSafetyStatus(...args) { return this._lifecycle().getRuntimeSafetyStatus(...args); }
 
   startAnalysisDataWatchdog(...args) { return this._riskMonitor().startAnalysisDataWatchdog(...args); }
 
