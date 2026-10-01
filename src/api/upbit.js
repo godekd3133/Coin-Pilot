@@ -1037,8 +1037,21 @@ class UpbitAPI {
 
         // 주문 상태 확인
         // done: 완료, cancel: 취소, wait: 체결 대기
+        const fillAveragePriceFromTrades = target => {
+          if (target && (target.avg_price === null || target.avg_price === undefined ||
+            !Number.isFinite(Number(target.avg_price)))) {
+            const trades = Array.isArray(target.trades) ? target.trades : [];
+            const funds = trades.reduce((sum, trade) => sum + (Number(trade?.funds) || 0), 0);
+            const volume = trades.reduce((sum, trade) => sum + (Number(trade?.volume) || 0), 0);
+            // 업비트는 'cancel' 종결된 주문은 물론 market 매도가 'done'으로
+            // 끝날 때도 avg_price를 비워 둔다 — 체결 내역 합산으로 복원한다.
+            if (volume > 0 && funds > 0) target.avg_price = String(funds / volume);
+          }
+          return target;
+        };
+
         if (order.state === 'done') {
-          return { filled: true, order };
+          return { filled: true, order: fillAveragePriceFromTrades(order) };
         }
 
         if (order.state === 'cancel') {
@@ -1048,16 +1061,7 @@ class UpbitAPI {
           const cancelledExecuted = parseFloat(order.executed_volume || 0);
           const cancelledRemaining = parseFloat(order.remaining_volume || 0);
           if (cancelledExecuted > 0 && cancelledRemaining === 0) {
-            // 'cancel' 종결된 시장가 주문은 avg_price가 비어 있다 — 체결 내역
-            // 합산으로 평균가를 복원해 후속 회계가 가능하게 한다.
-            if (order.avg_price === null || order.avg_price === undefined ||
-              !Number.isFinite(Number(order.avg_price))) {
-              const trades = Array.isArray(order.trades) ? order.trades : [];
-              const funds = trades.reduce((sum, trade) => sum + (Number(trade?.funds) || 0), 0);
-              const volume = trades.reduce((sum, trade) => sum + (Number(trade?.volume) || 0), 0);
-              if (volume > 0 && funds > 0) order.avg_price = String(funds / volume);
-            }
-            return { filled: true, order };
+            return { filled: true, order: fillAveragePriceFromTrades(order) };
           }
           if (cancelledExecuted > 0) {
             return { filled: false, partial: true, order, error: '부분 체결 후 취소됨' };
@@ -1070,7 +1074,7 @@ class UpbitAPI {
         const remainingVolume = parseFloat(order.remaining_volume || 0);
 
         if (executedVolume > 0 && remainingVolume === 0) {
-          return { filled: true, order };
+          return { filled: true, order: fillAveragePriceFromTrades(order) };
         }
 
         // 아직 체결 대기 중 - 대기
