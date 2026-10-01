@@ -5,7 +5,9 @@ import {
   calculateScalpingVolatilityPositionScale,
   resolveScalpingVolatilitySizing
 } from '../src/research/scalpingVolatility.js';
-import { simulateScalping } from '../src/backtest/scalpingBacktest.js';
+import {
+  simulateScalping
+} from '../src/backtest/scalpingBacktest.js';;
 
 function candle(index, close, open = close, high = close, low = close) {
   return {

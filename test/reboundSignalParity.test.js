@@ -7,7 +7,9 @@ import {
   computeReboundPoint,
   decideReboundSignal
 } from '../src/analysis/reboundSignal.js';
-import { createScalpingFeatureCache } from '../src/backtest/scalpingBacktest.js';
+import {
+  createScalpingFeatureCache
+} from '../src/backtest/scalpingBacktest.js';;
 
 // 라이브/백테스트 공용 설정 — 기본값이 의도적으로 다르므로(예: minVolumeRatio
 // 0.8 vs 1.0) 비교는 명시 설정으로만 수행한다.

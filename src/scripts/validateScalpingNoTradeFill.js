@@ -1,9 +1,11 @@
 import dotenv from 'dotenv';
 import fs from 'node:fs';
 import {
-  DEFAULT_CONFIG,
-  walkForwardValidate
+  DEFAULT_CONFIG
 } from '../backtest/scalpingBacktest.js';
+import {
+  walkForwardValidate
+} from '../backtest/scalpingTuning.js';;
 import { resolveMaxCandleAgeSeconds } from '../risk/candleFreshness.js';
 import { fillNoTradeCandleGaps } from '../research/historicalCandleSeries.js';
 import {

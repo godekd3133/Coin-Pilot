@@ -14,7 +14,7 @@ import path from 'path';
 import {
   calculateTradeReturnConfidence,
   evaluateStatisticalConfidenceGate
-} from '../backtest/scalpingBacktest.js';
+} from '../backtest/tradeConfidence.js';;
 import {
   MARKET_QUALITY_DEFAULTS,
   selectFreshMarketCohort

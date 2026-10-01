@@ -1,9 +1,11 @@
 import {
   analyzeHistoricalCandleContinuity,
-  calculateTradeReturnConfidence,
   historicalTimestampForCandle,
   normalizeHistoricalCandles
-} from '../backtest/scalpingBacktest.js';
+} from '../backtest/historicalCandleIntegrity.js';
+import {
+  calculateTradeReturnConfidence
+} from '../backtest/tradeConfidence.js';;
 
 /**
  * Research-only higher-timeframe momentum contract.

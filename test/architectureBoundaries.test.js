@@ -46,7 +46,7 @@ const OWNER_DELEGATED_MODULES = [
 
 function declaredMethods(source) {
   return new Set(
-    [...source.matchAll(/^  (?:async )?([a-zA-Z_]\w*)\s*\(/gm)].map(m => m[1])
+    [...source.matchAll(/^ {2}(?:async )?([a-zA-Z_]\w*)\s*\(/gm)].map(m => m[1])
   );
 }
 
@@ -80,7 +80,7 @@ test('MultiCoinTrader는 추출된 모듈의 위임과 지연 팩토리를 제�
   for (const factory of expectedFactories) {
     assert.match(
       source,
-      new RegExp(`${factory}\\(\\) \\{`),
+      new RegExp(`${factory}\\(\\)\\s*\\{`),
       `missing lazy factory ${factory}() on MultiCoinTrader`
     );
   }

@@ -2,7 +2,9 @@ import dotenv from 'dotenv';
 import fs from 'node:fs';
 import path from 'node:path';
 import AIAdvisorService from '../ai/aiAdvisorService.js';
-import { collectScalpingCandidates } from '../backtest/scalpingBacktest.js';
+import {
+  collectScalpingCandidates
+} from '../backtest/scalpingBacktest.js';;
 import { scoreAdviceOutcome } from '../ai/monitoringSessionService.js';
 import { envBool, envList, envNumber, envString } from '../config/envConfig.js';
 

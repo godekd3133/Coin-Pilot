@@ -5,7 +5,7 @@ import UpbitAPI from '../api/upbit.js';
 import {
   walkForwardValidatePortfolio,
   walkForwardValidatePortfolioFolds
-} from '../backtest/scalpingBacktest.js';
+} from '../backtest/scalpingTuning.js';;
 import { resolveMaxCandleAgeSeconds } from '../risk/candleFreshness.js';
 import { envBool, envList, envNumber, envString } from '../config/envConfig.js';
 

@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import {
   DEFAULT_CONFIG,
   simulateScalpingSegmented
-} from '../backtest/scalpingBacktest.js';
+} from '../backtest/scalpingBacktest.js';;
 import {
   loadPaperValidationConfigSnapshot,
   mergePaperValidationConfig

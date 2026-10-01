@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { simulateScalping } from '../src/backtest/scalpingBacktest.js';
+import {
+  simulateScalping
+} from '../src/backtest/scalpingBacktest.js';;
 
 function candle(index, close, open = close, high = close, low = close) {
   return {

@@ -6,7 +6,7 @@ import { pathToFileURL } from 'node:url';
 import {
   analyzeHistoricalCandleContinuity,
   historicalTimestampForCandle
-} from '../backtest/scalpingBacktest.js';
+} from '../backtest/historicalCandleIntegrity.js';;
 import { fillNoTradeCandleGaps } from '../research/historicalCandleSeries.js';
 import { envBool, envList, envNumber, envRaw } from '../config/envConfig.js';
 

@@ -2,10 +2,12 @@ import dotenv from 'dotenv';
 import fs from 'node:fs';
 import RegimeMomentumStrategy from '../strategy/regimeMomentumStrategy.js';
 import {
-  splitHistoricalCandleSegments,
+  splitHistoricalCandleSegments
+} from '../backtest/historicalCandleIntegrity.js';
+import {
   calculateTradeReturnConfidence,
   evaluateStatisticalConfidenceGate
-} from '../backtest/scalpingBacktest.js';
+} from '../backtest/tradeConfidence.js';;
 import { aggregateHigherTimeframeCandles } from '../research/higherTimeframeMomentum.js';
 import { envBool, envList, envNumber, envString } from '../config/envConfig.js';
 

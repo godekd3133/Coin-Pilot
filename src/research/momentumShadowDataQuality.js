@@ -1,4 +1,6 @@
-import { analyzeHistoricalCandleContinuity } from '../backtest/scalpingBacktest.js';
+import {
+  analyzeHistoricalCandleContinuity
+} from '../backtest/historicalCandleIntegrity.js';;
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 

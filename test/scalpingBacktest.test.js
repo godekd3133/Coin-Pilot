@@ -2,21 +2,27 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   calculateQualityScore,
-  calculateTradeReturnConfidence,
   createScalpingFeatureCache,
+  simulateScalpingSegmented,
+  simulateScalping,
+  simulateScalpingPortfolio
+} from '../src/backtest/scalpingBacktest.js';
+import {
+  calculateTradeReturnConfidence,
+  evaluateStatisticalConfidenceGate
+} from '../src/backtest/tradeConfidence.js';
+import {
   analyzeHistoricalCandleContinuity,
   historicalTimestampForCandle,
   normalizeHistoricalCandles,
-  splitHistoricalCandleSegments,
-  simulateScalpingSegmented,
-  evaluateStatisticalConfidenceGate,
-  simulateScalping,
-  simulateScalpingPortfolio,
+  splitHistoricalCandleSegments
+} from '../src/backtest/historicalCandleIntegrity.js';
+import {
   tuneScalpingParameters,
   walkForwardValidate,
   walkForwardValidatePortfolio,
   walkForwardValidatePortfolioFolds
-} from '../src/backtest/scalpingBacktest.js';
+} from '../src/backtest/scalpingTuning.js';;
 import { calculateCostAdjustedBreakEvenPrice } from '../src/strategy/protectionPrices.js';
 import { fillNoTradeCandleGaps } from '../src/research/historicalCandleSeries.js';
 

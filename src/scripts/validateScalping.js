@@ -1,7 +1,9 @@
 import dotenv from 'dotenv';
 import fs from 'fs';
 import UpbitAPI from '../api/upbit.js';
-import { walkForwardValidate } from '../backtest/scalpingBacktest.js';
+import {
+  walkForwardValidate
+} from '../backtest/scalpingTuning.js';;
 import { resolveMaxCandleAgeSeconds } from '../risk/candleFreshness.js';
 import {
   loadPaperValidationConfigSnapshot,

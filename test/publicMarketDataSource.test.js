@@ -425,7 +425,7 @@ test('dashboard routes and account valuation use the injected source and preserv
 
   try {
     dashboard = new DashboardServer(trader, 0, {
-      env: { ...process.env, DASHBOARD_TOKEN: '', DASHBOARD_READ_ONLY_TOKEN: '', DASHBOARD_MOBILE_TOKEN: '', DASHBOARD_READ_ONLY_TOKEN: '' },
+      env: { ...process.env, DASHBOARD_TOKEN: '', DASHBOARD_READ_ONLY_TOKEN: '', DASHBOARD_MOBILE_TOKEN: '' },
       publicMarketDataSource: source
     });
     assert.strictEqual(dashboard.publicMarketDataSource, source);
@@ -518,7 +518,7 @@ test('coin detail and bundle suggestions read from the injected source without a
     }
   };
   const dashboard = new DashboardServer(trader, 0, {
-    env: { ...process.env, DASHBOARD_TOKEN: '', DASHBOARD_READ_ONLY_TOKEN: '', DASHBOARD_MOBILE_TOKEN: '', DASHBOARD_READ_ONLY_TOKEN: '' },
+    env: { ...process.env, DASHBOARD_TOKEN: '', DASHBOARD_READ_ONLY_TOKEN: '', DASHBOARD_MOBILE_TOKEN: '' },
     publicMarketDataSource: source
   });
 

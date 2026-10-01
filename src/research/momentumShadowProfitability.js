@@ -1,4 +1,6 @@
-import { calculateTradeReturnConfidence } from '../backtest/scalpingBacktest.js';
+import {
+  calculateTradeReturnConfidence
+} from '../backtest/tradeConfidence.js';;
 
 export const DEFAULT_MOMENTUM_SHADOW_MIN_RESEARCH_DAYS = 14;
 

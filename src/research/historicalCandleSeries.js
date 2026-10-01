@@ -2,7 +2,7 @@ import {
   analyzeHistoricalCandleContinuity,
   historicalTimestampForCandle,
   normalizeHistoricalCandles
-} from '../backtest/scalpingBacktest.js';
+} from '../backtest/historicalCandleIntegrity.js';;
 
 const number = (value, fallback) => Number.isFinite(Number(value)) ? Number(value) : fallback;
 
