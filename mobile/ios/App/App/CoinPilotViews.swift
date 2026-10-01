@@ -264,7 +264,7 @@ private struct CoinPilotConnectionView: View {
                     }
                 }
 
-                Label("Upbit API 키는 서버에만 보관합니다. 모드에 맞는 서버를 연결하세요.", systemImage: "lock.shield")
+                Label("거래소 API 키는 서버에만 보관합니다. 모드에 맞는 서버를 연결하세요.", systemImage: "lock.shield")
                     .font(.footnote)
                     .foregroundColor(CoinPilotColors.secondaryInk)
                     .fixedSize(horizontal: false, vertical: true)
@@ -423,7 +423,9 @@ private struct CoinPilotTabView: View {
                     }
                 }
             } label: {
-                Label(store.activeWorkspace.title, systemImage: "arrow.left.arrow.right")
+                let exchangeSuffix = store.isBundledPreview || store.isBundledLocalMarketData
+                    ? "" : " · \(store.exchangeDisplayName)"
+                Label("\(store.activeWorkspace.title)\(exchangeSuffix)", systemImage: "arrow.left.arrow.right")
                     .font(.caption.weight(.semibold))
             }
             .accessibilityLabel("현재 \(store.activeWorkspace.title) 작업공간. 전환")
@@ -550,7 +552,7 @@ private struct CoinPilotTradingView: View {
             ? (parsedBuyAmount.map { CoinPilotFormatting.won($0) } ?? "금액 확인 필요")
             : "\(sellQuantity)개 · 예상 \(CoinPilotFormatting.won(currentPrice.map { $0 * (parsedSellQuantity ?? 0) }, unavailable: "평가 불가"))"
         if store.activeWorkspace == .live {
-            return "Upbit 실계정으로 시장가 주문을 보냅니다.\n\(amount)\n서버의 계좌 동기화·주문 안전 검사가 통과해야 접수됩니다."
+            return "\(store.exchangeDisplayName) 실계정으로 시장가 주문을 보냅니다.\n\(amount)\n서버의 계좌 동기화·주문 안전 검사가 통과해야 접수됩니다."
         }
         return "모의 서버의 가상 계좌에서만 처리합니다.\n\(amount)\n실제 거래소로 주문을 보내지 않습니다."
     }
@@ -729,7 +731,7 @@ private struct CoinPilotTradingView: View {
                     ForEach(CoinPilotSmartOrderSide.allCases) { value in Text(value.title).tag(value) }
                 }
                 .pickerStyle(SegmentedPickerStyle())
-                FieldTitle(title: smartSide == .buy ? "총 투자 금액 (원)" : "목표 매도 금액 (원)")
+                FieldTitle(title: smartSide == .buy ? "총 투자 금액 (\(store.quoteCurrency))" : "목표 매도 금액 (\(store.quoteCurrency))")
                 TextField("금액 입력", text: $smartAmount)
                     .cpKeyboardNumberPad()
                     .textFieldStyle(.roundedBorder)
@@ -904,7 +906,7 @@ private struct CoinPilotTradingView: View {
                         .pickerStyle(MenuPickerStyle())
                         .accessibilityLabel("주문 종목")
                         if !store.isBundledPreview && !store.isBundledLocalMarketData,
-                           market.range(of: "^KRW-[A-Z0-9]{2,15}$", options: .regularExpression) != nil {
+                           market.range(of: "^[A-Z0-9]{2,10}-[A-Z0-9]{2,15}$", options: .regularExpression) != nil {
                             NavigationLink(destination: CoinPilotMarketDetailView(store: store, coin: market)) {
                                 Label("시세", systemImage: "chart.line.uptrend.xyaxis")
                                     .font(.caption.weight(.semibold))
@@ -937,9 +939,9 @@ private struct CoinPilotTradingView: View {
                             .frame(minHeight: 50)
                             .background(CoinPilotColors.paper)
                             .clipShape(RoundedRectangle(cornerRadius: 11))
-                            .accessibilityLabel("매수 금액 원화")
+                            .accessibilityLabel("매수 금액 \(store.quoteCurrency)")
                         HStack(spacing: 8) {
-                            ForEach([10_000.0, 50_000.0, 100_000.0, 500_000.0], id: \.self) { amount in
+                            ForEach(store.buyAmountPresets, id: \.self) { amount in
                                 Button(CoinPilotFormatting.won(amount)) { buyAmount = String(Int(amount)) }
                                     .font(.caption.weight(.semibold))
                                     .foregroundColor(CoinPilotColors.blue)
@@ -1058,7 +1060,7 @@ private struct CoinPilotTradingView: View {
                     .foregroundColor(CoinPilotColors.secondaryInk)
                     .fixedSize(horizontal: false, vertical: true)
                 if !store.isBundledPreview {
-                    TextField("입금·출금 금액 (원)", text: $walletAmount)
+                    TextField("입금·출금 금액 (\(store.quoteCurrency))", text: $walletAmount)
                         .cpKeyboardNumberPad()
                         .textFieldStyle(.plain)
                         .padding(.horizontal, 14)
@@ -1069,13 +1071,13 @@ private struct CoinPilotTradingView: View {
                     HStack(spacing: 10) {
                         Button("입금") { walletAction = .deposit }
                             .buttonStyle(CoinPilotSecondaryButtonStyle())
-                            .disabled(store.paperWalletBlockReason != nil || (Double(walletAmount) ?? 0) < 1_000)
+                            .disabled(store.paperWalletBlockReason != nil || (Double(walletAmount) ?? 0) < store.minimumWalletAmount)
                         Button("출금") { walletAction = .withdraw }
                             .buttonStyle(CoinPilotSecondaryButtonStyle())
-                            .disabled(store.paperWalletBlockReason != nil || (Double(walletAmount) ?? 0) < 1_000)
+                            .disabled(store.paperWalletBlockReason != nil || (Double(walletAmount) ?? 0) < store.minimumWalletAmount)
                     }
                     Divider().overlay(CoinPilotColors.line)
-                    TextField("초기 잔액 (원)", text: $resetSeedMoney)
+                    TextField("초기 잔액 (\(store.quoteCurrency))", text: $resetSeedMoney)
                         .cpKeyboardNumberPad()
                         .textFieldStyle(.plain)
                         .padding(.horizontal, 14)
@@ -1085,7 +1087,7 @@ private struct CoinPilotTradingView: View {
                         .accessibilityLabel("모의 계좌 초기 잔액")
                     Button("모의 계좌 초기화", role: .destructive) { walletAction = .reset }
                         .frame(maxWidth: .infinity, minHeight: 42, alignment: .leading)
-                        .disabled(store.paperWalletBlockReason != nil || (Double(resetSeedMoney) ?? 0) < 100_000)
+                        .disabled(store.paperWalletBlockReason != nil || (Double(resetSeedMoney) ?? 0) < store.minimumSeedAmount)
                     if let reason = store.paperWalletBlockReason {
                         Text(reason)
                             .font(.caption)
@@ -1299,8 +1301,8 @@ private struct CoinPilotLiveCredentialSetupView: View {
     var body: some View {
         NativeCard {
             VStack(alignment: .leading, spacing: 13) {
-                SectionHeading(title: "Upbit API 키 등록")
-                Text("Upbit PC 웹의 Open API 관리에서 Access Key와 Secret Key를 만드세요. 앱 안에서 Upbit 비밀번호나 OTP 로그인을 하지 않습니다.")
+                SectionHeading(title: "\(store.exchangeDisplayName) API 키 등록")
+                Text("\(store.exchangeDisplayName) 웹의 Open API 관리에서 Access Key와 Secret Key를 만드세요. 앱 안에서 거래소 비밀번호나 OTP 로그인을 하지 않습니다.")
                     .font(.footnote)
                     .foregroundColor(CoinPilotColors.secondaryInk)
                     .fixedSize(horizontal: false, vertical: true)
@@ -1325,7 +1327,7 @@ private struct CoinPilotLiveCredentialSetupView: View {
                         .background(CoinPilotColors.surface)
                         .clipShape(RoundedRectangle(cornerRadius: 11))
                         .overlay(RoundedRectangle(cornerRadius: 11).stroke(CoinPilotColors.line, lineWidth: 1))
-                        .accessibilityLabel("Upbit Access Key")
+                        .accessibilityLabel("\(store.exchangeDisplayName) Access Key")
                 }
 
                 VStack(alignment: .leading, spacing: 7) {
@@ -1340,7 +1342,7 @@ private struct CoinPilotLiveCredentialSetupView: View {
                         .background(CoinPilotColors.surface)
                         .clipShape(RoundedRectangle(cornerRadius: 11))
                         .overlay(RoundedRectangle(cornerRadius: 11).stroke(CoinPilotColors.line, lineWidth: 1))
-                        .accessibilityLabel("Upbit Secret Key")
+                        .accessibilityLabel("\(store.exchangeDisplayName) Secret Key")
                 }
 
                 if store.currentLiveCredentialTransportIsSecure == false {
@@ -1468,7 +1470,7 @@ private struct CoinPilotHomeView: View {
             NativeCard {
                 VStack(alignment: .leading, spacing: 8) {
                     SectionHeading(title: "실거래 계좌 확인 중")
-                    Text("Upbit 키가 등록됐어요. 서버가 잔고와 미체결 주문을 확인할 때까지 실거래 주문은 잠겨 있습니다.")
+                    Text("\(store.exchangeDisplayName) 키가 등록됐어요. 서버가 잔고와 미체결 주문을 확인할 때까지 실거래 주문은 잠겨 있습니다.")
                         .font(.footnote)
                         .foregroundColor(CoinPilotColors.secondaryInk)
                         .fixedSize(horizontal: false, vertical: true)
@@ -2200,7 +2202,7 @@ private struct CoinPilotAllocationBar: View {
         var slices: [CoinPilotAllocationSlice] = []
         if let krw = krwBalance, krw.isFinite, krw > 0 {
             slices.append(CoinPilotAllocationSlice(
-                label: "원화", weight: krw / total * 100, value: krw, tint: krwTint
+                label: CoinPilotFormatting.quoteAssetLabel, weight: krw / total * 100, value: krw, tint: krwTint
             ))
         }
         let valued = positions
@@ -2237,7 +2239,7 @@ private struct CoinPilotAllocationBar: View {
         var slices: [CoinPilotAllocationSlice] = []
         if let krwWeight = number(summary["krwWeight"]), krwWeight > 0 {
             slices.append(CoinPilotAllocationSlice(
-                label: "원화", weight: krwWeight, value: number(summary["krwBalance"]), tint: krwTint
+                label: CoinPilotFormatting.quoteAssetLabel, weight: krwWeight, value: number(summary["krwBalance"]), tint: krwTint
             ))
         }
         let valued = holdings
@@ -2343,7 +2345,7 @@ private struct CoinPilotAssetsView: View {
                         }
                         Divider().overlay(CoinPilotColors.line)
                         HStack {
-                            SectionHeading(title: "원화")
+                            SectionHeading(title: store.quoteAssetLabel)
                             Spacer()
                             Text(CoinPilotFormatting.won(store.account?.krwBalance, unavailable: "잔액 미제공"))
                                 .font(.body.weight(.semibold))
@@ -2648,9 +2650,7 @@ private struct CoinPilotSettingsView: View {
                         } else {
                             SettingsRow(
                                 title: "거래소",
-                                value: store.serverExchange == "binance"
-                                    ? "Binance (\(store.quoteCurrency) 기준)"
-                                    : "Upbit (KRW 기준)",
+                                value: "\(store.exchangeDisplayName) (\(store.quoteCurrency) 기준)",
                                 symbol: "building.columns"
                             )
                             SettingsRow(
@@ -3756,7 +3756,8 @@ private struct CoinPilotMarketDetailView: View {
                         HStack(alignment: .top) {
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(CoinPilotFormatting.symbol(coin)).font(.title2.weight(.bold)).foregroundColor(CoinPilotColors.ink)
-                                Text("Upbit 원화 시장").font(.caption).foregroundColor(CoinPilotColors.secondaryInk)
+                                Text(isExampleData ? "예시·로컬 시세" : "\(store.exchangeDisplayName) \(store.quoteCurrency) 시장")
+                                    .font(.caption).foregroundColor(CoinPilotColors.secondaryInk)
                             }
                             Spacer()
                             VStack(alignment: .trailing, spacing: 5) {
@@ -3912,7 +3913,7 @@ private struct CoinPilotMarketDetailView: View {
                                 detailRow("BB %B", CoinPilotFormatting.indicator(detail.bollingerPercentB))
                             }
                             Divider().overlay(CoinPilotColors.line)
-                            detailRow("원화 잔고", CoinPilotFormatting.won(detail.krwBalance))
+                            detailRow("\(store.quoteAssetLabel) 잔고", CoinPilotFormatting.won(detail.krwBalance))
                             HStack(spacing: 12) {
                                 detailRow("최대 매수 가능", CoinPilotFormatting.won(detail.maxBuyAmount))
                                 detailRow("최대 매도 평가", CoinPilotFormatting.won(detail.maxSellAmount))
@@ -5690,7 +5691,7 @@ private struct CoinPilotTuningEditor: View {
                                         .padding(.horizontal, 8)
                                         .background(CoinPilotColors.paper)
                                         .clipShape(RoundedRectangle(cornerRadius: 8))
-                                    Text("쉼표로 구분한 KRW- 코드이거나 ALL입니다. ALL은 유동성 상위 마켓을 다시 선택합니다.")
+                                    Text("쉼표로 구분한 KRW-·USDT- 형식 코드이거나 ALL입니다. ALL은 유동성 상위 마켓을 다시 선택합니다.")
                                         .font(.caption)
                                         .foregroundColor(CoinPilotColors.secondaryInk)
                                         .fixedSize(horizontal: false, vertical: true)
@@ -5861,9 +5862,9 @@ private struct CoinPilotTuningEditor: View {
                 }
                 guard !codes.isEmpty,
                       codes.allSatisfy({
-                          $0.range(of: "^KRW-[A-Z0-9]{2,15}$", options: .regularExpression) != nil
+                          $0.range(of: "^[A-Z0-9]{2,10}-[A-Z0-9]{2,15}$", options: .regularExpression) != nil
                       }) else {
-                    validationMessage = "대상 코인은 KRW- 코드를 쉼표로 구분하거나 ALL로 입력해 주세요."
+                    validationMessage = "대상 코인은 KRW-·USDT- 형식 코드를 쉼표로 구분하거나 ALL로 입력해 주세요."
                     return
                 }
                 updates["targetCoins"] = codes
@@ -6139,7 +6140,7 @@ private struct PositionRow: View {
     private var marketDetailCoin: String? {
         guard !store.isBundledPreview, !store.isBundledLocalMarketData,
               let coin = position.coin,
-              coin.range(of: "^KRW-[A-Z0-9]{2,15}$", options: .regularExpression) != nil
+              coin.range(of: "^[A-Z0-9]{2,10}-[A-Z0-9]{2,15}$", options: .regularExpression) != nil
         else { return nil }
         return coin
     }
@@ -6166,7 +6167,7 @@ private struct PositionRow: View {
             }
             Button("취소", role: .cancel) {}
         } message: {
-            Text("\(CoinPilotFormatting.quantity(position.amount))개를 시장가로 매도합니다. \(store.activeWorkspace == .live ? "Upbit 실계정 주문입니다." : "모의 서버 가상 계좌에만 적용됩니다.")")
+            Text("\(CoinPilotFormatting.quantity(position.amount))개를 시장가로 매도합니다. \(store.activeWorkspace == .live ? "\(store.exchangeDisplayName) 실계정 주문입니다." : "모의 서버 가상 계좌에만 적용됩니다.")")
         }
     }
 

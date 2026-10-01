@@ -5238,6 +5238,7 @@ final class CoinPilotStore: ObservableObject {
         serverExchange = nil
         quoteCurrency = "KRW"
         CoinPilotFormatting.quoteSymbol = "₩"
+        CoinPilotFormatting.quoteAssetLabel = "원화"
         pnl = nil
         todayRealizedProfit = nil
         history = []
@@ -5414,11 +5415,35 @@ final class CoinPilotStore: ObservableObject {
         if let quote, !quote.isEmpty {
             quoteCurrency = quote
             CoinPilotFormatting.quoteSymbol = quote == "KRW" ? "₩" : "$"
+            CoinPilotFormatting.quoteAssetLabel = quote == "KRW" ? "원화" : quote
         }
     }
 
     /// 최소 주문 금액 — 기준통화 단위. KRW 5,000 / USDT 계열 5.
     var minimumOrderAmount: Double { quoteCurrency == "KRW" ? 5_000 : 5 }
+
+    /// 모의 계좌 초기 잔액 최소값 — 기준통화 단위.
+    var minimumSeedAmount: Double { quoteCurrency == "KRW" ? 100_000 : 100 }
+
+    /// 모의 계좌 입금·출금 최소 금액 — 기준통화 단위.
+    var minimumWalletAmount: Double { quoteCurrency == "KRW" ? 1_000 : 1 }
+
+    /// 매수 금액 빠른 입력 프리셋 — 기준통화 단위.
+    var buyAmountPresets: [Double] {
+        quoteCurrency == "KRW" ? [10_000, 50_000, 100_000, 500_000] : [10, 50, 100, 500]
+    }
+
+    /// 연결된 거래소 표시 이름. 서버가 exchange를 보내지 않으면 Upbit로 간주한다.
+    var exchangeDisplayName: String {
+        switch serverExchange {
+        case "binance": return "Binance"
+        case "upbit", nil: return "Upbit"
+        default: return serverExchange?.capitalized ?? "거래소"
+        }
+    }
+
+    /// 기준통화 라벨 — KRW는 "원화", 그 외는 통화 코드 그대로.
+    var quoteAssetLabel: String { CoinPilotFormatting.quoteAssetLabel }
 
     /// 현재 워크스페이스의 번들 서버 프리셋 (거래소별 인스턴스 선택용).
     var bundledServerPresets: [CoinPilotServerPreset] { bundledServers.presets(for: activeWorkspace) }
@@ -5467,6 +5492,8 @@ final class CoinPilotStore: ObservableObject {
 enum CoinPilotFormatting {
     /// 연결된 서버의 기준통화 표시 기호 — status/auth-status에서 갱신된다.
     static var quoteSymbol = "₩"
+    /// 기준통화 자연어 라벨 — KRW는 "원화", 그 외는 통화 코드.
+    static var quoteAssetLabel = "원화"
 
     static func won(_ value: Double?, unavailable: String = "금액 미제공") -> String {
         guard let value, value.isFinite else { return unavailable }
@@ -5503,11 +5530,23 @@ enum CoinPilotFormatting {
         return number(value, fractionDigits: fractionDigits)
     }
 
-    /// 차트 축처럼 좁은 공간에 넣는 원화 표기. 만·억 단위로 줄입니다.
+    /// 차트 축처럼 좁은 공간에 넣는 기준통화 축약 표기. KRW는 만·억, 그 외는 K/M/B.
     static func compactWon(_ value: Double?, unavailable: String = "금액 미제공") -> String {
         guard let value, value.isFinite else { return unavailable }
         let sign = value < 0 ? "−" : ""
         let magnitude = abs(value)
+        if quoteSymbol != "₩" {
+            if magnitude >= 1_000_000_000 {
+                return "\(sign)\(quoteSymbol)\(number(magnitude / 1_000_000_000, fractionDigits: 2))B"
+            }
+            if magnitude >= 1_000_000 {
+                return "\(sign)\(quoteSymbol)\(number(magnitude / 1_000_000, fractionDigits: 2))M"
+            }
+            if magnitude >= 1_000 {
+                return "\(sign)\(quoteSymbol)\(number((magnitude / 1_000).rounded(), fractionDigits: 0))K"
+            }
+            return "\(sign)\(quoteSymbol)\(number(magnitude, fractionDigits: magnitude >= 1 ? 2 : 4))"
+        }
         if magnitude >= 100_000_000 {
             let eok = magnitude / 100_000_000
             let text = eok >= 100 ? number(eok.rounded(), fractionDigits: 0) : number(eok, fractionDigits: 1)
