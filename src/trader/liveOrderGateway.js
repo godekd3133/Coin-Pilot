@@ -531,11 +531,11 @@ export class LiveOrderGateway {
     const hasObservedNumber = value => value !== null && value !== undefined &&
       !(typeof value === 'string' && value.trim() === '') && Number.isFinite(Number(value));
     const executedVolume = hasObservedNumber(order.executed_volume) ? Number(order.executed_volume) : null;
-    // 시장가 매수(price)는 'cancel' 상태로 종결되며 remaining_volume을 보고하지
-    // 않는다. 잔여가 sub-unit locked KRW 먼지뿐이면 미체결 잔량 0으로,
-    // avg_price가 비어 있으면 체결 내역 합산으로 복원한다.
-    if (resolvedOrderType === 'price' && order.state === 'cancel' &&
-      executedVolume !== null && executedVolume > 0) {
+    // 체결된 주문의 회계가 비어 있을 수 있다: 업비트는 시장가(price) 매수를
+    // 'cancel'로 끝내며 remaining_volume을 생략하고, 시장가(market) 매도가
+    // 'done'으로 끝날 때도 avg_price를 비워 둔다. 미보고 필드는 체결 내역과
+    // sub-unit locked 먼지로 복원한다.
+    if (executedVolume !== null && executedVolume > 0) {
       const lockedDust = hasObservedNumber(order.locked) ? Number(order.locked) : null;
       const orderAvgPrice = hasObservedNumber(order.avg_price) ? Number(order.avg_price) : null;
       const trades = Array.isArray(order.trades) ? order.trades : [];
@@ -545,7 +545,8 @@ export class LiveOrderGateway {
         ...order,
         remaining_volume: hasObservedNumber(order.remaining_volume)
           ? order.remaining_volume
-          : (lockedDust !== null && lockedDust < 1 ? '0' : order.remaining_volume),
+          : (resolvedOrderType === 'price' && order.state === 'cancel' &&
+              lockedDust !== null && lockedDust < 1 ? '0' : order.remaining_volume),
         avg_price: orderAvgPrice !== null
           ? order.avg_price
           : (tradeVolume > 0 && tradeFunds > 0 ? String(tradeFunds / tradeVolume) : order.avg_price)
@@ -677,8 +678,13 @@ export class LiveOrderGateway {
       this._liveOrderStateUnknownMarkets.add(market);
       this._livePendingOrderMarkets.add(market);
     }
+    // 미해결 주문/intent/불완전 체결 기록은 readback 복구가 다시 기록을
+    // 써야 해소된다 — fatal로 막으면 writer가 영구 잠기고 drain도 못 끝낸다.
+    // 시장 차단은 _liveEvidenceBlockedMarkets가 별도로 유지한다.
     const fatalBlocks = inspection.blockingReasons.filter(reason =>
-      !reason.startsWith('unresolved submitted orders:') && !reason.startsWith('unresolved order intents:'));
+      !reason.startsWith('unresolved submitted orders:') &&
+      !reason.startsWith('unresolved order intents:') &&
+      !reason.startsWith('incomplete fill records:'));
     if (fatalBlocks.length > 0) {
       this.liveExecutionEvidenceDataError = `startup safety block: ${fatalBlocks.join('; ')}`;
     } else if (typeof this.liveExecutionEvidenceDataError === 'string' &&
