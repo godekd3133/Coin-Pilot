@@ -4381,14 +4381,23 @@ private struct CoinPilotAnalysisView: View {
                                         .foregroundColor(CoinPilotColors.ink)
                                         .fixedSize(horizontal: false, vertical: true)
                                 }
-                                Button {
-                                    store.selectedMarket = result.coin
-                                    selectedTab = 1
-                                } label: {
-                                    Label("거래 화면에서 종목 열기", systemImage: "arrow.left.arrow.right")
-                                        .frame(maxWidth: .infinity, minHeight: 40)
+                                HStack(spacing: 8) {
+                                    if result.coin.range(of: "^[A-Z0-9]{2,10}-[A-Z0-9]{2,15}$", options: .regularExpression) != nil {
+                                        NavigationLink(destination: CoinPilotMarketDetailView(store: store, coin: result.coin)) {
+                                            Label("시세", systemImage: "chart.line.uptrend.xyaxis")
+                                                .frame(maxWidth: .infinity, minHeight: 40)
+                                        }
+                                        .buttonStyle(CoinPilotSecondaryButtonStyle())
+                                    }
+                                    Button {
+                                        store.selectedMarket = result.coin
+                                        selectedTab = 1
+                                    } label: {
+                                        Label("주문 열기", systemImage: "arrow.left.arrow.right")
+                                            .frame(maxWidth: .infinity, minHeight: 40)
+                                    }
+                                    .buttonStyle(CoinPilotSecondaryButtonStyle())
                                 }
-                                .buttonStyle(CoinPilotSecondaryButtonStyle())
                             }
                         }
                     }
