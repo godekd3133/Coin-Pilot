@@ -105,7 +105,8 @@ test('.env.example의 모든 할당 키는 ENV_SCHEMA에 선언되어 있다', (
 // 재발하면 여기서 실패한다 — 새 파일을 이전할 때마다 목록에 추가한다.
 const TYPED_ENV_MIGRATED_FILES = [
   'src/config/envConfig.js',
-  'src/research/paperRunnerConfig.js'
+  'src/research/paperRunnerConfig.js',
+  'src/scripts/runPaperSmoke.js'
 ];
 
 test('envConfig로 이전된 파일은 직접 env 접근이 없다', () => {

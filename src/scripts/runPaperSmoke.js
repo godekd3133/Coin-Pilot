@@ -9,17 +9,9 @@ import {
   assertNoConcurrentPaperSessions
 } from '../research/paperSessionConcurrency.js';
 import { createPaperAiMonitor } from '../ai/paperAiMonitoring.js';
+import { envBool, envNumber, envString } from '../config/envConfig.js';
 
 dotenv.config();
-
-const number = (value, fallback) => Number.isFinite(Number(value)) ? Number(value) : fallback;
-const boolean = (value, fallback) => value === undefined
-  ? fallback
-  : value === 'true'
-    ? true
-    : value === 'false'
-      ? false
-      : fallback;
 
 // Keep the active paper session recoverable when the runner itself fails.
 // SIGKILL/host termination cannot be intercepted, so the dashboard still
@@ -101,89 +93,89 @@ function buildConfig(portfolioFile, paperFile, markets) {
     strategyMode: 'oversold_reaction_scalping',
     targetCoins: markets,
     dryRun: true,
-    dryRunSeedMoney: number(process.env.PAPER_SMOKE_SEED_MONEY, 1_000_000),
+    dryRunSeedMoney: envNumber('PAPER_SMOKE_SEED_MONEY', 1_000_000),
     virtualPortfolioFile: portfolioFile,
     paperValidationFile: paperFile,
-    paperMinimumStorageMiB: number(process.env.SCALP_PAPER_MIN_STORAGE_MIB, 1024),
-    maxPositions: number(process.env.SCALP_MAX_POSITIONS, 3),
-    portfolioAllocation: number(process.env.SCALP_PORTFOLIO_ALLOCATION, 0.1),
-    investmentRatio: number(process.env.SCALP_INVESTMENT_RATIO, 0.02),
-    maxCandleAgeSeconds: number(process.env.SCALP_MAX_CANDLE_AGE_SECONDS, 0),
-    stopLossPercent: number(process.env.SCALP_STOP_LOSS_PERCENT, 1.2),
-    takeProfitPercent: number(process.env.SCALP_TAKE_PROFIT_PERCENT, 1.8),
-    rsiPeriod: number(process.env.SCALP_RSI_PERIOD, number(process.env.RSI_PERIOD, 14)),
-    rsiOversold: number(process.env.SCALP_RSI_OVERSOLD, number(process.env.RSI_OVERSOLD, 30)),
-    rsiOverbought: number(process.env.SCALP_RSI_OVERBOUGHT, number(process.env.RSI_OVERBOUGHT, 70)),
-    oversoldLookback: number(process.env.SCALP_OVERSOLD_LOOKBACK, 1),
-    candleUnit: number(process.env.SCALP_CANDLE_UNIT, 1),
-    candleCount: number(process.env.SCALP_CANDLE_COUNT, 120),
-    minReboundPercent: number(process.env.SCALP_MIN_REBOUND_PERCENT, 0.15),
-    minRsiRecovery: number(process.env.SCALP_MIN_RSI_RECOVERY, 2),
-    minVolumeRatio: number(process.env.SCALP_MIN_VOLUME_RATIO, 1),
-    volumeLookback: number(process.env.SCALP_VOLUME_LOOKBACK, 20),
-    minCloseStrength: number(process.env.SCALP_MIN_CLOSE_STRENGTH, 0.65),
-    trendPeriod: number(process.env.SCALP_TREND_PERIOD, 30),
-    trendSlopeLookback: number(process.env.SCALP_TREND_SLOPE_LOOKBACK, 3),
-    minTrendSlopePercent: number(process.env.SCALP_MIN_TREND_SLOPE_PERCENT, -0.2),
-    requirePreviousHighBreak: process.env.SCALP_REQUIRE_PREVIOUS_HIGH_BREAK !== 'false',
-    maxSignalRangePercent: number(process.env.SCALP_MAX_SIGNAL_RANGE_PERCENT, 0),
-    minSignalRangePercent: number(process.env.SCALP_MIN_SIGNAL_RANGE_PERCENT, 0),
-    maxReboundPercent: number(process.env.SCALP_MAX_REBOUND_PERCENT, 0),
-    marketRegimeEnabled: process.env.SCALP_MARKET_REGIME_ENABLED === 'true',
-    marketRegimeLookback: number(process.env.SCALP_MARKET_REGIME_LOOKBACK, 5),
-    marketRegimeMinBreadth: number(process.env.SCALP_MARKET_REGIME_MIN_BREADTH, 0.5),
-    marketRegimeMinReturnPercent: number(process.env.SCALP_MARKET_REGIME_MIN_RETURN_PERCENT, -0.2),
-    requireReboundBelowOverbought: process.env.SCALP_REQUIRE_REBOUND_BELOW_OVERBOUGHT === 'true',
-    signalProfile: process.env.SCALP_SIGNAL_PROFILE || 'rsi_rebound',
-    bbPeriod: number(process.env.BB_PERIOD, 20),
-    bbStdDev: number(process.env.BB_STD_DEV, 2),
-    emaLong: number(process.env.EMA_LONG, 60),
-    entryDelayMinMs: number(process.env.SCALP_ENTRY_DELAY_MIN_MS, 1000),
-    entryDelayMaxMs: number(process.env.SCALP_ENTRY_DELAY_MAX_MS, 5000),
-    maxEntryRetracePercent: number(process.env.SCALP_MAX_ENTRY_RETRACE_PERCENT, 0.25),
-    maxEntryChasePercent: number(process.env.SCALP_MAX_ENTRY_CHASE_PERCENT, 0.35),
-    breakEvenTriggerPercent: number(process.env.SCALP_BREAK_EVEN_TRIGGER_PERCENT, 0),
-    breakEvenOffsetPercent: number(process.env.SCALP_BREAK_EVEN_OFFSET_PERCENT, 0.05),
-    trailingActivationPercent: number(process.env.SCALP_TRAILING_ACTIVATION_PERCENT, 0),
-    trailingStopPercent: number(process.env.SCALP_TRAILING_STOP_PERCENT, 0),
-    maxHoldMinutes: number(process.env.SCALP_MAX_HOLD_MINUTES, 30),
-    maxLosingHoldMinutes: number(process.env.SCALP_MAX_LOSING_HOLD_MINUTES, 0),
-    winnerExtendMinutes: number(process.env.SCALP_WINNER_EXTEND_MINUTES, 0),
-    winnerExtendMinProfitPercent: number(process.env.SCALP_WINNER_EXTEND_MIN_PROFIT_PERCENT, 0),
-    winnerShadowExtendMinutes: number(process.env.SCALP_WINNER_SHADOW_EXTEND_MINUTES, 0),
-    winnerShadowExtendMinProfitPercent: number(process.env.SCALP_WINNER_SHADOW_EXTEND_MIN_PROFIT_PERCENT, 0),
-    winnerShadowMaxReboundPercent: number(process.env.SCALP_WINNER_SHADOW_MAX_REBOUND_PERCENT, 0),
-    paperDiagnosticShadowsEnabled: boolean(process.env.SCALP_PAPER_DIAGNOSTIC_SHADOWS_ENABLED, true),
-    maxEntriesPerSignalWindow: number(process.env.SCALP_MAX_ENTRIES_PER_SIGNAL_WINDOW, 0),
-    positionRiskCheckIntervalMs: number(process.env.SCALP_RISK_CHECK_INTERVAL_MS, 1000),
-    maxRiskDataGapSeconds: number(process.env.SCALP_MAX_RISK_DATA_GAP_SECONDS, 30),
-    maxAnalysisDataGapSeconds: number(process.env.SCALP_MAX_ANALYSIS_DATA_GAP_SECONDS, 60),
-    cooldownAfterLossMinutes: number(process.env.SCALP_COOLDOWN_AFTER_LOSS_MINUTES, 15),
-    maxConsecutiveLosses: number(process.env.SCALP_MAX_CONSECUTIVE_LOSSES, 3),
-    lossCircuitBreakerCount: number(process.env.SCALP_LOSS_CIRCUIT_BREAKER_COUNT, 0),
-    lossCircuitBreakerWindowMinutes: number(process.env.SCALP_LOSS_CIRCUIT_BREAKER_WINDOW_MINUTES, 30),
-    lossCircuitBreakerCooldownMinutes: number(process.env.SCALP_LOSS_CIRCUIT_BREAKER_COOLDOWN_MINUTES, 60),
-    checkInterval: number(process.env.PAPER_SMOKE_INTERVAL_MS, 5_000),
-    upbitRequestTimeoutMs: number(process.env.UPBIT_REQUEST_TIMEOUT_MS, 10_000),
+    paperMinimumStorageMiB: envNumber('SCALP_PAPER_MIN_STORAGE_MIB', 1024),
+    maxPositions: envNumber('SCALP_MAX_POSITIONS', 3),
+    portfolioAllocation: envNumber('SCALP_PORTFOLIO_ALLOCATION', 0.1),
+    investmentRatio: envNumber('SCALP_INVESTMENT_RATIO', 0.02),
+    maxCandleAgeSeconds: envNumber('SCALP_MAX_CANDLE_AGE_SECONDS', 0),
+    stopLossPercent: envNumber('SCALP_STOP_LOSS_PERCENT', 1.2),
+    takeProfitPercent: envNumber('SCALP_TAKE_PROFIT_PERCENT', 1.8),
+    rsiPeriod: envNumber('SCALP_RSI_PERIOD', envNumber('RSI_PERIOD', 14)),
+    rsiOversold: envNumber('SCALP_RSI_OVERSOLD', envNumber('RSI_OVERSOLD', 30)),
+    rsiOverbought: envNumber('SCALP_RSI_OVERBOUGHT', envNumber('RSI_OVERBOUGHT', 70)),
+    oversoldLookback: envNumber('SCALP_OVERSOLD_LOOKBACK', 1),
+    candleUnit: envNumber('SCALP_CANDLE_UNIT', 1),
+    candleCount: envNumber('SCALP_CANDLE_COUNT', 120),
+    minReboundPercent: envNumber('SCALP_MIN_REBOUND_PERCENT', 0.15),
+    minRsiRecovery: envNumber('SCALP_MIN_RSI_RECOVERY', 2),
+    minVolumeRatio: envNumber('SCALP_MIN_VOLUME_RATIO', 1),
+    volumeLookback: envNumber('SCALP_VOLUME_LOOKBACK', 20),
+    minCloseStrength: envNumber('SCALP_MIN_CLOSE_STRENGTH', 0.65),
+    trendPeriod: envNumber('SCALP_TREND_PERIOD', 30),
+    trendSlopeLookback: envNumber('SCALP_TREND_SLOPE_LOOKBACK', 3),
+    minTrendSlopePercent: envNumber('SCALP_MIN_TREND_SLOPE_PERCENT', -0.2),
+    requirePreviousHighBreak: envBool('SCALP_REQUIRE_PREVIOUS_HIGH_BREAK', true),
+    maxSignalRangePercent: envNumber('SCALP_MAX_SIGNAL_RANGE_PERCENT', 0),
+    minSignalRangePercent: envNumber('SCALP_MIN_SIGNAL_RANGE_PERCENT', 0),
+    maxReboundPercent: envNumber('SCALP_MAX_REBOUND_PERCENT', 0),
+    marketRegimeEnabled: envBool('SCALP_MARKET_REGIME_ENABLED', false),
+    marketRegimeLookback: envNumber('SCALP_MARKET_REGIME_LOOKBACK', 5),
+    marketRegimeMinBreadth: envNumber('SCALP_MARKET_REGIME_MIN_BREADTH', 0.5),
+    marketRegimeMinReturnPercent: envNumber('SCALP_MARKET_REGIME_MIN_RETURN_PERCENT', -0.2),
+    requireReboundBelowOverbought: envBool('SCALP_REQUIRE_REBOUND_BELOW_OVERBOUGHT', false),
+    signalProfile: envString('SCALP_SIGNAL_PROFILE', 'rsi_rebound'),
+    bbPeriod: envNumber('BB_PERIOD', 20),
+    bbStdDev: envNumber('BB_STD_DEV', 2),
+    emaLong: envNumber('EMA_LONG', 60),
+    entryDelayMinMs: envNumber('SCALP_ENTRY_DELAY_MIN_MS', 1000),
+    entryDelayMaxMs: envNumber('SCALP_ENTRY_DELAY_MAX_MS', 5000),
+    maxEntryRetracePercent: envNumber('SCALP_MAX_ENTRY_RETRACE_PERCENT', 0.25),
+    maxEntryChasePercent: envNumber('SCALP_MAX_ENTRY_CHASE_PERCENT', 0.35),
+    breakEvenTriggerPercent: envNumber('SCALP_BREAK_EVEN_TRIGGER_PERCENT', 0),
+    breakEvenOffsetPercent: envNumber('SCALP_BREAK_EVEN_OFFSET_PERCENT', 0.05),
+    trailingActivationPercent: envNumber('SCALP_TRAILING_ACTIVATION_PERCENT', 0),
+    trailingStopPercent: envNumber('SCALP_TRAILING_STOP_PERCENT', 0),
+    maxHoldMinutes: envNumber('SCALP_MAX_HOLD_MINUTES', 30),
+    maxLosingHoldMinutes: envNumber('SCALP_MAX_LOSING_HOLD_MINUTES', 0),
+    winnerExtendMinutes: envNumber('SCALP_WINNER_EXTEND_MINUTES', 0),
+    winnerExtendMinProfitPercent: envNumber('SCALP_WINNER_EXTEND_MIN_PROFIT_PERCENT', 0),
+    winnerShadowExtendMinutes: envNumber('SCALP_WINNER_SHADOW_EXTEND_MINUTES', 0),
+    winnerShadowExtendMinProfitPercent: envNumber('SCALP_WINNER_SHADOW_EXTEND_MIN_PROFIT_PERCENT', 0),
+    winnerShadowMaxReboundPercent: envNumber('SCALP_WINNER_SHADOW_MAX_REBOUND_PERCENT', 0),
+    paperDiagnosticShadowsEnabled: envBool('SCALP_PAPER_DIAGNOSTIC_SHADOWS_ENABLED', true),
+    maxEntriesPerSignalWindow: envNumber('SCALP_MAX_ENTRIES_PER_SIGNAL_WINDOW', 0),
+    positionRiskCheckIntervalMs: envNumber('SCALP_RISK_CHECK_INTERVAL_MS', 1000),
+    maxRiskDataGapSeconds: envNumber('SCALP_MAX_RISK_DATA_GAP_SECONDS', 30),
+    maxAnalysisDataGapSeconds: envNumber('SCALP_MAX_ANALYSIS_DATA_GAP_SECONDS', 60),
+    cooldownAfterLossMinutes: envNumber('SCALP_COOLDOWN_AFTER_LOSS_MINUTES', 15),
+    maxConsecutiveLosses: envNumber('SCALP_MAX_CONSECUTIVE_LOSSES', 3),
+    lossCircuitBreakerCount: envNumber('SCALP_LOSS_CIRCUIT_BREAKER_COUNT', 0),
+    lossCircuitBreakerWindowMinutes: envNumber('SCALP_LOSS_CIRCUIT_BREAKER_WINDOW_MINUTES', 30),
+    lossCircuitBreakerCooldownMinutes: envNumber('SCALP_LOSS_CIRCUIT_BREAKER_COOLDOWN_MINUTES', 60),
+    checkInterval: envNumber('PAPER_SMOKE_INTERVAL_MS', 5_000),
+    upbitRequestTimeoutMs: envNumber('UPBIT_REQUEST_TIMEOUT_MS', 10_000),
     useNews: false,
     requireValidationPassForLive: true,
-    paperValidationMinDays: number(process.env.SCALP_PAPER_MIN_DAYS, 7),
-    paperValidationMinTrades: number(process.env.SCALP_PAPER_MIN_TRADES, 20),
-    paperValidationMinReturnPercent: number(process.env.SCALP_PAPER_MIN_RETURN_PERCENT, 0.2),
-    paperValidationMaxDrawdownPercent: number(process.env.SCALP_PAPER_MAX_DRAWDOWN_PERCENT, 15),
-    paperValidationMaxHeartbeatGapMinutes: number(process.env.SCALP_PAPER_MAX_HEARTBEAT_GAP_MINUTES, 15),
+    paperValidationMinDays: envNumber('SCALP_PAPER_MIN_DAYS', 7),
+    paperValidationMinTrades: envNumber('SCALP_PAPER_MIN_TRADES', 20),
+    paperValidationMinReturnPercent: envNumber('SCALP_PAPER_MIN_RETURN_PERCENT', 0.2),
+    paperValidationMaxDrawdownPercent: envNumber('SCALP_PAPER_MAX_DRAWDOWN_PERCENT', 15),
+    paperValidationMaxHeartbeatGapMinutes: envNumber('SCALP_PAPER_MAX_HEARTBEAT_GAP_MINUTES', 15),
     // Keep the validation artifact identity shared with the live config and
     // staging/API projection. Paper sessions do not read the report here,
     // but must still carry the same explicit path contract.
-    scalpingValidationOutputFile: process.env.SCALP_VALIDATION_OUTPUT_FILE || 'scalping_validation.json',
-    logLevel: process.env.LOG_LEVEL || 'warn'
+    scalpingValidationOutputFile: envString('SCALP_VALIDATION_OUTPUT_FILE', 'scalping_validation.json'),
+    logLevel: envString('LOG_LEVEL', 'warn')
   };
 }
 
 async function resolveMarkets() {
-  const requested = (process.env.PAPER_SMOKE_MARKETS || '').trim().toUpperCase();
+  const requested = envString('PAPER_SMOKE_MARKETS', '').trim().toUpperCase();
   if (requested === 'FRESH_FROM_LEDGER' || requested === 'FRESH_COHORT') {
-    const sourceFile = process.env.PAPER_SMOKE_FRESHNESS_LEDGER;
+    const sourceFile = envString('PAPER_SMOKE_FRESHNESS_LEDGER', null);
     if (!sourceFile) {
       throw new Error('freshness 코호트 선택에는 PAPER_SMOKE_FRESHNESS_LEDGER가 필요합니다.');
     }
@@ -196,9 +188,9 @@ async function resolveMarkets() {
     const cohort = selectFreshMarketCohort({
       markets: sourceLedger?.targetCoins,
       telemetry: sourceLedger?.telemetry,
-      minObservations: number(process.env.PAPER_SMOKE_MIN_FRESHNESS_OBSERVATIONS, 100),
-      maxFreshnessBlockRate: number(process.env.PAPER_SMOKE_MAX_STALE_RATE, 0.05),
-      maxMarkets: number(process.env.PAPER_SMOKE_MAX_MARKETS, 20)
+      minObservations: envNumber('PAPER_SMOKE_MIN_FRESHNESS_OBSERVATIONS', 100),
+      maxFreshnessBlockRate: envNumber('PAPER_SMOKE_MAX_STALE_RATE', 0.05),
+      maxMarkets: envNumber('PAPER_SMOKE_MAX_MARKETS', 20)
     });
     if (cohort.selectedMarkets.length === 0) {
       throw new Error(`freshness 코호트 조건을 통과한 마켓이 없습니다 (최소 관측 ${cohort.minObservations}회, 최대 차단률 ${(cohort.maxFreshnessBlockRate * 100).toFixed(1)}%).`);
@@ -221,7 +213,7 @@ async function resolveMarkets() {
     .filter(item => item.market?.startsWith('KRW-') && !excluded.has(item.market))
     .map(item => item.market);
   const tickers = await upbit.getTicker(markets);
-  const limit = number(process.env.PAPER_SMOKE_MAX_MARKETS, number(process.env.SCALP_MAX_MARKETS, 20));
+  const limit = envNumber('PAPER_SMOKE_MAX_MARKETS', envNumber('SCALP_MAX_MARKETS', 20));
   return (tickers || [])
     .filter(ticker => Number.isFinite(ticker?.acc_trade_price_24h))
     .sort((a, b) => b.acc_trade_price_24h - a.acc_trade_price_24h)
@@ -230,23 +222,23 @@ async function resolveMarkets() {
 }
 
 async function main() {
-  const forwardMode = process.env.PAPER_FORWARD_MODE === 'true';
+  const forwardMode = envBool('PAPER_FORWARD_MODE', false);
   const defaultOutputDir = forwardMode ? '.paper-forward' : '.paper-smoke';
-  const outputDir = path.resolve(process.env.PAPER_SMOKE_OUTPUT_DIR || defaultOutputDir);
+  const outputDir = path.resolve(envString('PAPER_SMOKE_OUTPUT_DIR', defaultOutputDir));
   fs.mkdirSync(outputDir, { recursive: true });
-  assertSufficientStorage(outputDir, number(process.env.SCALP_PAPER_MIN_STORAGE_MIB, 1024));
+  assertSufficientStorage(outputDir, envNumber('SCALP_PAPER_MIN_STORAGE_MIB', 1024));
   const portfolioFile = path.join(outputDir, 'dry_portfolio.json');
   const paperFile = path.join(outputDir, 'paper_validation.json');
   const paperSessionLock = acquirePaperSessionLock({
     workspaceRoot: process.cwd(),
-    allowConcurrent: process.env.PAPER_ALLOW_CONCURRENT_SESSIONS === 'true'
+    allowConcurrent: envBool('PAPER_ALLOW_CONCURRENT_SESSIONS', false)
   });
   assertNoConcurrentPaperSessions({
     workspaceRoot: process.cwd(),
     currentLedgerFile: paperFile,
-    allowConcurrent: process.env.PAPER_ALLOW_CONCURRENT_SESSIONS === 'true'
+    allowConcurrent: envBool('PAPER_ALLOW_CONCURRENT_SESSIONS', false)
   });
-  const durationSeconds = Math.max(10, number(process.env.PAPER_SMOKE_SECONDS, 60));
+  const durationSeconds = Math.max(10, envNumber('PAPER_SMOKE_SECONDS', 60));
   const markets = await resolveMarkets();
   if (markets.length === 0) throw new Error('paper forward 대상 KRW 마켓이 없습니다.');
   const config = buildConfig(portfolioFile, paperFile, markets);
@@ -264,7 +256,7 @@ async function main() {
     failurePromise: null
   };
   const originalConsoleLog = console.log.bind(console);
-  const quietForward = forwardMode && process.env.PAPER_FORWARD_VERBOSE !== 'true';
+  const quietForward = forwardMode && !envBool('PAPER_FORWARD_VERBOSE', false);
   let statusTimer = null;
   if (quietForward) {
     console.log = (...args) => {
