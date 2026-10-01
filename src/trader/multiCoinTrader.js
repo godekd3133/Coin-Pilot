@@ -1,9 +1,9 @@
 import { PaperValidationJournal, resolveSignalWindowEntryLimit } from './paperValidationJournal.js';
 import { VirtualPortfolioStore } from './virtualPortfolioStore.js';
+import { PositionRiskMonitor, inspectTraderMarketQuote } from './positionRiskMonitor.js';
 import { createLossCircuitBreakerState } from '../risk/lossCircuitBreaker.js';
 import UpbitAPI from '../api/upbit.js';
 import { isPublicMarketDataSource } from '../api/publicMarketDataSource.js';
-import { inspectMarketQuoteFreshness } from '../api/marketQuoteFreshness.js';
 import {
   getMarketDataAdapterKind,
   UpbitMarketDataAdapter
@@ -18,22 +18,10 @@ import {
 } from '../risk/candleFreshness.js';
 import {
   createRiskMonitorState,
-  getRiskMonitorStatus,
-  recordRiskMonitorAttempt,
-  recordRiskMonitorFailure,
-  recordRiskMonitorIdle,
-  recordRiskMonitorStale,
-  recordRiskMonitorSuccess,
-  recordRiskMonitorWatchdogTick,
   resolveMaxRiskDataGapSeconds
 } from '../risk/riskMonitor.js';
 import {
   createAnalysisDataHealthState,
-  getAnalysisDataHealthStatus,
-  recordAnalysisDataAttempt,
-  recordAnalysisDataFailure,
-  recordAnalysisDataStale,
-  recordAnalysisDataSuccess,
   resolveMaxAnalysisDataGapSeconds
 } from '../risk/analysisDataHealth.js';
 
@@ -109,13 +97,6 @@ function classifyAnalysisFailure(error) {
   return 'market_analysis_failed';
 }
 
-function inspectTraderMarketQuote(ticker, market, maximumAgeSeconds, now = Date.now()) {
-  return inspectMarketQuoteFreshness(ticker, {
-    now,
-    maximumAgeSeconds,
-    expectedMarket: market
-  });
-}
 
 function createMarketQuoteFreshnessError(market, freshness) {
   const stale = freshness.reason === 'market_source_stale' ||
@@ -530,6 +511,44 @@ class MultiCoinTrader {
   set smartTradeHistory(value) { this._portfolioStore().smartTradeHistory = value; }
   get manualOrderIdempotencyRecords() { return this._portfolioStore().manualOrderIdempotencyRecords; }
   set manualOrderIdempotencyRecords(value) { this._portfolioStore().manualOrderIdempotencyRecords = value; }
+
+  // ── PositionRiskMonitor 위임 ────────────────────────────────────
+  // 필드명과 메서드명이 충돌하지 않도록 내부 참조는 _riskMonitorRef.
+  _riskMonitor() {
+    this._riskMonitorRef = this._riskMonitorRef || new PositionRiskMonitor(this);
+    return this._riskMonitorRef;
+  }
+
+  get riskMonitorState() { return this._riskMonitor().riskMonitorState; }
+  set riskMonitorState(v) { this._riskMonitor().riskMonitorState = v; }
+  get analysisDataHealthState() { return this._riskMonitor().analysisDataHealthState; }
+  set analysisDataHealthState(v) { this._riskMonitor().analysisDataHealthState = v; }
+  get positionRiskTimer() { return this._riskMonitor().positionRiskTimer; }
+  set positionRiskTimer(v) { this._riskMonitor().positionRiskTimer = v; }
+  get analysisWatchdogTimer() { return this._riskMonitor().analysisWatchdogTimer; }
+  set analysisWatchdogTimer(v) { this._riskMonitor().analysisWatchdogTimer = v; }
+  get _riskMonitorProtectiveOnly() { return this._riskMonitor()._riskMonitorProtectiveOnly; }
+  set _riskMonitorProtectiveOnly(v) { this._riskMonitor()._riskMonitorProtectiveOnly = v; }
+  get _riskMonitorExitInProgress() { return this._riskMonitor()._riskMonitorExitInProgress; }
+  set _riskMonitorExitInProgress(v) { this._riskMonitor()._riskMonitorExitInProgress = v; }
+  get _riskCheckInProgress() { return this._riskMonitor()._riskCheckInProgress; }
+  set _riskCheckInProgress(v) { this._riskMonitor()._riskCheckInProgress = v; }
+  get lastRiskStatePersistedAt() { return this._riskMonitor().lastRiskStatePersistedAt; }
+  set lastRiskStatePersistedAt(v) { this._riskMonitor().lastRiskStatePersistedAt = v; }
+  get lastAnalysisStatePersistedAt() { return this._riskMonitor().lastAnalysisStatePersistedAt; }
+  set lastAnalysisStatePersistedAt(v) { this._riskMonitor().lastAnalysisStatePersistedAt = v; }
+  get riskStatePersistIntervalMs() { return this._riskMonitor().riskStatePersistIntervalMs; }
+  set riskStatePersistIntervalMs(v) { this._riskMonitor().riskStatePersistIntervalMs = v; }
+  get analysisCycleProgress() { return this._riskMonitor().analysisCycleProgress; }
+  set analysisCycleProgress(v) { this._riskMonitor().analysisCycleProgress = v; }
+  get riskUpbit() { return this._riskMonitor().riskUpbit; }
+  set riskUpbit(v) { this._riskMonitor().riskUpbit = v; }
+  get maxRiskDataGapSeconds() { return this._riskMonitor().maxRiskDataGapSeconds; }
+  set maxRiskDataGapSeconds(v) { this._riskMonitor().maxRiskDataGapSeconds = v; }
+  get maxAnalysisDataGapSeconds() { return this._riskMonitor().maxAnalysisDataGapSeconds; }
+  set maxAnalysisDataGapSeconds(v) { this._riskMonitor().maxAnalysisDataGapSeconds = v; }
+  get positionRiskCheckIntervalMs() { return this._riskMonitor().positionRiskCheckIntervalMs; }
+  set positionRiskCheckIntervalMs(v) { this._riskMonitor().positionRiskCheckIntervalMs = v; }
 
   setTradeCallback(callback) {
     this.onTradeCallback = callback;
@@ -1787,265 +1806,31 @@ class MultiCoinTrader {
     }
   }
 
-  /**
-   * 중지
-   */
-  syncRiskMonitorState() {
-    if (!this.paperValidation) return;
-    this.paperValidation.riskMonitor = { ...this.riskMonitorState };
-    this.paperValidation.telemetry = this.paperValidation.telemetry || {};
-    this.paperValidation.telemetry.riskMonitor = { ...this.riskMonitorState };
-  }
+  syncRiskMonitorState(...args) { return this._riskMonitor().syncRiskMonitorState(...args); }
 
-  persistRiskMonitorStateIfDue(now = Date.now(), force = false) {
-    if (!this.dryRun || !this.paperValidation?.active || !this.paperValidation?.sessionId) {
-      return false;
-    }
-    const timestamp = Number.isFinite(Number(now)) ? Number(now) : Date.now();
-    if (!force && this.lastRiskStatePersistedAt > 0 &&
-      timestamp - this.lastRiskStatePersistedAt < this.riskStatePersistIntervalMs) {
-      return false;
-    }
-    this.syncRiskMonitorState();
-    this.savePaperValidation();
-    this.lastRiskStatePersistedAt = timestamp;
-    return true;
-  }
+  persistRiskMonitorStateIfDue(...args) { return this._riskMonitor().persistRiskMonitorStateIfDue(...args); }
 
-  getRiskMonitorStatus(now = Date.now()) {
-    return getRiskMonitorStatus(
-      this.riskMonitorState,
-      now,
-      this.maxRiskDataGapSeconds
-    );
-  }
+  getRiskMonitorStatus(...args) { return this._riskMonitor().getRiskMonitorStatus(...args); }
 
-  recordRiskMonitorSuccess(now = Date.now()) {
-    this.riskMonitorState = recordRiskMonitorSuccess(
-      this.riskMonitorState,
-      now,
-      this.maxRiskDataGapSeconds
-    );
-    this.syncRiskMonitorState();
-    const status = this.getRiskMonitorStatus(now);
-    if (this.riskMonitorState.lastFailureCode === 'RISK_CHECK_STALE' &&
-      this.riskMonitorState.continuityEligible === false &&
-      (this.isRunning || this._manualRiskProtection)) {
-      this.persistRiskMonitorStateIfDue(now, true);
-      console.error(
-        `\n🛑 늦은 risk ticker 성공 callback으로 확인된 시세 공백 ${status.currentOutageDurationSeconds.toFixed(1)}초 초과 - ` +
-        'paper/live 관찰을 중지합니다.'
-      );
-      this.pauseForSafetyIncident('risk_data_gap');
-    } else {
-      this.persistRiskMonitorStateIfDue(now);
-    }
-    return status;
-  }
+  recordRiskMonitorSuccess(...args) { return this._riskMonitor().recordRiskMonitorSuccess(...args); }
 
-  recordRiskMonitorFailure(error, now = Date.now()) {
-    const result = recordRiskMonitorFailure(
-      this.riskMonitorState,
-      error,
-      now,
-      this.maxRiskDataGapSeconds
-    );
-    this.riskMonitorState = result.state;
-    this.syncRiskMonitorState();
-    if (this.dryRun && this.paperValidation?.active) {
-      this.savePaperValidation();
-      this.lastRiskStatePersistedAt = Date.now();
-    }
-    return {
-      ...result,
-      status: this.getRiskMonitorStatus(now)
-    };
-  }
+  recordRiskMonitorFailure(...args) { return this._riskMonitor().recordRiskMonitorFailure(...args); }
 
-  /**
-   * A risk ticker request can be in-flight without throwing yet. Check the
-   * timestamp age independently of the request's eventual callback so an
-   * open position cannot remain unprotected while the event loop waits on
-   * network I/O.
-   */
-  enforceRiskMonitorFreshness(now = Date.now()) {
-    const status = this.getRiskMonitorStatus(now);
-    // Explicit request failures already flow through handleRiskMonitorFailure.
-    // This guard is specifically for the previously invisible in-flight case
-    // where no failure callback has created currentOutageStartedAt yet.
-    if (!status.failClosed || status.staleReason !== 'risk_check_stale' ||
-      (!this.isRunning && !this._manualRiskProtection)) {
-      return status;
-    }
+  enforceRiskMonitorFreshness(...args) { return this._riskMonitor().enforceRiskMonitorFreshness(...args); }
 
-    const result = recordRiskMonitorStale(
-      this.riskMonitorState,
-      now,
-      this.maxRiskDataGapSeconds
-    );
-    this.riskMonitorState = result.state;
-    this.syncRiskMonitorState();
-    this.persistRiskMonitorStateIfDue(now, true);
+  handleRiskMonitorFailure(...args) { return this._riskMonitor().handleRiskMonitorFailure(...args); }
 
-    console.error(
-      `\n🛑 리스크 시세 freshness ${result.outageDurationSeconds.toFixed(1)}초 초과 - ` +
-      '실패 callback 없이도 paper/live 관찰을 중지합니다.'
-    );
-    this.pauseForSafetyIncident('risk_data_gap');
-    return {
-      ...result,
-      status: this.getRiskMonitorStatus(now)
-    };
-  }
+  syncAnalysisDataHealthState(...args) { return this._riskMonitor().syncAnalysisDataHealthState(...args); }
 
-  /**
-   * An open position without a successful ticker check is not valid forward
-   * evidence. Once the outage budget is exceeded, stop the loop so it cannot
-   * keep accepting new entries while its exits are unknowable.
-   */
-  handleRiskMonitorFailure(error) {
-    const result = this.recordRiskMonitorFailure(error);
-    if (result.failClosed && (this.isRunning || this._manualRiskProtection)) {
-      console.error(`\n🛑 리스크 시세 공백 ${result.outageDurationSeconds.toFixed(1)}초 초과 - 신규 매매와 paper 관찰을 중지합니다.`);
-      this.pauseForSafetyIncident('risk_data_gap');
-    }
-    return result;
-  }
+  persistAnalysisDataStateIfDue(...args) { return this._riskMonitor().persistAnalysisDataStateIfDue(...args); }
 
-  syncAnalysisDataHealthState() {
-    if (!this.paperValidation) return;
-    this.paperValidation.analysisDataHealth = { ...this.analysisDataHealthState };
-    this.paperValidation.telemetry = this.paperValidation.telemetry || {};
-    this.paperValidation.telemetry.analysisDataHealth = { ...this.analysisDataHealthState };
-  }
+  beginAnalysisDataCycle(...args) { return this._riskMonitor().beginAnalysisDataCycle(...args); }
 
-  persistAnalysisDataStateIfDue(now = Date.now(), force = false) {
-    if (!this.dryRun || !this.paperValidation?.active || !this.paperValidation?.sessionId) {
-      return false;
-    }
-    const timestamp = Number.isFinite(Number(now)) ? Number(now) : Date.now();
-    if (!force && this.lastAnalysisStatePersistedAt > 0 &&
-      timestamp - this.lastAnalysisStatePersistedAt < this.riskStatePersistIntervalMs) {
-      return false;
-    }
-    this.syncAnalysisDataHealthState();
-    this.savePaperValidation();
-    this.lastAnalysisStatePersistedAt = timestamp;
-    return true;
-  }
+  getAnalysisDataHealthStatus(...args) { return this._riskMonitor().getAnalysisDataHealthStatus(...args); }
 
-  beginAnalysisDataCycle(now = Date.now()) {
-    const wasActive = this.analysisDataHealthState.analysisActive === true;
-    this.analysisDataHealthState = recordAnalysisDataAttempt(
-      this.analysisDataHealthState,
-      now
-    );
-    this.analysisCycleProgress = new Set();
-    this.syncAnalysisDataHealthState();
-    if (!wasActive) this.persistAnalysisDataStateIfDue(now, true);
-    return this.getAnalysisDataHealthStatus(now);
-  }
+  enforceAnalysisDataFreshness(...args) { return this._riskMonitor().enforceAnalysisDataFreshness(...args); }
 
-  getAnalysisDataHealthStatus(now = Date.now()) {
-    return getAnalysisDataHealthStatus(
-      this.analysisDataHealthState,
-      now,
-      this.maxAnalysisDataGapSeconds
-    );
-  }
-
-  enforceAnalysisDataFreshness(now = Date.now()) {
-    const status = this.getAnalysisDataHealthStatus(now);
-    if (!status.failClosed || status.staleReason !== 'analysis_cycle_stale' || !this.isRunning) {
-      return status;
-    }
-
-    const expectedMarkets = [...new Set((this.targetCoins || [])
-      .map(coin => String(coin || '').trim().toUpperCase())
-      .filter(Boolean))];
-    const analyzedMarkets = this.analysisCycleProgress instanceof Set
-      ? [...this.analysisCycleProgress]
-      : [];
-    const missingMarkets = expectedMarkets.filter(coin => !analyzedMarkets.includes(coin));
-    const result = recordAnalysisDataStale(
-      this.analysisDataHealthState,
-      {
-        expectedMarketCount: expectedMarkets.length,
-        analyzedMarketCount: analyzedMarkets.length,
-        missingMarkets
-      },
-      now,
-      this.maxAnalysisDataGapSeconds
-    );
-    this.analysisDataHealthState = result.state;
-    this.analysisCycleProgress = null;
-    this.syncAnalysisDataHealthState();
-    this.persistAnalysisDataStateIfDue(now, true);
-
-    console.error(
-      `\n🛑 분석 cycle freshness ${result.gapDurationSeconds.toFixed(1)}초 초과 - ` +
-      'paper/live 관찰을 중지합니다.'
-    );
-    this.pauseForSafetyIncident('analysis_data_gap');
-    return {
-      ...result,
-      status: this.getAnalysisDataHealthStatus(now)
-    };
-  }
-
-  /**
-   * A cycle is complete only when every configured market returned a usable
-   * analysis object. A batch ticker failure is acceptable when all individual
-   * fallbacks recover; a partial market set is not valid forward evidence.
-   */
-  recordAnalysisDataHealth(coinAnalyses = [], now = Date.now(), failureDetails = {}) {
-    const expectedMarkets = [...new Set((this.targetCoins || [])
-      .map(coin => String(coin || '').trim().toUpperCase())
-      .filter(Boolean))];
-    const analyzedMarkets = new Set((Array.isArray(coinAnalyses) ? coinAnalyses : [])
-      .map(analysis => String(analysis?.coin || '').trim().toUpperCase())
-      .filter(Boolean));
-    const missingMarkets = expectedMarkets.filter(coin => !analyzedMarkets.has(coin));
-    const details = {
-      expectedMarketCount: expectedMarkets.length,
-      analyzedMarketCount: analyzedMarkets.size,
-      missingMarkets
-    };
-    if (missingMarkets.length === 0) {
-      this.analysisDataHealthState = recordAnalysisDataSuccess(
-        this.analysisDataHealthState,
-        details,
-        now
-      );
-      this.analysisCycleProgress = null;
-      this.syncAnalysisDataHealthState();
-      return {
-        complete: true,
-        ...details,
-        status: this.getAnalysisDataHealthStatus(now),
-        failClosed: false
-      };
-    }
-
-    const result = recordAnalysisDataFailure(
-      this.analysisDataHealthState,
-      { ...details, ...failureDetails },
-      now,
-      this.maxAnalysisDataGapSeconds
-    );
-    this.analysisDataHealthState = result.state;
-    this.analysisCycleProgress = null;
-    this.syncAnalysisDataHealthState();
-    return {
-      complete: false,
-      ...details,
-      ...result,
-      failureCode: result.failureCode || null,
-      failureMarkets: result.failureMarkets || [],
-      transportFailureCodes: failureDetails.transportFailureCodes || {},
-      status: this.getAnalysisDataHealthStatus(now)
-    };
-  }
+  recordAnalysisDataHealth(...args) { return this._riskMonitor().recordAnalysisDataHealth(...args); }
 
   recordPaperIncompleteAnalysisTelemetry(...args) { return this._paperJournal().recordPaperIncompleteAnalysisTelemetry(...args); }
 
@@ -2170,18 +1955,9 @@ class MultiCoinTrader {
     };
   }
 
-  startAnalysisDataWatchdog() {
-    if (this.analysisWatchdogTimer || this.maxAnalysisDataGapSeconds <= 0) return;
-    this.analysisWatchdogTimer = setInterval(() => {
-      this.enforceAnalysisDataFreshness();
-    }, 1000);
-  }
+  startAnalysisDataWatchdog(...args) { return this._riskMonitor().startAnalysisDataWatchdog(...args); }
 
-  stopAnalysisDataWatchdog() {
-    if (!this.analysisWatchdogTimer) return;
-    clearInterval(this.analysisWatchdogTimer);
-    this.analysisWatchdogTimer = null;
-  }
+  stopAnalysisDataWatchdog(...args) { return this._riskMonitor().stopAnalysisDataWatchdog(...args); }
 
   getStrictPaperExecutionCostModel(position = null) {
     if (!this.dryRun || this.paperValidation?.active !== true) return null;
@@ -2206,253 +1982,11 @@ class MultiCoinTrader {
     return { version, slippageRate, tradingFeeRate };
   }
 
-  startPositionRiskMonitor() {
-    if (this.positionRiskTimer || this.positionRiskCheckIntervalMs <= 0) return;
-    this.positionRiskTimer = setInterval(() => {
-      const now = Date.now();
-      if (this.riskMonitorState.monitoringActive === true) {
-        this.riskMonitorState = recordRiskMonitorWatchdogTick(this.riskMonitorState, now);
-        this.syncRiskMonitorState();
-        this.persistRiskMonitorStateIfDue(now);
-      }
-      this.enforceRiskMonitorFreshness(now);
-      if (!this.isRunning && !this._riskMonitorProtectiveOnly && !this._manualRiskProtection) return;
-      this.monitorOpenPositions().catch(error => {
-        console.error(`\n❌ 포지션 리스크 모니터 오류: ${error.message}`);
-      });
-    }, this.positionRiskCheckIntervalMs);
-  }
+  startPositionRiskMonitor(...args) { return this._riskMonitor().startPositionRiskMonitor(...args); }
 
-  stopPositionRiskMonitor() {
-    if (!this.positionRiskTimer) return;
-    clearInterval(this.positionRiskTimer);
-    this.positionRiskTimer = null;
-  }
+  stopPositionRiskMonitor(...args) { return this._riskMonitor().stopPositionRiskMonitor(...args); }
 
-  async monitorOpenPositions(snapshotContext = null) {
-    if ((!this.isRunning && !this._riskMonitorProtectiveOnly && !this._manualRiskProtection) ||
-      this._riskCheckInProgress || this._orderInProgress) return;
-
-    const riskFreshness = this.enforceRiskMonitorFreshness();
-    if (!this._riskMonitorProtectiveOnly &&
-      riskFreshness.failClosed && riskFreshness.staleReason === 'risk_check_stale') return;
-
-    const strictPositions = [...this.strategies.entries()]
-      .filter(([, strategy]) => strategy?.currentPosition)
-      .map(([coin, strategy]) => ({ coin, strategy }));
-    for (const coin of this._deferredProtectiveExitIntents.keys()) {
-      if (!this.strategies.get(coin)?.currentPosition) this._deferredProtectiveExitIntents.delete(coin);
-    }
-    const winnerShadowActive = this.winnerShadowExtendMinutes > 0 ||
-      this.winnerShadowMaxReboundPercent > 0 ||
-      Object.keys(this.paperValidation?.winnerShadow?.positions || {}).length > 0;
-    const shadowStates = this.dryRun && this.paperValidation?.active
-      ? ['shadow', 'looseShadow', ...(winnerShadowActive ? ['winnerShadow'] : [])]
-        .map(stateKey => ({ stateKey, book: this.paperValidation[stateKey] }))
-        .filter(({ book }) => book?.positions && Object.keys(book.positions).length > 0)
-      : [];
-    const shadowCoins = shadowStates.flatMap(({ book }) => Object.keys(book.positions));
-    const monitoredCoins = [...new Set([
-      ...strictPositions.map(position => position.coin),
-      ...shadowCoins
-    ])];
-    if (monitoredCoins.length === 0) {
-      if (this.riskMonitorState.monitoringActive === true) {
-        this.riskMonitorState = recordRiskMonitorIdle(this.riskMonitorState);
-        this.syncRiskMonitorState();
-        this.persistRiskMonitorStateIfDue(Date.now(), true);
-      }
-      this.finishProtectiveMonitoringWhenFlat();
-      return;
-    }
-
-    const wasMonitoringRisk = this.riskMonitorState.monitoringActive === true;
-    const shouldPersistRiskAttempt = !wasMonitoringRisk &&
-      this.dryRun &&
-      this.paperValidation?.active &&
-      this.paperValidation?.sessionId &&
-      this.paperValidation?.riskMonitor;
-    this.riskMonitorState = recordRiskMonitorAttempt(this.riskMonitorState);
-    this.syncRiskMonitorState();
-    // Persist the transition before awaiting the network request so a
-    // read-only observer can see that an open position is being protected.
-    if (shouldPersistRiskAttempt) {
-      this.persistRiskMonitorStateIfDue(Date.now(), true);
-    }
-
-    this._riskCheckInProgress = true;
-    try {
-      const tickers = snapshotContext?.sharedSnapshot === true &&
-        snapshotContext.tickerMap instanceof Map
-        ? [...snapshotContext.tickerMap.values()]
-        // Keep protective pricing on its priority-lane exchange client, never the analysis fixture.
-        : await this.riskUpbit.getTicker(monitoredCoins, { priority: 'risk' });
-      const tickersByMarket = new Map(
-        (Array.isArray(tickers) ? tickers : [])
-          .filter(ticker => ticker?.market)
-          .map(ticker => [ticker.market, ticker])
-      );
-      const priceMap = new Map();
-      const quoteIssues = [];
-      for (const market of monitoredCoins) {
-        const ticker = tickersByMarket.get(market);
-        const freshness = inspectTraderMarketQuote(
-          ticker,
-          market,
-          this.maxCandleAgeSeconds
-        );
-        if (!freshness.fresh) {
-          quoteIssues.push({ market, ...freshness });
-          continue;
-        }
-        priceMap.set(market, Number(ticker.trade_price));
-      }
-      if (quoteIssues.length > 0) {
-        const staleQuote = quoteIssues.some(issue => issue.reason === 'market_source_stale' ||
-          issue.reason === 'market_source_timestamp_in_future');
-        const error = new Error(
-          `risk ticker 시세 신선도 실패 (${quoteIssues.map(({ market, reason }) => `${market}:${reason}`).join(', ')})`
-        );
-        error.code = staleQuote ? 'STALE_RISK_TICKER' : 'INCOMPLETE_RISK_TICKER';
-        error.quoteIssues = quoteIssues;
-        throw error;
-      }
-      this.recordRiskMonitorSuccess();
-      if (priceMap.size === 0 ||
-        (!this.isRunning && !this._riskMonitorProtectiveOnly && !this._manualRiskProtection)) return;
-
-      if (strictPositions.length > 0) {
-        let currentPositions = this.getCurrentPositionCount();
-        const exitCandidates = [];
-        const canExecuteRiskExit = coin => {
-          const previousExitState = this._riskMonitorExitInProgress;
-          this._riskMonitorExitInProgress = true;
-          try {
-            return this.canExecuteLiveOrder(coin, { action: 'SELL' });
-          } finally {
-            this._riskMonitorExitInProgress = previousExitState;
-          }
-        };
-        for (const { coin, strategy } of strictPositions) {
-          if ((!this.isRunning && !this._riskMonitorProtectiveOnly && !this._manualRiskProtection) ||
-            this._orderInProgress) break;
-          const currentPrice = priceMap.get(coin);
-          if (!Number.isFinite(currentPrice) || !strategy.currentPosition) continue;
-
-          const deferredIntent = this._deferredProtectiveExitIntents.get(coin);
-          const positionCheck = deferredIntent
-            ? { shouldClose: true, reason: deferredIntent.reason, type: deferredIntent.type }
-            : strategy.checkPosition(currentPrice);
-          if (!positionCheck.shouldClose) continue;
-
-          const exitIntent = {
-            reason: positionCheck.reason,
-            type: positionCheck.type || deferredIntent?.type || null,
-            triggeredAt: deferredIntent?.triggeredAt || new Date().toISOString()
-          };
-          this._deferredProtectiveExitIntents.set(coin, exitIntent);
-
-          if (!this.dryRun && !canExecuteRiskExit(coin)) {
-            if (!this._riskMonitorProtectiveOnly) {
-              this.pauseForSafetyIncident('exchange_state_unverified');
-            }
-            continue;
-          }
-
-          exitCandidates.push({ coin, strategy, currentPrice, positionCheck, exitIntent });
-        }
-
-        if (exitCandidates.length > 0) {
-          let accounts;
-          try {
-            accounts = await this.getAccountInfo();
-            const isFiniteNonnegativeField = value =>
-              (typeof value === 'number' || (typeof value === 'string' && value.trim() !== '')) &&
-              Number.isFinite(Number(value)) && Number(value) >= 0;
-            if (!Array.isArray(accounts) || accounts.some(account =>
-              !account || typeof account.currency !== 'string' || !account.currency.trim() ||
-              !isFiniteNonnegativeField(account.balance) || !isFiniteNonnegativeField(account.locked)
-            )) {
-              const error = new Error('리스크 청산용 거래소 계좌 응답이 올바르지 않습니다.');
-              error.code = 'INVALID_RISK_ACCOUNT_SNAPSHOT';
-              throw error;
-            }
-          } catch (error) {
-            if (!this.dryRun) this.pauseForSafetyIncident('exchange_state_unverified');
-            throw error;
-          }
-
-          for (const { coin, strategy, currentPrice, positionCheck, exitIntent } of exitCandidates) {
-            if ((!this.isRunning && !this._riskMonitorProtectiveOnly && !this._manualRiskProtection) ||
-              this._orderInProgress) break;
-            if (!strategy.currentPosition) {
-              this._deferredProtectiveExitIntents.delete(coin);
-              continue;
-            }
-            if (!this.dryRun && !canExecuteRiskExit(coin)) {
-              if (!this._riskMonitorProtectiveOnly) {
-                this.pauseForSafetyIncident('exchange_state_unverified');
-              }
-              continue;
-            }
-
-            this._riskMonitorExitInProgress = this._riskMonitorProtectiveOnly || this._manualRiskProtection;
-            try {
-              await this.executeOrder(
-                coin,
-                {
-                  action: 'SELL',
-                  reason: exitIntent.reason,
-                  confidence: '1.00',
-                  signalStrength: { level: 'STRONG', multiplier: 1, score: 100 },
-                  scores: { technical: '0.00', news: '50.00', total: '0.00' },
-                  details: { positionCheck, source: 'position_risk_monitor' }
-                },
-                currentPrice,
-                this.getKRWBalance(accounts),
-                this.getCoinBalance(accounts, coin),
-                currentPositions,
-                [],
-                snapshotContext
-              );
-            } finally {
-              this._riskMonitorExitInProgress = false;
-            }
-            if (!strategy.currentPosition) this._deferredProtectiveExitIntents.delete(coin);
-            currentPositions = this.getCurrentPositionCount();
-          }
-        }
-      }
-
-      if (shadowStates.length > 0 && this.isRunning) {
-        const timestamp = new Date().toISOString();
-        let shadowClosed = false;
-        for (const { stateKey, book } of shadowStates) {
-          for (const coin of Object.keys(book.positions || {})) {
-            const currentPrice = priceMap.get(coin);
-            if (!Number.isFinite(currentPrice)) continue;
-            const closedBefore = book.closedTrades?.length || 0;
-            this.updatePaperShadowPosition(
-              { coin, currentPrice, decision: { details: { rebound: null } } },
-              false,
-              timestamp,
-              stateKey
-            );
-            if ((this.paperValidation[stateKey]?.closedTrades?.length || 0) > closedBefore) {
-              shadowClosed = true;
-            }
-          }
-        }
-        if (shadowClosed) this.savePaperValidation();
-      }
-      this.finishProtectiveMonitoringWhenFlat();
-    } catch (error) {
-      const result = this.handleRiskMonitorFailure(error);
-      console.error(`\n⚠️  포지션 리스크 조회 실패: ${error.message} (연속 ${result.status.consecutiveFailures}회, outage ${result.status.currentOutageDurationSeconds.toFixed(1)}초)`);
-    } finally {
-      this._riskCheckInProgress = false;
-    }
-  }
+  monitorOpenPositions(...args) { return this._riskMonitor().monitorOpenPositions(...args); }
 
   /**
    * 실전 모드: 거래소 실제 잔고와 내부 상태 동기화

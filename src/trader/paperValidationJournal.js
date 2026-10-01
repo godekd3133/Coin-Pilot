@@ -470,7 +470,7 @@ export class PaperValidationJournal {
 
 
   comparePaperExperimentConfig(recordedSnapshot) {
-    const current = this.getPaperExperimentSnapshot();
+    const current = this.owner.getPaperExperimentSnapshot();
     const drift = [];
     const recordedDiagnosticShadows = recordedSnapshot?.diagnosticShadows;
     // Ledgers created before the strict-only switch existed are interpreted as
@@ -547,7 +547,7 @@ export class PaperValidationJournal {
       return false;
     }
 
-    const counterfactualConfig = this.getExecutionBoundaryCounterfactualConfig();
+    const counterfactualConfig = this.owner.getExecutionBoundaryCounterfactualConfig();
     const referencePrice = Number(rebound.referencePrice);
     const retracePercent = Number.isFinite(referencePrice) && referencePrice > 0
       ? ((referencePrice - currentPrice) / referencePrice) * 100
@@ -887,7 +887,7 @@ export class PaperValidationJournal {
     }
     if (resolvedCount > 0) {
       this.paperValidation.winnerShadow = shadow;
-      this.savePaperValidation();
+      this.owner.savePaperValidation();
     }
     return resolvedCount;
   }
@@ -898,7 +898,7 @@ export class PaperValidationJournal {
       return { consistent: null, drift: ['config_snapshot_missing'] };
     }
 
-    const currentSnapshot = this.getPaperValidationConfigSnapshot();
+    const currentSnapshot = this.owner.getPaperValidationConfigSnapshot();
     const backwardCompatibleDefaults = {
       maxEntriesPerSignalWindow: 0,
       maxRiskDataGapSeconds: this.owner.isScalpingMode ? 30 : 0,
@@ -952,7 +952,7 @@ export class PaperValidationJournal {
     if (!this.paperValidation?.active) {
       // The forward ledger is optional. Keep the runtime safety brake active
       // for ordinary DRY_RUN sessions even when no paper session is recording.
-      this.registerRuntimeLoss(trade);
+      this.owner.registerRuntimeLoss(trade);
       return;
     }
 
@@ -976,19 +976,19 @@ export class PaperValidationJournal {
       ledgerKey
     });
     this.paperValidation.strictTrades = strictTrades.slice(-2000);
-    this.settleWinnerShadowBlockedEntries(coin, trade);
-    this.registerRuntimeLoss({
+    this.owner.settleWinnerShadowBlockedEntries(coin, trade);
+    this.owner.registerRuntimeLoss({
       ...trade,
       exitTime
     });
     const strategy = this.owner.strategies.get(coin);
-    if (strategy) this.persistPaperStrategyRiskState(coin, strategy);
+    if (strategy) this.owner.persistPaperStrategyRiskState(coin, strategy);
     // A strict risk-monitor close happens outside the normal analysis cycle.
     // Refresh the durable snapshot before saving so a crash/restart between
     // this close and the next cycle cannot resurrect the already-closed
     // position from a stale strictOpenPositions array.
-    this.paperValidation.strictOpenPositions = this.getStrictOpenPositionSnapshot();
-    this.savePaperValidation();
+    this.paperValidation.strictOpenPositions = this.owner.getStrictOpenPositionSnapshot();
+    this.owner.savePaperValidation();
   }
 
 
@@ -1005,7 +1005,7 @@ export class PaperValidationJournal {
   restorePaperStrategyRiskState() {
     if (!this.paperValidation?.strictRiskState) return;
     for (const [coin, strategy] of this.owner.strategies.entries()) {
-      this.applyPaperStrategyRiskState(coin, strategy);
+      this.owner.applyPaperStrategyRiskState(coin, strategy);
     }
   }
 
@@ -1051,19 +1051,19 @@ export class PaperValidationJournal {
   getLossCircuitBreakerStatus(stateKey = 'strict') {
     let state;
     if (stateKey === 'strict') {
-      state = this.getStrictLossCircuitBreakerState();
+      state = this.owner.getStrictLossCircuitBreakerState();
     } else {
       state = this.paperValidation?.[stateKey]?.lossCircuitBreaker || null;
     }
-    return getLossCircuitBreakerStatus(state, Date.now(), this.getLossCircuitBreakerConfig());
+    return getLossCircuitBreakerStatus(state, Date.now(), this.owner.getLossCircuitBreakerConfig());
   }
 
 
   isStrictEntryBlockedByLossCircuit(now = Date.now()) {
     return isLossCircuitCoolingDown(
-      this.getStrictLossCircuitBreakerState(),
+      this.owner.getStrictLossCircuitBreakerState(),
       now,
-      this.getLossCircuitBreakerConfig()
+      this.owner.getLossCircuitBreakerConfig()
     );
   }
 
@@ -1092,7 +1092,7 @@ export class PaperValidationJournal {
 
   getStrictSignalWindowEntryCount(signalKey) {
     if (!signalKey) return 0;
-    const counts = this.getStrictSignalWindowEntryCounts();
+    const counts = this.owner.getStrictSignalWindowEntryCounts();
     return Number(counts[String(signalKey)]) || 0;
   }
 
@@ -1100,7 +1100,7 @@ export class PaperValidationJournal {
   isStrictEntryBlockedBySignalWindow(signalKey) {
     const limit = resolveSignalWindowEntryLimit(this.owner.config);
     return limit > 0 && Boolean(signalKey) &&
-      this.getStrictSignalWindowEntryCount(signalKey) >= limit;
+      this.owner.getStrictSignalWindowEntryCount(signalKey) >= limit;
   }
 
 
@@ -1110,11 +1110,11 @@ export class PaperValidationJournal {
 
     const normalizedKey = String(signalKey);
     if (this.owner.dryRun && this.paperValidation) {
-      const counts = this.getStrictSignalWindowEntryCounts();
+      const counts = this.owner.getStrictSignalWindowEntryCounts();
       counts[normalizedKey] = (Number(counts[normalizedKey]) || 0) + 1;
       const trimmed = Object.entries(counts).slice(-2000);
       this.paperValidation.strictRiskState.signalWindowEntryCountsByKey = Object.fromEntries(trimmed);
-      if (this.paperValidation.active) this.savePaperValidation();
+      if (this.paperValidation.active) this.owner.savePaperValidation();
       return;
     }
 
@@ -1129,7 +1129,7 @@ export class PaperValidationJournal {
 
   getStrictSignalWindowStatus() {
     const maxEntriesPerSignalWindow = resolveSignalWindowEntryLimit(this.owner.config);
-    const entries = Object.entries(this.getStrictSignalWindowEntryCounts());
+    const entries = Object.entries(this.owner.getStrictSignalWindowEntryCounts());
     const [lastSignalKey, lastEntryCount] = entries.at(-1) || [];
     return {
       enabled: maxEntriesPerSignalWindow > 0,
@@ -1147,10 +1147,10 @@ export class PaperValidationJournal {
       return { triggered: false, lossCount: 0, cooldownUntil: 0 };
     }
 
-    const state = this.getStrictLossCircuitBreakerState();
-    const result = registerLoss(state, trade.exitTime || Date.now(), this.getLossCircuitBreakerConfig());
+    const state = this.owner.getStrictLossCircuitBreakerState();
+    const result = registerLoss(state, trade.exitTime || Date.now(), this.owner.getLossCircuitBreakerConfig());
     if (result.triggered) {
-      console.log(`\n🛑 전역 손실 회로차단기 발동: 최근 손실 ${result.lossCount}회 · ${this.getLossCircuitBreakerConfig().cooldownMinutes}분 신규 진입 차단`);
+      console.log(`\n🛑 전역 손실 회로차단기 발동: 최근 손실 ${result.lossCount}회 · ${this.owner.getLossCircuitBreakerConfig().cooldownMinutes}분 신규 진입 차단`);
     }
     if (this.owner.dryRun && this.paperValidation) {
       this.paperValidation.strictRiskState = this.paperValidation.strictRiskState || {};
@@ -1165,7 +1165,7 @@ export class PaperValidationJournal {
       throw new Error('실거래 모드에서는 모의투자 세션을 시작할 수 없습니다.');
     }
 
-    const previousDiagnosticOpenPositions = this.getPaperDiagnosticOpenPositionSnapshot();
+    const previousDiagnosticOpenPositions = this.owner.getPaperDiagnosticOpenPositionSnapshot();
     const previousContinuityInvalid = this.paperValidation?.riskMonitor?.continuityEligible === false ||
       this.paperValidation?.analysisDataHealth?.continuityEligible === false ||
       this.paperValidation?.continuityEligible === false;
@@ -1214,9 +1214,9 @@ export class PaperValidationJournal {
       strategyMode: this.owner.strategyMode,
       strategyProfile: this.owner.config.signalProfile || 'rsi_rebound',
       targetCoins: [...this.owner.targetCoins],
-      configSnapshot: this.getPaperValidationConfigSnapshot(),
+      configSnapshot: this.owner.getPaperValidationConfigSnapshot(),
       configSnapshotComplete: true,
-      paperExperiments: this.getPaperExperimentSnapshot(),
+      paperExperiments: this.owner.getPaperExperimentSnapshot(),
       baselineAssets,
       baselineIncludesHoldings: this.owner.virtualPortfolio.holdings.size > 0,
       thresholds: {
@@ -1394,8 +1394,8 @@ export class PaperValidationJournal {
       },
       snapshots: [{ timestamp: startedAt, totalAssets: baselineAssets, reason: 'session_start' }]
     };
-    this.savePaperValidation();
-    return this.getPaperValidationStatus();
+    this.owner.savePaperValidation();
+    return this.owner.getPaperValidationStatus();
   }
 
 
@@ -1406,9 +1406,9 @@ export class PaperValidationJournal {
     const pendingCounterfactualCount = ['shadow', 'looseShadow']
       .reduce((count, stateKey) => count + (this.paperValidation[stateKey]?.executionBoundaryBlockedEntries || [])
         .filter(entry => entry?.status === 'pending').length, 0);
-    this.resolveExecutionBoundaryBlockedEntriesAtStop(new Date().toISOString());
-    const strictOpenPositions = this.getStrictOpenPositionSnapshot();
-    const diagnosticOpenPositions = this.getPaperDiagnosticOpenPositionSnapshot();
+    this.owner.resolveExecutionBoundaryBlockedEntriesAtStop(new Date().toISOString());
+    const strictOpenPositions = this.owner.getStrictOpenPositionSnapshot();
+    const diagnosticOpenPositions = this.owner.getPaperDiagnosticOpenPositionSnapshot();
     this.paperValidation.strictOpenPositions = strictOpenPositions;
     this.paperValidation.endedWithOpenPositions = strictOpenPositions.length > 0;
     this.paperValidation.endedWithDiagnosticOpenPositions = diagnosticOpenPositions.length > 0;
@@ -1429,8 +1429,8 @@ export class PaperValidationJournal {
           : 'stopped_cleanly');
     this.paperValidation.active = false;
     this.paperValidation.endedAt = new Date().toISOString();
-    this.savePaperValidation();
-    return this.getPaperValidationStatus();
+    this.owner.savePaperValidation();
+    return this.owner.getPaperValidationStatus();
   }
 
 
@@ -1440,7 +1440,7 @@ export class PaperValidationJournal {
     const now = Date.now();
     const lastSnapshot = this.paperValidation.snapshots?.at(-1);
     if (lastSnapshot && now - new Date(lastSnapshot.timestamp).getTime() < 60_000) {
-      return this.getPaperValidationStatus();
+      return this.owner.getPaperValidationStatus();
     }
 
     const totalAssets = await this.owner.calculateTotalAssets(priceMapOverride);
@@ -1448,8 +1448,8 @@ export class PaperValidationJournal {
       ...(this.paperValidation.snapshots || []),
       { timestamp: new Date(now).toISOString(), totalAssets, reason }
     ].slice(-10000);
-    this.savePaperValidation();
-    return this.getPaperValidationStatus();
+    this.owner.savePaperValidation();
+    return this.owner.getPaperValidationStatus();
   }
 
 
@@ -1656,7 +1656,7 @@ export class PaperValidationJournal {
     this.owner.cycleRequestStats = null;
     const now = new Date().toISOString();
     const diagnosticShadowsEnabled = this.owner.paperDiagnosticShadowsEnabled !== false;
-    this.paperValidation.strictOpenPositions = this.getStrictOpenPositionSnapshot();
+    this.paperValidation.strictOpenPositions = this.owner.getStrictOpenPositionSnapshot();
     telemetry.cycles += 1;
     telemetry.lastCycleAt = now;
     telemetry.heartbeatAt = now;
@@ -1679,8 +1679,8 @@ export class PaperValidationJournal {
       const candleFreshEnough = analysis?.candleFreshness?.valid !== false &&
         analysis?.decision?.details?.candleFreshness?.valid !== false;
       if (diagnosticShadowsEnabled && candleFreshEnough) {
-        this.updateExecutionBoundaryBlockedEntries(analysis, 'shadow', now);
-        this.updateExecutionBoundaryBlockedEntries(analysis, 'looseShadow', now);
+        this.owner.updateExecutionBoundaryBlockedEntries(analysis, 'shadow', now);
+        this.owner.updateExecutionBoundaryBlockedEntries(analysis, 'looseShadow', now);
       }
       const signalKey = rebound?.signalKey ? String(rebound.signalKey) : '';
       const isNewFreshSignalWindow = Boolean(candleFreshEnough && signalKey &&
@@ -1813,7 +1813,7 @@ export class PaperValidationJournal {
         if (winnerShadowEnabled && action === 'BUY' && rebound?.reboundConfirmed === true &&
           !winnerShadowReboundWithinCeiling) {
           telemetry.winnerShadowReboundBlockedEntries += 1;
-          this.recordWinnerShadowBlockedEntry(analysis, now);
+          this.owner.recordWinnerShadowBlockedEntry(analysis, now);
         }
         if (isNewFreshSignalWindow && shadowEntryExecution.enforceable && !shadowEntryExecution.valid) {
           const reason = shadowEntryExecution.reason;
@@ -1821,13 +1821,13 @@ export class PaperValidationJournal {
             telemetry.shadowEntryExecutionBlockedEntries += 1;
             telemetry.shadowEntryExecutionBlockReasons[reason] =
               (telemetry.shadowEntryExecutionBlockReasons[reason] || 0) + 1;
-            this.recordExecutionBoundaryBlockedEntry(analysis, 'shadow', reason, now);
+            this.owner.recordExecutionBoundaryBlockedEntry(analysis, 'shadow', reason, now);
           }
           if (looseShadowCandidateBeforeRegime) {
             telemetry.looseShadowEntryExecutionBlockedEntries += 1;
             telemetry.looseShadowEntryExecutionBlockReasons[reason] =
               (telemetry.looseShadowEntryExecutionBlockReasons[reason] || 0) + 1;
-            this.recordExecutionBoundaryBlockedEntry(analysis, 'looseShadow', reason, now);
+            this.owner.recordExecutionBoundaryBlockedEntry(analysis, 'looseShadow', reason, now);
           }
         }
         if (this.owner.config.marketRegimeEnabled === true && !regimeAllowsEntry) {
@@ -1849,10 +1849,10 @@ export class PaperValidationJournal {
             (telemetry.winnerShadowCandidatesByCoin[coin] || 0) + 1;
         }
 
-        const shadowResult = this.updatePaperShadowPosition(analysis, shadowCandidate && action !== 'BUY', now);
-        const looseShadowResult = this.updatePaperShadowPosition(analysis, looseShadowCandidate && action !== 'BUY', now, 'looseShadow');
+        const shadowResult = this.owner.updatePaperShadowPosition(analysis, shadowCandidate && action !== 'BUY', now);
+        const looseShadowResult = this.owner.updatePaperShadowPosition(analysis, looseShadowCandidate && action !== 'BUY', now, 'looseShadow');
         const winnerShadowResult = winnerShadowEnabled
-          ? this.updatePaperShadowPosition(analysis, winnerShadowCandidate, now, 'winnerShadow')
+          ? this.owner.updatePaperShadowPosition(analysis, winnerShadowCandidate, now, 'winnerShadow')
           : null;
         if (shadowResult?.blockedByLossCircuit) telemetry.shadowCircuitBlockedEntries += 1;
         if (looseShadowResult?.blockedByLossCircuit) telemetry.looseShadowCircuitBlockedEntries += 1;
@@ -1872,7 +1872,7 @@ export class PaperValidationJournal {
       : 0;
     if (Date.now() - lastPersistedAt >= 60_000) {
       this.paperValidation.lastTelemetryPersistedAt = now;
-      this.savePaperValidation();
+      this.owner.savePaperValidation();
     }
   }
 
@@ -2208,7 +2208,7 @@ export class PaperValidationJournal {
       return result;
     }
 
-    const exitConfig = this.resolveShadowExitConfig(stateKey, configOverride);
+    const exitConfig = this.owner.resolveShadowExitConfig(stateKey, configOverride);
     const tradingFee = Number.isFinite(Number(exitConfig.tradingFee))
       ? Number(exitConfig.tradingFee)
       : 0.0005;
@@ -2369,7 +2369,7 @@ export class PaperValidationJournal {
           const circuitResult = registerLoss(
             shadow.lossCircuitBreaker,
             nowMs,
-            this.getLossCircuitBreakerConfig()
+            this.owner.getLossCircuitBreakerConfig()
           );
           result.circuitTriggered = circuitResult.triggered;
         }
@@ -2399,7 +2399,7 @@ export class PaperValidationJournal {
           if (isLossCircuitCoolingDown(
             shadow.lossCircuitBreaker,
             nowMs,
-            this.getLossCircuitBreakerConfig()
+            this.owner.getLossCircuitBreakerConfig()
           )) {
             result.blockedByLossCircuit = true;
             this.paperValidation[stateKey] = shadow;
@@ -2487,14 +2487,14 @@ export class PaperValidationJournal {
       ? Date.now() - heartbeatMs
       : null;
     const heartbeatLimitMs = Math.max(120_000, (Number(this.owner.config.checkInterval) || 60_000) * 5);
-    const ownerProcessAlive = this.isProcessAlive(session.processId);
+    const ownerProcessAlive = this.owner.isProcessAlive(session.processId);
     const orphaned = session.active === true &&
       (ownerProcessAlive === false || heartbeatAgeMs === null || heartbeatAgeMs > heartbeatLimitMs);
     const orphanReason = orphaned
       ? ownerProcessAlive === false ? 'owner_process_missing' : 'heartbeat_stale'
       : null;
-    const configComparison = this.comparePaperValidationConfig(session.configSnapshot);
-    const experimentComparison = this.comparePaperExperimentConfig(session.paperExperiments);
+    const configComparison = this.owner.comparePaperValidationConfig(session.configSnapshot);
+    const experimentComparison = this.owner.comparePaperExperimentConfig(session.paperExperiments);
     const configSnapshotComplete = session.configSnapshotComplete === true;
     const snapshots = [
       { timestamp: session.startedAt, totalAssets: session.baselineAssets },
@@ -2540,7 +2540,7 @@ export class PaperValidationJournal {
 
     const hasLiveStrategyState = this.owner.strategies.size > 0;
     const strictOpenPositions = hasLiveStrategyState
-      ? this.getStrictOpenPositionSnapshot()
+      ? this.owner.getStrictOpenPositionSnapshot()
       : (Array.isArray(session.strictOpenPositions) ? session.strictOpenPositions : []);
 
     const realizedProfit = startedTrades.reduce((sum, trade) => sum + (Number(trade.profit) || 0), 0);
@@ -2711,12 +2711,12 @@ export class PaperValidationJournal {
     };
     const shadowRejectionOutcomes = summarizeRejectionOutcomes(shadowClosedTrades);
     const looseRejectionOutcomes = summarizeRejectionOutcomes(looseClosedTrades);
-    const shadowExecutionBoundary = this.getExecutionBoundaryBlockedEntrySummary(shadow);
-    const looseExecutionBoundary = this.getExecutionBoundaryBlockedEntrySummary(looseShadow);
-    const strictLossCircuitBreaker = this.getLossCircuitBreakerStatus('strict');
-    const shadowLossCircuitBreaker = this.getLossCircuitBreakerStatus('shadow');
-    const looseShadowLossCircuitBreaker = this.getLossCircuitBreakerStatus('looseShadow');
-    const winnerShadowLossCircuitBreaker = this.getLossCircuitBreakerStatus('winnerShadow');
+    const shadowExecutionBoundary = this.owner.getExecutionBoundaryBlockedEntrySummary(shadow);
+    const looseExecutionBoundary = this.owner.getExecutionBoundaryBlockedEntrySummary(looseShadow);
+    const strictLossCircuitBreaker = this.owner.getLossCircuitBreakerStatus('strict');
+    const shadowLossCircuitBreaker = this.owner.getLossCircuitBreakerStatus('shadow');
+    const looseShadowLossCircuitBreaker = this.owner.getLossCircuitBreakerStatus('looseShadow');
+    const winnerShadowLossCircuitBreaker = this.owner.getLossCircuitBreakerStatus('winnerShadow');
     const baselineAssets = Number(session.baselineAssets) || 0;
     const returnPercent = baselineAssets > 0 ? ((currentAssets / baselineAssets) - 1) * 100 : 0;
     const thresholds = session.thresholds || {};
@@ -2738,7 +2738,7 @@ export class PaperValidationJournal {
     );
     const riskMonitor = this.owner.getRiskMonitorStatus();
     const analysisDataHealth = this.owner.getAnalysisDataHealthStatus();
-    const currentDiagnosticOpenPositions = this.getPaperDiagnosticOpenPositionSnapshot();
+    const currentDiagnosticOpenPositions = this.owner.getPaperDiagnosticOpenPositionSnapshot();
     const endedWithOpenPositions = session.endedWithOpenPositions === true ||
       (orphaned && strictOpenPositions.length > 0);
     const endedWithDiagnosticOpenPositions = session.endedWithDiagnosticOpenPositions === true ||
@@ -3033,7 +3033,7 @@ export class PaperValidationJournal {
       strictTradeConfidence,
       strictConfidenceGate,
       exitEvidence,
-      signalWindow: this.getStrictSignalWindowStatus(),
+      signalWindow: this.owner.getStrictSignalWindowStatus(),
       lossCircuitBreaker: strictLossCircuitBreaker,
       strictEvaluation: {
         activePositions: strictOpenPositions.length,
@@ -3062,7 +3062,7 @@ export class PaperValidationJournal {
       maxInterruptionMinutes: interruptions.length > 0
         ? Math.max(...interruptions.map(interruption => Number(interruption.gapMs) || 0)) / 60000
         : 0,
-      storage: this.getStorageStatus(),
+      storage: this.owner.getStorageStatus(),
       candleFreshness: {
         maxAgeSeconds: this.owner.maxCandleAgeSeconds,
         blockedSnapshots: Number(telemetry?.candleFreshnessBlockedSnapshots) || 0,
@@ -3272,6 +3272,6 @@ export class PaperValidationJournal {
     telemetry.analysisDataHealth = { ...this.owner.analysisDataHealthState };
     this.paperValidation.telemetry = telemetry;
     this.paperValidation.lastTelemetryPersistedAt = now;
-    this.savePaperValidation();
+    this.owner.savePaperValidation();
   }
 }
