@@ -14,11 +14,20 @@ import fs from 'node:fs';
  */
 
 const TRADER_FILE = 'src/trader/multiCoinTrader.js';
+const JOURNAL_FILE = 'src/trader/paperValidationJournal.js';
 const ORCHESTRATOR_BUDGETS = {
   'src/trader/multiCoinTrader.js': 1100,
   'src/api/dashboardServer.js': 850,
   'src/index.js': 400,
-  'src/api/routes/trading.js': 300
+  'src/api/routes/trading.js': 300,
+  // 추출이 끝난 orchestrator/facade — 다시 팽창하면 실패한다.
+  'src/trader/paperValidationJournal.js': 500,
+  'src/api/manualOrderService.js': 80,
+  'src/api/upbit.js': 620,
+  'src/api/upbitRateCoordinator.js': 700,
+  'src/ai/monitoringSessionService.js': 750,
+  'src/api/routes/research.js': 300,
+  'src/backtest/scalpingBacktest.js': 1150
 };
 
 test('god-object로 분해된 파일은 크기 예산을 유지한다', () => {
@@ -69,6 +78,88 @@ test('추출된 트레이더 모듈은 cross-method 호출을 owner 표면으로
       `${file}: 호출 ${bypasses.join(', ')}은 this.owner.를 거쳐야 한다`
     );
   }
+});
+
+// 저널 서브모듈 — 저널 표면 메서드 호출은 this.journal을 거쳐야 한다.
+const JOURNAL_DELEGATED_MODULES = [
+  'src/trader/paperValidationStatus.js',
+  'src/trader/paperValidationBlockedEntries.js',
+  'src/trader/paperValidationTelemetry.js',
+  'src/trader/paperValidationRiskGate.js',
+  'src/trader/paperValidationShadowBook.js',
+  'src/trader/paperValidationSession.js',
+  'src/trader/paperValidationSnapshots.js'
+];
+
+test('저널 서브모듈은 저널 메서드 호출을 journal 표면으로 한다', () => {
+  const journalSource = fs.readFileSync(JOURNAL_FILE, 'utf8');
+  const journalMethods = declaredMethods(journalSource);
+  for (const file of JOURNAL_DELEGATED_MODULES) {
+    const source = fs.readFileSync(file, 'utf8');
+    const ownMethods = declaredMethods(source);
+    const bypasses = [...source.matchAll(/\bthis\.([a-zA-Z_]\w*)\s*\(/g)]
+      .map(m => m[1])
+      .filter(name => !ownMethods.has(name) && name !== 'journal' && journalMethods.has(name));
+    assert.deepEqual(
+      [...new Set(bypasses)],
+      [],
+      `${file}: 호출 ${bypasses.join(', ')}은 this.journal.를 거쳐야 한다`
+    );
+    assert.match(source, /constructor\(journal\)/, `${file} must take journal`);
+  }
+});
+
+test('paperValidationJournal은 서브모듈의 지연 팩토리를 제공한다', () => {
+  const source = fs.readFileSync(JOURNAL_FILE, 'utf8');
+  const expectedFactories = [
+    '_pvStatus', '_pvBlocked', '_pvTelemetry', '_pvRisk',
+    '_pvShadow', '_pvSession', '_pvSnapshots'
+  ];
+  for (const factory of expectedFactories) {
+    assert.match(
+      source,
+      new RegExp(`${factory}\\(\\)\\s*\\{`),
+      `missing lazy factory ${factory}() on PaperValidationJournal`
+    );
+  }
+});
+
+// 수동 주문 서비스 — use-case 모듈은 팩토리 패턴을 유지하고 서비스가 얇게 남는다.
+const MANUAL_ORDER_USE_CASES = [
+  'src/api/manualOrderTrade.js',
+  'src/api/manualOrderBuy.js',
+  'src/api/manualOrderSell.js',
+  'src/api/manualOrderQuick.js',
+  'src/api/manualOrderSmartBuy.js',
+  'src/api/manualOrderSmartSell.js',
+  'src/api/manualOrderBundle.js'
+];
+
+test('수동 주문 use-case는 ctx 주입 팩토리와 LIVE evidence 경계를 유지한다', () => {
+  for (const file of MANUAL_ORDER_USE_CASES) {
+    const source = fs.readFileSync(file, 'utf8');
+    assert.match(
+      source,
+      /export function create[A-Z]\w*UseCase\(ctx\)/,
+      `${file} must expose a create<Name>UseCase(ctx) factory`
+    );
+    // 라우트/헬퍼에서 거래소 클라이언트를 직접 호출하면 경계가 역전된 것.
+    assert.doesNotMatch(
+      source,
+      /tradingSystem\.upbit\.order\s*\(/,
+      `${file} must not call the exchange client directly — use runLiveLeg/executeLiveOrderWithEvidence`
+    );
+  }
+  const serviceSource = fs.readFileSync('src/api/manualOrderService.js', 'utf8');
+  assert.match(serviceSource, /createManualOrderContext/);
+});
+
+// LIVE leg 실행은 완전 관측 체결만 성공으로 인정한다 — 부분 체결이 포지션을 오염시키지 않도록.
+test('수동 주문 LIVE leg은 완전 관측 체결만 성공으로 받는다', () => {
+  const ctxSource = fs.readFileSync('src/api/manualOrderContext.js', 'utf8');
+  assert.match(ctxSource, /executeLiveOrderWithEvidence/);
+  assert.match(ctxSource, /hasCompleteObservedLiveFill/);
+  assert.match(ctxSource, /liveFillFailureResult/);
 });
 
 test('MultiCoinTrader는 추출된 모듈의 위임과 지연 팩토리를 제공한다', () => {
