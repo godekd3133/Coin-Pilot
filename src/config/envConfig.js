@@ -103,6 +103,16 @@ export function envString(key, fallback, { source = process.env } = {}) {
 }
 
 /**
+ * 스냅샷/원장 기록용 verbatim 읽기 — 값은 파싱 없이 그대로 반환한다.
+ * (기록 계약이 raw 문자열을 기대하는 곳 전용; 설정 소비는 타입드 접근자 사용)
+ */
+export function envRaw(key, { source = process.env } = {}) {
+  specFor(key);
+  const raw = source[key];
+  return raw === undefined ? undefined : String(raw);
+}
+
+/**
  * 콤마 구분 목록 설정.
  */
 export function envList(key, fallback, { source = process.env } = {}) {

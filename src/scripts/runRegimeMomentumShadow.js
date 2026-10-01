@@ -28,6 +28,7 @@ import {
   MOMENTUM_SHADOW_BENCHMARK_OBSERVATION_SCHEMA_VERSION,
   projectMomentumShadowBenchmarkObservation
 } from '../research/momentumShadowBenchmark.js';
+import { envNumber, envRaw } from '../config/envConfig.js';
 import {
   isMomentumShadowCooldownActive,
   recordMomentumShadowExit,
@@ -102,23 +103,23 @@ import {
  */
 dotenv.config();
 
-const DIR = process.env.MOMO_SHADOW_DIR || '.paper-momentum-shadow-v1';
+const DIR = envRaw('MOMO_SHADOW_DIR') || '.paper-momentum-shadow-v1';
 const LOCK = path.join(DIR, '.momentum-shadow.lock');
 const LEDGER = path.join(DIR, 'ledger.json');
-const POLL_MS = Number(process.env.MOMO_SHADOW_POLL_MS) || 5 * 60 * 1000;
+const POLL_MS = envNumber('MOMO_SHADOW_POLL_MS', null) || 5 * 60 * 1000;
 const DEFAULT_REQUEST_INTERVAL_MS = 500;
 const MAX_CONSECUTIVE_FETCH_FAILURES = resolveMomentumShadowFetchFailureLimit(
-  process.env.MOMO_SHADOW_MAX_CONSECUTIVE_FETCH_FAILURES
+  envRaw('MOMO_SHADOW_MAX_CONSECUTIVE_FETCH_FAILURES')
 );
 const MAX_CYCLE_DURATION_MS = resolveMomentumShadowMaxCycleDurationMs(
-  process.env.MOMO_SHADOW_MAX_CYCLE_DURATION_MS
+  envRaw('MOMO_SHADOW_MAX_CYCLE_DURATION_MS')
 );
-const CANDIDATE_SLOT_FILE = process.env.MOMO_SHADOW_CANDIDATE_SLOT_FILE
-  ? path.resolve(process.env.MOMO_SHADOW_CANDIDATE_SLOT_FILE)
+const CANDIDATE_SLOT_FILE = envRaw('MOMO_SHADOW_CANDIDATE_SLOT_FILE')
+  ? path.resolve(envRaw('MOMO_SHADOW_CANDIDATE_SLOT_FILE'))
   : null;
 const HEARTBEAT_STALE_LIMIT_MS = Math.max(10 * 60 * 1000, POLL_MS * 5);
 const DEFAULT_MAX_DAILY_CANDLE_AGE_HOURS = 36;
-let MARKETS = (process.env.MOMO_SHADOW_MARKETS || 'KRW-BTC,KRW-ETH,KRW-XRP,KRW-SOL')
+let MARKETS = (envRaw('MOMO_SHADOW_MARKETS') || 'KRW-BTC,KRW-ETH,KRW-XRP,KRW-SOL')
   .split(',').map((m) => m.trim()).filter(Boolean);
 let BENCHMARK_MARKET = null;
 let BENCHMARK_TREND_MIN_PERCENT = null;
@@ -130,31 +131,31 @@ let MAX_ENTRY_GAP_PERCENT = 0;
 let MAX_DAILY_CANDLE_AGE_HOURS = DEFAULT_MAX_DAILY_CANDLE_AGE_HOURS;
 let MAX_SPREAD_PERCENT = 0;
 let REQUEST_INTERVAL_MS = DEFAULT_REQUEST_INTERVAL_MS;
-let EXECUTION_MODEL = resolveMomentumShadowExecutionModel(process.env.MOMO_SHADOW_EXECUTION_MODEL);
-const COST_PERCENT = resolveMomentumShadowCostPercent(process.env.MOMO_SHADOW_COST_PERCENT);
+let EXECUTION_MODEL = resolveMomentumShadowExecutionModel(envRaw('MOMO_SHADOW_EXECUTION_MODEL'));
+const COST_PERCENT = resolveMomentumShadowCostPercent(envRaw('MOMO_SHADOW_COST_PERCENT'));
 const COST_FLOOR_STATUS = assessMomentumShadowCostFloor(COST_PERCENT);
-const POSITION_FRACTION = Number(process.env.MOMO_SHADOW_POSITION_FRACTION) || 0.25;
-const MAX_POSITIONS = Number(process.env.MOMO_SHADOW_MAX_POSITIONS) || 4;
-const TREND_MIN_PERCENT = Number(process.env.MOMO_SHADOW_TREND_MIN_PERCENT) || 0;
-const BREADTH_MIN = Number(process.env.MOMO_SHADOW_BREADTH_MIN) || 1;
+const POSITION_FRACTION = envNumber('MOMO_SHADOW_POSITION_FRACTION', null) || 0.25;
+const MAX_POSITIONS = envNumber('MOMO_SHADOW_MAX_POSITIONS', null) || 4;
+const TREND_MIN_PERCENT = envNumber('MOMO_SHADOW_TREND_MIN_PERCENT', null) || 0;
+const BREADTH_MIN = envNumber('MOMO_SHADOW_BREADTH_MIN', null) || 1;
 let VOLATILITY_LOOKBACK_DAYS = Math.max(
   2,
-  Math.floor(Number(process.env.MOMO_SHADOW_VOLATILITY_LOOKBACK_DAYS) || 14)
+  Math.floor(envNumber('MOMO_SHADOW_VOLATILITY_LOOKBACK_DAYS', null) || 14)
 );
-let VOLATILITY_TARGET_PERCENT = process.env.MOMO_SHADOW_VOLATILITY_TARGET_PERCENT === undefined ||
-  process.env.MOMO_SHADOW_VOLATILITY_TARGET_PERCENT === ''
+let VOLATILITY_TARGET_PERCENT = envRaw('MOMO_SHADOW_VOLATILITY_TARGET_PERCENT') === undefined ||
+  envRaw('MOMO_SHADOW_VOLATILITY_TARGET_PERCENT') === ''
   ? null
-  : Number.isFinite(Number(process.env.MOMO_SHADOW_VOLATILITY_TARGET_PERCENT))
-    && Number(process.env.MOMO_SHADOW_VOLATILITY_TARGET_PERCENT) > 0
-    ? Number(process.env.MOMO_SHADOW_VOLATILITY_TARGET_PERCENT)
+  : Number.isFinite(Number(envRaw('MOMO_SHADOW_VOLATILITY_TARGET_PERCENT')))
+    && Number(envRaw('MOMO_SHADOW_VOLATILITY_TARGET_PERCENT')) > 0
+    ? Number(envRaw('MOMO_SHADOW_VOLATILITY_TARGET_PERCENT'))
     : null;
 let ENTRY_EXECUTION = resolveMomentumShadowEntryExecution(
-  process.env.MOMO_SHADOW_ENTRY_EXECUTION
+  envRaw('MOMO_SHADOW_ENTRY_EXECUTION')
 );
 const HISTORY_DAYS = 200;
 // 'fixed': exit at maxHoldHours / SL / TP (trade-based).
 // 'regime': hold while trailing 7d trend stays > trendMinPercent (regime switch).
-let MODE = process.env.MOMO_SHADOW_MODE === 'regime' ? 'regime' : 'fixed';
+let MODE = envRaw('MOMO_SHADOW_MODE') === 'regime' ? 'regime' : 'fixed';
 
 const strategyConfig = {
   candleUnitMinutes: 1440,
@@ -162,16 +163,15 @@ const strategyConfig = {
   trendLookbackHours: 168,       // 7d
   requireUpBar: true,
   // regime mode holds while the trend gate stays open; disable the fixed cap.
-  maxHoldHours: Number(process.env.MOMO_SHADOW_MAX_HOLD_HOURS)
-    || (MODE === 'regime' ? 24 * 365 : 72),
-  minUpBars: Math.max(1, Math.floor(Number(process.env.MOMO_SHADOW_MIN_UP_BARS) || 1)),
-  stopLossPercent: Number(process.env.MOMO_SHADOW_STOP_LOSS_PERCENT) || 0,
-  takeProfitPercent: Number(process.env.MOMO_SHADOW_TAKE_PROFIT_PERCENT) || 0
+  maxHoldHours: envNumber('MOMO_SHADOW_MAX_HOLD_HOURS', null) || (MODE === 'regime' ? 24 * 365 : 72),
+  minUpBars: Math.max(1, Math.floor(envNumber('MOMO_SHADOW_MIN_UP_BARS', null) || 1)),
+  stopLossPercent: envNumber('MOMO_SHADOW_STOP_LOSS_PERCENT', null) || 0,
+  takeProfitPercent: envNumber('MOMO_SHADOW_TAKE_PROFIT_PERCENT', null) || 0
 };
 
 const upbit = new UpbitAPI('', '', { requestTimeoutMs: 10_000 });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const notify = createNotifier({ topic: process.env.MOMO_SHADOW_NTFY_TOPIC || '' });
+const notify = createNotifier({ topic: envRaw('MOMO_SHADOW_NTFY_TOPIC') || '' });
 let bookName = `${DIR.replace(/[^a-z0-9]+/gi, '-')}·${MODE}`;
 let activeLedger = null;
 let lockOwned = false;
@@ -754,14 +754,14 @@ async function cycle(ledger, strategies) {
     markCycleStage('drawdown_guard');
     const markedBeforeEntries = getMomentumShadowEquity(
       ledger,
-      Number(process.env.MOMO_SHADOW_INITIAL_BALANCE) || 100_000_000
+      envNumber('MOMO_SHADOW_INITIAL_BALANCE', null) || 100_000_000
     );
     const drawdownState = updateMomentumShadowDrawdown(
       ledger,
       markedBeforeEntries.markedEquity,
       nowIso,
       MAX_PORTFOLIO_DRAWDOWN_PERCENT,
-      Number(process.env.MOMO_SHADOW_INITIAL_BALANCE) || 100_000_000
+      envNumber('MOMO_SHADOW_INITIAL_BALANCE', null) || 100_000_000
     );
     if (drawdownState.triggered) {
       for (const [m, pos] of Object.entries(ledger.positions)) {
@@ -1056,7 +1056,7 @@ async function cycle(ledger, strategies) {
     ledger.trends = trends;
     const equity = updateMomentumShadowEquity(
       ledger,
-      Number(process.env.MOMO_SHADOW_INITIAL_BALANCE) || 100_000_000,
+      envNumber('MOMO_SHADOW_INITIAL_BALANCE', null) || 100_000_000,
       nowIso
     );
     recordMomentumShadowBenchmarkCheckpoint(ledger, equity, nowIso);
@@ -1080,11 +1080,11 @@ async function main() {
   }
   const staleRecovery = acquireLock();
   let ledger = loadLedger();
-  const explicitExecutionModel = process.env.MOMO_SHADOW_EXECUTION_MODEL !== undefined;
+  const explicitExecutionModel = envRaw('MOMO_SHADOW_EXECUTION_MODEL') !== undefined;
   const persistedExecutionModel = ledger?.config?.executionModel;
   if (explicitExecutionModel && ledger && persistedExecutionModel !== undefined &&
     resolveMomentumShadowExecutionModel(persistedExecutionModel) !==
-      resolveMomentumShadowExecutionModel(process.env.MOMO_SHADOW_EXECUTION_MODEL) &&
+      resolveMomentumShadowExecutionModel(envRaw('MOMO_SHADOW_EXECUTION_MODEL')) &&
     ((ledger.pendingEntries || []).length > 0 || Object.keys(ledger.positions || {}).length > 0)) {
     throw new Error(
       `FAIL_CLOSED: open paper state requires persisted execution model=${resolveMomentumShadowExecutionModel(persistedExecutionModel)}`
@@ -1097,7 +1097,7 @@ async function main() {
       'FAIL_CLOSED: legacy paper state cannot adopt quote execution without a fresh isolated ledger'
     );
   }
-  const explicitEntryExecution = process.env.MOMO_SHADOW_ENTRY_EXECUTION !== undefined;
+  const explicitEntryExecution = envRaw('MOMO_SHADOW_ENTRY_EXECUTION') !== undefined;
   const persistedEntryExecution = ledger?.config?.entryExecution;
   if (!explicitEntryExecution && persistedEntryExecution !== undefined) {
     ENTRY_EXECUTION = resolveMomentumShadowEntryExecution(persistedEntryExecution);
@@ -1110,24 +1110,24 @@ async function main() {
     );
   }
   const contract = resolveMomentumShadowRunnerContract({
-    mode: process.env.MOMO_SHADOW_MODE,
-    markets: process.env.MOMO_SHADOW_MARKETS,
-    benchmarkMarket: process.env.MOMO_SHADOW_BENCHMARK_MARKET,
-    benchmarkTrendMinPercent: process.env.MOMO_SHADOW_BENCHMARK_TREND_MIN_PERCENT,
-    relativeTrendMinPercent: process.env.MOMO_SHADOW_RELATIVE_TREND_MIN_PERCENT,
-    exitOnBenchmarkOff: process.env.MOMO_SHADOW_EXIT_ON_BENCHMARK_OFF === undefined
+    mode: envRaw('MOMO_SHADOW_MODE'),
+    markets: envRaw('MOMO_SHADOW_MARKETS'),
+    benchmarkMarket: envRaw('MOMO_SHADOW_BENCHMARK_MARKET'),
+    benchmarkTrendMinPercent: envRaw('MOMO_SHADOW_BENCHMARK_TREND_MIN_PERCENT'),
+    relativeTrendMinPercent: envRaw('MOMO_SHADOW_RELATIVE_TREND_MIN_PERCENT'),
+    exitOnBenchmarkOff: envRaw('MOMO_SHADOW_EXIT_ON_BENCHMARK_OFF') === undefined
       ? undefined
-      : process.env.MOMO_SHADOW_EXIT_ON_BENCHMARK_OFF === 'true',
-    cooldownAfterLossDays: process.env.MOMO_SHADOW_COOLDOWN_AFTER_LOSS_DAYS,
-    maxPortfolioDrawdownPercent: process.env.MOMO_SHADOW_MAX_PORTFOLIO_DRAWDOWN_PERCENT,
-    maxEntryGapPercent: process.env.MOMO_SHADOW_MAX_ENTRY_GAP_PERCENT,
-    maxDailyCandleAgeHours: process.env.MOMO_SHADOW_MAX_DAILY_CANDLE_AGE_HOURS,
-    maxSpreadPercent: process.env.MOMO_SHADOW_MAX_SPREAD_PERCENT,
-    requestIntervalMs: process.env.MOMO_SHADOW_REQUEST_INTERVAL_MS,
-    minUpBars: process.env.MOMO_SHADOW_MIN_UP_BARS,
-    volatilityLookbackDays: process.env.MOMO_SHADOW_VOLATILITY_LOOKBACK_DAYS,
-    volatilityTargetPercent: process.env.MOMO_SHADOW_VOLATILITY_TARGET_PERCENT,
-    executionModel: process.env.MOMO_SHADOW_EXECUTION_MODEL,
+      : envRaw('MOMO_SHADOW_EXIT_ON_BENCHMARK_OFF') === 'true',
+    cooldownAfterLossDays: envRaw('MOMO_SHADOW_COOLDOWN_AFTER_LOSS_DAYS'),
+    maxPortfolioDrawdownPercent: envRaw('MOMO_SHADOW_MAX_PORTFOLIO_DRAWDOWN_PERCENT'),
+    maxEntryGapPercent: envRaw('MOMO_SHADOW_MAX_ENTRY_GAP_PERCENT'),
+    maxDailyCandleAgeHours: envRaw('MOMO_SHADOW_MAX_DAILY_CANDLE_AGE_HOURS'),
+    maxSpreadPercent: envRaw('MOMO_SHADOW_MAX_SPREAD_PERCENT'),
+    requestIntervalMs: envRaw('MOMO_SHADOW_REQUEST_INTERVAL_MS'),
+    minUpBars: envRaw('MOMO_SHADOW_MIN_UP_BARS'),
+    volatilityLookbackDays: envRaw('MOMO_SHADOW_VOLATILITY_LOOKBACK_DAYS'),
+    volatilityTargetPercent: envRaw('MOMO_SHADOW_VOLATILITY_TARGET_PERCENT'),
+    executionModel: envRaw('MOMO_SHADOW_EXECUTION_MODEL'),
     persistedConfig: ledger?.config
   });
   MODE = contract.mode;
@@ -1143,10 +1143,10 @@ async function main() {
   MAX_SPREAD_PERCENT = contract.maxSpreadPercent ?? 0;
   REQUEST_INTERVAL_MS = contract.requestIntervalMs ?? DEFAULT_REQUEST_INTERVAL_MS;
   EXECUTION_MODEL = contract.executionModel || resolveMomentumShadowExecutionModel(
-    process.env.MOMO_SHADOW_EXECUTION_MODEL || ledger?.config?.executionModel
+    envRaw('MOMO_SHADOW_EXECUTION_MODEL') || ledger?.config?.executionModel
   );
   strategyConfig.minUpBars = contract.minUpBars ?? 1;
-  strategyConfig.maxHoldHours = Number(process.env.MOMO_SHADOW_MAX_HOLD_HOURS) ||
+  strategyConfig.maxHoldHours = envNumber('MOMO_SHADOW_MAX_HOLD_HOURS', null) ||
     (MODE === 'regime' ? 24 * 365 : 72);
   // Volatility sizing is part of the sealed contract too: a relaunched book
   // inherits its persisted target/lookback when the env is omitted rather
@@ -1220,12 +1220,12 @@ async function main() {
       diagnosticOnly: true, promoted: false,
       startedAt: new Date().toISOString(),
       config: { mode: MODE, ...persistedStrategyConfig, trendMinPercent: TREND_MIN_PERCENT, breadthMin: BREADTH_MIN, costPercent: COST_PERCENT, positionFraction: POSITION_FRACTION, maxPositions: MAX_POSITIONS, markets: MARKETS, pollMs: POLL_MS, benchmarkMarket: BENCHMARK_MARKET, benchmarkTrendMinPercent: BENCHMARK_TREND_MIN_PERCENT, exitOnBenchmarkOff: EXIT_ON_BENCHMARK_OFF, ...optionalRiskConfig },
-      balance: Number(process.env.MOMO_SHADOW_INITIAL_BALANCE) || 100_000_000,
-      initialBalance: Number(process.env.MOMO_SHADOW_INITIAL_BALANCE) || 100_000_000,
+      balance: envNumber('MOMO_SHADOW_INITIAL_BALANCE', null) || 100_000_000,
+      initialBalance: envNumber('MOMO_SHADOW_INITIAL_BALANCE', null) || 100_000_000,
       positions: {}, trades: [], cycles: 0, cooldownUntilByMarket: {}, pendingEntries: []
     };
   } else {
-    ensureMomentumShadowInitialBalance(ledger, Number(process.env.MOMO_SHADOW_INITIAL_BALANCE) || 100_000_000);
+    ensureMomentumShadowInitialBalance(ledger, envNumber('MOMO_SHADOW_INITIAL_BALANCE', null) || 100_000_000);
     const active = { mode: MODE, ...persistedStrategyConfig, trendMinPercent: TREND_MIN_PERCENT, breadthMin: BREADTH_MIN, costPercent: COST_PERCENT, positionFraction: POSITION_FRACTION, maxPositions: MAX_POSITIONS, markets: MARKETS, pollMs: POLL_MS, benchmarkMarket: BENCHMARK_MARKET, benchmarkTrendMinPercent: BENCHMARK_TREND_MIN_PERCENT, exitOnBenchmarkOff: EXIT_ON_BENCHMARK_OFF, ...optionalRiskConfig };
     recordMomentumShadowConfigDrift(ledger, active);
   }
