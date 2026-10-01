@@ -11,6 +11,7 @@ const ENV_EXAMPLE = '.env.example';
 // CoinPilot configuration and therefore never belong in .env.example.
 const PLATFORM_ENVS = new Set([
   'NODE_ENV',
+  'NODE_TEST_CONTEXT',
   'PATH',
   'HOME',
   'PWD',
@@ -108,6 +109,7 @@ const TYPED_ENV_MIGRATED_FILES = [
   'src/ai/monitoringSessionService.js',
   'src/api/liveCredentialStore.js',
   'src/api/routes/research.js',
+  'src/api/routes/trading.js',
   'src/api/upbit.js',
   'src/api/upbitRateCoordinator.js',
   'src/index.js',
@@ -154,6 +156,16 @@ const TYPED_ENV_MIGRATED_FILES = [
   'src/runtime/researchLoops.js',
   'src/scripts/verifyMomentumShadowEvidenceSnapshot.js',
   'src/trader/autoTrader.js',
+  'src/trader/liveOrderGateway.js',
+  'src/trader/multiCoinTrader.js',
+  'src/trader/orderExecutionEngine.js',
+  'src/trader/paperValidationJournal.js',
+  'src/trader/portfolioValuation.js',
+  'src/trader/positionRebalancer.js',
+  'src/trader/positionRiskMonitor.js',
+  'src/trader/tradingCycleRunner.js',
+  'src/trader/tradingLifecycle.js',
+  'src/trader/virtualPortfolioStore.js',
   'src/utils/logger.js'
 ];
 

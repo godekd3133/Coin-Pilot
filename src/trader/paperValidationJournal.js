@@ -9,6 +9,7 @@
 //
 // 트레이더 필드(config/dryRun/upbit/포지션 등)는 owner를 통해 조회한다.
 import fs from 'fs';
+import { envNumber } from '../config/envConfig.js';
 import path from 'path';
 import {
   calculateTradeReturnConfidence,
@@ -2827,8 +2828,8 @@ export class PaperValidationJournal {
     // the next isolated paper run reproducible when a universe contains
     // inactive markets, but it never changes this session's target list,
     // strict metrics, or live-promotion gate.
-    const configuredMinimumMarketObservations = Number(process.env.SCALP_MARKET_QUALITY_MIN_OBSERVATIONS);
-    const configuredMaximumFreshnessBlockRate = Number(process.env.SCALP_MARKET_QUALITY_MAX_STALE_RATE);
+    const configuredMinimumMarketObservations = envNumber('SCALP_MARKET_QUALITY_MIN_OBSERVATIONS');
+    const configuredMaximumFreshnessBlockRate = envNumber('SCALP_MARKET_QUALITY_MAX_STALE_RATE');
     const marketFreshnessCohort = selectFreshMarketCohort({
       markets: session.targetCoins || this.owner.targetCoins,
       telemetry: telemetry || {},

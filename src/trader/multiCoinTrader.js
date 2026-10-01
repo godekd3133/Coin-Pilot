@@ -9,6 +9,7 @@ import { PositionRebalancer } from './positionRebalancer.js';
 import { PortfolioValuation } from './portfolioValuation.js';
 import { createLossCircuitBreakerState } from '../risk/lossCircuitBreaker.js';
 import { createExchangeClient } from '../exchange/exchangeFactory.js';
+import { envNumber, envString } from '../config/envConfig.js';
 import { isPublicMarketDataSource } from '../api/publicMarketDataSource.js';
 import {
   getMarketDataAdapterKind,
@@ -70,7 +71,7 @@ class MultiCoinTrader {
     if (publicMarketDataSource !== undefined && !isPublicMarketDataSource(publicMarketDataSource)) {
       throw new TypeError('MultiCoinTrader requires the built-in credential-free public market data source.');
     }
-    const configuredStorageMiB = config.paperMinimumStorageMiB ?? process.env.SCALP_PAPER_MIN_STORAGE_MIB;
+    const configuredStorageMiB = config.paperMinimumStorageMiB ?? envNumber('SCALP_PAPER_MIN_STORAGE_MIB');
     const parsedStorageMiB = Number(configuredStorageMiB);
     this.paperMinimumStorageMiB = Number.isFinite(parsedStorageMiB) && parsedStorageMiB >= 128
       ? parsedStorageMiB
@@ -166,7 +167,7 @@ class MultiCoinTrader {
       lossCircuitBreakerCount: config.lossCircuitBreakerCount,
       lossCircuitBreakerWindowMinutes: config.lossCircuitBreakerWindowMinutes,
       lossCircuitBreakerCooldownMinutes: config.lossCircuitBreakerCooldownMinutes,
-      tradingFee: config.tradingFee ?? 0.0005,
+      tradingFee: config.tradingFee ?? (this.exchange === 'binance' ? 0.001 : 0.0005),
       slippage: config.slippage ?? 0.001
     };
 
@@ -270,16 +271,16 @@ class MultiCoinTrader {
       ? path.join(os.tmpdir(), `coin-pilot-test-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`)
       : null;
     this.virtualPortfolioFile = config.virtualPortfolioFile ||
-      process.env.DRY_PORTFOLIO_FILE ||
+      envString('DRY_PORTFOLIO_FILE') ||
       (testStoragePrefix ? `${testStoragePrefix}.dry_portfolio.json` : 'dry_portfolio.json');
     this.paperValidationFile = config.paperValidationFile ||
-      process.env.PAPER_VALIDATION_FILE ||
+      envString('PAPER_VALIDATION_FILE') ||
       (testStoragePrefix ? `${testStoragePrefix}.paper_validation.json` : 'paper_validation.json');
     this.portfolioHistoryFile = config.portfolioHistoryFile ||
-      process.env.PORTFOLIO_HISTORY_FILE ||
+      envString('PORTFOLIO_HISTORY_FILE') ||
       'portfolio_history.json';
     this.liveExecutionEvidenceFile = config.liveExecutionEvidenceFile ||
-      process.env.LIVE_EXECUTION_EVIDENCE_FILE ||
+      envString('LIVE_EXECUTION_EVIDENCE_FILE') ||
       '.coinpilot-runtime/live-execution/evidence.jsonl';
     this.liveExecutionEvidenceWriteError = null;
     this.liveExecutionEvidenceDataError = null;

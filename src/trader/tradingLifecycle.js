@@ -9,6 +9,7 @@
 //
 // 주문·포지션·포트폴리오 상태는 owner(MultiCoinTrader)를 통해 조회한다.
 import fs from 'fs';
+import { envString } from '../config/envConfig.js';
 import path from 'path';
 import UpbitAPI from '../api/upbit.js';
 import { assessScalpingValidationReportFreshness } from '../research/scalpingValidationFreshness.js';
@@ -246,7 +247,7 @@ export class TradingLifecycle {
     }
 
     const reportFile = this.owner.config.scalpingValidationOutputFile ||
-      process.env.SCALP_VALIDATION_OUTPUT_FILE ||
+      envString('SCALP_VALIDATION_OUTPUT_FILE') ||
       'scalping_validation.json';
     if (!fs.existsSync(reportFile)) {
       throw new Error(`실전 스캘핑 차단: ${path.basename(reportFile)} 검증 리포트가 없습니다. 먼저 npm run validate:scalping을 실행하세요.`);

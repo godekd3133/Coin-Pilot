@@ -5,6 +5,7 @@ import { assessScalpingValidationReportFreshness } from '../../research/scalping
 import { getStrategyReadiness } from '../../research/strategyReadiness.js';
 import { createManualOrderIdempotencyMiddleware } from '../manualOrderIdempotencyStore.js';
 import { getMarketDataProvider } from '../marketDataProvider.js';
+import { envString } from '../../config/envConfig.js';
 import { createManualOrderService } from '../manualOrderService.js';
 import { createMarketAnalysisQueries } from '../marketAnalysisQueries.js';
 import {
@@ -59,7 +60,7 @@ export default function createTradingRoutes(server) {
   // 마지막 읽기 전용 스캘핑 워크포워드 검증 결과
   router.get('/scalping-validation', (req, res) => {
     const configuredReportFile = server?.tradingSystem?.config?.scalpingValidationOutputFile ||
-      process.env.SCALP_VALIDATION_OUTPUT_FILE ||
+      envString('SCALP_VALIDATION_OUTPUT_FILE') ||
       'scalping_validation.json';
     const reportFile = path.isAbsolute(configuredReportFile)
       ? configuredReportFile
