@@ -10,7 +10,6 @@ import Logger, { resolveLogDirectory } from '../utils/logger.js';
 import createAccountRoutes from './routes/account.js';
 import createLiveCredentialsRoutes from './routes/liveCredentials.js';
 import createPortfolioRoutes from './routes/portfolio.js';
-import { projectReadOnlyPaperPortfolioAnalysis } from './readOnlyPaperPortfolio.js';
 import createNewsRoutes from './routes/news.js';
 import createMarketRoutes from './routes/market.js';
 import createOptimizationRoutes from './routes/optimization.js';
@@ -18,18 +17,13 @@ import createConfigRoutes from './routes/config.js';
 import createTradingRoutes from './routes/trading.js';
 import createAiRoutes from './routes/ai.js';
 import createResearchRoutes from './routes/research.js';
+import createStatusRoutes from './routes/status.js';
 import AIAdvisorService from '../ai/aiAdvisorService.js';
 import MonitoringSessionService from '../ai/monitoringSessionService.js';
 import { createDashboardAuth, createOriginGuard } from './auth.js';
 import { createDefaultManualOrderIdempotencyStore } from './manualOrderIdempotencyStore.js';
 import { resolveDashboardTls } from './dashboardTls.js';
-import {
-  getMarketDataProvider,
-  MARKET_DATA_FRESHNESS,
-  UpbitCacheMarketDataProvider
-} from './marketDataProvider.js';
-import { readLogTail } from '../utils/readLogTail.js';
-import { parseRecentLogErrors } from '../utils/parseRecentLogErrors.js';
+import { UpbitCacheMarketDataProvider } from './marketDataProvider.js';
 import { resolveOptimizationStoragePaths } from '../runtime/optimizationStorage.js';
 import { RealtimeHub } from './realtimeHub.js';
 import { NewsAccumulator, MAX_NEWS_RETENTION_LIMIT } from './newsAccumulator.js';
@@ -37,7 +31,6 @@ import { DashboardReadCache } from './dashboardReadCache.js';
 import { DashboardReadiness } from './dashboardReadiness.js';
 import { OptimizationScheduler } from './optimizationScheduler.js';
 import { NotificationMonitor } from './notificationMonitor.js';
-import { quoteOfSystem } from '../exchange/marketCodes.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -389,6 +382,7 @@ class DashboardServer {
     this.app.use('/api', createConfigRoutes(this));
     this.app.use('/api', createTradingRoutes(this));
     this.app.use('/api', createAiRoutes(this));
+    this.app.use('/api', createStatusRoutes(this));
     this.app.use('/api', createResearchRoutes(this, {
       paperForwardCohortRootDir: this.paperForwardCohortRootDir,
       momentumShadowProjectionCacheMs: this.momentumShadowProjectionCacheMs
@@ -404,408 +398,12 @@ class DashboardServer {
     this.app.get('/api/stream', (req, res) => this._realtimeHub().addSseClient(req, res));
 
     // 시스템 상태 상세 조회
-    this.app.get('/api/system-status', async (req, res) => {
-      try {
-        const now = new Date();
-        const uptime = process.uptime();
-
-        // 마지막 거래 시간 계산
-        let lastTradeTime = null;
-        if (this.tradingSystem.smartTradeHistory?.length > 0) {
-          lastTradeTime = this.tradingSystem.smartTradeHistory[0].timestamp;
-        }
-
-        // Keep log reads bounded so a large file cannot block the trading loop.
-        const logDir = this.logger.logDir;
-        const today = now.toISOString().split('T')[0];
-        const errorLogFile = path.join(logDir, `error-${today}.log`);
-        let recentErrors = [];
-
-        const errorTail = await readLogTail(errorLogFile, { maxLines: 1000, maxBytes: 512 * 1024 });
-        recentErrors = parseRecentLogErrors(errorTail.lines);
-
-        // 다음 분석 예정 시간
-        const checkInterval = this.tradingSystem.config?.checkInterval || 60000;
-        const nextAnalysis = new Date(now.getTime() + checkInterval);
-
-        // 현재 포지션 수 계산 (여러 소스에서 확인)
-        let currentPositions = 0;
-
-        // 1. 전략 기반 포지션 수
-        if (this.tradingSystem.getCurrentPositionCount) {
-          currentPositions = this.tradingSystem.getCurrentPositionCount();
-        }
-
-        // 2. 가상 포트폴리오에서 확인 (드라이 모드)
-        if (currentPositions === 0) {
-          currentPositions = this.getActiveHoldings().size || 0;
-        }
-
-        // 3. strategies에서 직접 확인
-        if (currentPositions === 0 && this.tradingSystem.strategies) {
-          for (const [, strategy] of this.tradingSystem.strategies.entries()) {
-            if (strategy.currentPosition) {
-              currentPositions++;
-            }
-          }
-        }
-
-        const runtimeSafety = typeof this.tradingSystem.getRuntimeSafetyStatus === 'function'
-          ? this.tradingSystem.getRuntimeSafetyStatus()
-          : {};
-        res.json({
-          isRunning: this.tradingSystem.isRunning,
-          mode: this.tradingSystem.dryRun ? 'DRY_RUN' : 'LIVE',
-          ...runtimeSafety,
-          readOnlyObserver: this.tradingSystem.readOnlyObserver === true,
-          strategyMode: this.tradingSystem.strategyMode,
-          maxPositions: this.tradingSystem.maxPositions,
-          entryDelayMs: this.tradingSystem.isScalpingMode
-            ? [this.tradingSystem.entryDelayMinMs, this.tradingSystem.entryDelayMaxMs]
-            : null,
-          uptime: Math.floor(uptime),
-          uptimeFormatted: `${Math.floor(uptime / 3600)}시간 ${Math.floor((uptime % 3600) / 60)}분`,
-          lastTradeTime,
-          nextAnalysis: nextAnalysis.toISOString(),
-          checkInterval,
-          targetCoinsCount: this.tradingSystem.targetCoins?.length || 0,
-          currentPositions,
-          recentErrors,
-          hasErrors: recentErrors.length > 0,
-          serverTime: now.toISOString()
-        });
-      } catch (error) {
-        res.status(500).json({ error: error.message });
-      }
-    });
 
     // 오늘의 거래 요약
-    this.app.get('/api/today-summary', async (req, res) => {
-      try {
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-
-        let todayTrades = [];
-        let totalBuyAmount = 0;
-        let totalSellAmount = 0;
-        let buyCount = 0;
-        let sellCount = 0;
-        let realizedProfit = 0;
-
-        // 스마트 거래 이력에서 오늘 거래 필터링
-        if (this.tradingSystem.smartTradeHistory) {
-          todayTrades = this.tradingSystem.smartTradeHistory.filter(trade => {
-            const tradeDate = new Date(trade.timestamp);
-            return tradeDate >= today;
-          });
-
-          todayTrades.forEach(trade => {
-            if (trade.type === 'BUY') {
-              buyCount++;
-              totalBuyAmount += trade.amount || 0;
-            } else if (trade.type === 'SELL') {
-              sellCount++;
-              totalSellAmount += trade.amount || 0;
-              realizedProfit += trade.profit || 0;
-            }
-          });
-        }
-
-        // 전략별 오늘 거래도 확인 (자동매매 이력)
-        // 전략의 tradeHistory는 action: 'OPEN'/'CLOSE' 형식 사용
-        if (this.tradingSystem.strategies) {
-          const processedTradeIds = new Set(todayTrades.map(t => t.id || t.timestamp));
-
-          for (const strategy of this.tradingSystem.strategies.values()) {
-            const history = strategy.tradeHistory || [];
-            history.forEach(trade => {
-              // 이미 smartTradeHistory에서 처리된 거래는 스킵
-              if (trade.id && processedTradeIds.has(trade.id)) return;
-
-              // OPEN (매수) 거래
-              if (trade.action === 'OPEN') {
-                const tradeDate = new Date(trade.entryTime);
-                if (tradeDate >= today) {
-                  buyCount++;
-                  // 매수 금액 계산: 진입가 × 수량
-                  const buyAmount = (trade.entryPrice || 0) * (trade.amount || 0);
-                  totalBuyAmount += buyAmount;
-                }
-              }
-
-              // CLOSE (매도) 거래
-              if (trade.action === 'CLOSE') {
-                const tradeDate = new Date(trade.exitTime);
-                if (tradeDate >= today) {
-                  sellCount++;
-                  // 매도 금액 계산: 청산가 × 수량
-                  const sellAmount = (trade.exitPrice || 0) * (trade.amount || 0);
-                  totalSellAmount += sellAmount;
-                  realizedProfit += trade.profit || 0;
-                }
-              }
-            });
-          }
-        }
-
-        res.json({
-          date: today.toISOString().split('T')[0],
-          totalTrades: buyCount + sellCount,
-          buyCount,
-          sellCount,
-          totalBuyAmount: Math.round(totalBuyAmount),
-          totalSellAmount: Math.round(totalSellAmount),
-          netFlow: Math.round(totalSellAmount - totalBuyAmount),
-          realizedProfit: Math.round(realizedProfit),
-          trades: todayTrades.slice(0, 10)
-        });
-      } catch (error) {
-        res.status(500).json({ error: error.message });
-      }
-    });
 
     // 포트폴리오 상세 분석
-    this.app.get('/api/portfolio-analysis', async (req, res) => {
-      try {
-        if (this.tradingSystem.readOnlyObserver === true) {
-          if (typeof this.tradingSystem.getPaperValidationStatus !== 'function') {
-            return res.status(503).json({ readOnlyObserver: true, error: 'paper ledger status unavailable' });
-          }
-          const paperStatus = await this.tradingSystem.getPaperValidationStatus();
-          return res.json(projectReadOnlyPaperPortfolioAnalysis(paperStatus));
-        }
-
-        const holdings = [];
-        let totalValue = 0;
-        let totalCost = 0;
-
-        // Read holdings from the active account mode. LIVE must never reuse a
-        // stale virtual portfolio left on the process.
-        const isDryRun = this.tradingSystem.dryRun === true;
-        const liveAccounts = isDryRun ? null : await this.tradingSystem.getAccountInfo();
-        const portfolioHoldings = isDryRun
-          ? this.tradingSystem.virtualPortfolio?.holdings
-          : new Map((Array.isArray(liveAccounts) ? liveAccounts : [])
-            .filter(account => account?.currency && account.currency !== quoteOfSystem(this.tradingSystem))
-            .map(account => {
-              const amount = Number(account.balance);
-              const avgPrice = Number(account.avg_buy_price) || 0;
-              return [`${quoteOfSystem(this.tradingSystem)}-${account.currency}`, { amount, avgPrice }];
-            })
-            .filter(([, holding]) => Number.isFinite(holding.amount) && holding.amount > 0));
-
-        // Map 또는 Object 모두 처리
-        const isMap = portfolioHoldings instanceof Map;
-        const holdingsEntries = isMap
-          ? Array.from(portfolioHoldings.entries())
-          : Object.entries(portfolioHoldings || {});
-
-        const coins = holdingsEntries.map(([coin]) => coin);
-        const marketSnapshot = coins.length > 0
-          ? await getMarketDataProvider(this).getSnapshot(coins, {
-            freshness: MARKET_DATA_FRESHNESS.CACHED
-          })
-          : {
-            tickers: [],
-            priceMap: new Map(),
-            freshPriceMap: new Map(),
-            sourceAsOfByMarket: new Map(),
-            quoteFreshnessByMarket: new Map(),
-            fetchedAtByMarket: new Map(),
-            sourceAsOf: null,
-            fetchedAt: null,
-            complete: true,
-            allQuotesFresh: true,
-            freshMarkets: [],
-            staleMarkets: [],
-            sourceSkewMs: null,
-            captureSkewMs: null,
-            snapshotSource: 'none',
-            fallbackReason: null,
-            unavailableMarkets: []
-          };
-
-        if (holdingsEntries.length > 0) {
-          for (const [coin, holding] of holdingsEntries) {
-            const ticker = marketSnapshot.tickers.find(item => item.market === coin) || null;
-            const currentPrice = marketSnapshot.freshPriceMap.get(coin) ?? null;
-            const valuationAvailable = Number.isFinite(currentPrice) && currentPrice > 0;
-            const change24h = ticker?.signed_change_rate;
-            const change24hAvailable = change24h !== null && change24h !== undefined &&
-              Number.isFinite(Number(change24h));
-            const currentValue = valuationAvailable ? holding.amount * currentPrice : null;
-            const costBasis = holding.amount * holding.avgPrice;
-            const profit = valuationAvailable ? currentValue - costBasis : null;
-            const profitPercent = valuationAvailable && costBasis > 0
-              ? ((currentValue / costBasis) - 1) * 100
-              : null;
-
-            if (valuationAvailable) totalValue += currentValue;
-            totalCost += costBasis;
-
-            holdings.push({
-              coin,
-              symbol: coin.split('-')[1],
-              amount: holding.amount,
-              avgPrice: holding.avgPrice,
-              currentPrice,
-              currentValue: currentValue === null ? null : Math.round(currentValue),
-              costBasis: Math.round(costBasis),
-              profit: profit === null ? null : Math.round(profit),
-              profitPercent: profitPercent === null ? null : profitPercent.toFixed(2),
-              change24h: change24hAvailable
-                ? (Number(change24h) * 100).toFixed(2)
-                : null,
-              valuationAvailable,
-              sourceAsOf: marketSnapshot.sourceAsOfByMarket.get(coin) ?? null,
-              quoteFreshnessReason: marketSnapshot.quoteFreshnessByMarket.get(coin)?.reason ?? null,
-              fetchedAt: marketSnapshot.fetchedAtByMarket?.get(coin) ?? marketSnapshot.fetchedAt,
-              weight: null
-            });
-          }
-        }
-
-        const valuationAvailable = holdings.every(holding => holding.valuationAvailable === true);
-        if (!valuationAvailable) totalValue = null;
-
-        // KRW 잔액 추가
-        const krwBalance = isDryRun
-          ? (this.tradingSystem.virtualPortfolio?.krwBalance || 0)
-          : (this.tradingSystem.getKRWBalance(liveAccounts) || 0);
-
-        const totalAssets = valuationAvailable ? totalValue + krwBalance : null;
-
-        // 비중 계산
-        if (valuationAvailable) {
-          holdings.forEach(h => {
-            h.weight = totalAssets > 0 ? ((h.currentValue / totalAssets) * 100).toFixed(1) : '0';
-          });
-        }
-
-        // 수익률 순 정렬
-        const valuedHoldings = holdings.filter(holding => holding.valuationAvailable === true);
-        const topGainers = [...valuedHoldings]
-          .sort((a, b) => parseFloat(b.profitPercent) - parseFloat(a.profitPercent)).slice(0, 3);
-        const topLosers = [...valuedHoldings]
-          .sort((a, b) => parseFloat(a.profitPercent) - parseFloat(b.profitPercent)).slice(0, 3);
-
-        // 비중 순 정렬
-        const byWeight = valuationAvailable
-          ? [...holdings].sort((a, b) => parseFloat(b.weight) - parseFloat(a.weight))
-          : holdings;
-
-        res.json({
-          holdings: byWeight,
-          summary: {
-            totalHoldings: holdings.length,
-            totalValue: totalValue === null ? null : Math.round(totalValue),
-            totalCost: Math.round(totalCost),
-            totalProfit: totalValue === null ? null : Math.round(totalValue - totalCost),
-            totalProfitPercent: totalValue !== null && totalCost > 0
-              ? (((totalValue / totalCost) - 1) * 100).toFixed(2)
-              : null,
-            krwBalance: Math.round(krwBalance),
-            krwWeight: totalAssets !== null && totalAssets > 0
-              ? ((krwBalance / totalAssets) * 100).toFixed(1)
-              : null,
-            totalAssets: totalAssets === null ? null : Math.round(totalAssets),
-            valuationAvailable,
-            valuationStatus: valuationAvailable
-              ? 'available'
-              : marketSnapshot.staleMarkets?.length > 0 ? 'stale' : 'unavailable',
-            valuationAsOf: marketSnapshot.sourceAsOf,
-            sourceAsOf: marketSnapshot.sourceAsOf,
-            fetchedAt: marketSnapshot.fetchedAt,
-            staleMarkets: marketSnapshot.staleMarkets || [],
-            sourceSkewMs: marketSnapshot.sourceSkewMs ?? null,
-            captureSkewMs: marketSnapshot.captureSkewMs ?? null,
-            snapshotSource: marketSnapshot.snapshotSource ?? 'upstream',
-            fallbackReason: marketSnapshot.fallbackReason ?? null,
-            unavailableMarkets: marketSnapshot.unavailableMarkets
-          },
-          topGainers,
-          topLosers
-        });
-      } catch (error) {
-        res.status(500).json({ error: error.message });
-      }
-    });
 
     // 특정 코인 상세 정보 (매수/매도 시 참조용)
-    this.app.get('/api/coin-detail/:coin', async (req, res) => {
-      try {
-        const coin = req.params.coin;
-
-        // 현재가 조회
-        let ticker = null;
-        let currentPrice = 0;
-        try {
-          ticker = await getMarketDataProvider(this).getTickers(coin, {
-            freshness: MARKET_DATA_FRESHNESS.FRESH
-          });
-          currentPrice = ticker?.[0]?.trade_price || 0;
-        } catch (tickerErr) {
-          console.error(`[coin-detail] 현재가 조회 실패 (${coin}):`, tickerErr.message);
-          // 현재가 조회 실패해도 계속 진행
-        }
-
-        // 보유 정보
-        const holding = this.tradingSystem.virtualPortfolio?.holdings?.get(coin);
-        const holdingAmount = holding?.amount || 0;
-        const avgPrice = holding?.avgPrice || 0;
-        const holdingValue = holdingAmount * currentPrice;
-        const costBasis = holdingAmount * avgPrice;
-        const profit = holdingValue - costBasis;
-        const profitPercent = costBasis > 0 ? ((holdingValue / costBasis) - 1) * 100 : 0;
-
-        // 캔들 데이터로 기술적 분석
-        let analysis = null;
-        try {
-          const candles = await getMarketDataProvider(this).getMinuteCandles(coin, 5, 50);
-          if (candles?.length >= 30) {
-            const { comprehensiveAnalysis } = await import('../analysis/technicalIndicators.js');
-            analysis = comprehensiveAnalysis(candles, {});
-          }
-        } catch (candleErr) {
-          console.error(`[coin-detail] 캔들 데이터 조회 실패 (${coin}):`, candleErr.message);
-          // 캔들 조회 실패해도 계속 진행
-        }
-
-        // KRW 잔액
-        const krwBalance = this.tradingSystem.dryRun
-          ? (this.tradingSystem.virtualPortfolio?.krwBalance || 0)
-          : 0;
-
-        res.json({
-          coin,
-          symbol: coin.split('-')[1],
-          currentPrice,
-          change24h: ticker?.[0]?.signed_change_rate ? (ticker[0].signed_change_rate * 100).toFixed(2) : '0',
-          high24h: ticker?.[0]?.high_price || 0,
-          low24h: ticker?.[0]?.low_price || 0,
-          volume24h: ticker?.[0]?.acc_trade_price_24h || 0,
-          holding: {
-            amount: holdingAmount,
-            avgPrice,
-            currentValue: Math.round(holdingValue),
-            costBasis: Math.round(costBasis),
-            profit: Math.round(profit),
-            profitPercent: profitPercent.toFixed(2)
-          },
-          indicators: analysis?.indicators ? {
-            rsi: analysis.indicators.rsi?.toFixed(1) || '-',
-            macd: analysis.indicators.macd?.histogram?.toFixed(2) || '-',
-            bb: analysis.indicators.bollingerBands?.percentB?.toFixed(2) || '-'
-          } : null,
-          krwBalance: Math.round(krwBalance),
-          maxBuyAmount: Math.floor(krwBalance * 0.95),
-          maxSellAmount: Math.round(holdingValue)
-        });
-      } catch (error) {
-        console.error(`[coin-detail] 전체 오류:`, error);
-        res.status(500).json({ error: error.message });
-      }
-    });
   }
 
   /**

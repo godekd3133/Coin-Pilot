@@ -138,9 +138,12 @@ test('dashboard market-list and ticker reads stay behind the selected market-dat
     new URL('../src/api/manualOrderService.js', import.meta.url),
     new URL('../src/api/marketAnalysisQueries.js', import.meta.url),
     new URL('../src/api/dashboardReadCache.js', import.meta.url),
-    new URL('../src/api/notificationMonitor.js', import.meta.url)
+    new URL('../src/api/notificationMonitor.js', import.meta.url),
+    new URL('../src/api/routes/status.js', import.meta.url)
   ];
   const routeSources = await Promise.all(routeUrls.map(url => readFile(url, 'utf8')));
+  // /api/coin-detail과 상태 read-model은 routes/status.js로 추출됐다.
+  const statusSource = routeSources[7];
 
   assert.match(routeSources[0], /getMarketDataProvider\(server\)\.getMarkets\(\)/);
   assert.match(routeSources[1], /getMarketDataProvider\(server\)/);
@@ -152,10 +155,10 @@ test('dashboard market-list and ticker reads stay behind the selected market-dat
     assert.doesNotMatch(source, /(?:server\.)?tradingSystem\.upbit\.getMarkets\s*\(/);
   }
 
-  const dashboardSource = routeSources[2];
-  const coinDetailStart = dashboardSource.indexOf("this.app.get('/api/coin-detail/:coin'");
-  const coinDetailEnd = dashboardSource.indexOf('\n    });', coinDetailStart);
-  const coinDetail = dashboardSource.slice(coinDetailStart, coinDetailEnd);
+  // /api/coin-detail moved to routes/status.js — scan the handler there.
+  const coinDetailStart = statusSource.indexOf("router.get('/coin-detail/:coin'");
+  const coinDetailEnd = statusSource.indexOf('\n  });', coinDetailStart);
+  const coinDetail = statusSource.slice(coinDetailStart, coinDetailEnd);
   // generateBundleSuggestions lives in the extracted NotificationMonitor and
   // getCachedTickerWithMetadata in DashboardReadCache — scan those bodies.
   const notificationSource = routeSources[6];
@@ -167,9 +170,9 @@ test('dashboard market-list and ticker reads stay behind the selected market-dat
     .split('async getTickerWithMetadata(coins) {')[1]
     ?.split('async getTicker(coins)')[0];
 
-  assert.match(coinDetail, /getMarketDataProvider\(this\)\.getTickers/);
-  assert.match(coinDetail, /getMarketDataProvider\(this\)\.getMinuteCandles/);
-  assert.doesNotMatch(coinDetail, /this\.tradingSystem\.upbit\.get(?:Ticker|MinuteCandles)\s*\(/);
+  assert.match(coinDetail, /getMarketDataProvider\(server\)\.getTickers/);
+  assert.match(coinDetail, /getMarketDataProvider\(server\)\.getMinuteCandles/);
+  assert.doesNotMatch(coinDetail, /server\.tradingSystem\.upbit\.get(?:Ticker|MinuteCandles)\s*\(/);
   assert.match(bundleRecommendations, /marketDataProvider\.getTickers/);
   assert.match(bundleRecommendations, /marketDataProvider\.getMinuteCandles/);
   assert.doesNotMatch(bundleRecommendations, /this\.tradingSystem\.upbit\.get(?:Ticker|MinuteCandles)\s*\(/);

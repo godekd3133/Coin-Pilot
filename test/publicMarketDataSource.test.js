@@ -524,9 +524,21 @@ test('coin detail and bundle suggestions read from the injected source without a
 
   try {
     assert.equal('upbit' in trader, false);
-    const routeLayer = dashboard.app._router.stack.find(
-      layer => layer.route?.path === '/api/coin-detail/:coin'
-    );
+    // coin-detail now lives inside the mounted status router — search router
+    // sub-stacks for a layer whose route path matches under the /api mount.
+    const findRouteLayer = (stack, wantPath) => {
+      for (const layer of stack) {
+        if (layer.route?.path === wantPath) return layer;
+        const inner = layer.handle?.stack;
+        if (Array.isArray(inner)) {
+          const hit = inner.find(innerLayer =>
+            innerLayer.route?.path === wantPath || innerLayer.route?.path === wantPath.replace('/api', ''));
+          if (hit) return hit;
+        }
+      }
+      return null;
+    };
+    const routeLayer = findRouteLayer(dashboard.app._router.stack, '/coin-detail/:coin');
     assert.ok(routeLayer, 'coin-detail route should be registered');
     const routeHandler = routeLayer.route.stack.find(layer => layer.method === 'get')?.handle;
     assert.equal(typeof routeHandler, 'function');
