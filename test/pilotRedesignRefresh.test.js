@@ -16,6 +16,8 @@ const redesignStyleSource = fs.readFileSync(
 );
 const indexSource = fs.readFileSync(path.join(projectRoot, 'public/index.html'), 'utf8');
 const serviceWorkerSource = fs.readFileSync(path.join(projectRoot, 'public/sw.js'), 'utf8');
+const designQaSource = fs.readFileSync(path.join(projectRoot, 'design-qa.md'), 'utf8');
+const serviceWorkerAppShell = serviceWorkerSource.match(/const APP_SHELL = \[([\s\S]*?)\n\];/)?.[1] || '';
 const manifestSource = fs.readFileSync(path.join(projectRoot, 'public/manifest.webmanifest'), 'utf8');
 const redesignScriptAsset = indexSource.match(/<script\s+src=["'](\/pilot-redesign\.js\?v=[^"']+)["']/)?.[1];
 const redesignStylesheetAsset = indexSource.match(/<link\s+rel=["']stylesheet["']\s+href=["'](\/pilot-redesign\.css\?v=[^"']+)["']/)?.[1];
@@ -39,6 +41,12 @@ const marketQuoteFreshnessFunctionSource = redesignSource.match(
 const marketQuoteFreshnessIssue = marketQuoteFreshnessFunctionSource
   ? new Function('state', `${marketQuoteFreshnessFunctionSource}; return marketQuoteFreshnessIssue;`)({
     status: { maxCandleAgeSeconds: 90 }
+  })
+  : null;
+const lastGoodMarketQuoteFreshnessIssue = marketQuoteFreshnessFunctionSource
+  ? new Function('state', `${marketQuoteFreshnessFunctionSource}; return marketQuoteFreshnessIssue;`)({
+    status: { maxCandleAgeSeconds: 90 },
+    marketSnapshot: { snapshotSource: 'last_good' }
   })
   : null;
 const protectedMutationErrorFunctionSource = redesignSource.match(
@@ -82,13 +90,22 @@ const marketSnapshotPresentation = marketSnapshotPresentationFunctionSource
   )(formatMarketTimestamp, () => null)
   : null;
 const selectedMarketQuotePresentationFunctionSource = redesignSource.match(
-  /function selectedMarketQuotePresentation\(marketData, snapshotPresentation, now = Date\.now\(\)\) \{[\s\S]*?\n {4}\}/
+  /function selectedMarketQuotePresentation\(\s*marketData,\s*snapshotPresentation,\s*latestReadSucceeded = true,\s*now = Date\.now\(\)\s*\) \{[\s\S]*?\n {4}\}/
 )?.[0];
 const selectedMarketQuotePresentation = selectedMarketQuotePresentationFunctionSource
   ? new Function(
-    'marketQuoteFreshnessIssue',
+    'formatMarketTimestamp', 'marketQuoteFreshnessIssue',
     `${selectedMarketQuotePresentationFunctionSource}; return selectedMarketQuotePresentation;`
-  )(marketQuoteFreshnessIssue)
+  )(formatMarketTimestamp, marketQuoteFreshnessIssue)
+  : null;
+const marketRowQuotePresentationFunctionSource = redesignSource.match(
+  /function marketRowQuotePresentation\(marketData, latestReadSucceeded, now = Date\.now\(\)\) \{[\s\S]*?\n {4}\}/
+ )?.[0];
+const marketRowQuotePresentation = marketRowQuotePresentationFunctionSource
+  ? new Function(
+    'formatMarketTimestamp', 'marketQuoteFreshnessIssue',
+    `${marketRowQuotePresentationFunctionSource}; return marketRowQuotePresentation;`
+  )(formatMarketTimestamp, marketQuoteFreshnessIssue)
   : null;
 const displayedCandlesFunctionSource = redesignSource.match(
   /function getDisplayedCandles\(candles, displayRange\) \{[\s\S]*?\n {4}\}/
@@ -227,9 +244,108 @@ const createModalKeydownHandler = closeModal => new Function(
   'closeModal',
   `${modalFocusableFunctionSource}; ${modalFocusElementFunctionSource}; ${modalKeydownFunctionSource}; return handleModalKeydown;`
 )(closeModal);
+const pwaAuthPolicyFunctionSource = redesignSource.match(
+  /function pwaAuthRequestPolicy\(auth, method, path\) \{[\s\S]*?\n {4}\}/
+)?.[0];
+const pwaAuthRequestPolicy = pwaAuthPolicyFunctionSource
+  ? new Function(
+    'READ_ONLY_PWA_GET_PATHS', 'READ_ONLY_PWA_PORTFOLIO_PERIODS',
+    `${pwaAuthPolicyFunctionSource}; return pwaAuthRequestPolicy;`
+  )(new Set(['/status', '/account', '/cumulative-pnl', '/today-summary', '/market/prices/snapshot']), new Set(['24h', '7d', '30d']))
+  : null;
+const pwaMutationControlSelectorSource = redesignSource.match(
+  /const PWA_MUTATION_CONTROL_SELECTOR = \[[\s\S]*?\]\.join\(','\);/
+)?.[0];
+const pwaMutationControlSelector = pwaMutationControlSelectorSource
+  ? new Function(`${pwaMutationControlSelectorSource}; return PWA_MUTATION_CONTROL_SELECTOR;`)()
+  : '';
+const pwaScopeOnlyControlSelectorSource = redesignSource.match(
+  /const PWA_SCOPE_ONLY_CONTROL_SELECTOR = \[[\s\S]*?\]\.join\(','\);/
+)?.[0];
+const pwaScopeOnlyControlSelector = pwaScopeOnlyControlSelectorSource
+  ? new Function(`${pwaScopeOnlyControlSelectorSource}; return PWA_SCOPE_ONLY_CONTROL_SELECTOR;`)()
+  : '';
+const scopedMutationControlsFunctionSource = redesignSource.match(
+  /function syncScopedMutationControls\(\) \{[\s\S]*?\n {4}\}/
+)?.[0];
+const createSyncScopedMutationControls = scopedMutationControlsFunctionSource
+  ? (findControls, isBlocked, reason) => new Function(
+    'PWA_MUTATION_CONTROL_SELECTOR', 'PWA_SCOPE_ONLY_CONTROL_SELECTOR', '$$', 'isPwaMutationBlocked', 'readOnlyObserverReason',
+    `${scopedMutationControlsFunctionSource}; return syncScopedMutationControls;`
+  )(
+    pwaMutationControlSelector,
+    pwaScopeOnlyControlSelector,
+    findControls,
+    isBlocked,
+    reason
+  )
+  : null;
+const requestJsonFunctionSource = redesignSource.match(
+  /async function requestJSON\(path, options = \{\}\) \{[\s\S]*?\n {4}\}/
+)?.[0];
+const createRequestJSON = requestJsonFunctionSource
+  ? new Function(
+    'state', 'waitForPwaAuth', 'pwaAuthRequestPolicy', 'readOnlyObserverReason', 'window', 'fetch', 'toUserText',
+    `${requestJsonFunctionSource}; return requestJSON;`
+  )
+  : null;
 
 test('redesign 외부 번들도 브라우저가 실행할 수 있는 문법이다', () => {
   assert.doesNotThrow(() => new Function(redesignSource));
+});
+
+test('read_only PWA locks mutation controls and rejects denied reads or writes before fetch', async () => {
+  const reason = '읽기 전용 토큰으로 접속했습니다. 주문, 설정 변경, 저장 기능은 사용할 수 없습니다.';
+  const controls = Array.from({ length: 6 }, () => {
+    const attributes = new Map();
+    return {
+      disabled: false,
+      title: '',
+      attributes,
+      setAttribute(name, value) { attributes.set(name, value); },
+      removeAttribute(name) { attributes.delete(name); }
+    };
+  });
+  assert.ok(createSyncScopedMutationControls);
+  assert.match(pwaMutationControlSelector, /data-pilot-ai-session-action/);
+  assert.match(pwaMutationControlSelector, /data-pilot-ai-consult-event/);
+  assert.match(pwaMutationControlSelector, /#pilot-ai-session-form input/);
+  createSyncScopedMutationControls(() => controls, () => true, () => reason)();
+  for (const control of controls) {
+    assert.equal(control.disabled, true);
+    assert.equal(control.attributes.get('aria-disabled'), 'true');
+    assert.equal(control.title, reason);
+  }
+
+  const calls = [];
+  const auth = { authRequired: true, tokenScope: 'read_only', authenticated: true, resolved: true, verification: 'verified' };
+  const state = { online: true, auth };
+  const requestJSON = createRequestJSON(
+    state,
+    async () => {},
+    pwaAuthRequestPolicy,
+    () => reason,
+    { setTimeout: () => 1, clearTimeout() {} },
+    async (url, options) => {
+      calls.push({ url, options });
+      return { ok: true, status: 200, async json() { return { success: true }; } };
+    },
+    String
+  );
+
+  await assert.rejects(requestJSON('/trade/buy', { method: 'POST', body: '{}' }), error => error.code === 'pwa_auth_scope_blocked');
+  await assert.rejects(requestJSON('/ai/sessions', { method: 'POST', body: '{}' }), error => error.code === 'pwa_auth_scope_blocked');
+  await assert.rejects(requestJSON('/all-coin-scores?limit=60'), error => error.code === 'pwa_auth_scope_blocked');
+  assert.equal(calls.length, 0, 'denied writes and read endpoints must not reach fetch');
+
+  await requestJSON('/account');
+  assert.deepEqual(calls.map(call => call.url), ['/api/account']);
+});
+
+test('read-only and native-only PWA sessions can open the supported token replacement flow', () => {
+  const notice = redesignSource.split('function syncAuthScopeNotice() {')[1]?.split('\n    }')[0] || '';
+  assert.match(notice, /changeTokenButton\.hidden = !\(isReadOnlyPwaScope\(\) \|\| isMobileOperatorPwaScope\(\)\)/);
+  assert.match(redesignSource, /byId\('pilot-auth-change-token'\)\?\.addEventListener\('click',[\s\S]*authClient\?\.requestLogin/);
 });
 
 function createMemoryStorage(initial = null) {
@@ -1006,6 +1122,10 @@ test('PWA shell은 redesign asset version과 service worker cache version을 함
   assert.match(redesignScriptAsset || '', /^\/pilot-redesign\.js\?v=\d{8}-\d+$/);
   assert.match(redesignStylesheetAsset || '', /^\/pilot-redesign\.css\?v=\d{8}-\d+$/);
   assert.match(serviceWorkerCacheName || '', /^coinpilot-shell-v\d+$/);
+  assert.equal(serviceWorkerCacheName, 'coinpilot-shell-v205');
+  assert.ok(serviceWorkerAppShell);
+  assert.match(serviceWorkerAppShell, new RegExp(`['"]${redesignScriptAsset.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}['"]`));
+  assert.match(serviceWorkerAppShell, new RegExp(`['"]${redesignStylesheetAsset.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}['"]`));
   assert.match(serviceWorkerSource, new RegExp(`['"]${redesignScriptAsset.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}['"]`));
   assert.match(serviceWorkerSource, new RegExp(`['"]${redesignStylesheetAsset.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}['"]`));
   assert.match(serviceWorkerSource, /NETWORK_FIRST_SHELL_PATHS/);
@@ -1014,15 +1134,28 @@ test('PWA shell은 redesign asset version과 service worker cache version을 함
 
 test('빈 자산 그래프는 간결한 시작 안내와 읽기 전용을 막는 기록 동작을 제공한다', () => {
   const chart = redesignSource.split('function drawEquityChart(')[1]?.split('function drawAllocationChart(')[0] || '';
+  const trendHelperSource = redesignSource.split('function hasUsableHistoryTrend(')[1]?.split('function formatMarketTimestamp(')[0] || '';
+  const hasUsableHistoryTrend = trendHelperSource
+    ? new Function(`return function hasUsableHistoryTrend(${trendHelperSource};`)()
+    : null;
   const recordSnapshot = redesignSource.split('async function recordCurrentPortfolioSnapshot(')[1]?.split('async function executeTrade(')[0] || '';
-  assert.match(chart, /chartWrap\?\.classList\.toggle\('is-empty', !hasPoints\)/);
+  assert.equal(typeof hasUsableHistoryTrend, 'function');
+  assert.equal(hasUsableHistoryTrend([]), false);
+  assert.equal(hasUsableHistoryTrend([{ totalAssets: 1_000_000, timestamp: '2026-09-30T00:00:00.000Z' }]), false);
+  assert.equal(hasUsableHistoryTrend([
+    { totalAssets: 1_000_000, timestamp: '2026-09-30T00:00:00.000Z' },
+    { totalAssets: 1_001_000, timestamp: '2026-09-30T00:01:00.000Z' }
+  ]), true);
+  assert.match(chart, /const hasTrend = hasUsableHistoryTrend\(points\)/);
+  assert.match(chart, /저장된 평가 기록 1건/);
+  assert.match(chart, /state\.coreReady === true/);
   assert.match(chart, /자산 흐름을 기록해 보세요/);
   assert.match(chart, /data-pilot-action="record-snapshot"/);
   assert.match(chart, /!isReadOnlyObserver\(\)/);
   assert.match(redesignStyleSource, /\.pilot-chart-wrap\.is-empty/);
   assert.match(recordSnapshot, /requestJSON\('\/portfolio\/snapshot', \{ method: 'POST' \}\)/);
   assert.match(recordSnapshot, /result\?\.recorded !== true/);
-  assert.match(recordSnapshot, /isReadOnlyObserver\(\) \|\| state\.online === false/);
+  assert.match(recordSnapshot, /isPwaMutationBlocked\(\) \|\| state\.online === false/);
 });
 
 test('successful manual and conditional orders record one portfolio snapshot before refreshing history', () => {
@@ -1123,11 +1256,22 @@ test('PWA manifest icon과 service worker app shell의 모든 정적 자산이 �
 });
 
 test('redesign uses Toss foundation color values and local system fonts', () => {
-  assert.match(redesignStyleSource, /--sl-ink:\s*#191f28/i);
-  assert.match(redesignStyleSource, /--sl-muted:\s*#6b7684/i);
-  assert.match(redesignStyleSource, /--sl-blue:\s*#1b64da/i);
-  assert.match(redesignStyleSource, /--sl-paper:\s*#f9fafb/i);
+  assert.match(redesignStyleSource, /--tds-color-grey-900:\s*#191f28/i);
+  assert.match(redesignStyleSource, /--tds-color-grey-600:\s*#6b7684/i);
+  assert.match(redesignStyleSource, /--tds-color-blue-700:\s*#1b64da/i);
+  assert.match(redesignStyleSource, /--tds-color-grey-50:\s*#f9fafb/i);
+  assert.match(redesignStyleSource, /--sl-ink:\s*var\(--tds-color-grey-900\)/i);
+  assert.match(redesignStyleSource, /--sl-type-page-title:\s*28px/i);
+  assert.match(redesignStyleSource, /\.pilot-page-title[\s\S]*font-size:\s*clamp\(22px, 2\.1vw, var\(--sl-type-page-title\)\)/);
   assert.match(redesignStyleSource, /--sl-font-body:\s*-apple-system/);
+  const topbarStyle = redesignStyleSource.split('.pilot-topbar {')[1]?.split('}')[0] || '';
+  assert.match(topbarStyle, /background:\s*var\(--sl-paper\)/);
+  assert.doesNotMatch(topbarStyle, /backdrop-filter/);
+  const modeSwitchStyle = redesignStyleSource.split('.pilot-mode-switch {')[1]?.split('}')[0] || '';
+  assert.match(modeSwitchStyle, /background:\s*var\(--sl-surface-2\)/);
+  assert.match(designQaSource, /Active reference: Toss Design System/);
+  assert.match(designQaSource, /Historical comparison target — Signal Ledger/);
+  assert.match(designQaSource, /does not load the React TDS component package/);
   assert.doesNotMatch(indexSource, /fonts\.(?:googleapis|gstatic)\.com/i);
   assert.doesNotMatch(redesignSource, /Manrope|IBM Plex Sans KR/i);
   assert.match(indexSource, /<script\s+src=["']\/socket\.io\/socket\.io\.js["']/i);
@@ -1202,7 +1346,7 @@ test('selected-market UI binds exchange source time and server fetch time separa
   assert.match(renderMarketHeader, /marketName\.textContent !== '업비트 원화 시장'/);
   assert.match(renderMarketHeader, /marketStatus\.textContent !== marketStatusLabel/);
   const selectedMarketHeader = redesignSource.split('function renderMarketHeader() {')[1]?.split('function sortedMarketPrices()')[0] || '';
-  assert.match(selectedMarketHeader, /selectedMarketQuotePresentation\(marketData, marketPresentation\)/);
+  assert.match(selectedMarketHeader, /selectedMarketQuotePresentation\(\s*marketData,\s*marketPresentation,\s*state\.marketPricesLoaded\s*\)/);
   assert.match(redesignStyleSource, /\.pilot-market-time-meta/);
 });
 
@@ -1216,24 +1360,32 @@ test('selected market status is scoped to its own quote while market summary ret
   const selectedFresh = selectedMarketQuotePresentation({
     price: 100,
     sourceAsOf: new Date(now - 1_000).toISOString()
-  }, aggregateStale, now);
+  }, aggregateStale, true, now);
   assert.deepEqual(selectedFresh, { label: '현재 시세', state: 'complete' });
 
   const selectedStale = selectedMarketQuotePresentation({
     price: 100,
     sourceAsOf: new Date(now - 10 * 60_000).toISOString()
-  }, { label: '전체 시세 상태를 확인하세요', state: 'partial' }, now);
+  }, { label: '전체 시세 상태를 확인하세요', state: 'partial' }, true, now);
   assert.equal(selectedStale.state, 'stale');
   assert.match(selectedStale.label, /최근 체결 시각이 오래됐어요/);
 
   const missingSelected = selectedMarketQuotePresentation(null, {
     label: '일부 시장 시세를 확인할 수 없습니다',
     state: 'partial'
-  }, now);
+  }, true, now);
   assert.deepEqual(missingSelected, {
     label: '일부 시장 시세를 확인할 수 없습니다',
     state: 'partial'
   });
+
+  const failedRefresh = selectedMarketQuotePresentation({
+    price: 100,
+    sourceAsOf: new Date(now - 1_000).toISOString(),
+    fetchedAt: new Date(now - 5_000).toISOString()
+  }, aggregateStale, false, now);
+  assert.equal(failedRefresh.state, 'stale');
+  assert.match(failedRefresh.label, /새로고침 실패 · 마지막 수집/);
 });
 
 test('selected-market order freshness matches server source-age admission and ignores fetch age alone', () => {
@@ -1259,14 +1411,33 @@ test('selected-market order freshness matches server source-age admission and ig
     sourceAsOf: new Date(now - 1_000).toISOString(),
     fetchedAt: new Date(now - 10 * 60_000).toISOString()
   }, now);
+  const serverMarkedUnverified = marketQuoteFreshnessIssue({
+    price: 100,
+    sourceAsOf: new Date(now - 1_000).toISOString(),
+    fetchedAt: new Date(now).toISOString(),
+    quoteFresh: false
+  }, now);
 
   assert.equal(fresh, null);
   assert.match(staleTrade, /최근 체결 시각이 오래됐어요/);
   assert.match(futureTrade, /현재보다 앞서 있어요/);
   assert.equal(oldFetchFreshSource, null,
     'A cached fetch time alone must not contradict the server fresh-ticker admission policy.');
+  assert.match(serverMarkedUnverified, /최신 여부를 확인할 수 없어요/);
+  assert.match(lastGoodMarketQuoteFreshnessIssue({
+    price: 100,
+    sourceAsOf: new Date(now - 1_000).toISOString(),
+    fetchedAt: new Date(now - 2_000).toISOString(),
+    quoteFresh: false
+  }, now), /저장된 최근 시세/);
+  assert.match(marketQuoteFreshnessIssue({
+    price: 100,
+    sourceAsOf: new Date(now - 1_000).toISOString(),
+    quoteFresh: false,
+    quoteFreshnessReason: 'market_snapshot_last_good'
+  }, now), /저장된 최근 시세/);
   const selectedMarketHeader = redesignSource.split('function renderMarketHeader() {')[1]?.split('function sortedMarketPrices()')[0] || '';
-  assert.match(selectedMarketHeader, /selectedMarketQuotePresentation\(marketData, marketPresentation\)/);
+  assert.match(selectedMarketHeader, /selectedMarketQuotePresentation\(\s*marketData,\s*marketPresentation,\s*state\.marketPricesLoaded\s*\)/);
   assert.match(selectedMarketQuotePresentationFunctionSource, /marketQuoteFreshnessIssue\(marketData, now\)/);
   assert.match(redesignSource, /marketQuoteFreshnessIssue\(currentMarket\(marketSelect\?\.value\)\)/);
   const tradePanel = redesignSource.split('function renderTradePanel(prefix) {')[1]?.split('function renderTradePanels()')[0] || '';
@@ -1308,6 +1479,7 @@ test('PWA reads explicit price snapshot metadata and presents complete, partial,
     complete: true,
     sourceAsOf: '2026-09-29T01:02:03.000Z',
     fetchedAt: '2026-09-29T01:02:08.000Z',
+    snapshotSource: 'upstream',
     marketListStale: false,
     marketListFetchedAt: '2026-09-29T01:01:00.000Z',
     prices: rows
@@ -1318,6 +1490,7 @@ test('PWA reads explicit price snapshot metadata and presents complete, partial,
   assert.equal(completeSnapshot.marketListStale, false);
   assert.equal(completeSnapshot.sourceAsOf, '2026-09-29T01:02:03.000Z');
   assert.equal(completeSnapshot.fetchedAt, '2026-09-29T01:02:08.000Z');
+  assert.equal(completeSnapshot.snapshotSource, 'upstream');
   assert.equal(completeSnapshot.marketListFetchedAt, '2026-09-29T01:01:00.000Z');
   const completePresentation = marketSnapshotPresentation(completeSnapshot, true, completeSnapshot.prices);
   assert.equal(completePresentation.state, 'complete');
@@ -1348,15 +1521,55 @@ test('PWA reads explicit price snapshot metadata and presents complete, partial,
   assert.equal(staleCompletePresentation.state, 'stale');
   assert.equal(staleCompletePresentation.tone, 'warning');
 
+  const lastGoodSnapshot = normalizeMarketPriceSnapshot({
+    ...completeSnapshot,
+    snapshotSource: 'last_good',
+    fallbackReason: 'ENETDOWN',
+    prices: [{ ...rows[0], quoteFresh: false, quoteFreshnessReason: 'market_snapshot_last_good' }]
+  });
+  const lastGoodPresentation = marketSnapshotPresentation(lastGoodSnapshot, true, lastGoodSnapshot.prices);
+  assert.equal(lastGoodPresentation.state, 'stale');
+  assert.equal(lastGoodPresentation.tone, 'warning');
+  assert.match(lastGoodPresentation.label, /저장된 최근 시세/);
+
   assert.equal(normalizeMarketPriceSnapshot({ complete: true }), null);
   const unavailablePresentation = marketSnapshotPresentation(null, false, []);
   assert.equal(unavailablePresentation.state, 'unavailable');
   assert.match(unavailablePresentation.label, /시세를 불러오지 못했습니다/);
   assert.match(unavailablePresentation.detail, /시장 목록을 확인할 수 없어요/);
 
+  assert.equal(typeof marketRowQuotePresentation, 'function');
+  const rowFetchedAt = '2026-09-29T01:02:08.000Z';
+  const currentRow = marketRowQuotePresentation({
+    price: 100,
+    sourceAsOf: '2026-09-29T01:02:03.000Z',
+    fetchedAt: rowFetchedAt
+  }, true, Date.parse('2026-09-29T01:02:09.000Z'));
+  assert.equal(currentRow.state, 'current');
+  assert.match(currentRow.label, /최근 시세 · 수집/);
+  const failedRefreshRow = marketRowQuotePresentation({
+    price: 100,
+    sourceAsOf: '2026-09-29T01:02:03.000Z',
+    fetchedAt: rowFetchedAt
+  }, false, Date.parse('2026-09-29T01:02:09.000Z'));
+  assert.equal(failedRefreshRow.state, 'stale');
+  assert.match(failedRefreshRow.label, /갱신 실패 · 마지막 수집/);
+  const lastGoodRow = marketRowQuotePresentation({
+    price: 100,
+    sourceAsOf: '2026-09-29T01:02:03.000Z',
+    fetchedAt: rowFetchedAt,
+    quoteFresh: false,
+    quoteFreshnessReason: 'market_snapshot_last_good'
+  }, true, Date.parse('2026-09-29T01:02:09.000Z'));
+  assert.equal(lastGoodRow.state, 'stale');
+  assert.match(lastGoodRow.label, /저장 시세 · 수집/);
+
   const coreLoader = redesignSource.split('async function loadCore(')[1]?.split('function clearDynamicStateForOffline()')[0] || '';
   assert.match(coreLoader, /marketPrices: '\/market\/prices\/snapshot'/);
   assert.match(coreLoader, /marketPrices: marketSnapshotLoaded \? marketSnapshot\.prices : null/);
+  const marketRows = redesignSource.split('function renderMarketList() {')[1]?.split('function renderPortfolio()')[0] || '';
+  assert.match(marketRows, /marketRowQuotePresentation\(item, state\.marketPricesLoaded\)/);
+  assert.match(marketRows, /pilot-market-row-freshness/);
   assert.doesNotMatch(coreReadinessFunctionSource || '', /marketSnapshot|complete|missingMarkets/);
 });
 
@@ -1772,7 +1985,7 @@ test('portfolio snapshot request restores its control after a failed response', 
   const button = { disabled: false };
   const syncObserverControls = () => { button.disabled = state.snapshotSaving; };
   const recordSnapshot = new Function(
-    'state', 'isReadOnlyObserver', 'syncObserverControls', 'requestJSON', 'toUserText', 'showToast', 'loadCore',
+    'state', 'isPwaMutationBlocked', 'syncObserverControls', 'requestJSON', 'toUserText', 'showToast', 'loadCore',
     `${snapshotFunctionSource}; return recordCurrentPortfolioSnapshot;`
   )(state, () => false, syncObserverControls, async () => ({ recorded: false, error: 'not saved' }), String, () => {}, async () => {});
 
@@ -2084,6 +2297,39 @@ test('redesigned shell hides the legacy UI without requiring the CSS :has select
   assert.match(redesignSource, /document\.body\?\.classList\.remove\('pilot-redesign-shell'\)/);
 });
 
+test('overview leads with account value and one preflight action while order entry stays in Trade', () => {
+  const overview = redesignSource.split('<section class="pilot-page is-active" data-pilot-page="overview">')[1]
+    ?.split('<section class="pilot-page" data-pilot-page="trade">')[0] || '';
+  const tradePage = redesignSource.split('<section class="pilot-page" data-pilot-page="trade">')[1]
+    ?.split('<section class="pilot-page" data-pilot-page="portfolio">')[0] || '';
+  assert.ok(overview);
+  assert.ok(tradePage);
+  assert.match(overview, /class="pilot-overview-balance"[\s\S]*id="pilot-total-assets"/);
+  assert.equal((overview.match(/id="pilot-total-assets"/g) || []).length, 1);
+  const balanceRule = redesignStyleSource.match(/\.pilot-overview-balance\s*\{([^}]*)\}/)?.[1] || '';
+  assert.match(balanceRule, /border-left:\s*3px solid var\(--sl-blue\)/);
+  assert.doesNotMatch(balanceRule, /gradient|box-shadow/i);
+  assert.doesNotMatch(redesignStyleSource, /\.pilot-overview-balance::after/);
+  assert.match(overview, /<button[^>]*class="pilot-button is-primary pilot-overview-next-action"[^>]*data-pilot-go="history"/);
+  assert.equal((overview.match(/data-pilot-go="history"/g) || []).length, 1);
+  for (const statusId of [
+    'pilot-gate-validation-detail', 'pilot-gate-paper-detail', 'pilot-gate-freshness-detail'
+  ]) {
+    assert.match(overview, new RegExp(`id="${statusId}"`), `overview must retain ${statusId}`);
+  }
+  for (const warningId of ['pilot-auth-scope-banner', 'pilot-offline-banner', 'pilot-pending-mutation']) {
+    assert.match(redesignSource, new RegExp(`id="${warningId}"`), `shell must retain ${warningId}`);
+  }
+  const gateDetailRule = redesignStyleSource.match(/\.pilot-gate-detail\s*\{[^}]*\}/)?.[0] || '';
+  assert.doesNotMatch(gateDetailRule, /overflow:\s*hidden|text-overflow:\s*ellipsis|white-space:\s*nowrap/);
+  assert.doesNotMatch(overview, /tradePanelMarkup\('overview'\)/);
+  assert.match(tradePage, /tradePanelMarkup\('trade'\)/);
+  assert.match(tradePage, /data-pilot-action="smart-buy"/);
+  assert.match(tradePage, /data-pilot-action="smart-sell"/);
+  assert.match(redesignSource, /\['market', 'trade'\]\.forEach\(renderTradePanel\)/);
+  assert.match(redesignSource, /data-pilot-view="trade"/);
+});
+
 test('mobile navigation keeps four core destinations visible and builds the rest into the menu', () => {
   const coreViews = ['overview', 'trade', 'portfolio', 'market'];
   const hiddenViews = ['analysis', 'ai', 'news', 'settings', 'history'];
@@ -2340,19 +2586,17 @@ test('mobile redesigned shell은 한 줄 네비게이션과 safe-area 여백을 
   assert.match(redesignStyleSource, /pilot-sidebar-nav > \.pilot-nav-button\[data-pilot-view="overview"\][\s\S]*pilot-mobile-more\s*\{\s*display:\s*flex/);
   assert.match(
     redesignStyleSource,
-    /@media\s*\(max-width:\s*760px\)[\s\S]*\.pilot-gate-grid\s*\{[\s\S]*grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/
+    /\.pilot-overview-lead\s*\{[\s\S]*grid-template-columns:\s*minmax\(0,\s*1\.15fr\)\s+minmax\(300px,\s*0\.85fr\)/
   );
   assert.match(
     redesignStyleSource,
-    /@media\s*\(max-width:\s*760px\)[\s\S]*\.pilot-gate-card\s*\{[\s\S]*min-height:\s*98px/
+    /@media\s*\(max-width:\s*980px\)[\s\S]*\.pilot-overview-lead\s*,\s*\.pilot-market-layout\s*\{[\s\S]*grid-template-columns:\s*1fr/
   );
+  assert.match(redesignStyleSource, /\.pilot-overview-readiness-row\s*\{[\s\S]*grid-template-columns:\s*28px\s+minmax\(0,\s*1fr\)/);
+  assert.doesNotMatch(redesignStyleSource, /\.pilot-gate-card/);
   assert.match(
     redesignStyleSource,
     /@media\s*\(max-width:\s*360px\)[\s\S]*\.pilot-mode-banner\s*\{[\s\S]*display:\s*grid/
-  );
-  assert.match(
-    redesignStyleSource,
-    /@media\s*\(max-width:\s*480px\)[\s\S]*\.pilot-gate-grid\s*\{[\s\S]*grid-template-columns:\s*1fr/
   );
 });
 
@@ -2366,6 +2610,8 @@ test('mobile navigation keeps readable labels and touch targets at least 44px hi
     /\.pilot-mobile-menu-close\s*\{[\s\S]*width:\s*44px[\s\S]*height:\s*44px/
   );
   assert.match(redesignStyleSource, /\.pilot-mobile-menu-nav \.pilot-nav-button\s*\{[\s\S]*min-height:\s*54px/);
+  assert.match(redesignStyleSource, /\.pilot-overview-next-action\s*\{[\s\S]*min-height:\s*48px/);
+  assert.match(redesignStyleSource, /\.pilot-button:focus-visible,[\s\S]*outline:\s*3px solid/);
   assert.match(
     redesignStyleSource,
     /@media\s*\(max-width:\s*520px\)[\s\S]*\.pilot-chart-empty \.pilot-button\s*\{[\s\S]*min-height:\s*44px/
@@ -2377,7 +2623,7 @@ test('mobile navigation keeps readable labels and touch targets at least 44px hi
 test('모의투자 시작은 paper 경로를 사용하고 server blocker를 숨기거나 완화하지 않는다', () => {
   const startPaper = redesignSource.split('async function startPaper(')[1]?.split('async function stopPaper()')[0];
   assert.ok(startPaper);
-  assert.match(startPaper, /if \(isReadOnlyObserver\(\)\)/);
+  assert.match(startPaper, /if \(isPwaMutationBlocked\(\)\)/);
   assert.match(startPaper, /requestJSON\('\/paper-validation\/start'/);
   assert.match(startPaper, /모의투자 시작 실패: \$\{error\.message\}/);
   assert.doesNotMatch(startPaper, /minReboundPercent|minVolumeRatio|자동 완화/);

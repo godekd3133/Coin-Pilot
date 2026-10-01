@@ -2,6 +2,7 @@ import dotenv from 'dotenv';
 import MultiCoinTrader from './trader/multiCoinTrader.js';
 import DashboardServer from './api/dashboardServer.js';
 import { createPublicMarketDataSource } from './api/publicMarketDataSource.js';
+import { createPublicMarketSnapshotStore } from './api/publicMarketSnapshotStore.js';
 import BacktestEngine from './backtest/backtestEngine.js';
 import UpbitAPI from './api/upbit.js';
 import { LiveCredentialStore } from './api/liveCredentialStore.js';
@@ -12,13 +13,15 @@ import { resolveTradingLimits } from './config/tradingLimits.js';
 import { acquireHeadlessRuntimeWriterLock, setupExitHandlers } from './runtime/exitHandlers.js';
 import { runAfterDashboardReady } from './runtime/dashboardStartup.js';
 import { createProfileWriterStartup } from './runtime/profileWriterStartup.js';
+import { derivePublicMarketSnapshotFilePath } from './runtime/profileStoragePlan.js';
 import { resolveOptimizationStoragePaths } from './runtime/optimizationStorage.js';
-import { appendOptimizerHistory } from './runtime/optimizerHistoryStore.js';
+import { appendOptimizerHistory, writeOptimizerJsonAtomically } from './runtime/optimizerHistoryStore.js';
 import { fetchCompleteUpbitCandleHistory } from './market-data/completeUpbitCandleHistory.js';
+import { assertSupportedNodeVersion } from './runtime/nodeRuntimeRequirement.js';
 import fs from 'fs';
-import path from 'node:path';
 
 dotenv.config();
+assertSupportedNodeVersion();
 
 let activeExitHandlers = null;
 
@@ -532,14 +535,9 @@ function startOptimizationLoop(config, logger) {
         note: '지속적 최적화를 통해 생성된 파라미터입니다.'
       };
 
-      fs.mkdirSync(path.dirname(optimizationStoragePaths.optimalConfigFile.absolutePath), {
-        recursive: true,
-        mode: 0o700
-      });
-      fs.writeFileSync(
+      await writeOptimizerJsonAtomically(
         optimizationStoragePaths.optimalConfigFile.absolutePath,
-        JSON.stringify(optimConfig, null, 2),
-        'utf8'
+        optimConfig
       );
 
       console.log(`\n💾 최적 파라미터 저장: ${optimizationStoragePaths.optimalConfigFile.absolutePath}`);
@@ -680,17 +678,32 @@ async function main() {
   let manualOrderIdempotencyStore;
   let dashboardServer = null;
   let runtimeLifecycleInstalled = false;
+  let publicMarketDataSource = null;
   try {
-    const runtime = profileWriterStartup.createTraderAndStore(() => new MultiCoinTrader(config));
+    const runtime = profileWriterStartup.createTraderAndStore(() => {
+      // Public market reads share a keyless client across strategy and the
+      // dashboard. Account, reconciliation, and order calls stay on trader.upbit.
+      const publicMarketSnapshotStore = createPublicMarketSnapshotStore({
+        filePath: derivePublicMarketSnapshotFilePath(config.virtualPortfolioFile)
+      });
+      publicMarketDataSource = createPublicMarketDataSource({
+        requestTimeoutMs: config.upbitRequestTimeoutMs,
+        snapshotStore: publicMarketSnapshotStore
+      });
+      return new MultiCoinTrader(config, { publicMarketDataSource });
+    });
     trader = runtime.trader;
+    if (!config.enableDashboard && typeof trader?.upbit?.assertRateCoordinatorReady === 'function') {
+      await trader.upbit.assertRateCoordinatorReady();
+    }
     manualOrderIdempotencyStore = runtime.manualOrderIdempotencyStore;
 
     // DashboardServer.start() initializes this same store and validates its
     // adopted lock before binding the HTTP listener.
     if (config.enableDashboard) {
-      const publicMarketDataSource = createPublicMarketDataSource();
       dashboardServer = new DashboardServer(trader, config.dashboardPort, {
         publicMarketDataSource,
+        releaseManualOrderWriterLockOnStop: false,
         optimizationStateDir: config.stateDir,
         manualOrderIdempotencyStore,
         liveCredentialStore,
@@ -723,7 +736,20 @@ async function main() {
       // The startup owner controls both the portfolio lock and the journal
       // lock so every clean shutdown releases the complete write boundary.
       const runtimeWriterLockOwner = {
-        releaseWriterLock: () => profileWriterStartup.releaseWriterLock()
+        releaseWriterLock: async () => {
+          let closeError = null;
+          try {
+            await publicMarketDataSource?.close?.();
+          } catch (error) {
+            closeError = error;
+          }
+          const released = profileWriterStartup.releaseWriterLock();
+          if (closeError) {
+            closeError.profileWriterLockReleased = released;
+            throw closeError;
+          }
+          return released;
+        }
       };
 
       // 스캘핑 모드에서는 기존 종합점수 전략용 백테스트/최적화가
@@ -753,7 +779,7 @@ async function main() {
         if (backtestTimer) clearInterval(backtestTimer);
         if (optimizationTimer) clearInterval(optimizationTimer);
         try {
-          runtimeWriterLockOwner.releaseWriterLock();
+          await runtimeWriterLockOwner.releaseWriterLock();
         } catch (releaseError) {
           if (error && typeof error === 'object') error.writerLockReleaseError = releaseError;
         }
@@ -823,6 +849,11 @@ async function main() {
         if (error && typeof error === 'object') error.dashboardStartupCleanupError = cleanupError;
       }
       try {
+        try {
+          await publicMarketDataSource?.close?.();
+        } catch (closeError) {
+          if (error && typeof error === 'object') error.publicMarketSnapshotCloseError = closeError;
+        }
         profileWriterStartup.releaseWriterLock();
       } catch (releaseError) {
         if (error && typeof error === 'object') error.writerLockReleaseError = releaseError;

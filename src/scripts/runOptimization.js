@@ -3,9 +3,7 @@ import UpbitAPI from '../api/upbit.js';
 import ParameterOptimizer from '../optimization/parameterOptimizer.js';
 import { fetchCompleteUpbitCandleHistory } from '../market-data/completeUpbitCandleHistory.js';
 import { resolveOptimizationStoragePaths } from '../runtime/optimizationStorage.js';
-import { appendOptimizerHistory } from '../runtime/optimizerHistoryStore.js';
-import fs from 'fs';
-import path from 'node:path';
+import { appendOptimizerHistory, writeOptimizerJsonAtomically } from '../runtime/optimizerHistoryStore.js';
 import { pathToFileURL } from 'node:url';
 
 dotenv.config();
@@ -146,12 +144,7 @@ async function runContinuousOptimization() {
       };
 
       const activeConfigFile = optimizationStoragePaths.optimalConfigFile.absolutePath;
-      fs.mkdirSync(path.dirname(activeConfigFile), { recursive: true, mode: 0o700 });
-      fs.writeFileSync(
-        activeConfigFile,
-        JSON.stringify(config, null, 2),
-        'utf8'
-      );
+      await writeOptimizerJsonAtomically(activeConfigFile, config);
 
       console.log(`\n💾 최적 파라미터 저장: ${activeConfigFile}`);
 

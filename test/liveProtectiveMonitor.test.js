@@ -5,6 +5,10 @@ import path from 'node:path';
 import test from 'node:test';
 import MultiCoinTrader from '../src/trader/multiCoinTrader.js';
 
+function currentTicker(market, trade_price) {
+  return { market, trade_price, trade_timestamp: Date.now() };
+}
+
 function makeLiveTrader(root, overrides = {}, exchangeStateKnown = true) {
   const trader = new MultiCoinTrader({
     accessKey: '',
@@ -348,7 +352,7 @@ test('graceful shutdown keeps observing a known position while account reconcili
   let tickerReads = 0;
   trader.riskUpbit.getTicker = async () => {
     tickerReads += 1;
-    return [{ market: 'KRW-BTC', trade_price: 100 }];
+    return [currentTicker('KRW-BTC', 100)];
   };
   trader.getAccountInfo = async () => [
     { currency: 'KRW', balance: '1000000', locked: '0' },
@@ -424,7 +428,7 @@ test('known positions keep receiving ticker observations while another market sy
   let tickerReads = 0;
   trader.riskUpbit.getTicker = async () => {
     tickerReads += 1;
-    return [{ market: 'KRW-BTC', trade_price: 100 }];
+    return [currentTicker('KRW-BTC', 100)];
   };
   trader.getAccountInfo = async () => [
     { currency: 'KRW', balance: '1000000', locked: '0' },
@@ -493,7 +497,7 @@ test('protective LIVE exit remains pending when a stop is hit during exchange sy
   };
   let currentRiskPrice = 98;
   trader.riskUpbit.getTicker = async () => [
-    { market: 'KRW-BTC', trade_price: currentRiskPrice }
+    currentTicker('KRW-BTC', currentRiskPrice)
   ];
 
   const sync = trader.syncWithExchange();
@@ -560,7 +564,7 @@ test('a LIVE stop trigger survives a failed account read and retries with a fres
   trader.isRunning = true;
   let currentRiskPrice = 98;
   trader.riskUpbit.getTicker = async () => [
-    { market: 'KRW-BTC', trade_price: currentRiskPrice }
+    currentTicker('KRW-BTC', currentRiskPrice)
   ];
   let riskAccountReads = 0;
   trader.getAccountInfo = async () => {
@@ -618,7 +622,7 @@ test('a malformed LIVE account snapshot leaves the protective exit intent queued
   trader.isRunning = true;
   let currentRiskPrice = 98;
   trader.riskUpbit.getTicker = async () => [
-    { market: 'KRW-BTC', trade_price: currentRiskPrice }
+    currentTicker('KRW-BTC', currentRiskPrice)
   ];
   let riskAccountReads = 0;
   trader.getAccountInfo = async () => {
@@ -677,7 +681,7 @@ test('an unresolved protective SELL cannot submit twice before order-state recon
   });
   let currentRiskPrice = 98;
   trader.riskUpbit.getTicker = async () => [
-    { market: 'KRW-BTC', trade_price: currentRiskPrice }
+    currentTicker('KRW-BTC', currentRiskPrice)
   ];
   let orderCalls = 0;
   trader.upbit.order = async () => {
@@ -852,7 +856,7 @@ test('LIVE risk-data gap pauses entries, retries quotes, and allows one protecte
   trader.riskUpbit.getTicker = async () => {
     riskTickerCalls += 1;
     if (riskTickerCalls === 1) throw Object.assign(new Error('still unavailable'), { code: 'EHOSTUNREACH' });
-    return [{ market: 'KRW-BTC', trade_price: 98 }];
+    return [currentTicker('KRW-BTC', 98)];
   };
   trader.getAccountInfo = async () => [
     { currency: 'KRW', balance: '0', locked: '0' },
@@ -987,7 +991,7 @@ test('late LIVE risk ticker crossing the stale limit enters protective-only befo
   assert.equal(trader._riskMonitorProtectiveOnly, true);
   assert.notEqual(trader.positionRiskTimer, null);
 
-  resolveTicker([{ market: 'KRW-BTC', trade_price: 98 }]);
+  resolveTicker([currentTicker('KRW-BTC', 98)]);
   await pendingRiskCheck;
 
   assert.equal(riskExitCount, 1);

@@ -27,6 +27,9 @@ export function inspectMarketQuoteFreshness(ticker, options = {}) {
     : DEFAULT_MARKET_QUOTE_MAX_AGE_SECONDS;
   const maximumAgeMs = maximumAgeSeconds * 1000;
   const market = typeof ticker?.market === 'string' ? ticker.market : null;
+  const expectedMarket = typeof options.expectedMarket === 'string' && options.expectedMarket.trim()
+    ? options.expectedMarket.trim()
+    : null;
   const price = Number(ticker?.trade_price);
   const sourceTimestamp = normalizeTimestamp(ticker?.trade_timestamp ?? ticker?.timestamp);
   const result = {
@@ -40,6 +43,9 @@ export function inspectMarketQuoteFreshness(ticker, options = {}) {
 
   if (!market || !/^[A-Z0-9]+-[A-Z0-9]+$/.test(market) || !Number.isFinite(price) || price <= 0) {
     return { ...result, reason: 'invalid_market_quote' };
+  }
+  if (expectedMarket !== null && market !== expectedMarket) {
+    return { ...result, reason: 'market_quote_market_mismatch' };
   }
   if (sourceTimestamp === null) {
     return { ...result, reason: 'missing_market_source_timestamp' };

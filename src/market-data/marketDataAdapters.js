@@ -1,8 +1,9 @@
 const adapterKinds = new WeakMap();
 
-// Contract: normal ticker/candle analysis and portfolio mark prices use this
-// seam. LIVE binds to the trader's Upbit client; account/order reads,
-// manual-order preflight, and protective risk polling stay on exchange clients.
+// Contract: strategy ticker/candle analysis and portfolio marks use this seam.
+// Production entrypoints inject one credential-free PublicMarketDataSource
+// shared with DashboardServer; direct standalone traders fall back to their
+// own Upbit client. Account/order/reconciliation reads remain credentialed.
 
 function cloneFixtureValue(value) {
   if (typeof globalThis.structuredClone === 'function') return globalThis.structuredClone(value);
@@ -67,12 +68,14 @@ export class UpbitMarketDataAdapter {
     return upbit.getMarkets();
   }
 
-  getTickers(markets) {
+  getTickers(markets, requestOptions = {}) {
     const upbit = this.getUpbit();
     if (typeof upbit?.getTicker !== 'function') {
       throw new Error('Upbit ticker reader is unavailable.');
     }
-    return upbit.getTicker(markets);
+    return Object.keys(requestOptions).length > 0
+      ? upbit.getTicker(markets, requestOptions)
+      : upbit.getTicker(markets);
   }
 
   getMinuteCandles(market, unit, count, requestOptions = {}) {

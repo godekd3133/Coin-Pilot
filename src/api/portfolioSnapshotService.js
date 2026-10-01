@@ -106,25 +106,35 @@ export default class PortfolioSnapshotService {
 
       const valuationMarkets = accountValuationMarkets(tradingSystem, accounts);
       const marketSnapshot = await readCurrentMarketPrices(server, valuationMarkets);
-      if (!marketSnapshot.complete) {
+      const usedLastGoodSnapshot = marketSnapshot.snapshotSource === 'last_good';
+      if (!marketSnapshot.complete || marketSnapshot.allQuotesFresh !== true || usedLastGoodSnapshot) {
         return {
           status: 503,
           body: {
             success: false,
             recorded: false,
             valuationAvailable: false,
-            valuationStatus: 'unavailable',
+            valuationStatus: marketSnapshot.staleMarkets?.length > 0 || usedLastGoodSnapshot
+              ? 'stale' : 'unavailable',
             valuationAsOf: marketSnapshot.asOf,
             sourceAsOf: marketSnapshot.sourceAsOf,
             fetchedAt: marketSnapshot.fetchedAt,
+            sourceSkewMs: marketSnapshot.sourceSkewMs ?? null,
+            captureSkewMs: marketSnapshot.captureSkewMs ?? null,
+            snapshotSource: marketSnapshot.snapshotSource ?? 'upstream',
+            staleMarkets: marketSnapshot.staleMarkets || [],
             unavailableMarkets: marketSnapshot.unavailableMarkets,
             dataPoints: history.length,
-            error: '모든 보유 자산의 시세를 확인하지 못해 새 기록을 저장하지 않았어요.'
+            error: usedLastGoodSnapshot
+              ? '최근 저장한 시세를 표시 중이라 새 기록을 저장하지 않았어요.'
+              : marketSnapshot.staleMarkets?.length > 0
+                ? '보유 자산의 최근 체결 시각이 오래되어 새 기록을 저장하지 않았어요.'
+                : '모든 보유 자산의 시세를 확인하지 못해 새 기록을 저장하지 않았어요.'
           }
         };
       }
 
-      const totalAssets = await tradingSystem.calculateTotalAssets(marketSnapshot.priceMap, {
+      const totalAssets = await tradingSystem.calculateTotalAssets(marketSnapshot.freshPriceMap, {
         allowAveragePriceFallback: false,
         accountsOverride: accounts
       });
@@ -139,6 +149,8 @@ export default class PortfolioSnapshotService {
             valuationAsOf: marketSnapshot.asOf,
             sourceAsOf: marketSnapshot.sourceAsOf,
             fetchedAt: marketSnapshot.fetchedAt,
+            staleMarkets: marketSnapshot.staleMarkets || [],
+            unavailableMarkets: marketSnapshot.unavailableMarkets || [],
             dataPoints: history.length,
             error: '현재 자산 평가를 완료하지 못해 새 기록을 저장하지 않았어요.'
           }
@@ -152,6 +164,12 @@ export default class PortfolioSnapshotService {
         valuationAsOf: marketSnapshot.asOf,
         sourceAsOf: marketSnapshot.sourceAsOf,
         fetchedAt: marketSnapshot.fetchedAt,
+        sourceSkewMs: marketSnapshot.sourceSkewMs ?? null,
+        captureSkewMs: marketSnapshot.captureSkewMs ?? null,
+        maximumQuoteAgeMs: marketSnapshot.maximumQuoteAgeMs ?? null,
+        sourceAsOfByMarket: Object.fromEntries(marketSnapshot.sourceAsOfByMarket || []),
+        fetchedAtByMarket: Object.fromEntries(marketSnapshot.fetchedAtByMarket || []),
+        snapshotSource: marketSnapshot.snapshotSource ?? 'upstream',
         valuationAvailable: true,
         valuationStatus: 'available',
         valuationSource: tradingSystem.dryRun ? 'paper_virtual_portfolio' : 'exchange_account',
@@ -168,7 +186,7 @@ export default class PortfolioSnapshotService {
         try {
           const status = await tradingSystem.recordPaperValidationSnapshot(
             'dashboard_snapshot',
-            marketSnapshot.priceMap
+            marketSnapshot.freshPriceMap
           );
           paperLedgerSnapshotRecorded = status !== null;
         } catch (error) {

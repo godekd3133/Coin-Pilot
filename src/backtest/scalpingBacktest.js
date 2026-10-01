@@ -1356,7 +1356,11 @@ function findExit(position, candle, config, timestamp) {
   // If both levels are touched inside one candle, choose the stop first. This
   // avoids giving the backtest an optimistic intrabar ordering it cannot know.
   if (low <= protectiveStop.price) {
-    return { reason: protectiveStop.type, price: protectiveStop.price * (1 - config.slippage) };
+    // A stop-market order cannot fill at its trigger after the bar has already
+    // opened below that level. Use the worse opening price for a gap-through,
+    // then apply adverse slippage to either stop fill.
+    const stopFillPrice = Math.min(getOpen(candle), protectiveStop.price);
+    return { reason: protectiveStop.type, price: stopFillPrice * (1 - config.slippage) };
   }
   if (high >= takePrice) {
     return { reason: 'TAKE_PROFIT', price: takePrice * (1 - config.slippage) };

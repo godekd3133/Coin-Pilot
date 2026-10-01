@@ -18,8 +18,45 @@
 
     const MOBILE_CORE_VIEWS = new Set(['overview', 'trade', 'portfolio', 'market']);
     const CORE_REFRESH_INTERVAL_MS = 30_000;
+    const READ_ONLY_PWA_GET_PATHS = new Set([
+        '/status', '/account', '/cumulative-pnl', '/today-summary', '/market/prices/snapshot'
+    ]);
+    const READ_ONLY_PWA_PORTFOLIO_PERIODS = new Set(['24h', '7d', '30d']);
+    const PWA_MUTATION_CONTROL_SELECTOR = [
+        '[data-pilot-action="retry-pending-mutation"]',
+        '[data-pilot-action="start-paper"]', '[data-pilot-action="start-paper-reset"]', '[data-pilot-action="stop-paper"]',
+        '[data-pilot-action="smart-buy"]', '[data-pilot-action="smart-sell"]',
+        '[data-pilot-action="deposit"]', '[data-pilot-action="withdraw"]', '[data-pilot-action="reset-wallet"]',
+        '[data-pilot-action="record-snapshot"]', '[data-pilot-action="save-settings"]', '[data-pilot-action="run-optimization"]',
+        '[data-pilot-trade-submit]', '[data-pilot-trade-side]', '[data-pilot-trade-coin]', '[data-pilot-trade-amount]',
+        '[data-pilot-trade-preset]', '[data-pilot-preset-id]', '[data-pilot-setting-key]',
+        '#pilot-deposit-amount', '#pilot-withdraw-amount',
+        '#pilot-smart-buy-amount', '#pilot-smart-buy-score', '#pilot-smart-buy-max',
+        '#pilot-smart-sell-amount', '#pilot-smart-sell-strategy',
+        '#pilot-auto-optimization', '#pilot-optimization-interval',
+        '#pilot-ai-session-form input', '#pilot-ai-session-form button[type="submit"]',
+        '[data-pilot-ai-session-action]', '[data-pilot-ai-consult-event]'
+    ].join(',');
+    const PWA_SCOPE_ONLY_CONTROL_SELECTOR = [
+        '[data-pilot-trade-side]', '[data-pilot-trade-coin]', '[data-pilot-trade-amount]', '[data-pilot-trade-preset]',
+        '#pilot-deposit-amount', '#pilot-withdraw-amount',
+        '#pilot-smart-buy-amount', '#pilot-smart-buy-score', '#pilot-smart-buy-max',
+        '#pilot-smart-sell-amount', '#pilot-smart-sell-strategy',
+        '#pilot-ai-session-form input', '#pilot-ai-session-form button[type="submit"]',
+        '[data-pilot-ai-session-action]', '[data-pilot-ai-consult-event]'
+    ].join(',');
+    const authClient = window.coinPilotAuth || null;
 
     const state = {
+        auth: authClient?.state ? { ...authClient.state } : {
+            authRequired: false,
+            tokenScope: 'operator',
+            authenticated: true,
+            resolved: true,
+            verification: 'not-required',
+            tokenPresent: false,
+            error: null
+        },
         view: 'overview',
         activeMode: 'paper',
         actualMode: 'UNKNOWN',
@@ -404,6 +441,15 @@
     }
 
     async function sendManualMutationRequest({ endpoint, idempotencyKey, body }) {
+        const apiPath = endpoint.startsWith('/api/') ? endpoint.slice(4) : endpoint;
+        if (!pwaAuthRequestPolicy(state.auth, 'POST', apiPath)) {
+            return {
+                status: 403,
+                body: { success: false, error: readOnlyObserverReason() },
+                parsed: true,
+                idempotencyStatus: null
+            };
+        }
         const controller = new AbortController();
         const timeoutId = window.setTimeout(() => controller.abort(), 12_000);
         try {
@@ -596,6 +642,17 @@
         });
     }
 
+    function hasUsableHistoryTrend(points) {
+        if (!Array.isArray(points) || points.length < 2) return false;
+        const timestamps = new Set();
+        for (const point of points) {
+            const timestamp = Date.parse(point?.timestamp ?? point?.capturedAt ?? '');
+            if (Number.isFinite(timestamp)) timestamps.add(timestamp);
+            if (timestamps.size >= 2) return true;
+        }
+        return false;
+    }
+
     function formatMarketTimestamp(value) {
         if (value === null || value === undefined || value === '' ||
             (typeof value === 'string' && value.trim() === '')) {
@@ -627,6 +684,8 @@
             unavailableMarkets: Array.isArray(snapshot.unavailableMarkets) ? snapshot.unavailableMarkets : [],
             sourceAsOf: snapshot.sourceAsOf ?? null,
             fetchedAt: snapshot.fetchedAt ?? null,
+            snapshotSource: snapshot.snapshotSource ?? null,
+            fallbackReason: snapshot.fallbackReason ?? null,
             marketListStale: typeof snapshot.marketListStale === 'boolean' ? snapshot.marketListStale : null,
             marketListFetchedAt: snapshot.marketListFetchedAt ?? null,
             legacyFallback: snapshot.legacyFallback === true
@@ -695,9 +754,16 @@
             : 90) * 1000;
         const sourceTimestamp = Date.parse(market.sourceAsOf || '');
         if (!Number.isFinite(sourceTimestamp)) return '최근 체결 시각을 확인할 수 없어 주문할 수 없어요.';
+        if (market.quoteFresh === false && (
+            state.marketSnapshot?.snapshotSource === 'last_good' ||
+            market.quoteFreshnessReason === 'market_snapshot_last_good'
+        )) {
+            return '저장된 최근 시세를 표시 중이에요. 새 시세를 확인한 뒤 주문해 주세요.';
+        }
         const sourceAgeMs = now - sourceTimestamp;
         if (sourceAgeMs < -5000) return '최근 체결 시각이 현재보다 앞서 있어요. 서버 시각을 확인해 주세요.';
         if (sourceAgeMs > maximumAgeMs) return '최근 체결 시각이 오래됐어요. 새로고침 후 다시 시도해 주세요.';
+        if (market.quoteFresh === false) return '현재 시세 최신 여부를 확인할 수 없어요.';
         return null;
     }
 
@@ -708,6 +774,8 @@
             Array.isArray(snapshot?.missingMarkets) ? snapshot.missingMarkets.length : 0,
             Array.isArray(snapshot?.unavailableMarkets) ? snapshot.unavailableMarkets.length : 0
         );
+        const usingLastGood = snapshot?.snapshotSource === 'last_good' ||
+            rows.some(row => row?.quoteFreshnessReason === 'market_snapshot_last_good');
         const marketListStatus = !loaded
             ? '시장 목록을 확인할 수 없어요'
             : snapshot?.marketListStale === true
@@ -726,6 +794,11 @@
         } else if (!hasPrices) {
             stateLabel = '표시할 시세가 없습니다';
             tone = 'unavailable';
+        } else if (usingLastGood) {
+            stateLabel = missingCount > 0
+                ? `거래소 응답이 없어 저장된 최근 시세를 표시합니다 · ${missingCount}개 시장 누락`
+                : '거래소 응답이 없어 저장된 최근 시세를 표시합니다';
+            tone = 'stale';
         } else if (snapshot?.complete === false || missingCount > 0) {
             stateLabel = missingCount > 0
                 ? `${missingCount}개 시장 시세를 확인할 수 없습니다`
@@ -757,11 +830,23 @@
         };
     }
 
-    function selectedMarketQuotePresentation(marketData, snapshotPresentation, now = Date.now()) {
+    function selectedMarketQuotePresentation(
+        marketData,
+        snapshotPresentation,
+        latestReadSucceeded = true,
+        now = Date.now()
+    ) {
         if (!marketData) {
             return {
                 label: snapshotPresentation.label,
                 state: snapshotPresentation.state
+            };
+        }
+        if (latestReadSucceeded !== true) {
+            const fetchedAt = formatMarketTimestamp(marketData.fetchedAt ?? marketData.sourceAsOf);
+            return {
+                label: `새로고침 실패 · 마지막 수집 ${fetchedAt}`,
+                state: 'stale'
             };
         }
         const quoteIssue = marketQuoteFreshnessIssue(marketData, now);
@@ -772,6 +857,24 @@
             };
         }
         return { label: '현재 시세', state: 'complete' };
+    }
+
+    function marketRowQuotePresentation(marketData, latestReadSucceeded, now = Date.now()) {
+        const fetchedAt = formatMarketTimestamp(marketData?.fetchedAt ?? marketData?.sourceAsOf);
+        if (latestReadSucceeded !== true) {
+            return { label: `갱신 실패 · 마지막 수집 ${fetchedAt}`, state: 'stale' };
+        }
+        const quoteIssue = marketQuoteFreshnessIssue(marketData, now);
+        if (!quoteIssue) {
+            return { label: `최근 시세 · 수집 ${fetchedAt}`, state: 'current' };
+        }
+        if (quoteIssue.includes('저장된 최근 시세')) {
+            return { label: `저장 시세 · 수집 ${fetchedAt}`, state: 'stale' };
+        }
+        if (quoteIssue.includes('오래됐')) {
+            return { label: `오래된 시세 · ${fetchedAt}`, state: 'stale' };
+        }
+        return { label: `시세 확인 필요 · ${fetchedAt}`, state: 'unavailable' };
     }
 
     function updateMarketAnnouncement(elementId, message, { repeat = false } = {}) {
@@ -791,7 +894,11 @@
     function announceManualMarketRefresh() {
         const marketData = currentMarket();
         const marketPresentation = marketSnapshotPresentation(state.marketSnapshot, state.marketPricesLoaded, state.marketPrices);
-        const selectedPresentation = selectedMarketQuotePresentation(marketData, marketPresentation);
+        const selectedPresentation = selectedMarketQuotePresentation(
+            marketData,
+            marketPresentation,
+            state.marketPricesLoaded
+        );
         const symbol = symbolOf(state.selectedCoin);
         const fetchedAt = state.marketSnapshot?.fetchedAt
             ? ` · 서버 수집 ${formatMarketTimestamp(state.marketSnapshot.fetchedAt)}`
@@ -1098,11 +1205,175 @@
         return state.paper?.readOnlyObserver === true || state.status?.readOnlyObserver === true;
     }
 
+    function isReadOnlyPwaScope() {
+        return state.auth?.authRequired === true && state.auth?.resolved === true &&
+            state.auth?.verification === 'verified' && state.auth?.tokenScope === 'read_only';
+    }
+
+    function isMobileOperatorPwaScope() {
+        return state.auth?.authRequired === true && state.auth?.resolved === true &&
+            state.auth?.verification === 'verified' && state.auth?.tokenScope === 'mobile_operator';
+    }
+
+    function pwaAuthRequestPolicy(auth, method, path) {
+        if (!auth) return true;
+        const verb = String(method || 'GET').toUpperCase();
+        if (auth.authRequired !== true) {
+            return auth.resolved === true && (auth.verification === 'not-required' ||
+                (auth.verification === 'verified' && auth.tokenScope === 'operator'));
+        }
+        if (auth.resolved !== true || auth.verification !== 'verified') return false;
+        if (auth.tokenScope === 'operator') return true;
+        if (auth.tokenScope !== 'read_only' || verb !== 'GET') return false;
+
+        let url;
+        try { url = new URL(path, 'https://coinpilot.invalid'); } catch { return false; }
+        if (READ_ONLY_PWA_GET_PATHS.has(url.pathname)) return url.searchParams.size === 0;
+        if (url.pathname === '/portfolio/history') {
+            return url.searchParams.size === 1 && READ_ONLY_PWA_PORTFOLIO_PERIODS.has(url.searchParams.get('period'));
+        }
+        if (url.pathname === '/trades') {
+            if (url.searchParams.size !== 1 || !/^[1-9]\d*$/.test(url.searchParams.get('limit') || '')) return false;
+            const limit = Number(url.searchParams.get('limit'));
+            return Number.isSafeInteger(limit) && limit <= 50;
+        }
+        return false;
+    }
+
+    async function waitForPwaAuth() {
+        if (authClient?.ready) {
+            try {
+                const verifiedState = await authClient.ready;
+                state.auth = { ...(authClient.state || verifiedState || state.auth) };
+            } catch {
+                state.auth = { ...state.auth, resolved: true, verification: 'unavailable', authenticated: null, error: 'network' };
+            }
+        }
+        syncAuthScopeNotice();
+        syncObserverControls();
+        return state.auth;
+    }
+
+    function isPwaMutationBlocked() {
+        return !pwaAuthRequestPolicy(state.auth, 'POST', '/pwa-scope-check') || isReadOnlyObserver();
+    }
+
     function readOnlyObserverReason() {
+        if (state.auth?.resolved !== true && state.auth?.authRequired !== false) {
+            return '접속 권한을 확인하는 중입니다. 확인될 때까지 주문과 설정 변경을 잠갔습니다.';
+        }
+        if (state.auth?.authRequired === true && state.auth?.verification === 'unavailable') {
+            return '접속 권한을 확인할 수 없습니다. 저장된 토큰은 보관했으며, 확인될 때까지 주문과 설정 변경을 잠갔습니다.';
+        }
+        if (state.auth?.authRequired === true && state.auth?.tokenScope === 'read_only') {
+            return '읽기 전용 토큰으로 접속했습니다. 주문, 설정 변경, 저장 기능은 사용할 수 없습니다.';
+        }
+        if (state.auth?.authRequired === true && state.auth?.tokenScope === 'mobile_operator') {
+            return '모바일 운영 토큰은 모바일 앱 전용입니다. 브라우저에서는 주문과 설정 변경을 사용할 수 없습니다.';
+        }
+        if (state.auth?.authRequired === true && ['missing', 'invalid'].includes(state.auth?.verification)) {
+            return '유효한 서버 접속 토큰이 필요합니다. 로그인 창에서 토큰을 입력해 주세요.';
+        }
         return state.online === false
             ? '서버에 연결되면 상태를 불러오고 주문할 수 있습니다.'
             : '읽기 전용 모드에서는 내용을 변경할 수 없습니다.';
     }
+
+    function syncAuthScopeNotice() {
+        const banner = byId('pilot-auth-scope-banner');
+        if (!banner) return;
+        const title = byId('pilot-auth-scope-title');
+        const copy = byId('pilot-auth-scope-copy');
+        const changeTokenButton = byId('pilot-auth-change-token');
+        const verification = state.auth?.verification;
+        let heading = '';
+        let message = '';
+        if (state.auth?.authRequired === true && verification === 'checking') {
+            heading = '접속 권한 확인 중';
+            message = '확인이 끝날 때까지 서버 데이터와 변경 기능을 잠급니다.';
+        } else if (state.auth?.authRequired === true && verification === 'unavailable') {
+            heading = '접속 권한 확인 필요';
+            message = '저장된 토큰은 보관했습니다. 권한을 확인할 수 있을 때까지 서버 데이터와 변경 기능을 잠급니다.';
+        } else if (isReadOnlyPwaScope()) {
+            heading = '조회 전용 연결';
+            message = readOnlyObserverReason();
+        } else if (isMobileOperatorPwaScope()) {
+            heading = '모바일 앱 전용 토큰';
+            message = '이 토큰은 모바일 앱에서만 사용할 수 있습니다. 브라우저 대시보드 데이터는 불러오지 않습니다.';
+        }
+        banner.hidden = !message;
+        if (changeTokenButton) changeTokenButton.hidden = !(isReadOnlyPwaScope() || isMobileOperatorPwaScope());
+        if (title) title.textContent = heading;
+        if (copy) copy.textContent = message;
+    }
+
+    function syncScopedMutationControls() {
+        if (isPwaMutationBlocked()) {
+            const reason = readOnlyObserverReason();
+            $$(PWA_MUTATION_CONTROL_SELECTOR).forEach(control => {
+                control.disabled = true;
+                control.setAttribute('aria-disabled', 'true');
+                control.title = reason;
+            });
+            return;
+        }
+        // These inputs and AI actions have no other readiness gate. The action
+        // buttons with runtime/evidence gates are restored by syncObserverControls.
+        $$(PWA_SCOPE_ONLY_CONTROL_SELECTOR).forEach(control => {
+            control.disabled = false;
+            control.setAttribute('aria-disabled', 'false');
+            control.removeAttribute('title');
+        });
+    }
+
+    function clearUnavailablePwaData() {
+        state.status = null;
+        state.account = null;
+        state.pnl = null;
+        state.today = null;
+        state.statistics = [];
+        state.statisticsLoaded = false;
+        state.validation = null;
+        state.strategyReadiness = null;
+        state.paper = null;
+        state.strategyResearch = null;
+        state.strategyResearchLoaded = false;
+        state.strategyResearchError = null;
+        state.momentumShadow = null;
+        state.portfolioAnalysis = null;
+        state.portfolioHistory = [];
+        state.portfolioHistoryError = true;
+        state.trades = [];
+        state.tradesLoaded = false;
+        state.marketPrices = [];
+        state.marketPricesLoaded = false;
+        state.marketSnapshot = null;
+        state.targetCoins = [];
+        state.candles = [];
+        state.candlesError = false;
+        state.analysis = null;
+        state.analysisError = null;
+        state.news = null;
+        state.newsError = false;
+        state.settings = null;
+        state.settingsLoaded = false;
+        state.historyLoaded = false;
+        state.ai = { providers: null, sessions: [], events: [], consultations: [], effectiveness: null, loading: false };
+        state.lastSync = null;
+        state.coreReady = false;
+        state.connected = false;
+        state.actualMode = 'UNKNOWN';
+    }
+
+    window.addEventListener('coinpilot:auth-state', event => {
+        if (event.detail) state.auth = { ...event.detail };
+        if (state.auth?.verification === 'invalid' || state.auth?.verification === 'unavailable' ||
+            isMobileOperatorPwaScope()) clearUnavailablePwaData();
+        syncAuthScopeNotice();
+        syncObserverControls();
+        if (state.auth?.verification === 'invalid' || state.auth?.verification === 'unavailable' ||
+            isMobileOperatorPwaScope()) renderAll();
+    });
 
     function coreTradingReadinessReason() {
         return '서버 모드와 계좌, 선택한 시장의 시세를 확인할 때까지 주문할 수 없습니다.';
@@ -1132,7 +1403,7 @@
     }
 
     function syncObserverControls() {
-        const blocked = isReadOnlyObserver();
+        const blocked = isPwaMutationBlocked();
         const offline = state.online === false;
         const coreReady = state.coreReady === true;
         const runtimeBlocked = !runtimeCanAcceptOrders(state.status);
@@ -1235,10 +1506,11 @@
             else if (!disabled) control.removeAttribute('title');
         });
         syncSnapshotControls();
+        syncScopedMutationControls();
     }
 
     function syncSnapshotControls() {
-        const observerBlocked = isReadOnlyObserver();
+        const observerBlocked = isPwaMutationBlocked();
         const offline = state.online === false;
         const disabled = observerBlocked || offline || state.snapshotSaving;
         $$('[data-pilot-action="record-snapshot"]').forEach(button => {
@@ -1253,7 +1525,7 @@
 
     function canTrade(market = null) {
         if (state.online === false || state.coreReady !== true ||
-            !runtimeCanAcceptManualOrders(state.status, state.actualMode) || isReadOnlyObserver() ||
+            !runtimeCanAcceptManualOrders(state.status, state.actualMode) || isPwaMutationBlocked() ||
             isPaperEvidenceMutationLocked() || state.pendingMutation?.locked === true) return false;
         const modeReady = state.activeMode === 'paper'
             ? isPaperMode()
@@ -1300,7 +1572,7 @@
             return '서버 연결이 끊겨 계좌와 시세를 확인할 수 없습니다. 다시 연결될 때까지 주문할 수 없습니다.';
         }
         if (state.pendingMutation?.locked) return '처리 중인 요청의 결과를 확인한 뒤 새 주문을 할 수 있습니다.';
-        if (isReadOnlyObserver()) return readOnlyObserverReason();
+        if (isPwaMutationBlocked()) return readOnlyObserverReason();
         if (isPaperEvidenceMutationLocked()) return paperEvidenceMutationReason();
         if (state.status && !runtimeCanAcceptManualOrders(state.status, state.actualMode)) {
             return runtimeBlockReason() || '거래소 상태를 확인할 때까지 주문할 수 없습니다.';
@@ -1445,7 +1717,15 @@
     }
 
     async function requestJSON(path, options = {}) {
+        await waitForPwaAuth();
         if (state.online === false) throw new Error(readOnlyObserverReason());
+        const method = String(options.method || 'GET').toUpperCase();
+        if (!pwaAuthRequestPolicy(state.auth, method, path)) {
+            const error = new Error(readOnlyObserverReason());
+            error.status = 403;
+            error.code = 'pwa_auth_scope_blocked';
+            throw error;
+        }
         const timeoutMs = Number(options.timeoutMs) || 12000;
         const controller = new AbortController();
         const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
@@ -2003,6 +2283,7 @@
 
     async function createAiSession(event) {
         event.preventDefault();
+        if (isPwaMutationBlocked()) { showToast(readOnlyObserverReason(), 'warning'); return; }
         const providers = $$('input[name="pilot-ai-provider"]:checked').map(input => input.value);
         const eventTypes = $$('input[name="pilot-ai-event"]:checked').map(input => input.value);
         if (!providers.length || !eventTypes.length) {
@@ -2030,6 +2311,7 @@
     }
 
     async function updateAiSession(sessionId, action) {
+        if (isPwaMutationBlocked()) { showToast(readOnlyObserverReason(), 'warning'); return; }
         try {
             await requestJSON(`/ai/sessions/${sessionId}/${action}`, { method: 'POST' });
             showToast(action === 'stop' ? '신호 알림을 종료했습니다.' : `신호 알림을 ${action === 'pause' ? '일시정지' : '다시 시작'}했습니다`, 'success');
@@ -2040,6 +2322,7 @@
     }
 
     async function requestAiConsultation(eventId) {
+        if (isPwaMutationBlocked()) { showToast(readOnlyObserverReason(), 'warning'); return; }
         const providers = $$('input[name="pilot-ai-provider"]:checked').map(input => input.value);
         const provider = providers.length === 2 ? 'both' : providers[0] || 'both';
         showToast('의견을 요청하고 있습니다…', 'info');
@@ -2313,21 +2596,38 @@
                 <div class="pilot-mode-banner-copy"><i class="ph ph-lock-key" aria-hidden="true"></i><div><strong id="pilot-mode-banner-title">실거래 주문 잠금</strong><span id="pilot-mode-banner-copy">실제 주문 전 점검을 마칠 때까지 주문할 수 없습니다.</span></div></div>
                             <div class="pilot-mode-banner-actions"><span class="pilot-status-pill is-warning pilot-pwa-state" id="pilot-pwa-state">설치 메뉴에서 추가</span><button type="button" class="pilot-button pilot-pwa-install" id="pilot-pwa-install">앱으로 설치</button><button type="button" class="pilot-button" data-pilot-go="history">주문 전 점검 보기 <i class="ph ph-arrow-right" aria-hidden="true"></i></button></div>
                         </section>
+                        <section class="pilot-offline-banner pilot-auth-scope-banner" id="pilot-auth-scope-banner" role="status" aria-live="polite" hidden><i class="ph ph-shield-check" aria-hidden="true"></i><div><strong id="pilot-auth-scope-title"></strong><span id="pilot-auth-scope-copy"></span></div><button type="button" class="pilot-button is-small" id="pilot-auth-change-token" hidden>다른 토큰으로 접속</button></section>
                         <section class="pilot-offline-banner" id="pilot-offline-banner" role="status" aria-live="polite" hidden><i class="ph ph-cloud-slash" aria-hidden="true"></i><div><strong>오프라인 모드</strong><span>계좌와 시세를 불러올 수 없습니다. 연결이 복구될 때까지 주문과 설정을 사용할 수 없습니다.</span></div><button type="button" class="pilot-button is-small" data-pilot-action="refresh-core">다시 연결</button></section>
                         <section class="pilot-pending-mutation" id="pilot-pending-mutation" role="status" aria-live="polite" hidden><i class="ph ph-clock-countdown" aria-hidden="true"></i><div><strong id="pilot-pending-mutation-title">요청 결과 확인 필요</strong><span id="pilot-pending-mutation-copy">요청이 처리됐을 수 있어 새 주문과 가상 지갑 변경을 잠갔습니다.</span></div><button type="button" class="pilot-button is-small" id="pilot-pending-mutation-retry" data-pilot-action="retry-pending-mutation" hidden>같은 요청 결과 다시 확인</button></section>
 
                     <main class="pilot-content">
                         <section class="pilot-page is-active" data-pilot-page="overview">
                             <div class="pilot-page-heading"><div><h1 class="pilot-page-title">대시보드</h1></div><div class="pilot-heading-actions"><span class="pilot-sync-note" id="pilot-overview-sync">마지막 동기화 -</span><button type="button" class="pilot-button" data-pilot-action="refresh-core"><i class="ph ph-arrows-clockwise" aria-hidden="true"></i> 새로고침</button></div></div>
-                            <div class="pilot-gate-grid">
-                                <button type="button" class="pilot-gate-card" data-pilot-view="history"><span class="pilot-gate-icon" id="pilot-gate-validation-icon"><i class="ph ph-check" aria-hidden="true"></i></span><span><strong class="pilot-gate-title">주문 전 점검</strong><span class="pilot-gate-detail" id="pilot-gate-validation-detail">확인 중</span></span><i class="ph ph-caret-right pilot-gate-arrow" aria-hidden="true"></i></button>
-                                <button type="button" class="pilot-gate-card" data-pilot-view="history"><span class="pilot-gate-icon is-pending" id="pilot-gate-paper-icon"><i class="ph ph-hourglass-medium" aria-hidden="true"></i></span><span><strong class="pilot-gate-title">모의투자 실행</strong><span class="pilot-gate-detail" id="pilot-gate-paper-detail">실행 상태 확인 중</span></span><i class="ph ph-caret-right pilot-gate-arrow" aria-hidden="true"></i></button>
-                                <button type="button" class="pilot-gate-card" data-pilot-view="history"><span class="pilot-gate-icon is-pending" id="pilot-gate-freshness-icon"><i class="ph ph-database" aria-hidden="true"></i></span><span><strong class="pilot-gate-title">데이터 상태</strong><span class="pilot-gate-detail" id="pilot-gate-freshness-detail">수집 상태 확인 중</span></span><i class="ph ph-caret-right pilot-gate-arrow" aria-hidden="true"></i></button>
+                            <div class="pilot-overview-lead">
+                                <section class="pilot-overview-balance" aria-labelledby="pilot-overview-assets-title">
+                                    <span class="pilot-overview-balance-eyebrow">계좌 가치</span>
+                                    <h2 class="pilot-overview-balance-title" id="pilot-overview-assets-title">총 자산 평가액</h2>
+                                    <strong class="pilot-overview-balance-value" id="pilot-total-assets">-</strong>
+                                    <span class="pilot-overview-balance-caption" id="pilot-total-assets-caption">-</span>
+                                    <div class="pilot-stat-strip pilot-overview-supporting-stats" aria-label="추가 성과 지표">
+                                        <div class="pilot-stat-cell"><span class="pilot-stat-label">오늘의 손익</span><strong class="pilot-stat-value" id="pilot-today-profit">-</strong><span class="pilot-stat-caption" id="pilot-today-profit-caption">-</span></div>
+                                        <div class="pilot-stat-cell"><span class="pilot-stat-label">누적 손익</span><strong class="pilot-stat-value" id="pilot-cumulative-profit">-</strong><span class="pilot-stat-caption" id="pilot-cumulative-profit-caption">-</span></div>
+                                        <div class="pilot-stat-cell"><span class="pilot-stat-label">승률</span><strong class="pilot-stat-value" id="pilot-win-rate">-</strong><span class="pilot-stat-caption" id="pilot-trade-count-caption">-</span></div>
+                                    </div>
+                                </section>
+                                <aside class="pilot-overview-next" aria-labelledby="pilot-overview-next-title">
+                                    <span class="pilot-overview-next-eyebrow">다음 단계</span>
+                                    <h2 class="pilot-overview-next-title" id="pilot-overview-next-title">주문 전 점검</h2>
+                                    <p class="pilot-overview-next-copy">주문 조건과 모의투자·시세 상태를 한 곳에서 확인합니다.</p>
+                                    <button type="button" class="pilot-button is-primary pilot-overview-next-action" data-pilot-go="history">점검 상태 살펴보기 <i class="ph ph-arrow-right" aria-hidden="true"></i></button>
+                                    <ul class="pilot-overview-readiness" aria-label="현재 상태">
+                                        <li class="pilot-overview-readiness-row"><span class="pilot-gate-icon" id="pilot-gate-validation-icon"><i class="ph ph-check" aria-hidden="true"></i></span><span><strong class="pilot-gate-title">주문 전 점검</strong><span class="pilot-gate-detail" id="pilot-gate-validation-detail">확인 중</span></span></li>
+                                        <li class="pilot-overview-readiness-row"><span class="pilot-gate-icon is-pending" id="pilot-gate-paper-icon"><i class="ph ph-hourglass-medium" aria-hidden="true"></i></span><span><strong class="pilot-gate-title">모의투자</strong><span class="pilot-gate-detail" id="pilot-gate-paper-detail">실행 상태 확인 중</span></span></li>
+                                        <li class="pilot-overview-readiness-row"><span class="pilot-gate-icon is-pending" id="pilot-gate-freshness-icon"><i class="ph ph-database" aria-hidden="true"></i></span><span><strong class="pilot-gate-title">데이터 최신성</strong><span class="pilot-gate-detail" id="pilot-gate-freshness-detail">수집 상태 확인 중</span></span></li>
+                                    </ul>
+                                </aside>
                             </div>
-                            <div class="pilot-workspace-grid">
-                            <section class="pilot-panel"><div class="pilot-panel-header"><div><h2 class="pilot-panel-title">자산 추이</h2></div><div class="pilot-chart-toolbar"><div class="pilot-chart-legend"><span><i class="pilot-legend-dot"></i>총 자산 평가액</span><span><i class="pilot-legend-dot is-muted"></i>시작 자산</span></div><div class="pilot-range-tabs"><button type="button" class="pilot-tab-button" data-pilot-chart-period="1h">1시간</button><button type="button" class="pilot-tab-button is-active" data-pilot-chart-period="24h">1일</button><button type="button" class="pilot-tab-button" data-pilot-chart-period="7d">1주</button><button type="button" class="pilot-tab-button" data-pilot-chart-period="30d">1개월</button></div></div></div><div class="pilot-chart-wrap"><canvas id="pilot-equity-chart" class="pilot-chart-canvas" aria-label="총 자산 평가액 추이 차트"></canvas><div class="pilot-chart-empty" id="pilot-equity-empty" hidden>자산 기록이 없습니다.</div></div><div class="pilot-chart-footnote"><span id="pilot-equity-period-label">24시간 기준</span><span id="pilot-equity-source-label">-</span></div><div class="pilot-stat-strip"><div class="pilot-stat-cell"><span class="pilot-stat-label">총 자산 평가액</span><strong class="pilot-stat-value" id="pilot-total-assets">-</strong><span class="pilot-stat-caption" id="pilot-total-assets-caption">-</span></div><div class="pilot-stat-cell"><span class="pilot-stat-label">오늘의 손익</span><strong class="pilot-stat-value" id="pilot-today-profit">-</strong><span class="pilot-stat-caption" id="pilot-today-profit-caption">-</span></div><div class="pilot-stat-cell"><span class="pilot-stat-label">누적 손익</span><strong class="pilot-stat-value" id="pilot-cumulative-profit">-</strong><span class="pilot-stat-caption" id="pilot-cumulative-profit-caption">-</span></div><div class="pilot-stat-cell"><span class="pilot-stat-label">승률</span><strong class="pilot-stat-value" id="pilot-win-rate">-</strong><span class="pilot-stat-caption" id="pilot-trade-count-caption">-</span></div></div></section>
-                                ${tradePanelMarkup('overview')}
-                            </div>
+                            <section class="pilot-panel pilot-overview-chart"><div class="pilot-panel-header"><div><h2 class="pilot-panel-title">자산 추이</h2></div><div class="pilot-chart-toolbar"><div class="pilot-chart-legend"><span><i class="pilot-legend-dot"></i>총 자산 평가액</span><span><i class="pilot-legend-dot is-muted"></i>시작 자산</span></div><div class="pilot-range-tabs"><button type="button" class="pilot-tab-button" data-pilot-chart-period="1h">1시간</button><button type="button" class="pilot-tab-button is-active" data-pilot-chart-period="24h">1일</button><button type="button" class="pilot-tab-button" data-pilot-chart-period="7d">1주</button><button type="button" class="pilot-tab-button" data-pilot-chart-period="30d">1개월</button></div></div></div><div class="pilot-chart-wrap"><canvas id="pilot-equity-chart" class="pilot-chart-canvas" aria-label="총 자산 평가액 추이 차트"></canvas><div class="pilot-chart-empty" id="pilot-equity-empty" hidden>자산 기록이 없습니다.</div></div><div class="pilot-chart-footnote"><span id="pilot-equity-period-label">24시간 기준</span><span id="pilot-equity-source-label">-</span></div></section>
                             <div class="pilot-section-spacer"></div>
                             <section class="pilot-panel"><div class="pilot-panel-header"><div><h2 class="pilot-panel-title">보유 포지션</h2></div><button type="button" class="pilot-link-button" data-pilot-view="portfolio">전체 포트폴리오 보기 <i class="ph ph-arrow-right" aria-hidden="true"></i></button></div><div class="pilot-table-wrap"><table class="pilot-table"><thead><tr><th>자산</th><th class="pilot-table-number">수량</th><th class="pilot-table-number">평균 진입가</th><th class="pilot-table-number">현재가</th><th class="pilot-table-number">평가액</th><th class="pilot-table-number">평가손익</th><th>상태</th></tr></thead><tbody id="pilot-overview-positions"></tbody></table></div></section>
                             <div class="pilot-section-spacer"></div>
@@ -2417,6 +2717,11 @@
     mountAiDesk();
     mountMobileNavigation();
     mountPageEnhancements();
+    syncAuthScopeNotice();
+    syncObserverControls();
+    byId('pilot-auth-change-token')?.addEventListener('click', () => {
+        authClient?.requestLogin?.('브라우저 대시보드용 토큰을 입력해 주세요.');
+    });
     initProgressiveInstall();
     bindAiDesk();
     initializeAiSocket();
@@ -2872,7 +3177,7 @@
     }
 
     function renderTradePanels() {
-        ['overview', 'market', 'trade'].forEach(renderTradePanel);
+        ['market', 'trade'].forEach(renderTradePanel);
     }
 
     function renderManualOrderCapacity() {
@@ -2905,29 +3210,33 @@
         if (!canvas) return;
         const points = Array.isArray(history) ? history.filter(item => Number.isFinite(Number(item.totalAssets))) : [];
         const chartWrap = canvas.parentElement;
-        const hasPoints = points.length > 0;
-        canvas.hidden = !hasPoints;
-        chartWrap?.classList.toggle('is-empty', !hasPoints);
+        const hasTrend = hasUsableHistoryTrend(points);
+        canvas.hidden = !hasTrend;
+        chartWrap?.classList.toggle('is-empty', !hasTrend);
         if (empty) {
-            empty.hidden = hasPoints;
-            if (!hasPoints) {
+            empty.hidden = hasTrend;
+            if (!hasTrend) {
                 empty.setAttribute('role', 'status');
                 empty.setAttribute('aria-live', 'polite');
                 const isHistoryError = state.portfolioHistoryError === true;
                 const hasUnusableHistory = history.length > 0;
+                const hasSingleValuation = points.length === 1 && history.length === 1;
                 const isLoading = state.refreshing && !isHistoryError && !hasUnusableHistory;
-                const canRecordSnapshot = !isHistoryError && !hasUnusableHistory &&
-                    !isLoading && state.online !== false && !isReadOnlyObserver();
+                const canRecordSnapshot = !isHistoryError && !isLoading &&
+                    state.online !== false && state.coreReady === true && !isReadOnlyObserver();
                 const title = isHistoryError ? '자산 기록을 불러오지 못했습니다'
+                    : hasSingleValuation ? '저장된 평가 기록 1건'
                     : hasUnusableHistory ? '표시할 수 있는 평가 기록이 없습니다'
                     : isLoading ? '자산 기록을 확인하고 있습니다'
                     : isReadOnlyObserver() ? '아직 자산 기록이 없습니다'
                     : '자산 흐름을 기록해 보세요';
                 const description = isHistoryError ? '연결을 확인한 뒤 새로고침해 주세요.'
+                    : hasSingleValuation ? `${formatWon(points[0].totalAssets)} · ${formatTime(points[0].timestamp ?? points[0].capturedAt, true)} 저장. 다른 시점의 평가를 기록하면 추이를 볼 수 있습니다.`
                     : hasUnusableHistory ? '현재 가치가 확인된 기록만 추이에 표시됩니다.'
                     : isLoading ? '선택한 기간의 평가 기록을 불러오고 있습니다.'
                     : isReadOnlyObserver() ? '서버에 평가 기록이 쌓이면 선택한 기간의 변화를 볼 수 있습니다.'
-                    : '현재 계좌 평가를 저장하면 선택한 기간의 변화가 시작됩니다.';
+                    : state.coreReady === true ? '현재 계좌 평가를 저장하면 선택한 기간의 변화가 시작됩니다.'
+                    : '서버와 계좌, 최신 시세를 확인하면 현재 평가를 기록할 수 있습니다.';
                 const recordAction = canRecordSnapshot
                     ? '<button type="button" class="pilot-button is-small is-primary" data-pilot-action="record-snapshot">현재 평가 기록</button>'
                     : '';
@@ -2935,7 +3244,7 @@
             }
         }
         drawCanvas(canvas, 302, (ctx, width, height) => {
-            if (!points.length) return;
+            if (!hasTrend) return;
             const values = points.map(item => number(item.totalAssets));
             const seed = number(state.pnl?.initialSeedMoney || state.account?.initialSeedMoney || values[0]);
             const min = Math.min(seed, ...values); const max = Math.max(seed, ...values); const range = max - min || 1;
@@ -3173,7 +3482,11 @@
         const marketData = currentMarket(); const market = marketData || {}; const position = currentPosition(); const symbol = symbolOf(state.selectedCoin);
         const priceKnown = hasFiniteValue(market.price);
         const marketPresentation = marketSnapshotPresentation(state.marketSnapshot, state.marketPricesLoaded, state.marketPrices);
-        const selectedMarketPresentation = selectedMarketQuotePresentation(marketData, marketPresentation);
+        const selectedMarketPresentation = selectedMarketQuotePresentation(
+            marketData,
+            marketPresentation,
+            state.marketPricesLoaded
+        );
         const marketName = byId('pilot-market-name');
         const marketStatus = byId('pilot-market-status');
         const marketStatusLabel = selectedMarketPresentation.label;
@@ -3217,7 +3530,10 @@
             target.innerHTML = `<div class="pilot-empty-panel"><i class="ph ph-chart-line" aria-hidden="true"></i>${escapeHtml(emptyMessage)}</div>`;
             return;
         }
-        target.innerHTML = `<div class="pilot-market-row pilot-market-row-head" aria-hidden="true"><span class="pilot-market-row-label">시장</span><span class="pilot-market-row-label" style="text-align:right">현재가</span><span class="pilot-market-row-label" style="text-align:right">24시간</span><span class="pilot-market-row-label" style="text-align:right">거래량</span><span></span></div>${list.slice(0, 80).map(item => `<div class="pilot-market-row ${item.coin === state.selectedCoin ? 'is-selected' : ''}" role="button" tabindex="0" aria-pressed="${item.coin === state.selectedCoin ? 'true' : 'false'}" data-pilot-market-row="${escapeHtml(item.coin)}"><span class="pilot-market-row-symbol">${escapeHtml(symbolOf(item.coin))}/KRW</span><span class="pilot-market-row-price">${formatPrice(item.price)}</span><span class="pilot-market-row-change ${classForValue(item.change)}">${formatPercent(item.change)}</span><span class="pilot-market-row-volume">${formatWon(item.volumeKrw)}</span><span><i class="ph ph-arrow-up-right" aria-hidden="true"></i></span></div>`).join('')}`;
+        target.innerHTML = `<div class="pilot-market-row pilot-market-row-head" aria-hidden="true"><span class="pilot-market-row-label">시장</span><span class="pilot-market-row-label" style="text-align:right">현재가</span><span class="pilot-market-row-label" style="text-align:right">24시간</span><span class="pilot-market-row-label" style="text-align:right">거래량</span><span></span></div>${list.slice(0, 80).map(item => {
+            const quote = marketRowQuotePresentation(item, state.marketPricesLoaded);
+            return `<div class="pilot-market-row ${item.coin === state.selectedCoin ? 'is-selected' : ''}" role="button" tabindex="0" aria-pressed="${item.coin === state.selectedCoin ? 'true' : 'false'}" data-pilot-market-row="${escapeHtml(item.coin)}"><span class="pilot-market-row-market"><span class="pilot-market-row-symbol">${escapeHtml(symbolOf(item.coin))}/KRW</span><span class="pilot-market-row-freshness is-${quote.state}">${escapeHtml(quote.label)}</span></span><span class="pilot-market-row-price">${formatPrice(item.price)}</span><span class="pilot-market-row-change ${classForValue(item.change)}">${formatPercent(item.change)}</span><span class="pilot-market-row-volume">${formatWon(item.volumeKrw)}</span><span><i class="ph ph-arrow-up-right" aria-hidden="true"></i></span></div>`;
+        }).join('')}`;
     }
 
     function renderPortfolio() {
@@ -4148,8 +4464,17 @@
     }
 
     async function loadCore({ quiet = false, afterNetworkRestore = false } = {}) {
+        await waitForPwaAuth();
         if (state.refreshing) {
             if (afterNetworkRestore) refreshAfterCurrent = true;
+            return;
+        }
+        const pwaScopeMayRead = state.auth?.authRequired === false && state.auth?.verification === 'not-required' ||
+            state.auth?.authRequired === true && state.auth?.resolved === true && state.auth?.verification === 'verified' &&
+                ['operator', 'read_only'].includes(state.auth?.tokenScope);
+        if (!pwaScopeMayRead || isMobileOperatorPwaScope()) {
+            clearUnavailablePwaData();
+            renderAll();
             return;
         }
         if (state.online === false) {
@@ -4162,8 +4487,15 @@
         state.refreshing = true;
         syncObserverControls();
         if (!quiet) setConnection(state.coreReady, state.coreReady ? '' : '연결 확인 중');
+        const readOnlyScope = isReadOnlyPwaScope();
+        if (readOnlyScope && !READ_ONLY_PWA_PORTFOLIO_PERIODS.has(state.chartPeriod)) {
+            state.chartPeriod = '24h';
+            renderChartPeriodButtons();
+        }
         const period = encodeURIComponent(state.chartPeriod || '24h');
-        const requests = { status: '/status', account: '/account', pnl: '/cumulative-pnl', today: '/today-summary', statistics: '/statistics', validation: '/scalping-validation', strategyReadiness: '/strategy-readiness', paper: '/paper-validation', momentumShadow: '/momentum-shadow', portfolioAnalysis: '/portfolio-analysis', history: `/portfolio/history?period=${period}`, trades: '/trades?limit=12', marketPrices: '/market/prices/snapshot', targetCoins: '/target-coins' };
+        const requests = readOnlyScope
+            ? { status: '/status', account: '/account', pnl: '/cumulative-pnl', today: '/today-summary', history: `/portfolio/history?period=${period}`, trades: '/trades?limit=12', marketPrices: '/market/prices/snapshot' }
+            : { status: '/status', account: '/account', pnl: '/cumulative-pnl', today: '/today-summary', statistics: '/statistics', validation: '/scalping-validation', strategyReadiness: '/strategy-readiness', paper: '/paper-validation', momentumShadow: '/momentum-shadow', portfolioAnalysis: '/portfolio-analysis', history: `/portfolio/history?period=${period}`, trades: '/trades?limit=12', marketPrices: '/market/prices/snapshot', targetCoins: '/target-coins' };
         const settled = await Promise.all(Object.entries(requests).map(async ([key, path]) => { try { return [key, await requestJSON(path)]; } catch (error) { return [key, null, error]; } }));
         const marketPricesIndex = settled.findIndex(([key]) => key === 'marketPrices');
         const marketPricesError = settled[marketPricesIndex]?.[2];
@@ -4197,6 +4529,16 @@
         state.marketPricesLoaded = marketSnapshotLoaded;
         if (marketSnapshot) state.marketSnapshot = marketSnapshot;
         settled.forEach(([key, data]) => { if (key === 'strategyReadiness') { state.strategyReadiness = data; return; } if (key === 'marketPrices') { if (marketSnapshot) state.marketPrices = marketSnapshot.prices; return; } if (data === null) return; if (key === 'history') state.portfolioHistory = Array.isArray(data?.data) ? data.data : []; else if (key === 'targetCoins') state.targetCoins = Array.isArray(data?.coins) ? data.coins : []; else state[key] = data; });
+        const deniedReadKeys = settled.filter(([, , error]) => error?.status === 401 || error?.status === 403);
+        deniedReadKeys.forEach(([key]) => {
+            if (key === 'history') state.portfolioHistory = [];
+            else if (key === 'marketPrices') { state.marketPrices = []; state.marketSnapshot = null; }
+            else if (key === 'targetCoins') state.targetCoins = [];
+            else if (key === 'statistics') { state.statistics = []; state.statisticsLoaded = false; }
+            else if (key === 'trades') { state.trades = []; state.tradesLoaded = false; }
+            else if (['status', 'account', 'pnl', 'today', 'validation', 'strategyReadiness', 'paper', 'momentumShadow', 'portfolioAnalysis'].includes(key)) state[key] = null;
+        });
+        if (deniedReadKeys.length) state.lastSync = null;
         if (!loaded.paper) state.paper = null;
         state.actualMode = loaded.status && ['DRY_RUN', 'LIVE'].includes(currentSnapshot.status?.mode)
             ? currentSnapshot.status.mode
@@ -4430,6 +4772,10 @@
     }
 
     async function retryPendingMutation() {
+        if (isPwaMutationBlocked()) {
+            showToast(readOnlyObserverReason(), 'warning');
+            return;
+        }
         if (state.online === false) {
             showToast('연결이 복구된 뒤 같은 요청을 다시 확인할 수 있습니다.', 'warning');
             return;
@@ -4446,7 +4792,7 @@
     }
 
     async function recordCurrentPortfolioSnapshot({ quiet = false, refresh = true } = {}) {
-        if (isReadOnlyObserver() || state.online === false || state.snapshotSaving) return false;
+        if (isPwaMutationBlocked() || state.online === false || state.snapshotSaving) return false;
         state.snapshotSaving = true;
         syncObserverControls();
         try {
@@ -4530,7 +4876,7 @@
     }
 
     async function walletAction(kind) {
-        if (isReadOnlyObserver()) { showToast(readOnlyObserverReason(), 'warning'); return; }
+        if (isPwaMutationBlocked()) { showToast(readOnlyObserverReason(), 'warning'); return; }
         if (!isPaperMode()) { showToast('실거래 모드에서는 모의투자 지갑을 조작할 수 없습니다.', 'warning'); return; }
         if (state.pendingMutation?.locked) { showToast('처리 중인 요청 결과를 확인한 뒤 가상 지갑을 변경할 수 있습니다.', 'warning'); return; }
         const input = byId(kind === 'deposit' ? 'pilot-deposit-amount' : 'pilot-withdraw-amount'); const amount = number(input?.value); if (!amount || amount < 1000) { showToast('최소 1,000원 이상 입력해주세요.', 'warning'); return; }
@@ -4546,7 +4892,7 @@
     }
 
     async function resetWallet() {
-        if (isReadOnlyObserver()) { showToast(readOnlyObserverReason(), 'warning'); return; }
+        if (isPwaMutationBlocked()) { showToast(readOnlyObserverReason(), 'warning'); return; }
         if (!isPaperMode()) { showToast('실거래 모드에서는 지갑을 리셋할 수 없습니다.', 'warning'); return; }
         if (state.pendingMutation?.locked) { showToast('처리 중인 요청 결과를 확인한 뒤 가상 지갑을 변경할 수 있습니다.', 'warning'); return; }
         const seed = number(window.prompt('모의 계좌를 얼마로 다시 시작할까요? (원)', String(state.account?.initialSeedMoney || 10000000))); if (!seed || seed < 100000) return; if (!window.confirm(`모의 계좌를 ${formatWon(seed)}으로 다시 시작할까요?\n보유 코인과 전략별 포지션·매매 기록은 사라집니다.`)) return;
@@ -4561,7 +4907,7 @@
     }
 
     async function startPaper(reset = false) {
-        if (isReadOnlyObserver()) { showToast(readOnlyObserverReason(), 'warning'); return; }
+        if (isPwaMutationBlocked()) { showToast(readOnlyObserverReason(), 'warning'); return; }
         const seed = number(state.account?.initialSeedMoney);
         const startingAmount = seed > 0 ? `초기 금액 ${formatWon(seed)}` : '저장된 초기 금액';
         const message = reset ? `${startingAmount}으로 새 모의투자를 시작할까요?\n보유 코인과 전략별 포지션·매매 기록은 사라집니다.` : '현재 가상 자산과 포지션을 유지한 채 모의투자 실행을 시작합니다. 계속할까요?'; if (!window.confirm(message)) return;
@@ -4569,7 +4915,7 @@
     }
 
     async function stopPaper() {
-        if (isReadOnlyObserver()) { showToast(readOnlyObserverReason(), 'warning'); return; }
+        if (isPwaMutationBlocked()) { showToast(readOnlyObserverReason(), 'warning'); return; }
         if (!window.confirm('현재 모의투자를 중지할까요?')) return;
         try { const result = await requestJSON('/paper-validation/stop', { method: 'POST' }); state.paper = result.status; renderGateCards(); renderPaperDetail(); showToast('모의투자를 중지했습니다.', 'success'); } catch (error) { showToast(`모의투자 중지 실패: ${error.message}`, 'error'); }
     }
@@ -4581,21 +4927,21 @@
     }
 
     async function saveSettings() {
-        if (isReadOnlyObserver()) { showToast(readOnlyObserverReason(), 'warning'); return; }
+        if (isPwaMutationBlocked()) { showToast(readOnlyObserverReason(), 'warning'); return; }
         if (isPaperEvidenceMutationLocked()) { showToast(paperEvidenceMutationReason(), 'warning'); return; }
         const payload = settingPayload();
         try { const investmentRatio = payload.investmentRatio; delete payload.investmentRatio; await requestJSON('/config/update', { method: 'POST', body: JSON.stringify(payload) }); if (investmentRatio !== undefined) await requestJSON('/investment-config/update', { method: 'POST', body: JSON.stringify({ investmentRatio }) }); state.settingsLoaded = false; await loadSettings(); showToast('설정을 적용했습니다. 다음 점검에서 다시 확인하세요.', 'success'); } catch (error) { showToast(`설정 적용 실패: ${error.message}`, 'error'); }
     }
 
     async function applyPreset(presetId) {
-        if (isReadOnlyObserver()) { showToast(readOnlyObserverReason(), 'warning'); return; }
+        if (isPwaMutationBlocked()) { showToast(readOnlyObserverReason(), 'warning'); return; }
         if (isPaperEvidenceMutationLocked()) { showToast(paperEvidenceMutationReason(), 'warning'); return; }
         const preset = state.settings?.presets?.find(item => item.id === presetId); if (!preset) return; if (!window.confirm(`${preset.name} 설정을 적용할까요? 현재 전략 설정이 바뀝니다.`)) return;
         try { await requestJSON('/investment-presets/apply', { method: 'POST', body: JSON.stringify({ presetId, config: preset.config }) }); state.settingsLoaded = false; await loadSettings(); showToast(`${preset.name} 설정을 적용했습니다.`, 'success'); } catch (error) { showToast(`설정을 적용하지 못했습니다: ${error.message}`, 'error'); }
     }
 
     async function runOptimization() {
-        if (isReadOnlyObserver()) { showToast(readOnlyObserverReason(), 'warning'); return; }
+        if (isPwaMutationBlocked()) { showToast(readOnlyObserverReason(), 'warning'); return; }
         if (isPaperEvidenceMutationLocked()) { showToast(paperEvidenceMutationReason(), 'warning'); return; }
         if (!window.confirm('현재 설정과 다른 후보의 결과를 비교할까요?')) return;
         try { const result = await requestJSON('/optimization/run-now', { method: 'POST' }); showToast(result.message || '설정 후보 비교를 시작했습니다.', 'success'); } catch (error) { showToast(`설정 후보를 비교하지 못했습니다: ${error.message}`, 'error'); }

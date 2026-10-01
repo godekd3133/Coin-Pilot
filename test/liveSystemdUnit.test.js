@@ -13,6 +13,10 @@ const liveEnvironmentExample = fs.readFileSync(
   path.join(projectRoot, 'ops/systemd/coinpilot-live.env.example'),
   'utf8'
 );
+const rateCoordinatorUnit = fs.readFileSync(
+  path.join(projectRoot, 'ops/systemd/coinpilot-upbit-rate.service'),
+  'utf8'
+);
 
 test('LIVE systemd service does not force-kill an unbounded protective drain', () => {
   assert.match(liveServiceUnit, /^Restart=on-failure$/m);
@@ -22,8 +26,26 @@ test('LIVE systemd service does not force-kill an unbounded protective drain', (
 
 test('LIVE systemd optimizer persistence is rooted in its writable state directory', () => {
   const stateDir = liveEnvironmentExample.match(/^COINPILOT_STATE_DIR=(.+)$/m)?.[1];
-  const writableRoot = liveServiceUnit.match(/^ReadWritePaths=(.+)$/m)?.[1];
+  const writableRoots = liveServiceUnit.match(/^ReadWritePaths=(.+)$/m)?.[1]?.split(/\s+/) || [];
   assert.ok(stateDir, 'the service environment example must select persistent optimizer state');
-  assert.ok(writableRoot, 'the systemd unit must declare a writable state root');
-  assert.equal(path.resolve(stateDir), path.resolve(writableRoot));
+  assert.ok(writableRoots.length, 'the systemd unit must declare writable state roots');
+  assert.ok(writableRoots.map(value => path.resolve(value)).includes(path.resolve(stateDir)));
+});
+
+test('LIVE and other same-host clients share a separate protected coordinator state directory', () => {
+  const rateStateDir = liveEnvironmentExample.match(/^UPBIT_RATE_COORDINATOR_STATE_DIR=(.+)$/m)?.[1];
+  const liveWritableRoots = liveServiceUnit.match(/^ReadWritePaths=(.+)$/m)?.[1]?.split(/\s+/) || [];
+  const coordinatorWritableRoots = rateCoordinatorUnit.match(/^ReadWritePaths=(.+)$/m)?.[1]?.split(/\s+/) || [];
+
+  assert.equal(liveEnvironmentExample.match(/^UPBIT_RATE_COORDINATOR_REQUIRED=(.+)$/m)?.[1], 'true');
+  assert.ok(rateStateDir);
+  assert.notEqual(path.resolve(rateStateDir), path.resolve(liveEnvironmentExample.match(/^COINPILOT_STATE_DIR=(.+)$/m)?.[1]));
+  assert.match(liveServiceUnit, /^Requires=coinpilot-upbit-rate\.service$/m);
+  assert.match(liveServiceUnit, /^After=.*coinpilot-upbit-rate\.service/m);
+  assert.match(rateCoordinatorUnit, /^StateDirectory=coinpilot-rate$/m);
+  assert.match(rateCoordinatorUnit, /^StateDirectoryMode=0700$/m);
+  assert.ok(liveWritableRoots.map(value => path.resolve(value)).includes(path.resolve(rateStateDir)));
+  assert.ok(coordinatorWritableRoots.map(value => path.resolve(value)).includes(path.resolve(rateStateDir)));
+  assert.match(liveServiceUnit, /^ExecStartPre=\/usr\/bin\/node .*verifyNodeRuntime\.js$/m);
+  assert.match(rateCoordinatorUnit, /^ExecStartPre=\/usr\/bin\/node .*verifyNodeRuntime\.js$/m);
 });

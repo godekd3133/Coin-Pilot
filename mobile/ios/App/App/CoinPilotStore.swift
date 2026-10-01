@@ -706,6 +706,7 @@ struct CoinPilotPosition: Identifiable {
     let entryPrice: Double?
     let currentPrice: Double?
     let currentValue: Double?
+    let costBasis: Double?
     let profit: Double?
     let profitPercent: Double?
     let source: String?
@@ -722,6 +723,7 @@ struct CoinPilotPosition: Identifiable {
         entryPrice = Self.number(object["avgPrice"]) ?? Self.number(object["entryPrice"])
         currentPrice = Self.number(object["currentPrice"])
         currentValue = Self.number(object["currentValue"])
+        costBasis = Self.number(object["costBasis"])
         profit = Self.number(object["profit"])
         profitPercent = Self.number(object["profitPercent"])
         source = Self.string(object["source"])
@@ -904,6 +906,8 @@ struct CoinPilotMarketPrice: Identifiable {
     let volumeKrw: Double?
     let sourceAsOf: String?
     let fetchedAt: String?
+    let quoteFresh: Bool?
+    let quoteFreshnessReason: String?
 
     var id: String { coin ?? "unknown-\(price ?? 0)" }
 
@@ -919,15 +923,24 @@ struct CoinPilotMarketPrice: Identifiable {
         guard let price, price.isFinite, price > 0 else {
             return "현재가를 확인할 수 없어요"
         }
+        if quoteFreshnessReason == "market_snapshot_last_good" {
+            return "저장된 최근 시세를 표시 중이에요. 새 시세를 확인한 뒤 주문해 주세요."
+        }
         guard let sourceAsOfDate else {
             return "최근 체결 시각을 확인할 수 없어요"
         }
-        return CoinPilotTimestampFreshness.issue(
+        if let issue = CoinPilotTimestampFreshness.issue(
             sourceAsOfDate,
             label: "최근 체결",
             at: now,
             maximumAgeSeconds: maximumAgeSeconds
-        )
+        ) {
+            return issue
+        }
+        if quoteFresh == false {
+            return "현재 시세 최신 여부를 확인할 수 없어요"
+        }
+        return nil
     }
 
     init(_ object: [String: Any]) {
@@ -939,6 +952,8 @@ struct CoinPilotMarketPrice: Identifiable {
         volumeKrw = Self.number(object["volumeKrw"])
         sourceAsOf = object["sourceAsOf"] as? String
         fetchedAt = object["fetchedAt"] as? String
+        quoteFresh = object["quoteFresh"] as? Bool
+        quoteFreshnessReason = object["quoteFreshnessReason"] as? String
     }
 
     private static func number(_ value: Any?) -> Double? {
@@ -955,6 +970,8 @@ struct CoinPilotMarketSnapshotMetadata: Equatable {
     let marketListStale: Bool?
     let sourceAsOf: String?
     let fetchedAt: String?
+    let snapshotSource: String?
+    let fallbackReason: String?
 
     init(_ object: [String: Any]) {
         complete = object["complete"] as? Bool
@@ -962,6 +979,8 @@ struct CoinPilotMarketSnapshotMetadata: Equatable {
         marketListStale = object["marketListStale"] as? Bool
         sourceAsOf = object["sourceAsOf"] as? String
         fetchedAt = object["fetchedAt"] as? String
+        snapshotSource = object["snapshotSource"] as? String
+        fallbackReason = object["fallbackReason"] as? String
     }
 
     var fetchedAtDate: Date? {
@@ -983,6 +1002,9 @@ struct CoinPilotMarketSnapshotMetadata: Equatable {
     }
 
     var freshnessIssue: String? {
+        if snapshotSource == "last_good" {
+            return "거래소 응답이 없어 저장된 최근 시세를 표시 중이에요"
+        }
         if marketListStale == true {
             return "시세 종목 목록 갱신이 필요해요"
         }
@@ -1008,6 +1030,7 @@ struct CoinPilotMarketSnapshotMetadata: Equatable {
         guard complete == true,
               missingMarkets?.isEmpty == true,
               marketListStale == false,
+              snapshotSource != "last_good",
               sourceAsOfDate != nil,
               let fetchedAtDate else { return nil }
         return fetchedAtDate
@@ -1520,8 +1543,22 @@ final class CoinPilotStore: ObservableObject {
         "portfolio-history", "market-prices", "trades", "paper-validation-summary"
     ]
     private static let optionalResourceNames: Set<String> = ["paper-validation-summary"]
+    private static let mobileFeatureFreshnessSeconds: [String: TimeInterval] = [
+        "news": 300,
+        "ai": 60,
+        "account-analytics": 60,
+        "research": 300,
+        "optimization": 300
+    ]
     private static var requiredResourceCount: Int {
         resourceNames.count - optionalResourceNames.count
+    }
+
+    private struct MobileFeatureRequestContext {
+        let generation: Int
+        let serverURL: URL
+        let workspace: CoinPilotWorkspaceMode
+        let token: String
     }
 
     @Published private(set) var phase: CoinPilotScreenPhase = .connecting
@@ -1559,6 +1596,18 @@ final class CoinPilotStore: ObservableObject {
     @Published private(set) var localMarketData: CoinPilotBundledMarketData?
     @Published private(set) var localMarketDataError: String?
     @Published private(set) var isLoadingLocalMarketData = false
+    @Published private(set) var offlineReplayResult: CoinPilotOfflineReplay.Result?
+    @Published private(set) var offlineReplayResults: [CoinPilotOfflineReplay.Result] = []
+    @Published private(set) var isRunningOfflineReplay = false
+    @Published private(set) var offlineReplayMessage: String?
+    @Published private(set) var offlineReplayPersistenceMessage: String?
+    @Published private(set) var offlineReplaySessionCheckpoint: CoinPilotOfflineReplaySessionCheckpoint?
+    @Published private(set) var offlineReplaySessionFrame: CoinPilotOfflineReplay.PlaybackFrame?
+    @Published private(set) var offlineReplaySessionRecoveryMessage: String?
+    @Published private(set) var offlineReplaySessionMessage: String?
+    @Published private(set) var isPreparingOfflineReplaySession = false
+    @Published private(set) var isUpdatingOfflineReplaySession = false
+    @Published private(set) var offlineReplayPlaybackSpeed: CoinPilotOfflineReplayPlaybackSpeed = .tenCandlesPerSecond
     @Published private(set) var resourceStates: [String: CoinPilotResourceState] = [:]
     @Published private(set) var pendingManualOrder: CoinPilotPendingManualOrder?
     @Published private(set) var pendingManualOrderLocked = false
@@ -1602,6 +1651,8 @@ final class CoinPilotStore: ObservableObject {
     @Published private(set) var optimalConfig: [String: Any] = [:]
     @Published private(set) var featureMessages: [String: String] = [:]
     @Published private(set) var loadingFeatures: Set<String> = []
+    @Published private(set) var refreshingFeatureGroups: Set<String> = []
+    @Published private(set) var featureLastSuccessfulAt: [String: Date] = [:]
     @Published private(set) var isRunningFeatureAction = false
     @Published private(set) var isRecordingSnapshot = false
 
@@ -1611,14 +1662,26 @@ final class CoinPilotStore: ObservableObject {
     private let pendingOrders: CoinPilotPendingOrderProviding
     private let bundledPreview: CoinPilotBundledPreviewDataSource
     private let localMarketDataSource: CoinPilotBundledMarketDataLoading?
+    private let offlineReplayResultStore: any CoinPilotOfflineReplayResultPersisting
+    private let offlineReplaySessionStore: any CoinPilotOfflineReplaySessionPersisting
     private let dataModeDefaultsKey: String
+    private let offlineReplaySessionUptime: () -> TimeInterval
     private var currentServerURL: URL?
     private var requestGeneration = 0
     private var lastSuccessfulResourceAt: [String: Date] = [:]
     private var bootstrapped = false
     private var shouldInferWorkspaceFromLegacyURL = false
     private var localMarketDataLoadGeneration = 0
+    private var offlineReplayGeneration = 0
+    private var offlineReplaySessionGeneration = 0
+    private var offlineReplaySessionOperationInFlight = false
+    private var offlineReplaySessionRequest: CoinPilotOfflineReplay.Request?
+    private var offlineReplaySessionResult: CoinPilotOfflineReplay.Result?
+    private var offlineReplaySessionLastCheckpointUptime: TimeInterval?
+    private var offlineReplaySessionPersistedCursor = 0
     private var mobileFeatureRequestGenerations: [String: Int] = [:]
+    private var mobileFeatureGroupGenerations: [String: Int] = [:]
+    private var pendingMobileFeatureGroupRefreshes: Set<String> = []
 
     init(
         api: CoinPilotAPIProviding = CoinPilotAPIClient(),
@@ -1627,6 +1690,9 @@ final class CoinPilotStore: ObservableObject {
         localMarketDataSource suppliedLocalMarketDataSource: CoinPilotBundledMarketDataLoading? = nil,
         configuredDataMode: String? = nil,
         pendingOrderStore: CoinPilotPendingOrderProviding? = nil,
+        offlineReplayResultStore: any CoinPilotOfflineReplayResultPersisting = CoinPilotOfflineReplayFileStore.shared,
+        offlineReplaySessionStore: any CoinPilotOfflineReplaySessionPersisting = CoinPilotOfflineReplaySessionCheckpointStore.shared,
+        offlineReplaySessionUptime: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
         now: @escaping () -> Date = Date.init
     ) {
         self.api = api
@@ -1639,6 +1705,9 @@ final class CoinPilotStore: ObservableObject {
         self.pendingOrders = pendingOrderStore ?? CoinPilotKeychainPendingOrderStore()
 #endif
         self.bundledPreview = bundledPreview
+        self.offlineReplayResultStore = offlineReplayResultStore
+        self.offlineReplaySessionStore = offlineReplaySessionStore
+        self.offlineReplaySessionUptime = offlineReplaySessionUptime
         let savedWorkspaceName = UserDefaults.standard.string(forKey: Self.activeWorkspaceDefaultsKey)
         let workspace = CoinPilotWorkspaceMode(rawValue: savedWorkspaceName ?? "") ?? .paper
         let savedProfileAddress = UserDefaults.standard.string(forKey: workspace.addressDefaultsKey)
@@ -1685,9 +1754,11 @@ final class CoinPilotStore: ObservableObject {
     func freshnessLabel(for resource: String) -> String {
         if resource == "market-prices", isBundledLocalMarketData {
             guard let localMarketData else {
-                return localMarketDataError == nil ? "로컬 공개 시세 자료 불러오는 중" : "로컬 공개 시세 자료를 사용할 수 없어요"
+                return localMarketDataError == nil
+                    ? "앱에 저장된 고정 시세 자료를 불러오는 중"
+                    : "앱에 저장된 고정 시세 자료를 사용할 수 없어요"
             }
-            return "앱 저장 자료 생성 · \(CoinPilotFormatting.utcMarketTimestamp(localMarketData.generatedAt))"
+            return "자료 생성 시각 · \(CoinPilotFormatting.utcMarketTimestamp(localMarketData.generatedAt))"
         }
         let isMarketPrices = resource == "market-prices"
         let isMarketPreview = isMarketPrices && isBundledPreview
@@ -1925,7 +1996,7 @@ final class CoinPilotStore: ObservableObject {
     }
 
     var manualOrderBlockReason: String? {
-        if isBundledLocalMarketData { return "로컬 공개 시세 조회 전용 모드에서는 계좌·주문 작업을 사용할 수 없습니다." }
+        if isBundledLocalMarketData { return "앱에 저장된 고정 시세만 제공하는 모드라 계좌 연결이나 주문을 사용할 수 없습니다." }
         guard phase == .dashboard, !isBundledPreview else { return "서버 작업공간에서만 주문할 수 있습니다." }
         guard serverModeMatchesWorkspace, status?.mode == activeWorkspace.serverMode,
               account?.mode == activeWorkspace.serverMode else { return "선택한 실거래/모의투자 서버를 확인해 주세요." }
@@ -1948,6 +2019,9 @@ final class CoinPilotStore: ObservableObject {
 #if targetEnvironment(simulator)
         if activeWorkspace == .live { return "실거래 주문은 Simulator에서 잠겨 있습니다. 실제 기기의 TestFlight 앱을 사용하세요." }
 #endif
+        if marketSnapshotMetadata?.snapshotSource == "last_good" {
+            return marketSnapshotMetadata?.freshnessIssue ?? "저장된 최근 시세를 표시 중이에요. 새 시세를 확인한 뒤 주문해 주세요."
+        }
         guard state(for: "account").isCurrent, state(for: "market-prices").isCurrent else {
             return "계좌와 시세를 새로 확인한 뒤 주문할 수 있습니다."
         }
@@ -1969,7 +2043,7 @@ final class CoinPilotStore: ObservableObject {
 
     func marketQuoteFreshnessMessage(for marketCode: String) -> String {
         if isBundledLocalMarketData {
-            return "앱에 포함된 공개 시세 자료입니다. 최신성 자동 확인은 제공되지 않습니다."
+            return "출처와 최신 여부는 온라인으로 확인하지 않습니다."
         }
         if isBundledPreview {
             return "화면 구성 확인용 예시 시세입니다."
@@ -1979,7 +2053,7 @@ final class CoinPilotStore: ObservableObject {
 
     func marketCandleOriginLabel(candleCount: Int) -> String {
         if isBundledLocalMarketData {
-            return "앱에 포함된 공개 자료 · 캔들 \(candleCount)개"
+            return "앱에 저장된 고정 시세 자료 · 캔들 \(candleCount)개"
         }
         if isBundledPreview {
             return "화면 구성용 예시 자료 · 캔들 \(candleCount)개"
@@ -2014,7 +2088,7 @@ final class CoinPilotStore: ObservableObject {
     }
 
     var tuningBlockReason: String? {
-        guard !isBundledLocalMarketData else { return "로컬 공개 시세 조회 전용 모드에서는 설정을 바꿀 수 없습니다." }
+        guard !isBundledLocalMarketData else { return "앱에 저장된 고정 시세만 제공하는 모드라 설정 변경·계좌 연결·주문을 사용할 수 없습니다." }
         guard phase == .dashboard, !isBundledPreview else { return "서버 작업공간에서만 설정을 바꿀 수 있습니다." }
         guard authenticationRequired, authenticationScope.canOperate else { return "모바일 운영 토큰이 있어야 설정을 변경할 수 있습니다." }
         guard serverModeMatchesWorkspace, status?.mode == activeWorkspace.serverMode else { return "선택한 서버 모드를 확인해 주세요." }
@@ -2026,7 +2100,7 @@ final class CoinPilotStore: ObservableObject {
     }
 
     var optimizationBlockReason: String? {
-        guard !isBundledLocalMarketData else { return "로컬 공개 시세 조회 전용 모드에서는 후보 비교를 사용할 수 없습니다." }
+        guard !isBundledLocalMarketData else { return "앱에 저장된 고정 시세만 제공하는 모드라 후보 비교·계좌 연결·주문을 사용할 수 없습니다." }
         guard phase == .dashboard, !isBundledPreview else { return "서버 작업공간에서만 후보 비교를 사용할 수 있습니다." }
         guard canOperate else { return "모바일 운영 토큰이 있어야 후보 비교를 바꿀 수 있습니다." }
         guard serverModeMatchesWorkspace, status?.mode == activeWorkspace.serverMode else { return "선택한 서버 모드를 확인해 주세요." }
@@ -2144,7 +2218,7 @@ final class CoinPilotStore: ObservableObject {
 
     func useBundledPreview() {
         guard !isBundledLocalMarketData else {
-            connectionMessage = "이 앱 빌드는 로컬 공개 시세 조회 전용입니다."
+            connectionMessage = "이 빌드는 앱에 저장된 고정 시세만 표시하며 계좌 연결이나 주문은 제공하지 않습니다."
             return
         }
         guard bundledPreview.isAvailable else {
@@ -2450,7 +2524,7 @@ final class CoinPilotStore: ObservableObject {
 
     func updateServerToken(_ rawToken: String) async -> String? {
         guard !isBundledLocalMarketData else {
-            return "로컬 공개 시세 조회 전용 모드에서는 서버 토큰을 입력할 수 없습니다."
+            return "앱에 저장된 고정 시세만 제공하는 모드라 서버 토큰·계좌 연결·주문을 사용할 수 없습니다."
         }
         guard !isBundledPreview else {
             return "예시 데이터 화면에서는 토큰을 입력할 수 없습니다. 실제 서버에 연결해 주세요."
@@ -2811,6 +2885,7 @@ final class CoinPilotStore: ObservableObject {
         if selectionChanged {
             candles = []
             featureMessages.removeValue(forKey: "market")
+            offlineReplayMessage = nil
         }
         guard selectedMarket.range(of: "^KRW-[A-Z0-9]{2,15}$", options: .regularExpression) != nil else {
             featureMessages["market"] = "시장 코드를 확인해 주세요."
@@ -2819,7 +2894,7 @@ final class CoinPilotStore: ObservableObject {
         }
         if isBundledLocalMarketData {
             guard localMarketDataError == nil, let market = localMarketData?.markets.first(where: { $0.market == selectedMarket }) else {
-                featureMessages["market"] = localMarketDataError ?? "선택한 공개 원화 시장 자료가 없습니다."
+                featureMessages["market"] = localMarketDataError ?? "앱에 저장된 고정 시세 자료에 이 원화 시장이 없습니다."
                 candles = []
                 return
             }
@@ -2857,6 +2932,700 @@ final class CoinPilotStore: ObservableObject {
         candles = values.enumerated().map { CoinPilotCandle($0.element, index: $0.offset) }
     }
 
+    @discardableResult
+    func runBundledOfflineReplay(marketCode: String, intervalMinutes: Int) async -> Bool {
+        guard isBundledLocalMarketData else {
+            offlineReplayMessage = "과거 재생은 앱에 저장된 고정 시세 자료 모드에서만 가능합니다. 이 모드에서는 계좌 연결이나 주문을 할 수 없습니다."
+            return false
+        }
+        guard !isPreparingOfflineReplaySession,
+              offlineReplaySessionCheckpoint?.status != .playing,
+              offlineReplaySessionCheckpoint?.status != .paused else {
+            offlineReplayMessage = "재생 세션을 먼저 일시정지하거나 처음부터 다시 설정해 주세요."
+            return false
+        }
+        guard !isRunningOfflineReplay else { return false }
+        if let blockReason = offlineReplayBlockReason(forMarket: marketCode, intervalMinutes: intervalMinutes) {
+            offlineReplayResult = nil
+            offlineReplayMessage = blockReason
+            return false
+        }
+        guard localMarketDataError == nil, let dataset = localMarketData,
+              let market = dataset.markets.first(where: { $0.market == marketCode }),
+              localMarketIntervals(for: marketCode).contains(intervalMinutes) else {
+            offlineReplayResult = nil
+            offlineReplayMessage = "선택한 시장과 간격의 고정 시세 자료가 앱에 저장되어 있지 않습니다."
+            return false
+        }
+
+        let sourceRows = market.candles.filter { $0.intervalMinutes == intervalMinutes }
+        guard !sourceRows.isEmpty else {
+            offlineReplayResult = nil
+            offlineReplayMessage = "재생할 캔들 자료가 없습니다."
+            return false
+        }
+        var replayCandles: [CoinPilotOfflineReplay.Candle] = []
+        replayCandles.reserveCapacity(sourceRows.count)
+        for candle in sourceRows {
+            guard let date = CoinPilotBundledMarketData.utcDate(from: candle.timestamp) else {
+                offlineReplayResult = nil
+                offlineReplayMessage = "캔들 시각을 읽을 수 없어 재생을 중단했습니다."
+                return false
+            }
+            let timestampMilliseconds = date.timeIntervalSince1970 * 1_000
+            guard timestampMilliseconds.isFinite,
+                  timestampMilliseconds > Double(Int64.min),
+                  timestampMilliseconds < Double(Int64.max) else {
+                offlineReplayResult = nil
+                offlineReplayMessage = "캔들 시각이 지원 범위를 벗어나 재생을 중단했습니다."
+                return false
+            }
+            replayCandles.append(CoinPilotOfflineReplay.Candle(
+                timestampMilliseconds: Int64(timestampMilliseconds.rounded()),
+                open: candle.open,
+                high: candle.high,
+                low: candle.low,
+                close: candle.close,
+                volume: candle.volume
+            ))
+        }
+
+        let request = CoinPilotOfflineReplay.Request(
+            market: marketCode,
+            intervalMinutes: intervalMinutes,
+            source: dataset.source,
+            generatedAt: dataset.generatedAt,
+            candles: replayCandles
+        )
+        offlineReplayResult = nil
+        offlineReplayMessage = nil
+        offlineReplayPersistenceMessage = nil
+        offlineReplayGeneration += 1
+        let replayGeneration = offlineReplayGeneration
+        isRunningOfflineReplay = true
+        defer {
+            if offlineReplayGeneration == replayGeneration {
+                isRunningOfflineReplay = false
+            }
+        }
+
+        do {
+            let result = try await Task.detached(priority: .userInitiated) {
+                try CoinPilotOfflineReplay.run(request)
+            }.value
+            guard offlineReplayGeneration == replayGeneration, isBundledLocalMarketData else { return false }
+            offlineReplayResult = result
+            do {
+                offlineReplayResults = try await offlineReplayResultStore.save(result)
+                offlineReplayPersistenceMessage = nil
+            } catch {
+                offlineReplayPersistenceMessage = "재생은 끝났지만 이 기기에 기록을 저장하지 못했습니다."
+            }
+            return true
+        } catch {
+            offlineReplayMessage = (error as? LocalizedError)?.errorDescription ??
+                "자료를 확인한 뒤 과거 재생을 완료하지 못했습니다."
+            return false
+        }
+    }
+
+    func offlineReplayBlockReason(forMarket marketCode: String, intervalMinutes: Int) -> String? {
+        guard isBundledLocalMarketData,
+              localMarketDataError == nil,
+              let market = localMarketData?.markets.first(where: { $0.market == marketCode }),
+              [1, 5, 15, 60].contains(intervalMinutes),
+              market.candles.contains(where: { $0.intervalMinutes == intervalMinutes }) else {
+            return "앱에 저장된 고정 시세 자료에 선택한 시장과 간격이 없습니다."
+        }
+        if intervalMinutes > CoinPilotOfflineReplay.maximumHoldMinutes {
+            return CoinPilotOfflineReplay.ReplayError.intervalTooCoarse(
+                intervalMinutes: intervalMinutes,
+                maximumHoldMinutes: CoinPilotOfflineReplay.maximumHoldMinutes
+            ).errorDescription
+        }
+        let count = market.candles.reduce(into: 0) { total, candle in
+            if candle.intervalMinutes == intervalMinutes { total += 1 }
+        }
+        guard count >= CoinPilotOfflineReplay.minimumCandleCount else {
+            return CoinPilotOfflineReplay.ReplayError.insufficientCandles(
+                minimum: CoinPilotOfflineReplay.minimumCandleCount
+            ).errorDescription
+        }
+        return nil
+    }
+
+    func offlineReplaySessionDelayNanoseconds(forMarket marketCode: String, intervalMinutes: Int) -> UInt64? {
+        guard isBundledLocalMarketData,
+              offlineReplaySessionRecoveryMessage == nil,
+              offlineReplaySessionMessage == nil,
+              !isUpdatingOfflineReplaySession,
+              let checkpoint = offlineReplaySessionCheckpoint,
+              checkpoint.status == .playing,
+              checkpoint.market == marketCode,
+              checkpoint.intervalMinutes == intervalMinutes,
+              let speed = checkpoint.playbackSpeed else {
+            return nil
+        }
+        return speed.sleepNanoseconds
+    }
+
+    func offlineReplaySessionPlaybackTaskID(forMarket marketCode: String, intervalMinutes: Int) -> String {
+        guard let checkpoint = offlineReplaySessionCheckpoint,
+              checkpoint.market == marketCode,
+              checkpoint.intervalMinutes == intervalMinutes,
+              let speed = checkpoint.playbackSpeed else {
+            return "idle-\(marketCode)-\(intervalMinutes)"
+        }
+        return "\(checkpoint.datasetFingerprint)-\(checkpoint.status.rawValue)-\(checkpoint.nextCandleIndex)-\(speed.rawValue)-\(isUpdatingOfflineReplaySession)-\(offlineReplaySessionMessage ?? "")"
+    }
+
+    @discardableResult
+    func startOfflineReplaySession(
+        marketCode: String,
+        intervalMinutes: Int
+    ) async -> Bool {
+        guard isBundledLocalMarketData else {
+            offlineReplaySessionMessage = "과거 재생은 앱에 저장된 고정 시세 자료 모드에서만 가능합니다. 이 모드에서는 계좌 연결이나 주문을 할 수 없습니다."
+            return false
+        }
+        guard !isRunningOfflineReplay, !isPreparingOfflineReplaySession else { return false }
+        guard offlineReplaySessionRecoveryMessage == nil else {
+            offlineReplaySessionMessage = "저장 상태를 복구하거나 지운 뒤 재생을 시작해 주세요."
+            return false
+        }
+        if let blockReason = offlineReplayBlockReason(forMarket: marketCode, intervalMinutes: intervalMinutes) {
+            offlineReplaySessionMessage = blockReason
+            return false
+        }
+        if let checkpoint = offlineReplaySessionCheckpoint {
+            if checkpoint.status == .playing,
+               checkpoint.market == marketCode,
+               checkpoint.intervalMinutes == intervalMinutes {
+                return true
+            }
+            guard checkpoint.status == .stopped else {
+                offlineReplaySessionMessage = "현재 재생 상태를 먼저 일시정지하거나 처음부터 다시 설정해 주세요."
+                return false
+            }
+        }
+        guard !offlineReplaySessionOperationInFlight else { return false }
+
+        if let checkpoint = offlineReplaySessionCheckpoint,
+           checkpoint.status == .stopped,
+           checkpoint.market == marketCode,
+           checkpoint.intervalMinutes == intervalMinutes,
+           let request = offlineReplaySessionRequest,
+           let result = offlineReplaySessionResult,
+           checkpoint.matches(result.metadata, candleCount: request.candles.count) {
+            let playing = makeOfflineReplaySessionCheckpoint(
+                basedOn: checkpoint,
+                nextCandleIndex: checkpoint.nextCandleIndex,
+                status: .playing,
+                speed: offlineReplayPlaybackSpeed
+            )
+            return await saveAndPublishOfflineReplaySession(playing, request: request, result: result, frame: nil)
+        }
+
+        guard let request = makeBundledOfflineReplayRequest(marketCode: marketCode, intervalMinutes: intervalMinutes) else {
+            return false
+        }
+
+        offlineReplaySessionOperationInFlight = true
+        isUpdatingOfflineReplaySession = true
+        isPreparingOfflineReplaySession = true
+        offlineReplaySessionMessage = nil
+        offlineReplaySessionGeneration += 1
+        let generation = offlineReplaySessionGeneration
+        defer {
+            if offlineReplaySessionGeneration == generation {
+                isPreparingOfflineReplaySession = false
+                isUpdatingOfflineReplaySession = false
+                offlineReplaySessionOperationInFlight = false
+            }
+        }
+
+        do {
+            let result = try await Task.detached(priority: .userInitiated) {
+                try CoinPilotOfflineReplay.run(request)
+            }.value
+            guard offlineReplaySessionGeneration == generation,
+                  isBundledLocalMarketData,
+                  localMarketData != nil else { return false }
+
+            do {
+                offlineReplayResults = try await offlineReplayResultStore.save(result)
+                offlineReplayPersistenceMessage = nil
+            } catch {
+                offlineReplayPersistenceMessage = "재생은 가능하지만 전체 결과를 이 기기에 저장하지 못했습니다."
+            }
+
+            let checkpoint = CoinPilotOfflineReplaySessionCheckpoint(
+                datasetFingerprint: result.metadata.datasetFingerprint,
+                engineVersion: result.metadata.engineVersion,
+                configVersion: result.metadata.configVersion,
+                market: result.metadata.market,
+                intervalMinutes: result.metadata.intervalMinutes,
+                candleCount: request.candles.count,
+                nextCandleIndex: 0,
+                status: .playing,
+                speed: offlineReplayPlaybackSpeed
+            )
+            try await offlineReplaySessionStore.saveCheckpoint(checkpoint)
+            offlineReplaySessionRequest = request
+            offlineReplaySessionResult = result
+            offlineReplaySessionPersistedCursor = 0
+            offlineReplaySessionLastCheckpointUptime = offlineReplaySessionUptime()
+            offlineReplaySessionCheckpoint = checkpoint
+            offlineReplaySessionFrame = nil
+            offlineReplaySessionRecoveryMessage = nil
+            offlineReplaySessionMessage = nil
+            offlineReplayResult = result
+            offlineReplayMessage = nil
+            return true
+        } catch {
+            offlineReplaySessionMessage = (error as? LocalizedError)?.errorDescription ??
+                "재생 상태를 저장하지 못해 시작하지 않았습니다."
+            return false
+        }
+    }
+
+    @discardableResult
+    func pauseOfflineReplaySession() async -> Bool {
+        guard !offlineReplaySessionOperationInFlight,
+              let checkpoint = offlineReplaySessionCheckpoint,
+              checkpoint.status == .playing,
+              offlineReplaySessionRecoveryMessage == nil else { return false }
+        offlineReplaySessionOperationInFlight = true
+        isUpdatingOfflineReplaySession = true
+        let paused = makeOfflineReplaySessionCheckpoint(
+            basedOn: checkpoint,
+            nextCandleIndex: checkpoint.nextCandleIndex,
+            status: .paused,
+            speed: checkpoint.playbackSpeed ?? offlineReplayPlaybackSpeed
+        )
+        offlineReplaySessionCheckpoint = paused
+        defer {
+            isUpdatingOfflineReplaySession = false
+            offlineReplaySessionOperationInFlight = false
+        }
+        do {
+            try await offlineReplaySessionStore.saveCheckpoint(paused)
+            markOfflineReplaySessionCheckpointDurable(cursor: paused.nextCandleIndex)
+            offlineReplaySessionMessage = nil
+            return true
+        } catch {
+            offlineReplaySessionMessage = "일시정지는 적용됐지만 저장하지 못했습니다. 앱을 다시 열면 마지막 저장 지점부터 최대 1초 구간이 다시 나올 수 있습니다."
+            return false
+        }
+    }
+
+    @discardableResult
+    func resumeOfflineReplaySession() async -> Bool {
+        guard !offlineReplaySessionOperationInFlight,
+              offlineReplaySessionRecoveryMessage == nil,
+              let checkpoint = offlineReplaySessionCheckpoint,
+              checkpoint.status == .paused,
+              checkpoint.nextCandleIndex < checkpoint.candleCount,
+              offlineReplaySessionRequest != nil,
+              offlineReplaySessionResult != nil else { return false }
+        offlineReplaySessionOperationInFlight = true
+        isUpdatingOfflineReplaySession = true
+        let playing = makeOfflineReplaySessionCheckpoint(
+            basedOn: checkpoint,
+            nextCandleIndex: checkpoint.nextCandleIndex,
+            status: .playing,
+            speed: checkpoint.playbackSpeed ?? offlineReplayPlaybackSpeed
+        )
+        defer {
+            isUpdatingOfflineReplaySession = false
+            offlineReplaySessionOperationInFlight = false
+        }
+        do {
+            try await offlineReplaySessionStore.saveCheckpoint(playing)
+            markOfflineReplaySessionCheckpointDurable(cursor: playing.nextCandleIndex)
+            offlineReplaySessionCheckpoint = playing
+            offlineReplayPlaybackSpeed = playing.playbackSpeed ?? offlineReplayPlaybackSpeed
+            offlineReplaySessionMessage = nil
+            return true
+        } catch {
+            offlineReplaySessionMessage = "재생 상태를 저장하지 못해 다시 시작하지 않았습니다."
+            return false
+        }
+    }
+
+    @discardableResult
+    func resetOfflineReplaySession() async -> Bool {
+        guard !offlineReplaySessionOperationInFlight else { return false }
+        offlineReplaySessionOperationInFlight = true
+        isUpdatingOfflineReplaySession = true
+        defer {
+            isUpdatingOfflineReplaySession = false
+            offlineReplaySessionOperationInFlight = false
+        }
+
+        if offlineReplaySessionRecoveryMessage != nil {
+            do {
+                try await offlineReplaySessionStore.clearCheckpoint()
+                clearOfflineReplaySessionState()
+                offlineReplaySessionMessage = nil
+                return true
+            } catch {
+                offlineReplaySessionMessage = "손상된 재생 상태를 지우지 못했습니다."
+                return false
+            }
+        }
+
+        guard let checkpoint = offlineReplaySessionCheckpoint else {
+            offlineReplaySessionMessage = nil
+            offlineReplaySessionFrame = nil
+            return true
+        }
+        let stopped = makeOfflineReplaySessionCheckpoint(
+            basedOn: checkpoint,
+            nextCandleIndex: 0,
+            status: .stopped,
+            speed: checkpoint.playbackSpeed ?? offlineReplayPlaybackSpeed
+        )
+        do {
+            try await offlineReplaySessionStore.saveCheckpoint(stopped)
+            offlineReplaySessionCheckpoint = stopped
+            offlineReplaySessionFrame = nil
+            offlineReplaySessionPersistedCursor = 0
+            offlineReplaySessionLastCheckpointUptime = offlineReplaySessionUptime()
+            offlineReplayPlaybackSpeed = stopped.playbackSpeed ?? offlineReplayPlaybackSpeed
+            offlineReplaySessionMessage = nil
+            return true
+        } catch {
+            offlineReplaySessionCheckpoint = stopped
+            offlineReplaySessionFrame = nil
+            offlineReplaySessionMessage = "재생은 멈췄지만 처음 상태를 저장하지 못했습니다. 앱을 다시 열면 마지막 저장 지점부터 복원될 수 있습니다."
+            return false
+        }
+    }
+
+    @discardableResult
+    func setOfflineReplayPlaybackSpeed(_ speed: CoinPilotOfflineReplayPlaybackSpeed) async -> Bool {
+        guard !offlineReplaySessionOperationInFlight else { return false }
+        guard let checkpoint = offlineReplaySessionCheckpoint else {
+            offlineReplayPlaybackSpeed = speed
+            return true
+        }
+        guard offlineReplaySessionRecoveryMessage == nil else { return false }
+
+        offlineReplaySessionOperationInFlight = true
+        isUpdatingOfflineReplaySession = true
+        let updated = makeOfflineReplaySessionCheckpoint(
+            basedOn: checkpoint,
+            nextCandleIndex: checkpoint.nextCandleIndex,
+            status: checkpoint.status,
+            speed: speed
+        )
+        defer {
+            isUpdatingOfflineReplaySession = false
+            offlineReplaySessionOperationInFlight = false
+        }
+        do {
+            try await offlineReplaySessionStore.saveCheckpoint(updated)
+            markOfflineReplaySessionCheckpointDurable(cursor: updated.nextCandleIndex)
+            offlineReplaySessionCheckpoint = updated
+            offlineReplayPlaybackSpeed = speed
+            offlineReplaySessionMessage = nil
+            return true
+        } catch {
+            offlineReplaySessionMessage = "재생 속도를 저장하지 못해 기존 속도를 유지합니다."
+            return false
+        }
+    }
+
+    @discardableResult
+    func advanceOfflineReplaySession(marketCode: String, intervalMinutes: Int) async -> CoinPilotOfflineReplay.PlaybackFrame? {
+        guard !offlineReplaySessionOperationInFlight,
+              !isPreparingOfflineReplaySession,
+              offlineReplaySessionRecoveryMessage == nil,
+              offlineReplaySessionMessage == nil,
+              isBundledLocalMarketData,
+              let checkpoint = offlineReplaySessionCheckpoint,
+              checkpoint.status == .playing,
+              checkpoint.market == marketCode,
+              checkpoint.intervalMinutes == intervalMinutes,
+              checkpoint.nextCandleIndex < checkpoint.candleCount,
+              let request = offlineReplaySessionRequest,
+              let result = offlineReplaySessionResult else { return nil }
+
+        guard let frame = CoinPilotOfflineReplay.playbackFrame(
+            atCandleIndex: checkpoint.nextCandleIndex,
+            request: request,
+            result: result
+        ) else {
+            offlineReplaySessionRecoveryMessage = "재생 위치와 앱 저장 자료가 맞지 않습니다. 저장 상태를 지우고 다시 시작해 주세요."
+            return nil
+        }
+
+        let nextCursor = checkpoint.nextCandleIndex + 1
+        let nextStatus: CoinPilotOfflineReplaySessionStatus = nextCursor == checkpoint.candleCount
+            ? .completed
+            : .playing
+        let advanced = makeOfflineReplaySessionCheckpoint(
+            basedOn: checkpoint,
+            nextCandleIndex: nextCursor,
+            status: nextStatus,
+            speed: checkpoint.playbackSpeed ?? offlineReplayPlaybackSpeed
+        )
+        offlineReplaySessionCheckpoint = advanced
+        offlineReplaySessionFrame = frame
+
+        let uptime = offlineReplaySessionUptime()
+        let shouldPersist = nextStatus == .completed ||
+            offlineReplaySessionLastCheckpointUptime.map { uptime - $0 >= 1.0 } ?? true
+        guard shouldPersist else { return frame }
+
+        offlineReplaySessionOperationInFlight = true
+        isUpdatingOfflineReplaySession = true
+        defer {
+            isUpdatingOfflineReplaySession = false
+            offlineReplaySessionOperationInFlight = false
+        }
+        do {
+            try await offlineReplaySessionStore.saveCheckpoint(advanced)
+            markOfflineReplaySessionCheckpointDurable(cursor: advanced.nextCandleIndex)
+            offlineReplaySessionMessage = nil
+        } catch {
+            if nextStatus != .completed {
+                offlineReplaySessionCheckpoint = makeOfflineReplaySessionCheckpoint(
+                    basedOn: advanced,
+                    nextCandleIndex: advanced.nextCandleIndex,
+                    status: .paused,
+                    speed: advanced.playbackSpeed ?? offlineReplayPlaybackSpeed
+                )
+                offlineReplaySessionMessage = "재생 상태를 저장하지 못해 멈췄습니다. 다시 열면 마지막 저장 지점부터 최대 1초 구간이 다시 나올 수 있습니다."
+            } else {
+                offlineReplaySessionMessage = "과거 재생은 끝났지만 완료 상태를 저장하지 못했습니다. 다시 열면 마지막 저장 지점부터 복원될 수 있습니다."
+            }
+        }
+        return frame
+    }
+
+    func pauseOfflineReplaySessionForInterruption() async {
+        while offlineReplaySessionOperationInFlight && !Task.isCancelled {
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+        guard !Task.isCancelled else { return }
+        guard offlineReplaySessionCheckpoint?.status == .playing else { return }
+        _ = await pauseOfflineReplaySession()
+    }
+
+    func selectOfflineReplayResult(_ result: CoinPilotOfflineReplay.Result) {
+        guard isBundledLocalMarketData, offlineReplayResults.contains(result) else { return }
+        offlineReplayResult = result
+        offlineReplayMessage = nil
+        offlineReplayPersistenceMessage = nil
+    }
+
+    private func makeBundledOfflineReplayRequest(
+        marketCode: String,
+        intervalMinutes: Int
+    ) -> CoinPilotOfflineReplay.Request? {
+        guard localMarketDataError == nil,
+              let dataset = localMarketData,
+              let market = dataset.markets.first(where: { $0.market == marketCode }) else {
+            offlineReplaySessionMessage = "선택한 시장의 고정 시세 자료가 앱에 저장되어 있지 않습니다."
+            return nil
+        }
+        let sourceRows = market.candles.filter { $0.intervalMinutes == intervalMinutes }
+        guard !sourceRows.isEmpty else {
+            offlineReplaySessionMessage = "재생할 캔들 자료가 없습니다."
+            return nil
+        }
+
+        var candles: [CoinPilotOfflineReplay.Candle] = []
+        candles.reserveCapacity(sourceRows.count)
+        for candle in sourceRows {
+            guard let date = CoinPilotBundledMarketData.utcDate(from: candle.timestamp) else {
+                offlineReplaySessionMessage = "캔들 시각을 읽을 수 없어 재생을 시작하지 않았습니다."
+                return nil
+            }
+            let milliseconds = date.timeIntervalSince1970 * 1_000
+            guard milliseconds.isFinite,
+                  milliseconds > Double(Int64.min),
+                  milliseconds < Double(Int64.max) else {
+                offlineReplaySessionMessage = "캔들 시각이 지원 범위를 벗어나 재생을 시작하지 않았습니다."
+                return nil
+            }
+            candles.append(CoinPilotOfflineReplay.Candle(
+                timestampMilliseconds: Int64(milliseconds.rounded()),
+                open: candle.open,
+                high: candle.high,
+                low: candle.low,
+                close: candle.close,
+                volume: candle.volume
+            ))
+        }
+
+        return CoinPilotOfflineReplay.Request(
+            market: marketCode,
+            intervalMinutes: intervalMinutes,
+            source: dataset.source,
+            generatedAt: dataset.generatedAt,
+            candles: candles
+        )
+    }
+
+    private func makeOfflineReplaySessionCheckpoint(
+        basedOn checkpoint: CoinPilotOfflineReplaySessionCheckpoint,
+        nextCandleIndex: Int,
+        status: CoinPilotOfflineReplaySessionStatus,
+        speed: CoinPilotOfflineReplayPlaybackSpeed
+    ) -> CoinPilotOfflineReplaySessionCheckpoint {
+        CoinPilotOfflineReplaySessionCheckpoint(
+            datasetFingerprint: checkpoint.datasetFingerprint,
+            engineVersion: checkpoint.engineVersion,
+            configVersion: checkpoint.configVersion,
+            market: checkpoint.market,
+            intervalMinutes: checkpoint.intervalMinutes,
+            candleCount: checkpoint.candleCount,
+            nextCandleIndex: nextCandleIndex,
+            status: status,
+            speed: speed
+        )
+    }
+
+    private func saveAndPublishOfflineReplaySession(
+        _ checkpoint: CoinPilotOfflineReplaySessionCheckpoint,
+        request: CoinPilotOfflineReplay.Request,
+        result: CoinPilotOfflineReplay.Result,
+        frame: CoinPilotOfflineReplay.PlaybackFrame?
+    ) async -> Bool {
+        guard !offlineReplaySessionOperationInFlight else { return false }
+        offlineReplaySessionOperationInFlight = true
+        isUpdatingOfflineReplaySession = true
+        defer {
+            isUpdatingOfflineReplaySession = false
+            offlineReplaySessionOperationInFlight = false
+        }
+        do {
+            try await offlineReplaySessionStore.saveCheckpoint(checkpoint)
+            offlineReplaySessionRequest = request
+            offlineReplaySessionResult = result
+            offlineReplaySessionCheckpoint = checkpoint
+            offlineReplaySessionFrame = frame
+            offlineReplayPlaybackSpeed = checkpoint.playbackSpeed ?? .tenCandlesPerSecond
+            offlineReplaySessionPersistedCursor = checkpoint.nextCandleIndex
+            offlineReplaySessionLastCheckpointUptime = offlineReplaySessionUptime()
+            offlineReplaySessionRecoveryMessage = nil
+            offlineReplaySessionMessage = nil
+            offlineReplayResult = result
+            return true
+        } catch {
+            offlineReplaySessionMessage = (error as? LocalizedError)?.errorDescription ??
+                "재생 상태를 저장하지 못해 시작하지 않았습니다."
+            return false
+        }
+    }
+
+    private func markOfflineReplaySessionCheckpointDurable(cursor: Int) {
+        offlineReplaySessionPersistedCursor = cursor
+        offlineReplaySessionLastCheckpointUptime = offlineReplaySessionUptime()
+    }
+
+    private func clearOfflineReplaySessionState() {
+        offlineReplaySessionCheckpoint = nil
+        offlineReplaySessionFrame = nil
+        offlineReplaySessionRecoveryMessage = nil
+        offlineReplaySessionMessage = nil
+        offlineReplaySessionRequest = nil
+        offlineReplaySessionResult = nil
+        offlineReplaySessionPersistedCursor = 0
+        offlineReplaySessionLastCheckpointUptime = nil
+        offlineReplayPlaybackSpeed = .tenCandlesPerSecond
+    }
+
+    private func requireOfflineReplaySessionRecovery(_ message: String) {
+        offlineReplaySessionCheckpoint = nil
+        offlineReplaySessionFrame = nil
+        offlineReplaySessionRequest = nil
+        offlineReplaySessionResult = nil
+        offlineReplaySessionRecoveryMessage = message
+    }
+
+    private func markSessionRecoveryIfCheckpointExists() async {
+        do {
+            if try await offlineReplaySessionStore.loadCheckpoint() != nil {
+                requireOfflineReplaySessionRecovery("저장된 재생을 복원할 앱 자료가 없습니다. 자료를 확인한 뒤 저장 상태를 지우고 다시 시작해 주세요.")
+            }
+        } catch {
+            requireOfflineReplaySessionRecovery((error as? LocalizedError)?.errorDescription ??
+                "저장된 재생 상태를 읽지 못했습니다. 지운 뒤 다시 시작할 수 있습니다.")
+        }
+    }
+
+    private func restoreOfflineReplaySessionCheckpoint() async {
+        guard isBundledLocalMarketData else { return }
+        do {
+            guard let checkpoint = try await offlineReplaySessionStore.loadCheckpoint() else {
+                clearOfflineReplaySessionState()
+                return
+            }
+            guard let request = makeBundledOfflineReplayRequest(
+                marketCode: checkpoint.market,
+                intervalMinutes: checkpoint.intervalMinutes
+            ) else {
+                requireOfflineReplaySessionRecovery("저장된 재생이 현재 앱 저장 자료와 맞지 않습니다. 재생 상태를 지우고 다시 시작해 주세요.")
+                return
+            }
+            let result = try await Task.detached(priority: .userInitiated) {
+                try CoinPilotOfflineReplay.run(request)
+            }.value
+            guard checkpoint.matches(result.metadata, candleCount: request.candles.count) else {
+                requireOfflineReplaySessionRecovery("저장된 재생과 앱 저장 자료가 달라 이어서 열지 않았습니다. 재생 상태를 지우고 다시 시작해 주세요.")
+                return
+            }
+
+            let normalized = checkpoint.status == .playing
+                ? makeOfflineReplaySessionCheckpoint(
+                    basedOn: checkpoint,
+                    nextCandleIndex: checkpoint.nextCandleIndex,
+                    status: .paused,
+                    speed: checkpoint.playbackSpeed ?? .tenCandlesPerSecond
+                )
+                : checkpoint
+            let currentFrame = normalized.nextCandleIndex > 0
+                ? CoinPilotOfflineReplay.playbackFrame(
+                    atCandleIndex: normalized.nextCandleIndex - 1,
+                    request: request,
+                    result: result
+                )
+                : nil
+            guard normalized.nextCandleIndex == 0 || currentFrame != nil else {
+                requireOfflineReplaySessionRecovery("저장된 재생 위치를 복원할 수 없습니다. 재생 상태를 지우고 다시 시작해 주세요.")
+                return
+            }
+
+            offlineReplaySessionCheckpoint = normalized
+            offlineReplaySessionFrame = currentFrame
+            offlineReplaySessionRequest = request
+            offlineReplaySessionResult = result
+            offlineReplayPlaybackSpeed = normalized.playbackSpeed ?? .tenCandlesPerSecond
+            offlineReplaySessionRecoveryMessage = nil
+            offlineReplaySessionMessage = normalized == checkpoint ? nil :
+                "이전 재생을 일시정지 상태로 복원했습니다. 이어서 보려면 재생을 눌러 주세요."
+            offlineReplaySessionPersistedCursor = normalized.nextCandleIndex
+            offlineReplaySessionLastCheckpointUptime = offlineReplaySessionUptime()
+            offlineReplayResult = result
+            if normalized != checkpoint {
+                do {
+                    try await offlineReplaySessionStore.saveCheckpoint(normalized)
+                    offlineReplaySessionMessage = nil
+                } catch {
+                    offlineReplaySessionMessage = "일시정지 상태는 복원됐지만 저장하지 못했습니다. 앱을 다시 열면 마지막 저장 지점부터 복원됩니다."
+                }
+            }
+        } catch {
+            requireOfflineReplaySessionRecovery((error as? LocalizedError)?.errorDescription ??
+                "저장된 재생 상태를 읽지 못했습니다. 지운 뒤 다시 시작할 수 있습니다."
+            )
+        }
+    }
+
     func loadAnalysisFeatures() async {
         guard let payload = await loadMobileFeature("analysis", path: "/api/all-coin-scores?limit=60"),
               let object = payload as? [String: Any] else { return }
@@ -2877,85 +3646,299 @@ final class CoinPilotStore: ObservableObject {
         bundleSuggestions = object["bundles"] as? [[String: Any]] ?? []
     }
 
+    func loadNewsIfStale() async {
+        _ = await loadNews(force: false)
+    }
+
     func loadNews() async {
-        guard let payload = await loadMobileFeature("news", path: "/api/news?limit=80"),
-              let object = payload as? [String: Any] else { return }
-        newsArticles = (object["news"] as? [[String: Any]] ?? []).enumerated().map {
-            CoinPilotNewsArticle($0.element, index: $0.offset)
+        _ = await loadNews(force: true)
+    }
+
+    private func loadNews(force: Bool) async -> Bool {
+        await refreshMobileFeatureGroup("news", force: force) { context in
+            guard let payload = await self.loadMobileFeature(
+                "news",
+                path: "/api/news?limit=80",
+                context: context
+            ) as? [String: Any], self.isCurrentMobileFeatureContext(context) else { return false }
+            self.newsArticles = (payload["news"] as? [[String: Any]] ?? []).enumerated().map {
+                CoinPilotNewsArticle($0.element, index: $0.offset)
+            }
+            self.newsSentiment = payload["sentiment"] as? [String: Any] ?? [:]
+            return true
         }
-        newsSentiment = object["sentiment"] as? [String: Any] ?? [:]
+    }
+
+    private func makeMobileFeatureRequestContext(featureKey: String) -> MobileFeatureRequestContext? {
+        guard canOperate,
+              let serverURL = currentServerURL,
+              let token = tokens.token(for: serverURL) else {
+            featureMessages[featureKey] = "이 화면의 서버 권한을 확인할 수 없습니다. 모바일 운영 토큰으로 로그인해 주세요."
+            return nil
+        }
+        return MobileFeatureRequestContext(
+            generation: requestGeneration,
+            serverURL: serverURL,
+            workspace: activeWorkspace,
+            token: token
+        )
+    }
+
+    private func matchesMobileFeatureContext(_ context: MobileFeatureRequestContext) -> Bool {
+        context.generation == requestGeneration &&
+            currentServerURL == context.serverURL &&
+            activeWorkspace == context.workspace &&
+            canOperate &&
+            tokens.token(for: context.serverURL) == context.token
+    }
+
+    private func isCurrentMobileFeatureContext(_ context: MobileFeatureRequestContext) -> Bool {
+        !Task.isCancelled && matchesMobileFeatureContext(context)
+    }
+
+    private func refreshMobileFeatureGroup(
+        _ group: String,
+        force: Bool,
+        operation: (MobileFeatureRequestContext) async -> Bool
+    ) async -> Bool {
+        guard let context = makeMobileFeatureRequestContext(featureKey: group) else { return false }
+        let forcedRefreshPending = pendingMobileFeatureGroupRefreshes.contains(group)
+        if !force, !forcedRefreshPending,
+           let lastSuccessfulAt = featureLastSuccessfulAt[group] {
+            let age = now().timeIntervalSince(lastSuccessfulAt)
+            if age >= 0, age < (Self.mobileFeatureFreshnessSeconds[group] ?? 60) { return true }
+        }
+        if refreshingFeatureGroups.contains(group) {
+            if force { pendingMobileFeatureGroupRefreshes.insert(group) }
+            return false
+        }
+        let refreshWasForced = force || pendingMobileFeatureGroupRefreshes.remove(group) != nil
+        let groupGeneration = mobileFeatureGroupGenerations[group, default: 0] + 1
+        mobileFeatureGroupGenerations[group] = groupGeneration
+        refreshingFeatureGroups.insert(group)
+        defer {
+            if matchesMobileFeatureContext(context),
+               mobileFeatureGroupGenerations[group] == groupGeneration {
+                refreshingFeatureGroups.remove(group)
+            }
+        }
+
+        let loaded = await operation(context)
+        guard matchesMobileFeatureContext(context),
+              mobileFeatureGroupGenerations[group] == groupGeneration else { return false }
+        let cancelled = Task.isCancelled
+        if cancelled {
+            if refreshWasForced { pendingMobileFeatureGroupRefreshes.insert(group) }
+            refreshingFeatureGroups.remove(group)
+            return false
+        }
+        if loaded && !cancelled {
+            featureLastSuccessfulAt[group] = now()
+            featureMessages.removeValue(forKey: group)
+        } else if !cancelled {
+            let detail = featureMessages[group]
+            let summary = featureLastSuccessfulAt[group] == nil
+                ? "자료를 불러오지 못했습니다."
+                : "새 자료를 확인하지 못했습니다. 마지막 정상 확인 시각을 참고해 주세요."
+            featureMessages[group] = detail.map { "\(summary) \($0)" } ?? "\(summary) 연결 상태를 확인해 주세요."
+        }
+        refreshingFeatureGroups.remove(group)
+        let shouldRefreshAgain = pendingMobileFeatureGroupRefreshes.remove(group) != nil
+        if shouldRefreshAgain && !cancelled {
+            return await refreshMobileFeatureGroup(group, force: true, operation: operation)
+        }
+        return loaded
+    }
+
+    func loadAIDeskIfStale() async {
+        _ = await loadAIDesk(force: false)
     }
 
     func loadAIDesk() async {
+        _ = await loadAIDesk(force: true)
+    }
+
+    private func loadAIDesk(force: Bool) async -> Bool {
         guard canOperate else {
             featureMessages["ai"] = "AI 자문을 사용하려면 모바일 운영 토큰으로 로그인해 주세요."
-            return
+            return false
         }
-        if let providers = await loadMobileFeature("ai-providers", path: "/api/ai/providers") as? [String: Any] {
-            aiProviderStatus = providers
-        }
-        if let monitor = await loadMobileFeature("ai-monitoring", path: "/api/ai/monitoring?limit=40") as? [String: Any] {
-            aiEvents = (monitor["events"] as? [[String: Any]] ?? []).enumerated().map {
-                CoinPilotAIEvent($0.element, index: $0.offset)
+        return await refreshMobileFeatureGroup("ai", force: force) { context in
+            var complete = true
+            if let providers = await self.loadMobileFeature(
+                "ai-providers", path: "/api/ai/providers", context: context
+            ) as? [String: Any] {
+                self.aiProviderStatus = providers
+            } else {
+                complete = false
             }
-            aiConsultations = monitor["consultations"] as? [[String: Any]] ?? []
-            aiEffectiveness = monitor["effectiveness"] as? [String: Any] ?? [:]
+            guard self.isCurrentMobileFeatureContext(context) else { return false }
+            if let monitor = await self.loadMobileFeature(
+                "ai-monitoring", path: "/api/ai/monitoring?limit=40", context: context
+            ) as? [String: Any] {
+                self.aiEvents = (monitor["events"] as? [[String: Any]] ?? []).enumerated().map {
+                    CoinPilotAIEvent($0.element, index: $0.offset)
+                }
+                self.aiConsultations = monitor["consultations"] as? [[String: Any]] ?? []
+                self.aiEffectiveness = monitor["effectiveness"] as? [String: Any] ?? [:]
+            } else {
+                complete = false
+            }
+            guard self.isCurrentMobileFeatureContext(context) else { return false }
+            if let sessions = await self.loadMobileFeature(
+                "ai-sessions", path: "/api/ai/sessions", context: context
+            ) as? [String: Any] {
+                self.aiSessions = (sessions["sessions"] as? [[String: Any]] ?? []).map(CoinPilotAISession.init)
+            } else {
+                complete = false
+            }
+            return complete
         }
-        if let sessions = await loadMobileFeature("ai-sessions", path: "/api/ai/sessions") as? [String: Any] {
-            aiSessions = (sessions["sessions"] as? [[String: Any]] ?? []).map(CoinPilotAISession.init)
-        }
+    }
+
+    func loadResearchDeskIfStale() async {
+        _ = await loadResearchDesk(force: false)
     }
 
     func loadResearchDesk() async {
-        if let value = await loadMobileFeature("strategy-research", path: "/api/strategy-research") as? [String: Any] {
-            strategyResearch = value
+        _ = await loadResearchDesk(force: true)
+    }
+
+    private func loadResearchDesk(force: Bool) async -> Bool {
+        await refreshMobileFeatureGroup("research", force: force) { context in
+            var complete = true
+            if let value = await self.loadMobileFeature(
+                "strategy-research", path: "/api/strategy-research", context: context
+            ) as? [String: Any] {
+                self.strategyResearch = value
+            } else {
+                complete = false
+            }
+            guard self.isCurrentMobileFeatureContext(context) else { return false }
+            if let value = await self.loadMobileFeature(
+                "strategy-readiness", path: "/api/strategy-readiness", context: context
+            ) as? [String: Any] {
+                self.strategyReadiness = value
+            } else {
+                complete = false
+            }
+            guard self.isCurrentMobileFeatureContext(context) else { return false }
+            if let value = await self.loadMobileFeature(
+                "validation", path: "/api/scalping-validation", context: context
+            ) as? [String: Any] {
+                self.scalpingValidation = value
+            } else {
+                complete = false
+            }
+            guard self.isCurrentMobileFeatureContext(context) else { return false }
+            if let value = await self.loadMobileFeature(
+                "paper-validation", path: "/api/paper-validation", context: context
+            ) as? [String: Any] {
+                self.paperValidationState = value
+            } else {
+                complete = false
+            }
+            guard self.isCurrentMobileFeatureContext(context) else { return false }
+            if let value = await self.loadMobileFeature(
+                "momentum-shadow", path: "/api/momentum-shadow", context: context
+            ) as? [String: Any] {
+                self.momentumShadow = value
+            } else {
+                complete = false
+            }
+            guard self.isCurrentMobileFeatureContext(context) else { return false }
+            if let value = await self.loadMobileFeature(
+                "live-execution-evidence", path: "/api/live-execution-evidence", context: context
+            ) as? [String: Any] {
+                self.liveExecutionEvidence = value
+            } else {
+                complete = false
+            }
+            return complete
         }
-        if let value = await loadMobileFeature("strategy-readiness", path: "/api/strategy-readiness") as? [String: Any] {
-            strategyReadiness = value
-        }
-        if let value = await loadMobileFeature("validation", path: "/api/scalping-validation") as? [String: Any] {
-            scalpingValidation = value
-        }
-        if let value = await loadMobileFeature("paper-validation", path: "/api/paper-validation") as? [String: Any] {
-            paperValidationState = value
-        }
-        if let value = await loadMobileFeature("momentum-shadow", path: "/api/momentum-shadow") as? [String: Any] {
-            momentumShadow = value
-        }
-        if let value = await loadMobileFeature("live-execution-evidence", path: "/api/live-execution-evidence") as? [String: Any] {
-            liveExecutionEvidence = value
-        }
-        _ = await loadOptimization()
+    }
+
+    func loadAccountAnalyticsIfStale() async {
+        _ = await loadAccountAnalytics(force: false)
     }
 
     func loadAccountAnalytics() async {
-        if let value = await loadMobileFeature("portfolio-analysis", path: "/api/portfolio-analysis") as? [String: Any] {
-            portfolioAnalysis = value
+        _ = await loadAccountAnalytics(force: true)
+    }
+
+    private func loadAccountAnalytics(force: Bool) async -> Bool {
+        await refreshMobileFeatureGroup("account-analytics", force: force) { context in
+            var complete = true
+            if let value = await self.loadMobileFeature(
+                "portfolio-analysis", path: "/api/portfolio-analysis", context: context
+            ) as? [String: Any] {
+                self.portfolioAnalysis = value
+            } else {
+                complete = false
+            }
+            guard self.isCurrentMobileFeatureContext(context) else { return false }
+            if let value = await self.loadMobileFeature(
+                "statistics", path: "/api/statistics", context: context
+            ) as? [[String: Any]] {
+                self.statistics = value
+            } else {
+                complete = false
+            }
+            return complete
         }
-        if let value = await loadMobileFeature("statistics", path: "/api/statistics") as? [[String: Any]] {
-            statistics = value
-        }
+    }
+
+    func loadOptimizationIfStale() async -> Bool {
+        await loadOptimization(force: false)
     }
 
     @discardableResult
     func loadOptimization() async -> Bool {
-        guard let settings = await loadMobileFeature("optimization", path: "/api/optimization/settings") as? [String: Any] else { return false }
+        await loadOptimization(force: true)
+    }
+
+    private func loadOptimization(force: Bool) async -> Bool {
+        await refreshMobileFeatureGroup("optimization", force: force) { context in
+            let loaded = await self.loadOptimizationData(context: context)
+            if loaded, self.isCurrentMobileFeatureContext(context) {
+                self.featureLastSuccessfulAt["optimization"] = self.now()
+            }
+            return loaded
+        }
+    }
+
+    private func loadOptimizationData(context: MobileFeatureRequestContext) async -> Bool {
+        guard let settings = await loadMobileFeature(
+            "optimization", path: "/api/optimization/settings", context: context
+        ) as? [String: Any] else { return false }
         optimizationSettings = settings
-        if let history = await loadMobileFeature("optimization-history", path: "/api/optimization-history") {
+        guard isCurrentMobileFeatureContext(context) else { return false }
+        if let history = await loadMobileFeature(
+            "optimization-history", path: "/api/optimization-history", context: context
+        ) {
             if let values = history as? [[String: Any]] { optimizationHistory = values }
             else if let object = history as? [String: Any] { optimizationHistory = object["history"] as? [[String: Any]] ?? [] }
         }
-        if let resultPayload = await loadMobileFeature("backtest", path: "/api/backtest/results") {
+        guard isCurrentMobileFeatureContext(context) else { return false }
+        if let resultPayload = await loadMobileFeature(
+            "backtest", path: "/api/backtest/results", context: context
+        ) {
             if let results = resultPayload as? [String: Any] {
                 backtestResults = results
             } else if let results = resultPayload as? [[String: Any]] {
                 backtestResults = ["entries": results]
             }
         }
-        if let config = await loadMobileFeature("optimal-config", path: "/api/optimal-config") as? [String: Any] {
+        guard isCurrentMobileFeatureContext(context) else { return false }
+        if let config = await loadMobileFeature(
+            "optimal-config", path: "/api/optimal-config", context: context
+        ) as? [String: Any] {
             optimalConfig = config
         }
-        if let presets = await loadMobileFeature("investment-presets", path: "/api/investment-presets") as? [String: Any] {
+        guard isCurrentMobileFeatureContext(context) else { return false }
+        if let presets = await loadMobileFeature(
+            "investment-presets", path: "/api/investment-presets", context: context
+        ) as? [String: Any] {
             investmentPresets = presets["presets"] as? [[String: Any]] ?? []
         }
         return true
@@ -3105,32 +4088,30 @@ final class CoinPilotStore: ObservableObject {
         return true
     }
 
-    private func loadMobileFeature(_ key: String, path: String) async -> Any? {
-        guard canOperate, let serverURL = currentServerURL, let token = tokens.token(for: serverURL) else {
-            featureMessages[key] = "이 화면의 서버 권한을 확인할 수 없습니다. 모바일 운영 토큰으로 로그인해 주세요."
-            return nil
-        }
-        let generation = requestGeneration
-        let workspace = activeWorkspace
+    private func loadMobileFeature(
+        _ key: String,
+        path: String,
+        context suppliedContext: MobileFeatureRequestContext? = nil
+    ) async -> Any? {
+        guard let context = suppliedContext ?? makeMobileFeatureRequestContext(featureKey: key) else { return nil }
+        guard isCurrentMobileFeatureContext(context) else { return nil }
+        let serverURL = context.serverURL
         let featureGeneration = mobileFeatureRequestGenerations[key, default: 0] + 1
         mobileFeatureRequestGenerations[key] = featureGeneration
         loadingFeatures.insert(key)
         featureMessages.removeValue(forKey: key)
         let isCurrentRequest = {
-            !Task.isCancelled &&
-                generation == self.requestGeneration &&
-                self.currentServerURL == serverURL &&
-                self.activeWorkspace == workspace &&
+            self.isCurrentMobileFeatureContext(context) &&
                 self.mobileFeatureRequestGenerations[key] == featureGeneration
         }
         defer {
-            if generation == requestGeneration,
+            if matchesMobileFeatureContext(context),
                mobileFeatureRequestGenerations[key] == featureGeneration {
                 loadingFeatures.remove(key)
             }
         }
         do {
-            let response = try await api.mobileRead(path: path, at: serverURL, token: token)
+            let response = try await api.mobileRead(path: path, at: serverURL, token: context.token)
             guard isCurrentRequest() else { return nil }
             guard (200..<300).contains(response.statusCode),
                   let object = try? Self.jsonObject(response.body),
@@ -3930,12 +4911,26 @@ final class CoinPilotStore: ObservableObject {
         investmentPresets = []
         featureMessages = [:]
         loadingFeatures = []
+        refreshingFeatureGroups = []
+        featureLastSuccessfulAt = [:]
+        pendingMobileFeatureGroupRefreshes = []
         mobileFeatureRequestGenerations = [:]
         isRunningFeatureAction = false
         isRecordingSnapshot = false
         rawResponses = [:]
         localMarketData = nil
         localMarketDataError = nil
+        offlineReplayResult = nil
+        offlineReplayResults = []
+        isRunningOfflineReplay = false
+        offlineReplayMessage = nil
+        offlineReplayPersistenceMessage = nil
+        offlineReplayGeneration += 1
+        offlineReplaySessionGeneration += 1
+        isPreparingOfflineReplaySession = false
+        isUpdatingOfflineReplaySession = false
+        offlineReplaySessionOperationInFlight = false
+        clearOfflineReplaySessionState()
         liveAccessKeyDraft = ""
         liveSecretKeyDraft = ""
         liveCredentialMessage = nil
@@ -3953,6 +4948,7 @@ final class CoinPilotStore: ObservableObject {
         guard let localMarketDataSource else {
             localMarketData = nil
             localMarketDataError = CoinPilotBundledMarketDataError.missingResource.localizedDescription
+            await markSessionRecoveryIfCheckpointExists()
             return
         }
 
@@ -3980,6 +4976,7 @@ final class CoinPilotStore: ObservableObject {
             } else {
                 localMarketDataError = CoinPilotBundledMarketDataError.malformed.localizedDescription
             }
+            await markSessionRecoveryIfCheckpointExists()
             return
         }
 
@@ -3988,6 +4985,16 @@ final class CoinPilotStore: ObservableObject {
         if !dataset.markets.contains(where: { $0.market == selectedMarket }) {
             selectedMarket = dataset.markets.first?.market ?? ""
         }
+        do {
+            offlineReplayResults = try await offlineReplayResultStore.load()
+            offlineReplayResult = offlineReplayResults.first
+            offlineReplayPersistenceMessage = nil
+        } catch {
+            offlineReplayResults = []
+            offlineReplayResult = nil
+            offlineReplayPersistenceMessage = "이 기기에 저장된 과거 재생 기록을 읽지 못했습니다."
+        }
+        await restoreOfflineReplaySessionCheckpoint()
     }
 
     func localMarketIntervals(for marketCode: String) -> [Int] {
@@ -4012,9 +5019,9 @@ final class CoinPilotStore: ObservableObject {
 
     func localMarketTimestampLabel(for marketCode: String, interval: Int? = nil) -> String {
         guard let timestamp = localMarketLatestCandle(for: marketCode, interval: interval)?.timestamp else {
-            return "원본 캔들 시각 미제공"
+            return "캔들 시각 정보가 없어요"
         }
-        return "원본 캔들 · \(CoinPilotFormatting.utcMarketTimestamp(timestamp))"
+        return "캔들 시각 · \(CoinPilotFormatting.utcMarketTimestamp(timestamp))"
     }
 
     func localMarketChartWindowLabel(for marketCode: String, interval: Int) -> String? {
@@ -4108,12 +5115,60 @@ enum CoinPilotFormatting {
         return number(value, fractionDigits: 8)
     }
 
+    /// 차트 축처럼 좁은 공간에 넣는 원화 표기. 만·억 단위로 줄입니다.
+    static func compactWon(_ value: Double?, unavailable: String = "금액 미제공") -> String {
+        guard let value, value.isFinite else { return unavailable }
+        let sign = value < 0 ? "−" : ""
+        let magnitude = abs(value)
+        if magnitude >= 100_000_000 {
+            let eok = magnitude / 100_000_000
+            let text = eok >= 100 ? number(eok.rounded(), fractionDigits: 0) : number(eok, fractionDigits: 1)
+            return "\(sign)\(text)억원"
+        }
+        if magnitude >= 10_000 {
+            return "\(sign)\(number((magnitude / 10_000).rounded(), fractionDigits: 0))만원"
+        }
+        return "\(sign)\(number(magnitude.rounded(), fractionDigits: 0))원"
+    }
+
+    /// 자산 기록 그래프의 가로축 시각. 기간에 따라 시각 또는 날짜를 보입니다.
+    static func historyAxisLabel(_ value: String?, period: CoinPilotHistoryPeriod) -> String {
+        guard let value, let date = parseDate(value) else { return "시각 미제공" }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "ko_KR")
+        switch period {
+        case .hour, .day:
+            formatter.dateFormat = "a h:mm"
+        case .week, .month:
+            formatter.dateFormat = "M월 d일"
+        }
+        return formatter.string(from: date)
+    }
+
+    /// UTC 캔들 시각의 짧은 표기 (예: "09.29 14:05"). 시간대 변환 없이 원본 시각을 유지합니다.
+    static func shortUtcTimestamp(_ value: String?) -> String {
+        guard let value, let date = parseDate(value) else { return "시각 미제공" }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "MM.dd HH:mm"
+        return formatter.string(from: date)
+    }
+
     static func dateTime(_ value: String?, unavailable: String = "시각 미제공") -> String {
         guard let value, let date = parseDate(value) else { return unavailable }
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "ko_KR")
         formatter.dateFormat = "M월 d일 a h:mm"
         return formatter.string(from: date)
+    }
+
+    static func localDateTime(_ value: Date?, unavailable: String = "시각 미제공") -> String {
+        guard let value else { return unavailable }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "ko_KR")
+        formatter.dateFormat = "M월 d일 a h:mm"
+        return formatter.string(from: value)
     }
 
     static func marketTimestamp(_ value: String?, label: String) -> String {

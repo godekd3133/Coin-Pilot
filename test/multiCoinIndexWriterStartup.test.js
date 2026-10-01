@@ -83,15 +83,21 @@ test('legacy dashboard startup adopts the lock acquired before trader constructi
   const exit = exitHandlerOptions(events);
   let constructorLockOwner;
   let dashboardStore;
+  let traderMarketDataSource;
+  let dashboardMarketDataSource;
+  const sharedMarketDataSource = { id: 'shared-public-market-source' };
 
   const runtime = await runLegacyMultiCoinRuntime(config, {
-    createTrader: () => {
+    createPublicMarketDataSource: () => sharedMarketDataSource,
+    createTrader: marketDataSource => {
       assert.equal(fs.existsSync(lockPath), true, 'profile lock must precede portfolio hydration');
+      traderMarketDataSource = marketDataSource;
       constructorLockOwner = JSON.parse(fs.readFileSync(lockPath, 'utf8'));
       return makeFakeTrader(config, events);
     },
     createDashboard: (trader, port, options) => {
       assert.equal(port, config.dashboardPort);
+      dashboardMarketDataSource = options.publicMarketDataSource;
       dashboardStore = options.manualOrderIdempotencyStore;
       return {
         start: async () => {
@@ -112,6 +118,8 @@ test('legacy dashboard startup adopts the lock acquired before trader constructi
   });
 
   assert.equal(runtime.manualOrderIdempotencyStore, dashboardStore);
+  assert.strictEqual(traderMarketDataSource, sharedMarketDataSource);
+  assert.strictEqual(dashboardMarketDataSource, sharedMarketDataSource);
   assert.deepEqual(events, ['dashboard-start', 'trader-start']);
   assert.equal(fs.existsSync(lockPath), true, 'the lock remains owned for the dashboard runtime lifetime');
   assert.equal(fs.existsSync(journalLockPath), true, 'the journal lock remains owned for the dashboard runtime lifetime');
@@ -205,18 +213,26 @@ test('headless SIGTERM shutdown keeps the lock through trader stop and then rele
   const journalLockPath = journalWriterLockPath(config);
   const events = [];
   const exit = exitHandlerOptions(events);
+  const sharedMarketDataSource = { id: 'headless-public-market-source' };
+  let traderMarketDataSource;
 
   await runLegacyMultiCoinRuntime(config, {
-    createTrader: () => makeFakeTrader(config, events, {
-      start: async () => {
-        assert.equal(fs.existsSync(lockPath), true);
-      }
-    }),
+    createPublicMarketDataSource: () => sharedMarketDataSource,
+    createTrader: marketDataSource => {
+      traderMarketDataSource = marketDataSource;
+      return makeFakeTrader(config, events, {
+        start: async () => {
+          assert.equal(fs.existsSync(lockPath), true);
+        }
+      });
+    },
     waitBeforeTraderStart: async () => {},
     exitHandlerOptions: exit
   });
 
   assert.equal(fs.existsSync(lockPath), true);
+  assert.strictEqual(traderMarketDataSource, sharedMarketDataSource,
+    'headless trading uses the public source even without a DashboardServer');
   assert.equal(fs.existsSync(journalLockPath), true);
   exit.processApi.emit('SIGTERM');
   assert.equal(await exit.exited, 0);

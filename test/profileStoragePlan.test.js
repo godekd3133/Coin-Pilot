@@ -37,9 +37,12 @@ test('same-cwd contexts with distinct portfolios share only cwd and project-root
     ]
   });
 
-  for (const id of ['virtualPortfolio', 'manualOrderIdempotency', 'profileWriterLock']) {
+  for (const id of ['virtualPortfolio', 'publicMarketSnapshot', 'manualOrderIdempotency', 'profileWriterLock']) {
     assert.notEqual(resource(plan, 'profile-a', id).absolutePath, resource(plan, 'profile-b', id).absolutePath);
   }
+  assert.equal(resource(plan, 'profile-a', 'publicMarketSnapshot').absolutePath,
+    '/fixture/portfolios/a.json.market_snapshot.json');
+  assert.equal(resource(plan, 'profile-a', 'publicMarketSnapshot').scope, 'profile-derived');
   assert.equal(resource(plan, 'profile-a', 'manualOrderIdempotency').scope, 'profile-derived');
   assert.equal(resource(plan, 'profile-a', 'profileWriterLock').scope, 'profile-derived');
 
@@ -202,6 +205,16 @@ test('COINPILOT_STATE_DIR unifies dashboard and runtime optimizer paths across c
     assert.equal(resource(plan, 'systemd-runtime', id).absolutePath, path.join('/var/lib/coinpilot-live', fileName));
     assert.equal(resource(plan, 'admin-runtime', id).absolutePath, path.join('/var/lib/coinpilot-live', fileName));
     assert.equal(resource(plan, 'systemd-runtime', id).resolutionBase, 'COINPILOT_STATE_DIR');
+  }
+  for (const [id, fileName] of [
+    ['optimalConfigWriterLock.dashboard', 'optimal_config.json.optimizer_config_writer.lock'],
+    ['optimalConfigWriterLock.cwdOptimizer', 'optimal_config.json.optimizer_config_writer.lock'],
+    ['optimizationHistoryWriterLock.dashboard', 'optimization_history.json.optimizer_history_writer.lock'],
+    ['optimizationHistoryWriterLock.cwdOptimizer', 'optimization_history.json.optimizer_history_writer.lock']
+  ]) {
+    const expectedPath = path.join('/var/lib/coinpilot-live', fileName);
+    assert.equal(resource(plan, 'systemd-runtime', id).absolutePath, expectedPath);
+    assert.equal(resource(plan, 'admin-runtime', id).absolutePath, expectedPath);
   }
 });
 

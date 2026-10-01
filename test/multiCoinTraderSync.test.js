@@ -422,10 +422,13 @@ test('durable intent is fsynced before POST and UUID-less timeout blocks only it
   });
   markLiveTraderExchangeReady(trader);
   let intentWasDurableBeforePost = false;
-  let evidenceFsyncCalls = 0;
+  let evidenceFileFsyncCalls = 0;
+  let evidenceDirectoryFsyncCalls = 0;
   const originalFsync = fs.fsyncSync;
   fs.fsyncSync = descriptor => {
-    evidenceFsyncCalls += 1;
+    const stat = fs.fstatSync(descriptor);
+    if (stat.isFile()) evidenceFileFsyncCalls += 1;
+    if (stat.isDirectory()) evidenceDirectoryFsyncCalls += 1;
     return originalFsync(descriptor);
   };
   trader.upbit.order = async (...args) => {
@@ -434,7 +437,8 @@ test('durable intent is fsynced before POST and UUID-less timeout blocks only it
     intentWasDurableBeforePost = eventsAtDispatch.length === 1 &&
       eventsAtDispatch[0].eventType === 'ORDER_INTENT' &&
       typeof eventsAtDispatch[0].clientIntentId === 'string' &&
-      evidenceFsyncCalls === 1 &&
+      evidenceFileFsyncCalls === 1 &&
+      evidenceDirectoryFsyncCalls === 1 &&
       args[5] === eventsAtDispatch[0].identifier;
     throw new Error('response timeout after POST dispatch');
   };

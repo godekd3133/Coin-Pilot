@@ -185,6 +185,7 @@ export function createMockTrader() {
       return selected.filter(Boolean).map(market => ({
         market,
         trade_price: prices[market] || 1_000,
+        trade_timestamp: Date.now(),
         acc_trade_price_24h: 10_000_000_000,
         signed_change_rate: 0.001,
         high_price: (prices[market] || 1_000) * 1.02,

@@ -4,6 +4,7 @@ import CryptoKit
 private actor DeferredCoinPilotAPI: CoinPilotAPIProviding {
     private var heldHosts: Set<String>
     private var heldMarketPaths: Set<String>
+    private var heldFeaturePaths: Set<String>
     private var marketRows: [[String: Any]]
     private var marketSnapshotOverride: [String: Any]?
     private let requiresAuth: Bool
@@ -12,6 +13,8 @@ private actor DeferredCoinPilotAPI: CoinPilotAPIProviding {
     private let isReadOnlyObserver: Bool
     private var pending: [String: CheckedContinuation<CoinPilotHTTPResponse, Error>] = [:]
     private var waiters: [String: CheckedContinuation<Void, Never>] = [:]
+    private var pendingFeatureReads: [String: CheckedContinuation<CoinPilotHTTPResponse, Error>] = [:]
+    private var featureReadWaiters: [String: CheckedContinuation<Void, Never>] = [:]
     private var pendingMarketReads: [String: CheckedContinuation<CoinPilotHTTPResponse, Error>] = [:]
     private var marketReadWaiters: [String: CheckedContinuation<Void, Never>] = [:]
     private var readRequests = 0
@@ -31,6 +34,7 @@ private actor DeferredCoinPilotAPI: CoinPilotAPIProviding {
     init(
         heldAccountHosts: Set<String> = [],
         heldMarketPaths: Set<String> = [],
+        heldFeaturePaths: Set<String> = [],
         marketRows: [[String: Any]] = [],
         requiresAuth: Bool = false,
         statusOverride: [String: Any] = [:],
@@ -40,6 +44,7 @@ private actor DeferredCoinPilotAPI: CoinPilotAPIProviding {
     ) {
         heldHosts = heldAccountHosts
         self.heldMarketPaths = heldMarketPaths
+        self.heldFeaturePaths = heldFeaturePaths
         self.marketRows = marketRows
         self.requiresAuth = requiresAuth
         self.statusOverride = statusOverride
@@ -74,6 +79,12 @@ private actor DeferredCoinPilotAPI: CoinPilotAPIProviding {
             return try await withCheckedThrowingContinuation { continuation in
                 pending[host] = continuation
                 waiters.removeValue(forKey: host)?.resume()
+            }
+        }
+        if heldFeaturePaths.contains(path) {
+            return try await withCheckedThrowingContinuation { continuation in
+                pendingFeatureReads[path] = continuation
+                featureReadWaiters.removeValue(forKey: path)?.resume()
             }
         }
         if path.hasPrefix("/api/market/candles/"), heldMarketPaths.contains(path) {
@@ -141,6 +152,19 @@ private actor DeferredCoinPilotAPI: CoinPilotAPIProviding {
         )
     }
 
+    func waitForHeldFeaturePath(_ path: String) async {
+        if pendingFeatureReads[path] != nil { return }
+        await withCheckedContinuation { continuation in
+            featureReadWaiters[path] = continuation
+        }
+    }
+
+    func releaseHeldFeaturePath(_ path: String, body: [String: Any], statusCode: Int = 200) {
+        pendingFeatureReads.removeValue(forKey: path)?.resume(
+            returning: Self.response(body, statusCode: statusCode)
+        )
+    }
+
     func waitForHeldMarketPath(_ path: String) async {
         if pendingMarketReads[path] != nil { return }
         await withCheckedContinuation { continuation in
@@ -168,6 +192,7 @@ private actor DeferredCoinPilotAPI: CoinPilotAPIProviding {
     func setCancelledPaths(_ paths: Set<String>) { cancelledPaths = paths }
     func setHeldHosts(_ hosts: Set<String>) { heldHosts = hosts }
     func setHeldMarketPaths(_ paths: Set<String>) { heldMarketPaths = paths }
+    func setHeldFeaturePaths(_ paths: Set<String>) { heldFeaturePaths = paths }
     func setMarketRows(_ rows: [[String: Any]]) { marketRows = rows }
     func setMarketSnapshot(_ snapshot: [String: Any]) { marketSnapshotOverride = snapshot }
 
@@ -202,6 +227,30 @@ private actor DeferredCoinPilotAPI: CoinPilotAPIProviding {
             ])
         }
         if path == "/api/today-summary" { return response(["realizedProfit": 0]) }
+        if path == "/api/news?limit=80" {
+            return response([
+                "news": [["id": "fixture-news", "title": "테스트 기사", "timestamp": "2026-09-30T12:00:00.000Z"]],
+                "sentiment": ["overall": "neutral", "count": 1]
+            ])
+        }
+        if path == "/api/ai/providers" { return response(["providers": [["name": "fixture", "ready": true]]]) }
+        if path == "/api/ai/monitoring?limit=40" {
+            return response(["events": [["id": "fixture-event"]], "consultations": [], "effectiveness": [:]])
+        }
+        if path == "/api/ai/sessions" { return response(["sessions": [["id": "fixture-session"]]]) }
+        if path == "/api/portfolio-analysis" { return response(["summary": ["totalAssets": totalAssets], "holdings": []]) }
+        if path == "/api/statistics" { return response([["key": "fixture-stat", "value": 1]]) }
+        if path == "/api/strategy-research" { return response(["available": true, "generatedAt": "fixture"]) }
+        if path == "/api/strategy-readiness" { return response(["status": "fixture", "available": true]) }
+        if path == "/api/scalping-validation" { return response(["results": [["coin": "KRW-BTC", "status": "fixture"]]]) }
+        if path == "/api/paper-validation" { return response(["active": false, "available": true]) }
+        if path == "/api/momentum-shadow" { return response(["available": true, "books": [["name": "fixture"]]]) }
+        if path == "/api/live-execution-evidence" { return response(["entries": [["eventType": "fixture"]]]) }
+        if path == "/api/optimization/settings" { return response(["enabled": true, "interval": 60_000]) }
+        if path == "/api/optimization-history" { return response(["history": [["id": "fixture-history"]]]) }
+        if path == "/api/backtest/results" { return response(["entries": [["id": "fixture-backtest"]]]) }
+        if path == "/api/optimal-config" { return response(["parameters": [String: Any]()]) }
+        if path == "/api/investment-presets" { return response(["presets": [["id": "fixture-preset"]]]) }
         if path == "/api/paper-validation/summary" {
             return response([
                 "schema": "coinpilot.paper-validation-mobile-summary.v1",
@@ -323,6 +372,49 @@ private actor DeferredBundledMarketDataLoader: CoinPilotBundledMarketDataLoading
     }
 }
 
+private actor MemoryCoinPilotOfflineReplayStore: CoinPilotOfflineReplayResultPersisting {
+    private var results: [CoinPilotOfflineReplay.Result] = []
+    private var saveCount = 0
+
+    func load() async throws -> [CoinPilotOfflineReplay.Result] { results }
+
+    func save(_ result: CoinPilotOfflineReplay.Result) async throws -> [CoinPilotOfflineReplay.Result] {
+        saveCount += 1
+        results.removeAll {
+            $0.metadata.datasetFingerprint == result.metadata.datasetFingerprint &&
+                $0.metadata.market == result.metadata.market &&
+                $0.metadata.intervalMinutes == result.metadata.intervalMinutes &&
+                $0.metadata.configVersion == result.metadata.configVersion &&
+                $0.metadata.engineVersion == result.metadata.engineVersion
+        }
+        results.insert(result, at: 0)
+        return results
+    }
+
+    func numberOfSaves() -> Int { saveCount }
+}
+
+private actor MemoryCoinPilotOfflineReplaySessionStore: CoinPilotOfflineReplaySessionPersisting {
+    private var checkpoint: CoinPilotOfflineReplaySessionCheckpoint?
+    private var saveCount = 0
+
+    func loadCheckpoint() async throws -> CoinPilotOfflineReplaySessionCheckpoint? { checkpoint }
+
+    func saveCheckpoint(_ checkpoint: CoinPilotOfflineReplaySessionCheckpoint) async throws {
+        guard checkpoint.isWellFormed else {
+            throw CoinPilotOfflineReplaySessionCheckpointError.invalidCheckpoint
+        }
+        self.checkpoint = checkpoint
+        saveCount += 1
+    }
+
+    func clearCheckpoint() async throws {
+        checkpoint = nil
+    }
+
+    func numberOfSaves() -> Int { saveCount }
+}
+
 @MainActor
 @main
 struct CoinPilotStoreTests {
@@ -342,9 +434,15 @@ struct CoinPilotStoreTests {
         try await bundledPreviewBuildIgnoresThePreviousServerProfile()
         try await bundledPreviewMissingResourceDoesNotFallBackToServer()
         try await refreshValidatesModeBeforePrivateReads()
+        try await newsFeatureRefreshUsesTTLAndPreservesLastGoodData()
+        try await featureRefreshCoalescesAndDiscardsResponsesAfterLogout()
+        try await forcedFeatureRefreshRunsAfterAnInFlightAutomaticRefresh()
+        try await detailFeatureGroupsRefreshIndependentlyByTTL()
         try await latestMarketDetailRequestWins()
         try localMarketPackRejectsInvalidData()
         try await bundledLocalMarketModeIsStrictReadOnlyAndOffline()
+        try await bundledOfflineReplayUsesThePackAndStaysOffline()
+        try await bundledOfflineReplaySessionResumesWithoutNetworkOrOrders()
         try await bundledLocalMarketMissingResourceFailsClosed()
         try await bundledLocalLoadKeepsTheStoreResponsive()
         try await bundledLocalChartUsesOnlyTheNewestBoundedWindow()
@@ -357,10 +455,11 @@ struct CoinPilotStoreTests {
         try optionalMarketTimestampsDecodeWithoutChangingExistingModelFields()
         try marketTimestampFormattingKeepsSourceAndFetchTimesDistinct()
         try await completeMarketSnapshotUsesServerFetchedAt()
+        try await lastGoodMarketSnapshotRemainsStaleAndBlocksOrders()
         try await staleMarketSourceCannotEnableManualOrder()
         try await incompleteMarketSnapshotKeepsPricesVisibleAndMarksStale()
         try await staleMarketListAndInvalidFetchedAtNeverMarkCurrent()
-        print("CoinPilotStore: 33 scenarios passed")
+        print("CoinPilotStore: 38 scenarios passed")
     }
 
     private static func bundledPreviewMissingResourceDoesNotFallBackToServer() async throws {
@@ -539,6 +638,196 @@ struct CoinPilotStoreTests {
                      "Cancellation should preserve the selected chart without presenting a connection error.")
     }
 
+    private static func newsFeatureRefreshUsesTTLAndPreservesLastGoodData() async throws {
+        var currentNow = Date(timeIntervalSince1970: 1_800_000_000)
+        let api = DeferredCoinPilotAPI(
+            requiresAuth: true,
+            loginTokenScope: "mobile_operator",
+            isReadOnlyObserver: false
+        )
+        let store = CoinPilotStore(
+            api: api,
+            tokens: MemoryCoinPilotTokens(),
+            configuredDataMode: "server",
+            now: { currentNow }
+        )
+        store.serverDraft = "https://news-feature-freshness.example"
+        store.tokenDraft = "synthetic-mobile-operator-token"
+        let connected = await store.signIn()
+        precondition(connected && store.canOperate, "The feature freshness test requires a signed-in operator.")
+
+        await store.loadNewsIfStale()
+        let newsPath = "/api/news?limit=80"
+        let firstReadCount = await api.recordedReadPaths().filter { $0 == newsPath }.count
+        let firstSuccessAt = store.featureLastSuccessfulAt["news"]
+        precondition(firstReadCount == 1 && store.newsArticles.first?.title == "테스트 기사",
+                     "The first visible News load should fetch and show the server data.")
+        precondition(firstSuccessAt == currentNow,
+                     "The freshness time must reflect the app's successful fetch, not the server report timestamp.")
+
+        currentNow = currentNow.addingTimeInterval(60)
+        await store.loadNewsIfStale()
+        let withinTTLReadCount = await api.recordedReadPaths().filter { $0 == newsPath }.count
+        precondition(withinTTLReadCount == firstReadCount,
+                     "Returning to the visible News page inside its TTL must not add another request.")
+
+        await store.loadNews()
+        let forcedReadCount = await api.recordedReadPaths().filter { $0 == newsPath }.count
+        let forcedSuccessAt = store.featureLastSuccessfulAt["news"]
+        precondition(forcedReadCount == firstReadCount + 1 && forcedSuccessAt == currentNow,
+                     "Manual refresh must bypass TTL and advance the last-success time.")
+
+        currentNow = currentNow.addingTimeInterval(60)
+        await api.setFailedPaths([newsPath])
+        await store.loadNews()
+        precondition(store.newsArticles.first?.title == "테스트 기사",
+                     "A failed refresh must keep the last successful News data.")
+        precondition(store.featureLastSuccessfulAt["news"] == forcedSuccessAt,
+                     "A failed request must not move the last-success timestamp.")
+        precondition(store.featureMessages["news"] != nil,
+                     "A failed refresh must remain visible next to the last successful timestamp.")
+    }
+
+    private static func featureRefreshCoalescesAndDiscardsResponsesAfterLogout() async throws {
+        let newsPath = "/api/news?limit=80"
+        let api = DeferredCoinPilotAPI(
+            heldFeaturePaths: [newsPath],
+            requiresAuth: true,
+            loginTokenScope: "mobile_operator",
+            isReadOnlyObserver: false
+        )
+        let store = CoinPilotStore(api: api, tokens: MemoryCoinPilotTokens(), configuredDataMode: "server")
+        store.serverDraft = "https://news-feature-coalesce.example"
+        store.tokenDraft = "synthetic-mobile-operator-token"
+        let connected = await store.signIn()
+        precondition(connected && store.canOperate, "The coalescing test requires a signed-in operator.")
+
+        let firstLoad = Task { await store.loadNewsIfStale() }
+        await api.waitForHeldFeaturePath(newsPath)
+        let duplicateLoad = Task { await store.loadNewsIfStale() }
+        await duplicateLoad.value
+        let heldReadCount = await api.recordedReadPaths().filter { $0 == newsPath }.count
+        precondition(heldReadCount == 1,
+                     "Concurrent refresh triggers for one visible feature group must share one request.")
+
+        store.logOut()
+        await api.releaseHeldFeaturePath(newsPath, body: [
+            "news": [["id": "late-news", "title": "늦은 기사"]],
+            "sentiment": ["overall": "neutral", "count": 1]
+        ])
+        await firstLoad.value
+        precondition(store.newsArticles.isEmpty && store.featureLastSuccessfulAt["news"] == nil,
+                     "A detail response from the old authenticated workspace must not repopulate data after logout.")
+    }
+
+    private static func forcedFeatureRefreshRunsAfterAnInFlightAutomaticRefresh() async throws {
+        let newsPath = "/api/news?limit=80"
+        let api = DeferredCoinPilotAPI(
+            heldFeaturePaths: [newsPath],
+            requiresAuth: true,
+            loginTokenScope: "mobile_operator",
+            isReadOnlyObserver: false
+        )
+        let store = CoinPilotStore(api: api, tokens: MemoryCoinPilotTokens(), configuredDataMode: "server")
+        store.serverDraft = "https://news-feature-forced-refresh.example"
+        store.tokenDraft = "synthetic-mobile-operator-token"
+        let connected = await store.signIn()
+        precondition(connected && store.canOperate, "The refresh priority test requires a signed-in operator.")
+
+        let automaticLoad = Task { await store.loadNewsIfStale() }
+        await api.waitForHeldFeaturePath(newsPath)
+        await store.loadNews()
+        let firstReadCount = await api.recordedReadPaths().filter { $0 == newsPath }.count
+        precondition(firstReadCount == 1,
+                     "A manual refresh must not create a duplicate request while the automatic read is in flight.")
+
+        await api.releaseHeldFeaturePath(newsPath, body: [
+            "news": [["id": "initial", "title": "첫 자료"]],
+            "sentiment": ["overall": "neutral", "count": 1]
+        ])
+        await api.waitForHeldFeaturePath(newsPath)
+        let rerunCount = await api.recordedReadPaths().filter { $0 == newsPath }.count
+        precondition(rerunCount == 2,
+                     "The forced request must run once after the active automatic request completes.")
+        await api.releaseHeldFeaturePath(newsPath, body: [
+            "news": [["id": "refreshed", "title": "새 자료"]],
+            "sentiment": ["overall": "neutral", "count": 1]
+        ])
+        await automaticLoad.value
+        precondition(store.newsArticles.first?.title == "새 자료",
+                     "The forced refresh result should replace the earlier automatic response.")
+    }
+
+    private static func detailFeatureGroupsRefreshIndependentlyByTTL() async throws {
+        var currentNow = Date(timeIntervalSince1970: 1_800_000_000)
+        let api = DeferredCoinPilotAPI(
+            requiresAuth: true,
+            loginTokenScope: "mobile_operator",
+            isReadOnlyObserver: false
+        )
+        let store = CoinPilotStore(
+            api: api,
+            tokens: MemoryCoinPilotTokens(),
+            configuredDataMode: "server",
+            now: { currentNow }
+        )
+        store.serverDraft = "https://feature-groups-freshness.example"
+        store.tokenDraft = "synthetic-mobile-operator-token"
+        let connected = await store.signIn()
+        precondition(connected && store.canOperate, "The detail refresh test requires a signed-in operator.")
+
+        await store.loadNewsIfStale()
+        await store.loadAIDeskIfStale()
+        await store.loadAccountAnalyticsIfStale()
+        await store.loadResearchDeskIfStale()
+        _ = await store.loadOptimizationIfStale()
+        precondition(store.featureLastSuccessfulAt["news"] == currentNow &&
+                     store.featureLastSuccessfulAt["ai"] == currentNow &&
+                     store.featureLastSuccessfulAt["account-analytics"] == currentNow &&
+                     store.featureLastSuccessfulAt["research"] == currentNow &&
+                     store.featureLastSuccessfulAt["optimization"] == currentNow,
+                     "Each visible detail group should record its app fetch time independently.")
+
+        let initialPaths = await api.recordedReadPaths()
+        let initialNewsCount = initialPaths.filter { $0 == "/api/news?limit=80" }.count
+        let initialAICount = initialPaths.filter { ["/api/ai/providers", "/api/ai/monitoring?limit=40", "/api/ai/sessions"].contains($0) }.count
+        let initialAnalyticsCount = initialPaths.filter { ["/api/portfolio-analysis", "/api/statistics"].contains($0) }.count
+        let researchPaths: Set<String> = [
+            "/api/strategy-research", "/api/strategy-readiness", "/api/scalping-validation",
+            "/api/paper-validation", "/api/momentum-shadow", "/api/live-execution-evidence"
+        ]
+        let optimizationPaths: Set<String> = [
+            "/api/optimization/settings", "/api/optimization-history", "/api/backtest/results",
+            "/api/optimal-config", "/api/investment-presets"
+        ]
+        let initialResearchCount = initialPaths.filter { researchPaths.contains($0) }.count
+        let initialOptimizationCount = initialPaths.filter { optimizationPaths.contains($0) }.count
+
+        currentNow = currentNow.addingTimeInterval(61)
+        await store.loadNewsIfStale()
+        await store.loadAIDeskIfStale()
+        await store.loadAccountAnalyticsIfStale()
+        await store.loadResearchDeskIfStale()
+        _ = await store.loadOptimizationIfStale()
+        let refreshedPaths = await api.recordedReadPaths()
+        let refreshedNewsCount = refreshedPaths.filter { $0 == "/api/news?limit=80" }.count
+        let refreshedAICount = refreshedPaths.filter { ["/api/ai/providers", "/api/ai/monitoring?limit=40", "/api/ai/sessions"].contains($0) }.count
+        let refreshedAnalyticsCount = refreshedPaths.filter { ["/api/portfolio-analysis", "/api/statistics"].contains($0) }.count
+        let refreshedResearchCount = refreshedPaths.filter { researchPaths.contains($0) }.count
+        let refreshedOptimizationCount = refreshedPaths.filter { optimizationPaths.contains($0) }.count
+
+        precondition(refreshedNewsCount == initialNewsCount,
+                     "News must respect its five-minute foreground TTL.")
+        precondition(refreshedAICount == initialAICount + 3,
+                     "AI status, monitoring, and sessions must refresh after the one-minute TTL.")
+        precondition(refreshedAnalyticsCount == initialAnalyticsCount + 2,
+                     "Portfolio analysis and statistics must refresh after the one-minute TTL.")
+        precondition(refreshedResearchCount == initialResearchCount,
+                     "Research and optimization data must respect their five-minute TTL.")
+        precondition(refreshedOptimizationCount == initialOptimizationCount,
+                     "Optimization details must not be fetched again inside their own five-minute TTL.")
+    }
+
     private static func localMarketPackRejectsInvalidData() throws {
         let validData = localMarketFixture()
         let decoded = try CoinPilotBundledMarketData.decode(data: validData)
@@ -634,17 +923,19 @@ struct CoinPilotStoreTests {
             api: api,
             tokens: MemoryCoinPilotTokens(),
             localMarketDataSource: CoinPilotBundledMarketDataSource(data: localMarketFixture()),
-            configuredDataMode: "bundled-local"
+            configuredDataMode: "bundled-local",
+            offlineReplayResultStore: MemoryCoinPilotOfflineReplayStore(),
+            offlineReplaySessionStore: MemoryCoinPilotOfflineReplaySessionStore()
         )
         await store.bootstrap()
 
         precondition(store.isBundledLocalMarketData && !store.isBundledPreview,
                      "The build-selected local profile must ignore the previous Server preference.")
         precondition(store.marketCandleOriginLabel(candleCount: 4)
-                     == "앱에 포함된 공개 자료 · 캔들 4개",
+                     == "앱에 저장된 고정 시세 자료 · 캔들 4개",
                      "Bundled-local details must identify the static app-pack data source.")
         precondition(store.marketQuoteFreshnessMessage(for: "KRW-BTC")
-                     == "앱에 포함된 공개 시세 자료입니다. 최신성 자동 확인은 제공되지 않습니다.",
+                     == "출처와 최신 여부는 온라인으로 확인하지 않습니다.",
                      "Bundled-local screens must not imply server-verified market freshness.")
         precondition(store.phase == .dashboard && store.localMarketData?.markets.count == 1,
                      "The installed local profile should open directly on its strict market pack.")
@@ -653,7 +944,7 @@ struct CoinPilotStoreTests {
         precondition(!store.canOperate && !store.canViewTuning && store.manualOrderBlockReason != nil,
                      "The local profile must remain read-only and block server or order actions.")
         precondition(store.freshnessLabel(for: "market-prices") ==
-                     "앱 저장 자료 생성 · 2026. 09. 29. 12:01:00 UTC",
+                     "자료 생성 시각 · 2026. 09. 29. 12:01:00 UTC",
                      "The market header should show a readable UTC package timestamp without substituting app time.")
 
         let connected = await store.connect(using: "https://stale-server-profile.example")
@@ -667,7 +958,7 @@ struct CoinPilotStoreTests {
         precondition(store.candles.count == 2 && store.candles.last?.time == "2026-09-29T11:55:00.000Z",
                      "Market detail should use the exact selected source rows in chronological order.")
         precondition(store.localMarketTimestampLabel(for: "KRW-BTC", interval: 5) ==
-                     "원본 캔들 · 2026. 09. 29. 11:55:00 UTC",
+                     "캔들 시각 · 2026. 09. 29. 11:55:00 UTC",
                      "Market timestamp presentation should keep the UTC meaning in a human-readable format.")
         let networkCalls = await api.networkCallCount()
         let mutationPaths = await api.recordedMutationPaths()
@@ -677,12 +968,212 @@ struct CoinPilotStoreTests {
                      "The local profile must never send mutations.")
     }
 
+    private static func bundledOfflineReplayUsesThePackAndStaysOffline() async throws {
+        let defaults = UserDefaults.standard
+        let keys = [
+            "coinpilot.dashboardUrl",
+            "coinpilot.dashboardUrl.paper",
+            "coinpilot.dashboardUrl.live",
+            "coinpilot.native.activeWorkspace",
+            "coinpilot.native.dataMode",
+            "coinpilot.native.dataMode.profile.server",
+            "coinpilot.native.dataMode.profile.bundled-preview",
+            "coinpilot.native.dataMode.profile.bundled-local"
+        ]
+        let previousValues = keys.map { ($0, defaults.object(forKey: $0)) }
+        defer {
+            for (key, value) in previousValues {
+                if let value { defaults.set(value, forKey: key) }
+                else { defaults.removeObject(forKey: key) }
+            }
+        }
+        for key in keys { defaults.removeObject(forKey: key) }
+        defaults.set("paper", forKey: "coinpilot.native.activeWorkspace")
+        defaults.set("server", forKey: "coinpilot.native.dataMode")
+
+        let api = DeferredCoinPilotAPI(requiresAuth: true)
+        let replayStore = MemoryCoinPilotOfflineReplayStore()
+        let store = CoinPilotStore(
+            api: api,
+            tokens: MemoryCoinPilotTokens(),
+            localMarketDataSource: CoinPilotBundledMarketDataSource(
+                data: localMarketFixture(candleCount: 40, hourlyCandleCount: 18)
+            ),
+            configuredDataMode: "bundled-local",
+            offlineReplayResultStore: replayStore,
+            offlineReplaySessionStore: MemoryCoinPilotOfflineReplaySessionStore()
+        )
+        await store.bootstrap()
+
+        let completed = await store.runBundledOfflineReplay(marketCode: "KRW-BTC", intervalMinutes: 5)
+        precondition(completed, "A valid bundled-local series should complete historical replay.")
+        guard let result = store.offlineReplayResult else {
+            fatalError("A successful replay should expose its result to the view.")
+        }
+        precondition(result.metadata.simulationType == "historical-simulation",
+                     "The result should identify itself as a historical simulation.")
+        precondition(result.metadata.market == "KRW-BTC" && result.metadata.intervalMinutes == 5,
+                     "Replay should use the selected market and candle interval.")
+        precondition(result.metadata.rowCount == 40 && result.equityCurve.count == 24,
+                     "Replay should use all 40 source candles, not the 200-row chart window.")
+        precondition(result.summary.completedTradeCount == 0 && result.summary.finalBalance == result.summary.initialBalance,
+                     "A fixture without qualifying signals should not fabricate trades or profit.")
+        precondition(!store.isRunningOfflineReplay && store.offlineReplayMessage == nil,
+                     "The store should leave a successful replay in a settled state.")
+        let savedReplayCount = await replayStore.numberOfSaves()
+        precondition(store.offlineReplayResults == [result] && savedReplayCount == 1,
+                     "A successful result should be saved to local replay history.")
+        precondition(store.offlineReplayBlockReason(forMarket: "KRW-BTC", intervalMinutes: 60)?.contains("1시간") == true,
+                     "The Store should explain why hourly candles cannot represent the 30-minute max-hold rule.")
+        let hourlyCompleted = await store.runBundledOfflineReplay(marketCode: "KRW-BTC", intervalMinutes: 60)
+        let savesAfterHourlyAttempt = await replayStore.numberOfSaves()
+        precondition(!hourlyCompleted && savesAfterHourlyAttempt == 1,
+                     "Hourly browsing data must not be recorded as a replay result at an insufficient time resolution.")
+
+        let networkCalls = await api.networkCallCount()
+        let mutationPaths = await api.recordedMutationPaths()
+        precondition(networkCalls == 0 && mutationPaths.isEmpty,
+                     "Bundled replay must not call authentication, data, or mutation endpoints.")
+    }
+
+    private static func bundledOfflineReplaySessionResumesWithoutNetworkOrOrders() async throws {
+        let defaults = UserDefaults.standard
+        let keys = [
+            "coinpilot.dashboardUrl",
+            "coinpilot.dashboardUrl.paper",
+            "coinpilot.dashboardUrl.live",
+            "coinpilot.native.activeWorkspace",
+            "coinpilot.native.dataMode",
+            "coinpilot.native.dataMode.profile.server",
+            "coinpilot.native.dataMode.profile.bundled-preview",
+            "coinpilot.native.dataMode.profile.bundled-local"
+        ]
+        let previousValues = keys.map { ($0, defaults.object(forKey: $0)) }
+        defer {
+            for (key, value) in previousValues {
+                if let value { defaults.set(value, forKey: key) }
+                else { defaults.removeObject(forKey: key) }
+            }
+        }
+        for key in keys { defaults.removeObject(forKey: key) }
+        defaults.set("paper", forKey: "coinpilot.native.activeWorkspace")
+        defaults.set("server", forKey: "coinpilot.native.dataMode")
+
+        let api = DeferredCoinPilotAPI(requiresAuth: true)
+        let sessionStore = MemoryCoinPilotOfflineReplaySessionStore()
+        let resultStore = MemoryCoinPilotOfflineReplayStore()
+        let fixture = CoinPilotBundledMarketDataSource(data: localMarketFixture(candleCount: 40))
+        let store = CoinPilotStore(
+            api: api,
+            tokens: MemoryCoinPilotTokens(),
+            localMarketDataSource: fixture,
+            configuredDataMode: "bundled-local",
+            offlineReplayResultStore: resultStore,
+            offlineReplaySessionStore: sessionStore,
+            offlineReplaySessionUptime: { 0 }
+        )
+        await store.bootstrap()
+
+        let started = await store.startOfflineReplaySession(marketCode: "KRW-BTC", intervalMinutes: 5)
+        precondition(started && store.offlineReplaySessionCheckpoint?.status == .playing,
+                     "Starting local playback should persist a playing checkpoint before the first step.")
+        guard let first = await store.advanceOfflineReplaySession(marketCode: "KRW-BTC", intervalMinutes: 5),
+              let second = await store.advanceOfflineReplaySession(marketCode: "KRW-BTC", intervalMinutes: 5),
+              let third = await store.advanceOfflineReplaySession(marketCode: "KRW-BTC", intervalMinutes: 5) else {
+            fatalError("Each explicit local playback step should produce exactly one candle frame.")
+        }
+        precondition([first.candleIndex, second.candleIndex, third.candleIndex] == [0, 1, 2],
+                     "Sequential steps should not duplicate or skip source candles.")
+        let durableBeforeInterruption = try await sessionStore.loadCheckpoint()
+        precondition(durableBeforeInterruption?.nextCandleIndex == 0 && durableBeforeInterruption?.status == .playing,
+                     "Fast playback should batch tiny cursor checkpoints instead of rewriting on every candle.")
+
+        let crashRelaunch = CoinPilotStore(
+            api: api,
+            tokens: MemoryCoinPilotTokens(),
+            localMarketDataSource: CoinPilotBundledMarketDataSource(data: localMarketFixture(candleCount: 40)),
+            configuredDataMode: "bundled-local",
+            offlineReplayResultStore: resultStore,
+            offlineReplaySessionStore: sessionStore,
+            offlineReplaySessionUptime: { 0 }
+        )
+        await crashRelaunch.bootstrap()
+        precondition(crashRelaunch.offlineReplaySessionCheckpoint?.status == .paused &&
+                     crashRelaunch.offlineReplaySessionCheckpoint?.nextCandleIndex == 0 &&
+                     crashRelaunch.offlineReplaySessionFrame == nil &&
+                     crashRelaunch.offlineReplaySessionDelayNanoseconds(forMarket: "KRW-BTC", intervalMinutes: 5) == nil,
+                     "Relaunch should pause at the durable cursor and never auto-resume stored Playing state.")
+        let crashResume = await crashRelaunch.resumeOfflineReplaySession()
+        let replayedFirstFrame = await crashRelaunch.advanceOfflineReplaySession(marketCode: "KRW-BTC", intervalMinutes: 5)
+        precondition(crashResume && replayedFirstFrame?.candleIndex == first.candleIndex,
+                     "An uncheckpointed sub-second display may rewind, but recomputation must begin at the durable cursor.")
+
+        await crashRelaunch.pauseOfflineReplaySessionForInterruption()
+        let savedPause = try await sessionStore.loadCheckpoint()
+        precondition(savedPause?.status == .paused && savedPause?.nextCandleIndex == 1,
+                     "Background interruption should save the next unconsumed candle index.")
+
+        let relaunched = CoinPilotStore(
+            api: api,
+            tokens: MemoryCoinPilotTokens(),
+            localMarketDataSource: CoinPilotBundledMarketDataSource(data: localMarketFixture(candleCount: 40)),
+            configuredDataMode: "bundled-local",
+            offlineReplayResultStore: resultStore,
+            offlineReplaySessionStore: sessionStore,
+            offlineReplaySessionUptime: { 0 }
+        )
+        await relaunched.bootstrap()
+        precondition(relaunched.offlineReplaySessionCheckpoint?.status == .paused &&
+                     relaunched.offlineReplaySessionCheckpoint?.nextCandleIndex == 1 &&
+                     relaunched.offlineReplaySessionFrame?.candleIndex == 0,
+                     "A clean pause should restore the displayed frame and continue at its next candle.")
+        let resumed = await relaunched.resumeOfflineReplaySession()
+        let resumedFrame = await relaunched.advanceOfflineReplaySession(marketCode: "KRW-BTC", intervalMinutes: 5)
+        precondition(resumed && resumedFrame?.candleIndex == 1,
+                     "Resume after a durable pause should continue without duplicating or skipping a candle.")
+        _ = await relaunched.pauseOfflineReplaySession()
+
+        guard let pausedCheckpoint = try await sessionStore.loadCheckpoint() else {
+            fatalError("The paused session should retain a checkpoint for mismatch verification.")
+        }
+        let mismatchCheckpointStore = MemoryCoinPilotOfflineReplaySessionStore()
+        try await mismatchCheckpointStore.saveCheckpoint(pausedCheckpoint)
+        let mismatchedPackStore = CoinPilotStore(
+            api: api,
+            tokens: MemoryCoinPilotTokens(),
+            localMarketDataSource: CoinPilotBundledMarketDataSource(data: localMarketFixture(candleCount: 41)),
+            configuredDataMode: "bundled-local",
+            offlineReplayResultStore: resultStore,
+            offlineReplaySessionStore: mismatchCheckpointStore,
+            offlineReplaySessionUptime: { 0 }
+        )
+        await mismatchedPackStore.bootstrap()
+        precondition(mismatchedPackStore.offlineReplaySessionRecoveryMessage != nil &&
+                     mismatchedPackStore.offlineReplaySessionCheckpoint == nil,
+                     "A checkpoint for another installed dataset must require explicit recovery.")
+        let cleared = await mismatchedPackStore.resetOfflineReplaySession()
+        let checkpointAfterRecovery = try await mismatchCheckpointStore.loadCheckpoint()
+        precondition(cleared && mismatchedPackStore.offlineReplaySessionRecoveryMessage == nil &&
+                     checkpointAfterRecovery == nil,
+                     "Explicit recovery should clear the mismatched checkpoint before allowing a new start.")
+
+        _ = await relaunched.resetOfflineReplaySession()
+        let stopped = try await sessionStore.loadCheckpoint()
+        precondition(stopped?.status == .stopped && stopped?.nextCandleIndex == 0,
+                     "Reset should return the session to its initial cursor.")
+        let networkCalls = await api.networkCallCount()
+        let mutationPaths = await api.recordedMutationPaths()
+        precondition(networkCalls == 0 && mutationPaths.isEmpty,
+                     "Session start, steps, pause, resume, relaunch, mismatch recovery, and reset must stay offline and send no orders.")
+    }
+
     private static func bundledLocalMarketMissingResourceFailsClosed() async throws {
         let api = DeferredCoinPilotAPI(requiresAuth: true)
         let store = CoinPilotStore(
             api: api,
             tokens: MemoryCoinPilotTokens(),
-            configuredDataMode: "bundled-local"
+            configuredDataMode: "bundled-local",
+            offlineReplaySessionStore: MemoryCoinPilotOfflineReplaySessionStore()
         )
         await store.bootstrap()
         precondition(store.isBundledLocalMarketData && store.phase == .dashboard,
@@ -702,7 +1193,9 @@ struct CoinPilotStoreTests {
             api: DeferredCoinPilotAPI(),
             tokens: MemoryCoinPilotTokens(),
             localMarketDataSource: loader,
-            configuredDataMode: "bundled-local"
+            configuredDataMode: "bundled-local",
+            offlineReplayResultStore: MemoryCoinPilotOfflineReplayStore(),
+            offlineReplaySessionStore: MemoryCoinPilotOfflineReplaySessionStore()
         )
         let bootstrap = Task { await store.bootstrap() }
 
@@ -729,7 +1222,9 @@ struct CoinPilotStoreTests {
             api: DeferredCoinPilotAPI(),
             tokens: MemoryCoinPilotTokens(),
             localMarketDataSource: CoinPilotBundledMarketDataSource(data: fixture),
-            configuredDataMode: "bundled-local"
+            configuredDataMode: "bundled-local",
+            offlineReplayResultStore: MemoryCoinPilotOfflineReplayStore(),
+            offlineReplaySessionStore: MemoryCoinPilotOfflineReplaySessionStore()
         )
         await store.bootstrap()
         await store.loadMarketDetail(coin: "KRW-BTC", interval: 5)
@@ -746,6 +1241,15 @@ struct CoinPilotStoreTests {
         precondition(store.localMarketChartWindowLabel(for: "KRW-BTC", interval: 5) ==
                      "최근 200 / 전체 1250개 캔들 · 2026. 09. 28. 15:30:00 UTC – 2026. 09. 29. 08:05:00 UTC",
                      "The UI summary should identify the visible range and total preserved history in UTC.")
+
+        let replayed = await store.runBundledOfflineReplay(marketCode: "KRW-BTC", intervalMinutes: 5)
+        precondition(replayed, "A complete 1,250-candle local series should replay successfully.")
+        precondition(store.offlineReplayResult?.metadata.rowCount == totalCandleCount,
+                     "Replay must consume all source rows even though the chart shows only the newest 200.")
+        precondition(store.offlineReplayResult?.equityCurve.count == totalCandleCount - 16,
+                     "Replay's result window must cover the full series after the pinned strategy warmup.")
+        precondition(store.candles.count == 200,
+                     "Replay must not widen or mutate the chart-facing window.")
     }
 
     private static func expectMarketDataError(
@@ -767,8 +1271,8 @@ struct CoinPilotStoreTests {
         return Data(source.replacingOccurrences(of: target, with: replacement).utf8)
     }
 
-    private static func localMarketFixture(candleCount: Int = 4) -> Data {
-        if candleCount == 4 {
+    private static func localMarketFixture(candleCount: Int = 4, hourlyCandleCount: Int = 0) -> Data {
+        if candleCount == 4 && hourlyCandleCount == 0 {
             return Data(#"{"schemaVersion":1,"source":"upbit-public-market-api","generatedAt":"2026-09-29T12:01:00.000Z","markets":[{"market":"KRW-BTC","candles":[{"intervalMinutes":1,"timestamp":"2026-09-29T12:00:00.000Z","open":100.0,"high":102.0,"low":99.0,"close":101.0,"volume":2.0},{"intervalMinutes":1,"timestamp":"2026-09-29T12:01:00.000Z","open":101.0,"high":112.0,"low":100.0,"close":110.0,"volume":3.0},{"intervalMinutes":5,"timestamp":"2026-09-29T11:50:00.000Z","open":90.0,"high":96.0,"low":89.0,"close":95.0,"volume":10.0},{"intervalMinutes":5,"timestamp":"2026-09-29T11:55:00.000Z","open":95.0,"high":106.0,"low":94.0,"close":105.0,"volume":11.0}]}]}"#.utf8)
         }
 
@@ -787,11 +1291,23 @@ struct CoinPilotStoreTests {
                 "volume": 1.5
             ]
         }
+        let hourlyCandles: [[String: Any]] = (0..<hourlyCandleCount).map { index in
+            let close = 200.0 + Double(index)
+            return [
+                "intervalMinutes": 60,
+                "timestamp": formatter.string(from: start.addingTimeInterval(Double(index) * 3_600)),
+                "open": close - 0.5,
+                "high": close + 1,
+                "low": close - 1,
+                "close": close,
+                "volume": 10.0
+            ]
+        }
         let object: [String: Any] = [
             "schemaVersion": 1,
             "source": CoinPilotBundledMarketData.supportedSource,
-            "generatedAt": formatter.string(from: start.addingTimeInterval(Double(candleCount) * 300)),
-            "markets": [["market": "KRW-BTC", "candles": candles]]
+            "generatedAt": formatter.string(from: start.addingTimeInterval(max(Double(candleCount) * 300, Double(hourlyCandleCount) * 3_600))),
+            "markets": [["market": "KRW-BTC", "candles": candles + hourlyCandles]]
         ]
         return try! JSONSerialization.data(withJSONObject: object)
     }
@@ -1046,6 +1562,92 @@ struct CoinPilotStoreTests {
                      "A future-dated quote beyond the clock-skew allowance must be blocked.")
         precondition(store.manualOrderBlockReason(for: "KRW-ETH") == nil,
                      "A future timestamp for one market must not block a different fresh order target.")
+
+        await api.setMarketSnapshot(marketSnapshotBody(
+            prices: [[
+                "coin": "KRW-BTC",
+                "price": 60_000_000,
+                "sourceAsOf": sourceTime,
+                "fetchedAt": recentFetchTime,
+                "quoteFresh": false
+            ], [
+                "coin": "KRW-ETH",
+                "price": 3_000_000,
+                "sourceAsOf": sourceTime,
+                "fetchedAt": recentFetchTime,
+                "quoteFresh": true
+            ]],
+            complete: true,
+            missingMarkets: [],
+            marketListStale: false,
+            sourceAsOf: sourceTime,
+            fetchedAt: recentFetchTime
+        ))
+        await store.refresh()
+        precondition(store.marketQuoteFreshnessIssue(for: "KRW-BTC")?.contains("최신 여부를 확인할 수") == true,
+                     "A server freshness=false result must not be shown or treated as current solely because its timestamp is young.")
+        precondition(store.manualOrderBlockReason(for: "KRW-BTC")?.contains("최신 여부를 확인할 수") == true,
+                     "An explicitly unverified quote must fail closed for its selected order target.")
+        precondition(store.manualOrderBlockReason(for: "KRW-ETH") == nil,
+                     "A server freshness failure for one market must not block another verified fresh target.")
+    }
+
+    private static func lastGoodMarketSnapshotRemainsStaleAndBlocksOrders() async throws {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let now = Date()
+        let sourceTime = formatter.string(from: now.addingTimeInterval(-1))
+        let fetchTime = formatter.string(from: now.addingTimeInterval(-2))
+        let api = DeferredCoinPilotAPI(
+            marketRows: [[
+                "coin": "KRW-BTC",
+                "price": 60_000_000,
+                "sourceAsOf": sourceTime,
+                "fetchedAt": fetchTime,
+                "quoteFresh": false,
+                "quoteFreshnessReason": "market_snapshot_last_good"
+            ]],
+            requiresAuth: true,
+            statusOverride: ["mode": "DRY_RUN", "maxCandleAgeSeconds": 90],
+            loginTokenScope: "mobile_operator",
+            isReadOnlyObserver: false
+        )
+        let store = CoinPilotStore(api: api, tokens: MemoryCoinPilotTokens(), configuredDataMode: "server")
+        store.serverDraft = "https://last-good-market.example"
+        store.tokenDraft = "mobile-operator-test-token"
+        let signedIn = await store.signIn()
+        precondition(signedIn, "The test starts from an order-capable server workspace.")
+
+        await api.setMarketSnapshot(marketSnapshotBody(
+            prices: [[
+                "coin": "KRW-BTC",
+                "price": 60_000_000,
+                "sourceAsOf": sourceTime,
+                "fetchedAt": fetchTime,
+                "quoteFresh": false,
+                "quoteFreshnessReason": "market_snapshot_last_good"
+            ]],
+            complete: true,
+            missingMarkets: [],
+            marketListStale: false,
+            sourceAsOf: sourceTime,
+            fetchedAt: fetchTime,
+            snapshotSource: "last_good",
+            fallbackReason: "ENETDOWN"
+        ))
+        await store.refresh()
+
+        precondition(!store.state(for: "market-prices").isCurrent,
+                     "A last-good fallback must not become a current market snapshot.")
+        precondition(store.freshnessLabel(for: "market-prices").contains("저장된 최근 시세"),
+                     "The app should explain that it is displaying saved last-good quotes.")
+        precondition(store.manualOrderBlockReason(for: "KRW-BTC")?.contains("저장된 최근 시세") == true,
+                     "A last-good quote must block the selected-market order action.")
+
+        let submitted = await store.submitManualBuy(coin: "KRW-BTC", amount: 5_000)
+        let mutationPaths = await api.recordedMutationPaths()
+        precondition(!submitted && mutationPaths.isEmpty,
+                     "Last-good display data must never reach an order mutation.")
     }
 
     private static func incompleteMarketSnapshotKeepsPricesVisibleAndMarksStale() async throws {
@@ -1174,7 +1776,9 @@ struct CoinPilotStoreTests {
         missingMarkets: [String],
         marketListStale: Bool,
         sourceAsOf: Any? = "2026-09-29T12:00:00.000Z",
-        fetchedAt: Any?
+        fetchedAt: Any?,
+        snapshotSource: Any? = nil,
+        fallbackReason: Any? = nil
     ) -> [String: Any] {
         var body: [String: Any] = [
             "prices": prices,
@@ -1184,6 +1788,8 @@ struct CoinPilotStoreTests {
         ]
         if let sourceAsOf { body["sourceAsOf"] = sourceAsOf }
         if let fetchedAt { body["fetchedAt"] = fetchedAt }
+        if let snapshotSource { body["snapshotSource"] = snapshotSource }
+        if let fallbackReason { body["fallbackReason"] = fallbackReason }
         return body
     }
 

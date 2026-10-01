@@ -43,33 +43,27 @@ function writeJsonAtomically(filePath, value) {
   }
 }
 
-/** Append and atomically persist one optimizer history row under a same-host writer lock. */
-export async function appendOptimizerHistory(filePath, entryOrFactory, {
-  maxEntries = 100,
+/** Run one JSON mutation under a same-host exclusive owner lock. */
+export async function withOptimizerWriterLock(filePath, operation, {
+  lockSuffix = '.optimizer_writer.lock',
   lockWaitMs = 5_000,
   now = () => Date.now(),
   sleepImpl = sleep
 } = {}) {
   if (typeof filePath !== 'string' || !filePath.trim()) {
-    throw new TypeError('optimizer history filePath must be a non-empty path');
+    throw new TypeError('optimizer persistence filePath must be a non-empty path');
   }
-  if (!Number.isSafeInteger(maxEntries) || maxEntries < 1) {
-    throw new RangeError('maxEntries must be a positive safe integer');
-  }
+  if (typeof operation !== 'function') throw new TypeError('optimizer persistence operation must be a function');
+  if (typeof lockSuffix !== 'string' || !lockSuffix) throw new TypeError('lockSuffix must be a non-empty string');
   if (!Number.isFinite(lockWaitMs) || lockWaitMs < 0) {
     throw new RangeError('lockWaitMs must be a non-negative finite number');
   }
-  if (typeof entryOrFactory !== 'function' && (!entryOrFactory || typeof entryOrFactory !== 'object')) {
-    throw new TypeError('optimizer history entry must be an object or a factory');
-  }
 
   const absoluteFilePath = path.resolve(filePath);
-  const directory = path.dirname(absoluteFilePath);
-  fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
-  const writerLockPath = `${absoluteFilePath}.optimizer_history_writer.lock`;
+  fs.mkdirSync(path.dirname(absoluteFilePath), { recursive: true, mode: 0o700 });
+  const writerLockPath = `${absoluteFilePath}${lockSuffix}`;
   const deadline = now() + lockWaitMs;
   let lockStore = null;
-  let lastLockError = null;
 
   while (!lockStore) {
     const contender = new ManualOrderIdempotencyStore({
@@ -80,7 +74,6 @@ export async function appendOptimizerHistory(filePath, entryOrFactory, {
       contender.acquireWriterLock();
       lockStore = contender;
     } catch (error) {
-      lastLockError = error;
       if (error.code !== 'MANUAL_ORDER_WRITER_LOCK_ACTIVE' || now() >= deadline) throw error;
       await sleepImpl(Math.min(25, Math.max(1, deadline - now())));
     }
@@ -89,23 +82,7 @@ export async function appendOptimizerHistory(filePath, entryOrFactory, {
   let result;
   let operationError = null;
   try {
-    let history = [];
-    if (fs.existsSync(absoluteFilePath)) {
-      history = JSON.parse(fs.readFileSync(absoluteFilePath, 'utf8'));
-      if (!Array.isArray(history)) {
-        throw new TypeError('optimizer history file must contain a JSON array');
-      }
-    }
-    const entry = typeof entryOrFactory === 'function'
-      ? entryOrFactory(history.slice())
-      : entryOrFactory;
-    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
-      throw new TypeError('optimizer history factory must return an object');
-    }
-    history.push(entry);
-    if (history.length > maxEntries) history = history.slice(-maxEntries);
-    writeJsonAtomically(absoluteFilePath, history);
-    result = { entry, history };
+    result = await operation(absoluteFilePath);
   } catch (error) {
     operationError = error;
   }
@@ -122,9 +99,48 @@ export async function appendOptimizerHistory(filePath, entryOrFactory, {
     }
     throw operationError;
   }
-  if (releaseError) {
-    if (lastLockError && typeof lastLockError === 'object') releaseError.previousLockError = lastLockError;
-    throw releaseError;
-  }
+  if (releaseError) throw releaseError;
   return result;
+}
+
+/** Atomically replace a JSON config while serializing same-host writers. */
+export async function writeOptimizerJsonAtomically(filePath, value, options = {}) {
+  return withOptimizerWriterLock(filePath, absoluteFilePath => {
+    writeJsonAtomically(absoluteFilePath, value);
+    return absoluteFilePath;
+  }, { ...options, lockSuffix: '.optimizer_config_writer.lock' });
+}
+
+/** Append and atomically persist one optimizer history row under a same-host writer lock. */
+export async function appendOptimizerHistory(filePath, entryOrFactory, {
+  maxEntries = 100,
+  lockWaitMs = 5_000,
+  now = () => Date.now(),
+  sleepImpl = sleep
+} = {}) {
+  if (!Number.isSafeInteger(maxEntries) || maxEntries < 1) {
+    throw new RangeError('maxEntries must be a positive safe integer');
+  }
+  if (typeof entryOrFactory !== 'function' && (!entryOrFactory || typeof entryOrFactory !== 'object')) {
+    throw new TypeError('optimizer history entry must be an object or a factory');
+  }
+  return withOptimizerWriterLock(filePath, absoluteFilePath => {
+    let history = [];
+    if (fs.existsSync(absoluteFilePath)) {
+      history = JSON.parse(fs.readFileSync(absoluteFilePath, 'utf8'));
+      if (!Array.isArray(history)) {
+        throw new TypeError('optimizer history file must contain a JSON array');
+      }
+    }
+    const entry = typeof entryOrFactory === 'function'
+      ? entryOrFactory(history.slice())
+      : entryOrFactory;
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      throw new TypeError('optimizer history factory must return an object');
+    }
+    history.push(entry);
+    if (history.length > maxEntries) history = history.slice(-maxEntries);
+    writeJsonAtomically(absoluteFilePath, history);
+    return { entry, history };
+  }, { lockSuffix: '.optimizer_history_writer.lock', lockWaitMs, now, sleepImpl });
 }

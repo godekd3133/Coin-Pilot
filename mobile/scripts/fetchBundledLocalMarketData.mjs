@@ -2,12 +2,14 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { fetchCompleteUpbitCandleHistory } from '../../src/market-data/completeUpbitCandleHistory.js';
 
 export const DEFAULT_BUNDLED_LOCAL_MARKETS = Object.freeze([
   'KRW-BTC', 'KRW-ETH', 'KRW-XRP', 'KRW-SOL'
 ]);
 export const DEFAULT_BUNDLED_LOCAL_INTERVALS = Object.freeze([1, 5, 15, 60]);
 export const MAX_BUNDLED_LOCAL_PACK_BYTES = 50 * 1024 * 1024;
+export const MAX_BUNDLED_LOCAL_CANDLES_PER_MARKET = 20_000;
 const SUPPORTED_INTERVALS = new Set(DEFAULT_BUNDLED_LOCAL_INTERVALS);
 const REPOSITORY_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const CANONICAL_REPOSITORY_ROOT = fs.realpathSync(REPOSITORY_ROOT);
@@ -68,7 +70,7 @@ function normalizeUtcTimestamp(value) {
 
 export function normalizeUpbitMinuteCandles(market, intervalMinutes, rows) {
   if (!validMarket(market) || !SUPPORTED_INTERVALS.has(intervalMinutes) ||
-    !Array.isArray(rows) || rows.length === 0 || rows.length > 200) {
+    !Array.isArray(rows) || rows.length === 0 || rows.length > MAX_BUNDLED_LOCAL_CANDLES_PER_MARKET) {
     throw new TypeError('market, interval, and a non-empty Upbit candle response are required');
   }
 
@@ -143,8 +145,12 @@ export async function generateBundledLocalMarketData({
     intervals.some(interval => !SUPPORTED_INTERVALS.has(interval)) || new Set(intervals).size !== intervals.length) {
     throw new TypeError('intervals must be unique values from 1, 5, 15, or 60');
   }
-  if (!Number.isSafeInteger(count) || count < 1 || count > 200) {
-    throw new RangeError('Upbit minute candle count must be between 1 and 200');
+  const maximumCountPerInterval = Math.floor(MAX_BUNDLED_LOCAL_CANDLES_PER_MARKET / intervals.length);
+  if (!Number.isSafeInteger(count) || count < 1 || count > maximumCountPerInterval) {
+    throw new RangeError(
+      `Upbit minute candle count must be between 1 and ${maximumCountPerInterval} for ${intervals.length} intervals ` +
+      `(${MAX_BUNDLED_LOCAL_CANDLES_PER_MARKET} combined candles per market maximum)`
+    );
   }
   if (!Number.isFinite(requestSpacingMs) || requestSpacingMs < 0) {
     throw new RangeError('requestSpacingMs must be a non-negative finite number');
@@ -152,15 +158,25 @@ export async function generateBundledLocalMarketData({
   const requestedGeneratedAtIso = generatedAt === null ? null : normalizeUtcTimestamp(generatedAt);
   if (generatedAt !== null && !requestedGeneratedAtIso) throw new TypeError('generatedAt must be a valid timestamp');
 
-  const packagedMarkets = [];
   let requestCount = 0;
+  const pacedClient = {
+    getMinuteCandles: async (...args) => {
+      if (requestCount > 0 && requestSpacingMs > 0) await sleepImpl(requestSpacingMs);
+      requestCount += 1;
+      return client.getMinuteCandles(...args);
+    }
+  };
+  const packagedMarkets = [];
   for (const market of markets) {
     const candles = [];
     for (const intervalMinutes of intervals) {
-      const rows = await client.getMinuteCandles(market, intervalMinutes, count);
-      requestCount += 1;
+      const rows = await fetchCompleteUpbitCandleHistory({
+        marketDataClient: pacedClient,
+        market,
+        intervalMinutes,
+        totalCount: count
+      });
       candles.push(...normalizeUpbitMinuteCandles(market, intervalMinutes, rows));
-      if (requestCount < markets.length * intervals.length) await sleepImpl(requestSpacingMs);
     }
     packagedMarkets.push({ market, candles });
   }
@@ -196,16 +212,17 @@ export function writeBundledLocalMarketData(pack, outputFile) {
 
 async function main() {
   const outputFile = process.argv[2];
+  const count = process.argv[3] === undefined ? 200 : Number(process.argv[3]);
   if (!outputFile || !path.isAbsolute(outputFile)) {
-    console.error('usage: npm --prefix mobile run market-data:pack -- /absolute/output/market-data.json');
+    console.error('usage: npm --prefix mobile run market-data:pack -- /absolute/output/market-data.json [candles-per-market-interval]');
     process.exitCode = 2;
     return;
   }
 
   try {
-    const pack = await generateBundledLocalMarketData();
+    const pack = await generateBundledLocalMarketData({ count });
     const output = writeBundledLocalMarketData(pack, outputFile);
-    console.log(`bundled local public market data: ${pack.markets.length} markets · ${DEFAULT_BUNDLED_LOCAL_INTERVALS.length} intervals · up to 200 candles each`);
+    console.log(`bundled local public market data: ${pack.markets.length} markets · ${DEFAULT_BUNDLED_LOCAL_INTERVALS.length} intervals · ${count} candles per interval`);
     console.log(`generatedAt: ${pack.generatedAt}`);
     console.log(`saved: ${output.outputFile} · ${output.byteCount} bytes · sha256 ${output.sha256}`);
     console.log('Public OHLCV only; no account data, credentials, orders, or automation state are included.');

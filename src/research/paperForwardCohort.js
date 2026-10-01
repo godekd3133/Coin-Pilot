@@ -2,6 +2,8 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { summarizePaperStrictTradeCostAudit } from './paperStrictTradeCostAudit.js';
+import { summarizePaperForwardHealth } from './paperForwardHealth.js';
+import { observeProcessExistence } from './paperForwardOwnerProbe.js';
 
 function fingerprint(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
@@ -196,7 +198,12 @@ function strictCohortEligibility({
  * sessions as one profitability sample. This is a read-only cohort report;
  * it never starts, stops, repairs, or promotes a paper session.
  */
-export function summarizePaperForwardCohort({ rootDir = '.', prefix = '.paper-forward-' } = {}) {
+export function summarizePaperForwardCohort({
+  rootDir = '.',
+  prefix = '.paper-forward-',
+  now = Date.now(),
+  processExistsProbe = observeProcessExistence
+} = {}) {
   const root = path.resolve(rootDir);
   const rows = [];
   const readErrors = [];
@@ -235,6 +242,9 @@ export function summarizePaperForwardCohort({ rootDir = '.', prefix = '.paper-fo
       actualFillsObserved: false,
       profitabilityEvidenceConfigGroups: [],
       profitabilityEvidenceExclusionCounts: {},
+      observedActiveOwnerMissingSessionCount: 0,
+      observedActiveHeartbeatStaleSessionCount: 0,
+      observedStrictHardDeadlineReachedPositionCount: 0,
       note: '서로 다른 forward session을 자동 승격하거나 하나의 수익성 표본으로 합산하지 않습니다.'
     };
   }
@@ -285,6 +295,32 @@ export function summarizePaperForwardCohort({ rootDir = '.', prefix = '.paper-fo
       configFingerprint,
       strictCostAuditEligible
     });
+    let observationHealth = null;
+    if (ledger.active === true) {
+      let processExistsObservation;
+      try {
+        processExistsObservation = processExistsProbe(ledger.processId);
+      } catch {
+        processExistsObservation = { pid: null, exists: null };
+      }
+      const health = summarizePaperForwardHealth({ ledger, now, processExistsObservation });
+      observationHealth = {
+        observedAt: health.observedAt,
+        ownerProcessStatus: health.ownerProcess.status,
+        heartbeatStatus: health.heartbeat.status,
+        heartbeatReason: health.heartbeat.reason,
+        attentionRequired: health.attentionRequired,
+        findings: health.findings,
+        strictPositions: health.positions.map(position => ({
+          market: position.market,
+          baseDeadlineAt: position.baseDeadlineAt,
+          hardDeadlineAt: position.hardDeadlineAt,
+          deadlineStatus: position.deadlineStatus,
+          hardDeadlineReached: position.hardDeadlineReached
+        })),
+        scope: 'active persisted ledger: PID existence, heartbeat timestamps, and strict-position configured hold deadlines only; no owner identity verification.'
+      };
+    }
     const profitabilityEvidence = evaluateProfitabilityEvidence({
       strictCohortEligible: strictCohort.eligible,
       continuityEligible,
@@ -327,7 +363,8 @@ export function summarizePaperForwardCohort({ rootDir = '.', prefix = '.paper-fo
       analysisContinuityEligible,
       riskContinuityEligible,
       interruptionContinuityEligible: interruptionContinuity,
-      continuityEligible
+      continuityEligible,
+      observationHealth
     });
   }
 
@@ -346,6 +383,8 @@ export function summarizePaperForwardCohort({ rootDir = '.', prefix = '.paper-fo
   const strictCostUnverifiedTradeCount = rows.reduce((sum, row) => sum + row.strictCostUnverifiedTradeCount, 0);
   const strictWinningTrades = rows.reduce((sum, row) => sum + row.strictWinningTrades, 0);
   const eligibleStrictRows = rows.filter(row => row.strictCohortEligible === true);
+  const observedActiveRows = rows.filter(row => row.active === true && row.observationHealth);
+  const observedStrictPositions = observedActiveRows.flatMap(row => row.observationHealth.strictPositions);
   const strictCohortExclusionCounts = {};
   for (const row of rows.filter(item => item.strictCohortEligible !== true)) {
     const reason = row.strictCohortExclusionReason || 'unknown';
@@ -382,6 +421,12 @@ export function summarizePaperForwardCohort({ rootDir = '.', prefix = '.paper-fo
     totalStrictProfitComparable: false,
     totalStrictProfitNote: '서로 다른 config·market universe·기간의 mixed aggregate이며 수익성 evidence가 아닙니다.',
     activeSessionCount: rows.filter(row => row.active === true).length,
+    observedActiveOwnerMissingSessionCount: observedActiveRows.filter(row =>
+      row.observationHealth.ownerProcessStatus === 'missing').length,
+    observedActiveHeartbeatStaleSessionCount: observedActiveRows.filter(row =>
+      row.observationHealth.heartbeatStatus === 'stale').length,
+    observedStrictHardDeadlineReachedPositionCount: observedStrictPositions.filter(position =>
+      position.hardDeadlineReached === true).length,
     endedSessionCount: rows.filter(row => Boolean(row.endedAt)).length,
     averageStrictProfit: strictTradeCount > 0 ? totalStrictProfit / strictTradeCount : null,
     eligibleStrictSessionCount: eligibleStrictRows.length,

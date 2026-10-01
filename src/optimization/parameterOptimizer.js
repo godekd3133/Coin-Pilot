@@ -1,8 +1,8 @@
 import BacktestEngine from '../backtest/backtestEngine.js';
 import fs from 'node:fs';
-import path from 'node:path';
 import { resolveOptimizationStoragePaths } from '../runtime/optimizationStorage.js';
 import { fetchCompleteUpbitCandleHistory } from '../market-data/completeUpbitCandleHistory.js';
+import { writeOptimizerJsonAtomically } from '../runtime/optimizerHistoryStore.js';
 
 /**
  * 유전 알고리즘 기반 파라미터 최적화
@@ -427,7 +427,7 @@ class ParameterOptimizer {
         const optimalParams = await this.optimize(candles);
 
         // 결과 저장
-        this.saveOptimalParameters(optimalParams);
+        await this.saveOptimalParameters(optimalParams);
 
         console.log('\n✅ 최적화 완료, 파라미터 업데이트됨');
       } catch (error) {
@@ -443,17 +443,15 @@ class ParameterOptimizer {
   /**
    * 최적 파라미터 저장
    */
-  saveOptimalParameters(params) {
+  async saveOptimalParameters(params) {
     const configPath = this.optimalConfigFile;
-    fs.mkdirSync(path.dirname(configPath), { recursive: true, mode: 0o700 });
-
     const config = {
       updatedAt: new Date().toISOString(),
       parameters: params,
       note: '자동 최적화를 통해 생성된 파라미터입니다.'
     };
 
-    fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf8');
+    await writeOptimizerJsonAtomically(configPath, config);
     console.log(`\n💾 최적 파라미터 저장: ${configPath}`);
   }
 

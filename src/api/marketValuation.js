@@ -1,4 +1,5 @@
 import { getMarketDataProvider } from './marketDataProvider.js';
+import { DEFAULT_MARKET_QUOTE_MAX_AGE_SECONDS } from './marketQuoteFreshness.js';
 
 /** Read one shared, current-price snapshot for a set of KRW markets. */
 export async function readCurrentMarketPrices(server, markets) {
@@ -9,11 +10,22 @@ export async function readCurrentMarketPrices(server, markets) {
     return {
       tickers: [],
       priceMap: new Map(),
+      freshPriceMap: new Map(),
       sourceAsOfByMarket: new Map(),
+      quoteFreshnessByMarket: new Map(),
+      fetchedAtByMarket: new Map(),
       sourceAsOf: null,
       asOf: null,
       fetchedAt: null,
       complete: requestedMarkets.length === 0,
+      allQuotesFresh: requestedMarkets.length === 0,
+      freshMarkets: [],
+      staleMarkets: [],
+      maximumQuoteAgeMs: DEFAULT_MARKET_QUOTE_MAX_AGE_SECONDS * 1000,
+      sourceSkewMs: null,
+      captureSkewMs: null,
+      snapshotSource: 'unavailable',
+      fallbackReason: null,
       unavailableMarkets: requestedMarkets
     };
   }

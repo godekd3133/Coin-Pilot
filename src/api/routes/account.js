@@ -124,14 +124,15 @@ export default function createAccountRoutes(server) {
 
       const valuationMarkets = accountValuationMarkets(server.tradingSystem, accounts, positionCoins);
       const marketSnapshot = await readCurrentMarketPrices(server, valuationMarkets);
-      const totalAssets = await server.tradingSystem.calculateTotalAssets(marketSnapshot.priceMap, {
+      const totalAssetsCandidate = await server.tradingSystem.calculateTotalAssets(marketSnapshot.freshPriceMap, {
         allowAveragePriceFallback: false,
         accountsOverride: accounts
       });
+      const totalAssets = marketSnapshot.allQuotesFresh === true ? totalAssetsCandidate : null;
       const valuationAvailable = Number.isFinite(totalAssets);
 
       positions.forEach(pos => {
-        const currentPrice = marketSnapshot.priceMap.get(pos.coin);
+        const currentPrice = marketSnapshot.freshPriceMap.get(pos.coin);
         const amount = Number(pos.amount);
         const averagePrice = Number(pos.avgPrice ?? pos.entryPrice);
         const costBasis = Number.isFinite(amount) && Number.isFinite(averagePrice) && averagePrice > 0
@@ -150,7 +151,8 @@ export default function createAccountRoutes(server) {
           pos.valuationAvailable = true;
           pos.valuationAsOf = marketSnapshot.asOf;
           pos.sourceAsOf = marketSnapshot.sourceAsOf;
-          pos.fetchedAt = marketSnapshot.fetchedAt;
+          pos.fetchedAt = marketSnapshot.fetchedAtByMarket?.get(pos.coin) ?? marketSnapshot.fetchedAt;
+          pos.quoteFreshnessReason = marketSnapshot.quoteFreshnessByMarket?.get(pos.coin)?.reason ?? null;
         } else {
           pos.currentPrice = null;
           pos.currentValue = null;
@@ -160,7 +162,8 @@ export default function createAccountRoutes(server) {
           pos.valuationAvailable = false;
           pos.valuationAsOf = null;
           pos.sourceAsOf = marketSnapshot.sourceAsOf;
-          pos.fetchedAt = marketSnapshot.fetchedAt;
+          pos.fetchedAt = marketSnapshot.fetchedAtByMarket?.get(pos.coin) ?? marketSnapshot.fetchedAt;
+          pos.quoteFreshnessReason = marketSnapshot.quoteFreshnessByMarket?.get(pos.coin)?.reason ?? null;
         }
       });
 
@@ -174,10 +177,18 @@ export default function createAccountRoutes(server) {
         krwBalance: effectiveKrwBalance,
         totalAssets: valuationAvailable ? Math.round(totalAssets) : null,
         valuationAvailable,
-        valuationStatus: valuationAvailable ? 'available' : 'unavailable',
+        valuationStatus: valuationAvailable
+          ? 'available'
+          : marketSnapshot.staleMarkets?.length > 0 ? 'stale' : 'unavailable',
         valuationAsOf: marketSnapshot.asOf,
         sourceAsOf: marketSnapshot.sourceAsOf,
         fetchedAt: marketSnapshot.fetchedAt,
+        staleMarkets: marketSnapshot.staleMarkets || [],
+        unavailableMarkets: marketSnapshot.unavailableMarkets || [],
+        sourceSkewMs: marketSnapshot.sourceSkewMs ?? null,
+        captureSkewMs: marketSnapshot.captureSkewMs ?? null,
+        snapshotSource: marketSnapshot.snapshotSource ?? 'upstream',
+        fallbackReason: marketSnapshot.fallbackReason ?? null,
         initialSeedMoney,
         positions,
         accounts,
@@ -240,11 +251,11 @@ export default function createAccountRoutes(server) {
         }
       }
 
+      let marketSnapshot = null;
       if (coinList.length > 0) {
         const coins = coinList.map(c => c.coin);
-        const tickers = await server.getCachedTicker(coins);
-        const priceMap = {};
-        tickers.forEach(t => { priceMap[t.market] = t.trade_price; });
+        marketSnapshot = await readCurrentMarketPrices(server, coins);
+        const priceMap = marketSnapshot.freshPriceMap;
         let completeValuation = true;
 
         for (const item of coinList) {
@@ -269,7 +280,10 @@ export default function createAccountRoutes(server) {
             currentValue: currentValue === null ? null : Math.round(currentValue),
             profit: profit === null ? null : Math.round(profit),
             profitPercent,
-            valuationAvailable
+            valuationAvailable,
+            sourceAsOf: marketSnapshot.sourceAsOfByMarket.get(item.coin) ?? null,
+            fetchedAt: marketSnapshot.fetchedAtByMarket?.get(item.coin) ?? marketSnapshot.fetchedAt,
+            quoteFreshnessReason: marketSnapshot.quoteFreshnessByMarket?.get(item.coin)?.reason ?? null
           });
         }
         if (!completeValuation) totalValue = null;
@@ -281,6 +295,17 @@ export default function createAccountRoutes(server) {
         holdings,
         totalValue: totalValue === null ? null : Math.round(totalValue),
         valuationAvailable: totalValue !== null,
+        valuationStatus: totalValue !== null
+          ? 'available'
+          : marketSnapshot?.snapshotSource === 'last_good' || marketSnapshot?.staleMarkets?.length > 0
+            ? 'stale' : 'unavailable',
+        valuationAsOf: marketSnapshot?.sourceAsOf ?? null,
+        sourceAsOf: marketSnapshot?.sourceAsOf ?? null,
+        fetchedAt: marketSnapshot?.fetchedAt ?? null,
+        snapshotSource: marketSnapshot?.snapshotSource ?? 'upstream',
+        fallbackReason: marketSnapshot?.fallbackReason ?? null,
+        staleMarkets: marketSnapshot?.staleMarkets || [],
+        unavailableMarkets: marketSnapshot?.unavailableMarkets || [],
         count: holdings.length,
         mode: isDryRun ? 'DRY_RUN' : 'LIVE'
       });

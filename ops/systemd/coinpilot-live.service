@@ -1,7 +1,8 @@
 [Unit]
 Description=CoinPilot LIVE account service
 Wants=network-online.target
-After=network-online.target
+Requires=coinpilot-upbit-rate.service
+After=network-online.target coinpilot-upbit-rate.service
 
 [Service]
 Type=simple
@@ -10,6 +11,7 @@ Group=ubuntu
 WorkingDirectory=/var/lib/coinpilot-live
 EnvironmentFile=/etc/coinpilot/coinpilot-live.env
 Environment=NODE_ENV=production
+ExecStartPre=/usr/bin/node /opt/coinpilot-live/current/src/scripts/verifyNodeRuntime.js
 ExecStart=/usr/bin/node /opt/coinpilot-live/current/src/index.js
 Restart=on-failure
 RestartSec=5s
@@ -21,7 +23,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/var/lib/coinpilot-live
+ReadWritePaths=/var/lib/coinpilot-live /var/lib/coinpilot-rate
 
 [Install]
 WantedBy=multi-user.target

@@ -1,5 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import UpbitAPI from '../api/upbit.js';
+import { isPublicMarketDataSource } from '../api/publicMarketDataSource.js';
+import { inspectMarketQuoteFreshness } from '../api/marketQuoteFreshness.js';
 import {
   getMarketDataAdapterKind,
   UpbitMarketDataAdapter
@@ -78,6 +80,33 @@ import path from 'path';
 import os from 'os';
 import { randomUUID } from 'node:crypto';
 
+function syncDirectoryForLiveEvidence(directory) {
+  const descriptor = fs.openSync(directory, 'r');
+  try {
+    fs.fsyncSync(descriptor);
+  } finally {
+    fs.closeSync(descriptor);
+  }
+}
+
+function createLiveEvidenceDirectoryDurably(directory) {
+  const absoluteDirectory = path.resolve(directory);
+  const missingDirectories = [];
+  let current = absoluteDirectory;
+  while (!fs.existsSync(current)) {
+    missingDirectories.push(current);
+    const parent = path.dirname(current);
+    if (parent === current) throw new Error('could not resolve live evidence directory parent');
+    current = parent;
+  }
+
+  if (missingDirectories.length === 0) return;
+  fs.mkdirSync(absoluteDirectory, { recursive: true, mode: 0o700 });
+  for (const createdDirectory of missingDirectories.reverse()) {
+    syncDirectoryForLiveEvidence(path.dirname(createdDirectory));
+  }
+}
+
 function resolveLossCircuitBreakerConfig(config = {}) {
   const configuredCount = Number(config.lossCircuitBreakerCount);
   const configuredWindow = Number(config.lossCircuitBreakerWindowMinutes);
@@ -114,11 +143,30 @@ function analysisNetworkErrorCode(error) {
 function classifyAnalysisFailure(error) {
   const code = String(error?.code || error?.cause?.code || '').toUpperCase();
   const message = String(error?.message || '').toLowerCase();
+  if (code === 'MARKET_QUOTE_STALE') return 'market_quote_stale';
+  if (code === 'MARKET_QUOTE_UNAVAILABLE') return 'market_quote_unavailable';
   if (ANALYSIS_NETWORK_ERROR_CODES.has(code) ||
       /getaddrinfo|dns|timeout|network/.test(message)) {
     return 'network_fetch_failed';
   }
   return 'market_analysis_failed';
+}
+
+function inspectTraderMarketQuote(ticker, market, maximumAgeSeconds, now = Date.now()) {
+  return inspectMarketQuoteFreshness(ticker, {
+    now,
+    maximumAgeSeconds,
+    expectedMarket: market
+  });
+}
+
+function createMarketQuoteFreshnessError(market, freshness) {
+  const stale = freshness.reason === 'market_source_stale' ||
+    freshness.reason === 'market_source_timestamp_in_future';
+  const error = new Error(`${market} 거래소 시세를 사용할 수 없습니다: ${freshness.reason}`);
+  error.code = stale ? 'MARKET_QUOTE_STALE' : 'MARKET_QUOTE_UNAVAILABLE';
+  error.freshness = freshness;
+  return error;
 }
 
 function resolveSignalWindowEntryLimit(config = {}) {
@@ -358,10 +406,16 @@ function summarizeLiveMarketRegime(analyses, config = {}) {
 }
 
 class MultiCoinTrader {
-  constructor(config, { marketDataAdapter } = {}) {
+  constructor(config, { marketDataAdapter, publicMarketDataSource } = {}) {
     this.config = config;
     if (marketDataAdapter !== undefined && config.dryRun === false) {
       throw new Error('Injected market data adapters are available in DRY_RUN only.');
+    }
+    if (marketDataAdapter !== undefined && publicMarketDataSource !== undefined) {
+      throw new TypeError('Use either a DRY_RUN fixture adapter or the built-in public market source, not both.');
+    }
+    if (publicMarketDataSource !== undefined && !isPublicMarketDataSource(publicMarketDataSource)) {
+      throw new TypeError('MultiCoinTrader requires the built-in credential-free public market data source.');
     }
     const configuredStorageMiB = config.paperMinimumStorageMiB ?? process.env.SCALP_PAPER_MIN_STORAGE_MIB;
     const parsedStorageMiB = Number(configuredStorageMiB);
@@ -371,8 +425,9 @@ class MultiCoinTrader {
     this.upbit = new UpbitAPI(config.accessKey, config.secretKey, {
       requestTimeoutMs: config.upbitRequestTimeoutMs
     });
+    this.publicMarketDataSource = publicMarketDataSource ?? null;
     const selectedMarketDataAdapter = marketDataAdapter === undefined
-      ? new UpbitMarketDataAdapter(() => this.upbit)
+      ? new UpbitMarketDataAdapter(publicMarketDataSource || (() => this.upbit))
       : marketDataAdapter;
     const marketDataAdapterKind = getMarketDataAdapterKind(selectedMarketDataAdapter);
     if (!marketDataAdapterKind) {
@@ -390,9 +445,11 @@ class MultiCoinTrader {
       enumerable: true,
       configurable: false
     });
-    this.riskUpbit = new UpbitAPI(config.accessKey, config.secretKey, {
-      requestTimeoutMs: config.upbitRequestTimeoutMs
-    });
+    this.riskUpbit = publicMarketDataSource
+      ? { getTicker: (markets, requestOptions) => publicMarketDataSource.getTicker(markets, requestOptions) }
+      : new UpbitAPI(config.accessKey, config.secretKey, {
+          requestTimeoutMs: config.upbitRequestTimeoutMs
+        });
     this.liveManualPrepareOnBoot = config.liveManualPrepareOnBoot === true && config.dryRun === false;
     this.newsMonitor = new NewsMonitor();
     this.strategyMode = config.strategyMode || 'oversold_reaction_scalping';
@@ -702,8 +759,16 @@ class MultiCoinTrader {
     }
     try {
       const directory = path.dirname(this.liveExecutionEvidenceFile);
-      if (directory && directory !== '.') fs.mkdirSync(directory, { recursive: true });
-      const descriptor = fs.openSync(this.liveExecutionEvidenceFile, 'a', 0o600);
+      if (directory) createLiveEvidenceDirectoryDurably(directory);
+      let descriptor;
+      let evidenceFileCreated = false;
+      try {
+        descriptor = fs.openSync(this.liveExecutionEvidenceFile, 'wx', 0o600);
+        evidenceFileCreated = true;
+      } catch (error) {
+        if (error.code !== 'EEXIST') throw error;
+        descriptor = fs.openSync(this.liveExecutionEvidenceFile, 'a', 0o600);
+      }
       try {
         // openSync's mode is ignored for an existing file, so protect the
         // descriptor before appending account and execution evidence.
@@ -718,6 +783,13 @@ class MultiCoinTrader {
         fs.fsyncSync(descriptor);
       } finally {
         fs.closeSync(descriptor);
+      }
+      // fsync on the evidence file protects its appended bytes. On this
+      // process's first append, also sync the parent directory so an existing
+      // or newly-created ledger entry survives a host crash before POST.
+      if (directory && (evidenceFileCreated || this._liveEvidenceDirectorySynced !== true)) {
+        syncDirectoryForLiveEvidence(directory);
+        this._liveEvidenceDirectorySynced = true;
       }
       if (event.eventType === 'ORDER_INTENT' &&
         !addLiveOrderIntentEvidence(this.liveOrderIntentEvidenceIndex, event)) {
@@ -4862,8 +4934,10 @@ class MultiCoinTrader {
     this.config.secretKey = nextSecretKey;
     this.upbit.accessKey = nextAccessKey;
     this.upbit.secretKey = nextSecretKey;
-    this.riskUpbit.accessKey = nextAccessKey;
-    this.riskUpbit.secretKey = nextSecretKey;
+    if (this.riskUpbit instanceof UpbitAPI) {
+      this.riskUpbit.accessKey = nextAccessKey;
+      this.riskUpbit.secretKey = nextSecretKey;
+    }
     this._liveAccountStateKnown = false;
     this._liveExchangeStateKnown = false;
     this._liveVerifiedOrderMarkets.clear();
@@ -5659,18 +5733,34 @@ class MultiCoinTrader {
         ? [...snapshotContext.tickerMap.values()]
         // Keep protective pricing on its priority-lane exchange client, never the analysis fixture.
         : await this.riskUpbit.getTicker(monitoredCoins, { priority: 'risk' });
-      const priceMap = snapshotContext?.sharedSnapshot === true &&
-        snapshotContext.priceMap instanceof Map
-        ? new Map(snapshotContext.priceMap)
-        : new Map(
-          (Array.isArray(tickers) ? tickers : [])
-            .filter(ticker => ticker?.market && Number.isFinite(Number(ticker.trade_price)))
-            .map(ticker => [ticker.market, Number(ticker.trade_price)])
+      const tickersByMarket = new Map(
+        (Array.isArray(tickers) ? tickers : [])
+          .filter(ticker => ticker?.market)
+          .map(ticker => [ticker.market, ticker])
+      );
+      const priceMap = new Map();
+      const quoteIssues = [];
+      for (const market of monitoredCoins) {
+        const ticker = tickersByMarket.get(market);
+        const freshness = inspectTraderMarketQuote(
+          ticker,
+          market,
+          this.maxCandleAgeSeconds
         );
-      if (priceMap.size < monitoredCoins.length) {
-        const missingCoins = monitoredCoins.filter(coin => !priceMap.has(coin));
-        const error = new Error(`risk ticker 응답 불완전 (${missingCoins.join(', ') || 'unknown'})`);
-        error.code = 'INCOMPLETE_RISK_TICKER';
+        if (!freshness.fresh) {
+          quoteIssues.push({ market, ...freshness });
+          continue;
+        }
+        priceMap.set(market, Number(ticker.trade_price));
+      }
+      if (quoteIssues.length > 0) {
+        const staleQuote = quoteIssues.some(issue => issue.reason === 'market_source_stale' ||
+          issue.reason === 'market_source_timestamp_in_future');
+        const error = new Error(
+          `risk ticker 시세 신선도 실패 (${quoteIssues.map(({ market, reason }) => `${market}:${reason}`).join(', ')})`
+        );
+        error.code = staleQuote ? 'STALE_RISK_TICKER' : 'INCOMPLETE_RISK_TICKER';
+        error.quoteIssues = quoteIssues;
         throw error;
       }
       this.recordRiskMonitorSuccess();
@@ -6387,7 +6477,8 @@ class MultiCoinTrader {
         const analysis = await this.analyzeCoin(
           coin,
           newsSentiment,
-          marketData
+          marketData,
+          accounts
         );
         coinAnalyses.push(analysis);
         this.analysisCycleProgress?.add(coin);
@@ -6481,6 +6572,7 @@ class MultiCoinTrader {
     // 7. 매매 실행 (강한 신호 우선)
     for (const analysis of coinAnalyses) {
       let updatedKrwBalance = krwBalance;
+      let updatedCoinBalance = analysis.coinBalance;
       let updatedPositions = currentPositions;
       if (analysis.decision?.action !== 'HOLD') {
         // Refresh immediately before actionable orders so manual/external
@@ -6488,6 +6580,7 @@ class MultiCoinTrader {
         // either balance, position count, or exchange state.
         const latestAccounts = await this.getAccountInfo();
         updatedKrwBalance = this.getKRWBalance(latestAccounts);
+        updatedCoinBalance = this.getCoinBalance(latestAccounts, analysis.coin);
         updatedPositions = this.getCurrentPositionCount();
       }
 
@@ -6496,7 +6589,7 @@ class MultiCoinTrader {
         analysis.decision,
         analysis.currentPrice,
         updatedKrwBalance,
-        analysis.coinBalance,
+        updatedCoinBalance,
         updatedPositions,
         coinAnalyses,  // 리밸런싱용 전체 분석 결과 전달
         this._snapshotContext
@@ -6585,8 +6678,10 @@ class MultiCoinTrader {
     }
   }
 
-  async analyzeCoin(coin, newsSentiment, marketData = {}) {
-    const accounts = await this.getAccountInfo();
+  async analyzeCoin(coin, newsSentiment, marketData = {}, accountSnapshot) {
+    const accounts = accountSnapshot === undefined
+      ? await this.getAccountInfo()
+      : accountSnapshot;
     const coinBalance = this.getCoinBalance(accounts, coin);
 
     // 현재가 조회 - null/빈배열 체크
@@ -6608,6 +6703,14 @@ class MultiCoinTrader {
     }
     if (!ticker[0] || typeof ticker[0].trade_price !== 'number') {
       throw new Error(`${coin} 현재가 조회 실패 - 유효하지 않은 데이터`);
+    }
+    const marketQuoteFreshness = inspectTraderMarketQuote(
+      ticker[0],
+      coin,
+      this.maxCandleAgeSeconds
+    );
+    if (!marketQuoteFreshness.fresh) {
+      throw createMarketQuoteFreshnessError(coin, marketQuoteFreshness);
     }
     const currentPrice = ticker[0].trade_price;
 
@@ -6696,6 +6799,7 @@ class MultiCoinTrader {
     decision.details = {
       ...(decision.details || {}),
       candleFreshness,
+      marketQuoteFreshness,
       marketReturnPercent
     };
 
@@ -6707,6 +6811,7 @@ class MultiCoinTrader {
       decision,
       marketReturnPercent,
       candleFreshness,
+      marketQuoteFreshness,
       sentiment: combinedSentiment
     };
   }
@@ -6756,11 +6861,24 @@ class MultiCoinTrader {
       return null;
     }
 
-    const latestPrice = ticker?.[0]?.trade_price;
+    const latestTicker = ticker?.[0];
+    const latestPrice = latestTicker?.trade_price;
     if (!Number.isFinite(latestPrice) || !Array.isArray(candles)) {
       this.recordPaperEntryConfirmation(coin, 'cancelled', 'invalid_revalidation_payload');
       this.resolveWinnerShadowBlockedEntryAsNotFilled(coin, decision, 'invalid_revalidation_payload');
       console.log(`  ⚠️  [${coin}] 지연 후 가격/캔들 데이터가 유효하지 않아 진입 취소`);
+      return null;
+    }
+
+    const marketQuoteFreshness = inspectTraderMarketQuote(
+      latestTicker,
+      coin,
+      this.maxCandleAgeSeconds
+    );
+    if (!marketQuoteFreshness.fresh) {
+      this.recordPaperEntryConfirmation(coin, 'cancelled', marketQuoteFreshness.reason);
+      this.resolveWinnerShadowBlockedEntryAsNotFilled(coin, decision, marketQuoteFreshness.reason);
+      console.log(`  ⛔ [${coin}] 지연 후 거래소 시세 신선도 실패: ${marketQuoteFreshness.reason}`);
       return null;
     }
 
@@ -6789,7 +6907,13 @@ class MultiCoinTrader {
 
     this.recordPaperEntryConfirmation(coin, 'confirmed', 'entry_revalidation_passed');
     console.log(`  ✅ [${coin}] 지연 후 반등 유지 - 현재가 ${latestPrice.toLocaleString()}원`);
-    return { currentPrice: latestPrice, technicalAnalysis, delayMs, candleFreshness };
+    return {
+      currentPrice: latestPrice,
+      technicalAnalysis,
+      delayMs,
+      candleFreshness,
+      marketQuoteFreshness
+    };
   }
 
   /**

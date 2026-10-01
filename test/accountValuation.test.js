@@ -171,12 +171,69 @@ test('/positions keeps current value unavailable when the market quote is missin
   }
 });
 
+test('/positions does not value stale source quotes as current holdings', async () => {
+  const { tradingSystem } = createDryRunTrader();
+  const ctx = await startReadServer(tradingSystem, async () => [{
+    market: 'KRW-BTC',
+    trade_price: 120,
+    trade_timestamp: Date.now() - 120_000
+  }]);
+
+  try {
+    const response = await fetch(`${ctx.baseUrl}/api/positions`);
+    const positions = await response.json();
+    assert.equal(response.status, 200);
+    assert.equal(positions.valuationAvailable, false);
+    assert.equal(positions.valuationStatus, 'stale');
+    assert.equal(positions.totalValue, null);
+    assert.deepEqual(positions.staleMarkets, ['KRW-BTC']);
+    assert.equal(positions.holdings[0].currentPrice, null);
+    assert.equal(positions.holdings[0].valuationAvailable, false);
+    assert.equal(positions.holdings[0].quoteFreshnessReason, 'market_source_stale');
+  } finally {
+    await stopReadServer(ctx);
+  }
+});
+
+test('/positions labels a last-good fallback stale even when its exchange trade time is recent', async () => {
+  const { tradingSystem } = createDryRunTrader();
+  const now = Date.now();
+  const fetchedAt = new Date(now - 2_000).toISOString();
+  const tickers = [{ market: 'KRW-BTC', trade_price: 120, trade_timestamp: now - 1_000 }];
+  const ctx = await startReadServer(
+    tradingSystem,
+    async () => { throw new Error('array reader should not be used'); },
+    null,
+    async () => ({
+      tickers,
+      fetchedAt,
+      fetchedAtByMarket: { 'KRW-BTC': fetchedAt },
+      snapshotSource: 'last_good',
+      fallbackReason: 'ENETDOWN'
+    })
+  );
+
+  try {
+    const response = await fetch(`${ctx.baseUrl}/api/positions`);
+    const positions = await response.json();
+    assert.equal(response.status, 200);
+    assert.equal(positions.valuationAvailable, false);
+    assert.equal(positions.valuationStatus, 'stale');
+    assert.equal(positions.snapshotSource, 'last_good');
+    assert.equal(positions.holdings[0].currentPrice, null);
+    assert.equal(positions.holdings[0].quoteFreshnessReason, 'market_snapshot_last_good');
+  } finally {
+    await stopReadServer(ctx);
+  }
+});
+
 test('account and cumulative P&L routes use one valid ticker snapshot and report its timestamp', async () => {
   const { tradingSystem } = createDryRunTrader();
+  const quoteTimestamp = Date.now();
   const tickers = [{
     market: 'KRW-BTC',
     trade_price: 120,
-    trade_timestamp: 1_790_000_000_000
+    trade_timestamp: quoteTimestamp
   }];
   const ctx = await startReadServer(tradingSystem, async markets => {
     assert.deepEqual(markets, ['KRW-BTC']);
@@ -190,8 +247,8 @@ test('account and cumulative P&L routes use one valid ticker snapshot and report
     assert.equal(account.totalAssets, 1240);
     assert.equal(account.valuationAvailable, true);
     assert.equal(account.valuationStatus, 'available');
-    assert.equal(account.valuationAsOf, new Date(1_790_000_000_000).toISOString());
-    assert.equal(account.sourceAsOf, new Date(1_790_000_000_000).toISOString());
+    assert.equal(account.valuationAsOf, new Date(quoteTimestamp).toISOString());
+    assert.equal(account.sourceAsOf, new Date(quoteTimestamp).toISOString());
     assert.equal(account.fetchedAt, null);
     assert.equal(account.positions[0].currentPrice, 120);
     assert.equal(account.positions[0].currentValue, 240);
@@ -207,8 +264,8 @@ test('account and cumulative P&L routes use one valid ticker snapshot and report
     assert.equal(pnl.totalAssets, 1240);
     assert.equal(pnl.profit, 240);
     assert.equal(pnl.valuationAvailable, true);
-    assert.equal(pnl.valuationAsOf, new Date(1_790_000_000_000).toISOString());
-    assert.equal(pnl.sourceAsOf, new Date(1_790_000_000_000).toISOString());
+    assert.equal(pnl.valuationAsOf, new Date(quoteTimestamp).toISOString());
+    assert.equal(pnl.sourceAsOf, new Date(quoteTimestamp).toISOString());
     assert.equal(pnl.fetchedAt, null);
   } finally {
     await stopReadServer(ctx);
@@ -217,12 +274,13 @@ test('account and cumulative P&L routes use one valid ticker snapshot and report
 
 test('metadata-aware ticker adapter keeps source time and local fetched time separate', async () => {
   const { tradingSystem } = createDryRunTrader();
-  const sourceAsOf = new Date(1_790_000_000_000).toISOString();
-  const fetchedAt = new Date(1_790_000_001_234).toISOString();
+  const quoteTimestamp = Date.now();
+  const sourceAsOf = new Date(quoteTimestamp).toISOString();
+  const fetchedAt = new Date(quoteTimestamp + 1_234).toISOString();
   const tickers = [{
     market: 'KRW-BTC',
     trade_price: 120,
-    trade_timestamp: 1_790_000_000_000
+    trade_timestamp: quoteTimestamp
   }];
   const ctx = await startReadServer(
     tradingSystem,
@@ -254,8 +312,9 @@ test('metadata-aware ticker adapter keeps source time and local fetched time sep
 });
 
 test('cumulative P&L fallback also exposes the ticker provenance fields', async () => {
-  const sourceAsOf = new Date(1_790_000_000_000).toISOString();
-  const fetchedAt = new Date(1_790_000_001_234).toISOString();
+  const quoteTimestamp = Date.now();
+  const sourceAsOf = new Date(quoteTimestamp).toISOString();
+  const fetchedAt = new Date(quoteTimestamp + 1_234).toISOString();
   const holdings = new Map([['KRW-BTC', { amount: 2, avgPrice: 100 }]]);
   const tradingSystem = {
     dryRun: true,
@@ -264,7 +323,7 @@ test('cumulative P&L fallback also exposes the ticker provenance fields', async 
     getAccountInfo: async () => [{ currency: 'KRW', balance: '1000', locked: '0' }],
     getKRWBalance: () => 1000
   };
-  const tickers = [{ market: 'KRW-BTC', trade_price: 120, trade_timestamp: 1_790_000_000_000 }];
+  const tickers = [{ market: 'KRW-BTC', trade_price: 120, trade_timestamp: quoteTimestamp }];
   const ctx = await startReadServer(
     tradingSystem,
     async () => { throw new Error('array adapter should not be used'); },
@@ -324,6 +383,61 @@ test('a ticker without source time is not reported as a current account valuatio
     assert.equal(result.recorded, false);
     assert.equal(result.valuationStatus, 'unavailable');
     assert.equal(fs.existsSync(historyFile), false);
+  } finally {
+    writer.stop();
+    await stopReadServer(writerContext);
+  }
+});
+
+test('stale holdings quotes are unavailable for account value and cannot be saved to portfolio history', async t => {
+  const quoteTimestamp = Date.now() - 120_000;
+  const { tradingSystem } = createDryRunTrader();
+  const readContext = await startReadServer(tradingSystem, async () => [{
+    market: 'KRW-BTC',
+    trade_price: 120,
+    trade_timestamp: quoteTimestamp
+  }]);
+
+  try {
+    const accountResponse = await fetch(`${readContext.baseUrl}/api/account`);
+    const account = await accountResponse.json();
+    assert.equal(accountResponse.status, 200);
+    assert.equal(account.totalAssets, null);
+    assert.equal(account.valuationAvailable, false);
+    assert.equal(account.valuationStatus, 'stale');
+    assert.deepEqual(account.staleMarkets, ['KRW-BTC']);
+    assert.equal(account.positions[0].currentPrice, null);
+    assert.equal(account.positions[0].valuationAvailable, false);
+  } finally {
+    await stopReadServer(readContext);
+  }
+
+  const storageRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'coinpilot-stale-portfolio-snapshot-'));
+  t.after(() => fs.rmSync(storageRoot, { recursive: true, force: true }));
+  const historyFile = path.join(storageRoot, 'portfolio-history.json');
+  const initialHistory = JSON.stringify([{ timestamp: new Date().toISOString(), totalAssets: 1000 }]);
+  fs.writeFileSync(historyFile, initialHistory);
+  const writer = createSnapshotWriterTrader({
+    dryRun: true,
+    accounts: [{ currency: 'KRW', balance: '1000', locked: '0' }],
+    holdings: [['KRW-BTC', { amount: 2, avgPrice: 100 }]],
+    historyFile
+  });
+  const writerContext = await startReadServer(writer, async () => [{
+    market: 'KRW-BTC',
+    trade_price: 120,
+    trade_timestamp: quoteTimestamp
+  }]);
+
+  try {
+    const response = await fetch(`${writerContext.baseUrl}/api/portfolio/snapshot`, { method: 'POST' });
+    const result = await response.json();
+    assert.equal(response.status, 503);
+    assert.equal(result.recorded, false);
+    assert.equal(result.valuationAvailable, false);
+    assert.equal(result.valuationStatus, 'stale');
+    assert.deepEqual(result.staleMarkets, ['KRW-BTC']);
+    assert.equal(fs.readFileSync(historyFile, 'utf8'), initialHistory);
   } finally {
     writer.stop();
     await stopReadServer(writerContext);
@@ -467,8 +581,9 @@ test('LIVE portfolio snapshots include exchange coin and locked balances instead
     { currency: 'BTC', balance: '0.5', locked: '0.1', avg_buy_price: '100' }
   ];
   const trader = createSnapshotWriterTrader({ dryRun: false, accounts, historyFile });
-  const tickers = [{ market: 'KRW-BTC', trade_price: 200, trade_timestamp: 1_790_000_000_000 }];
-  const fetchedAt = new Date(1_790_000_001_234).toISOString();
+  const quoteTimestamp = Date.now();
+  const tickers = [{ market: 'KRW-BTC', trade_price: 200, trade_timestamp: quoteTimestamp }];
+  const fetchedAt = new Date(quoteTimestamp + 1_234).toISOString();
   const ctx = await startReadServer(trader, async markets => {
     assert.deepEqual(markets, ['KRW-BTC']);
     return tickers;
@@ -483,8 +598,8 @@ test('LIVE portfolio snapshots include exchange coin and locked balances instead
     const result = await response.json();
     assert.equal(result.success, true);
     assert.equal(result.recorded, true);
-    assert.equal(result.valuationAsOf, new Date(1_790_000_000_000).toISOString());
-    assert.equal(result.sourceAsOf, new Date(1_790_000_000_000).toISOString());
+    assert.equal(result.valuationAsOf, new Date(quoteTimestamp).toISOString());
+    assert.equal(result.sourceAsOf, new Date(quoteTimestamp).toISOString());
     assert.equal(result.fetchedAt, fetchedAt);
     assert.equal(typeof result.capturedAt, 'string');
 
@@ -494,8 +609,8 @@ test('LIVE portfolio snapshots include exchange coin and locked balances instead
     assert.equal(history[0].krwBalance, 1000);
     assert.equal(history[0].positionCount, 1);
     assert.equal(history[0].valuationAvailable, true);
-    assert.equal(history[0].valuationAsOf, new Date(1_790_000_000_000).toISOString());
-    assert.equal(history[0].sourceAsOf, new Date(1_790_000_000_000).toISOString());
+    assert.equal(history[0].valuationAsOf, new Date(quoteTimestamp).toISOString());
+    assert.equal(history[0].sourceAsOf, new Date(quoteTimestamp).toISOString());
     assert.equal(history[0].fetchedAt, fetchedAt);
     assert.equal(history[0].capturedAt, result.capturedAt);
   } finally {
@@ -521,8 +636,9 @@ test('partial portfolio quotes leave the existing history byte-for-byte unchange
     ],
     historyFile
   });
+  const quoteTimestamp = Date.now();
   const ctx = await startReadServer(trader, async () => [
-    { market: 'KRW-BTC', trade_price: 120, trade_timestamp: 1_790_000_000_000 }
+    { market: 'KRW-BTC', trade_price: 120, trade_timestamp: quoteTimestamp }
   ]);
 
   try {
@@ -585,6 +701,7 @@ test('overlapping portfolio snapshot writes do not overwrite the first snapshot'
   const secondRequestArrived = new Promise(resolve => { notifySecondRequest = resolve; });
   let requestCount = 0;
   let releaseTicker;
+  const quoteTimestamp = Date.now();
   const tickerPromise = new Promise(resolve => { releaseTicker = resolve; });
   const ctx = await startReadServer(trader, async () => {
     notifyTickerStarted();
@@ -600,7 +717,7 @@ test('overlapping portfolio snapshot writes do not overwrite the first snapshot'
 
     const secondRequest = fetch(`${ctx.baseUrl}/api/portfolio/snapshot`, { method: 'POST' });
     await secondRequestArrived;
-    releaseTicker([{ market: 'KRW-BTC', trade_price: 120, trade_timestamp: 1_790_000_000_000 }]);
+    releaseTicker([{ market: 'KRW-BTC', trade_price: 120, trade_timestamp: quoteTimestamp }]);
     const [firstResponse, secondResponse] = await Promise.all([firstRequest, secondRequest]);
     assert.equal(secondResponse.status, 409);
     const secondResult = await secondResponse.json();

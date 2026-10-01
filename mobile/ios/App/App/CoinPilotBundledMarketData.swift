@@ -14,21 +14,21 @@ enum CoinPilotBundledMarketDataError: Error, Equatable, LocalizedError, Sendable
     var errorDescription: String? {
         switch self {
         case .missingResource:
-            return "앱에 공개 시장 자료가 포함되지 않았습니다."
+            return "앱에 저장된 고정 시세 자료를 찾을 수 없습니다."
         case .missingIntegrityManifest:
-            return "앱에 공개 시장 자료 검증 파일이 포함되지 않았습니다."
+            return "앱에 저장된 고정 시세 자료의 확인 파일이 없습니다."
         case .fileTooLarge:
-            return "공개 시장 자료가 허용 크기보다 큽니다."
+            return "앱에 저장된 고정 시세 자료가 허용 크기를 초과했습니다."
         case .malformed:
-            return "공개 시장 자료를 읽을 수 없습니다."
+            return "앱에 저장된 고정 시세 자료를 읽을 수 없습니다."
         case .malformedIntegrityManifest:
-            return "공개 시장 자료 검증 파일을 읽을 수 없습니다."
+            return "앱에 저장된 고정 시세 자료의 확인 파일을 읽을 수 없습니다."
         case .integrityMismatch:
-            return "공개 시장 자료가 패키징된 검증 값과 일치하지 않습니다."
+            return "앱에 저장된 고정 시세 자료와 패키징 확인 값이 일치하지 않습니다."
         case .unsupportedSchema:
-            return "지원하지 않는 공개 시장 자료 버전입니다."
+            return "앱에 저장된 고정 시세 자료 버전을 지원하지 않습니다."
         case .invalidValue:
-            return "공개 시장 자료에 허용되지 않은 값이 있습니다."
+            return "앱에 저장된 고정 시세 자료에 허용되지 않은 값이 있습니다."
         }
     }
 }

@@ -20,7 +20,7 @@ function makeDashboard(getAccountInfo) {
   return dashboard;
 }
 
-async function startDashboard(tradingSystem, { routes = [], tickers = [] } = {}) {
+async function startDashboard(tradingSystem, { routes = [], tickers = [], fetchedAt = new Date().toISOString() } = {}) {
   const app = express();
   const dashboard = Object.create(DashboardServer.prototype);
   const storageRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'coinpilot-account-cache-idempotency-'));
@@ -34,7 +34,7 @@ async function startDashboard(tradingSystem, { routes = [], tickers = [] } = {})
     getCachedTicker: async () => tickers,
     getCachedTickerWithMetadata: async () => ({
       tickers,
-      fetchedAt: new Date(1_790_000_001_234).toISOString()
+      fetchedAt
     }),
     manualOrderIdempotencyStore: new ManualOrderIdempotencyStore({
       filePath: path.join(storageRoot, 'manual_order_idempotency.json')
@@ -141,8 +141,9 @@ test('observer account read 실패는 same-flight를 정리하고 다음 요청�
 });
 
 test('parallel GET /account, /positions, and /cumulative-pnl share one private account read', async () => {
-  const sourceAsOf = new Date(1_790_000_000_000).toISOString();
-  const fetchedAt = new Date(1_790_000_001_234).toISOString();
+  const quoteTimestamp = Date.now();
+  const sourceAsOf = new Date(quoteTimestamp).toISOString();
+  const fetchedAt = new Date(quoteTimestamp + 1_234).toISOString();
   const accounts = [
     { currency: 'KRW', balance: '1000', locked: '0' },
     { currency: 'BTC', balance: '2', locked: '0', avg_buy_price: '100' }
@@ -184,9 +185,9 @@ test('parallel GET /account, /positions, and /cumulative-pnl share one private a
   const tickers = [{
     market: 'KRW-BTC',
     trade_price: 120,
-    trade_timestamp: 1_790_000_000_000
+    trade_timestamp: quoteTimestamp
   }];
-  const ctx = await startDashboard(trader, { routes: ['account', 'portfolio'], tickers });
+  const ctx = await startDashboard(trader, { routes: ['account', 'portfolio'], tickers, fetchedAt });
 
   try {
     const responsesPromise = Promise.all([

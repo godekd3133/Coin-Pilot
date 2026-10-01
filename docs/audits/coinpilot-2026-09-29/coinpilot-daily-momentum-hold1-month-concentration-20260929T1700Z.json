@@ -1,0 +1,3266 @@
+{
+  "schemaVersion": 1,
+  "auditId": "coinpilot-daily-momentum-hold1-month-concentration-20260929T1700Z",
+  "generatedAt": "2026-09-29T17:13:02.559Z",
+  "researchOnly": true,
+  "promoted": false,
+  "actualFillsObserved": false,
+  "independentHoldout": false,
+  "postSelection": true,
+  "scope": "Offline monthly exit-profit concentration accounting for existing fixed-hold-one daily-momentum rolling-window reports only.",
+  "cachedInput": {
+    "path": "docs/audits/coinpilot-2026-09-29/coinpilot-daily-momentum-candles-1000d-20260928T0733Z.json",
+    "sha256": "f37d2ab7fd2e2a5dadd6581aecbe5a996d024ac51ac18314309aa2765ce7d58a",
+    "source": "upbit_daily_candles",
+    "generatedAt": "2026-09-28T07:34:03.766Z",
+    "requestedDays": 1000,
+    "markets": [
+      "KRW-BTC",
+      "KRW-ETH",
+      "KRW-XRP",
+      "KRW-SOL",
+      "KRW-DOGE",
+      "KRW-ADA",
+      "KRW-DOT",
+      "KRW-LINK",
+      "KRW-ATOM",
+      "KRW-NEAR",
+      "KRW-ETC",
+      "KRW-SUI"
+    ],
+    "candleCountByMarket": {
+      "KRW-BTC": 1000,
+      "KRW-ETH": 1000,
+      "KRW-XRP": 1000,
+      "KRW-SOL": 1000,
+      "KRW-DOGE": 1000,
+      "KRW-ADA": 1000,
+      "KRW-DOT": 1000,
+      "KRW-LINK": 1000,
+      "KRW-ATOM": 1000,
+      "KRW-NEAR": 1000,
+      "KRW-ETC": 1000,
+      "KRW-SUI": 1000
+    }
+  },
+  "sourceReports": [
+    {
+      "file": "coinpilot-daily-momentum-fixed-hold1-postselection-trailing-windows-20260929T0518Z.json",
+      "generatedAt": "2026-09-29T05:21:07.272Z",
+      "sha256": "731b649f5982f986b85bfaa1a9baf39ff9158a60f66929a5af7820bf06fc92a5",
+      "inputFile": "docs/audits/coinpilot-2026-09-29/coinpilot-daily-momentum-candles-1000d-20260928T0733Z.json",
+      "minimumTradeCount": 30,
+      "config": {
+        "initialBalance": 100000000,
+        "trendLookbackDays": 7,
+        "trendMinPercent": 2,
+        "breadthMin": 3,
+        "requireUpBar": true,
+        "minUpBars": 2,
+        "costPercent": 0.3,
+        "positionFraction": 0.125,
+        "maxPositions": 2,
+        "maxHoldDays": 1,
+        "cooldownAfterLossDays": 3,
+        "benchmarkMarket": "KRW-BTC",
+        "benchmarkTrendMinPercent": 2,
+        "benchmarkMinUpBars": 1,
+        "benchmarkExitConfirmationBars": 1,
+        "regimeExitConfirmationBars": 1,
+        "relativeTrendMinPercent": null,
+        "volatilityLookbackDays": 14,
+        "volatilityTargetPercent": null,
+        "excludeBenchmarkFromEntries": false,
+        "excludeBenchmarkFromBreadth": false,
+        "benchmarkExposureMinPercent": null,
+        "benchmarkExposureMaxPercent": null,
+        "exitOnBenchmarkOff": true,
+        "stopLossPercent": 0,
+        "maxPortfolioDrawdownPercent": 15,
+        "mode": "fixed",
+        "entryExecution": "close",
+        "exitExecution": "close",
+        "maxEntryGapPercent": 0,
+        "entryWindowEndTimestamp": null,
+        "excludeCurrentUtcDay": true
+      }
+    },
+    {
+      "file": "coinpilot-daily-momentum-fixed-hold1-trailing-cost-0p40-20260929T0522Z.json",
+      "generatedAt": "2026-09-29T05:22:12.801Z",
+      "sha256": "6649cfe69b8e876108fac21d2e91c71db5d2b796712664be23030db16c73c3c5",
+      "inputFile": "docs/audits/coinpilot-2026-09-29/coinpilot-daily-momentum-candles-1000d-20260928T0733Z.json",
+      "minimumTradeCount": 30,
+      "config": {
+        "initialBalance": 100000000,
+        "trendLookbackDays": 7,
+        "trendMinPercent": 2,
+        "breadthMin": 3,
+        "requireUpBar": true,
+        "minUpBars": 2,
+        "costPercent": 0.4,
+        "positionFraction": 0.125,
+        "maxPositions": 2,
+        "maxHoldDays": 1,
+        "cooldownAfterLossDays": 3,
+        "benchmarkMarket": "KRW-BTC",
+        "benchmarkTrendMinPercent": 2,
+        "benchmarkMinUpBars": 1,
+        "benchmarkExitConfirmationBars": 1,
+        "regimeExitConfirmationBars": 1,
+        "relativeTrendMinPercent": null,
+        "volatilityLookbackDays": 14,
+        "volatilityTargetPercent": null,
+        "excludeBenchmarkFromEntries": false,
+        "excludeBenchmarkFromBreadth": false,
+        "benchmarkExposureMinPercent": null,
+        "benchmarkExposureMaxPercent": null,
+        "exitOnBenchmarkOff": true,
+        "stopLossPercent": 0,
+        "maxPortfolioDrawdownPercent": 15,
+        "mode": "fixed",
+        "entryExecution": "close",
+        "exitExecution": "close",
+        "maxEntryGapPercent": 0,
+        "entryWindowEndTimestamp": null,
+        "excludeCurrentUtcDay": true
+      }
+    },
+    {
+      "file": "coinpilot-daily-momentum-fixed-hold1-trailing-cost-0p50-20260929T0522Z.json",
+      "generatedAt": "2026-09-29T05:22:12.812Z",
+      "sha256": "31f1ddd994e5c440dd78a57711b344ec6f1663c796541cd5b847a7c120fb0a13",
+      "inputFile": "docs/audits/coinpilot-2026-09-29/coinpilot-daily-momentum-candles-1000d-20260928T0733Z.json",
+      "minimumTradeCount": 30,
+      "config": {
+        "initialBalance": 100000000,
+        "trendLookbackDays": 7,
+        "trendMinPercent": 2,
+        "breadthMin": 3,
+        "requireUpBar": true,
+        "minUpBars": 2,
+        "costPercent": 0.5,
+        "positionFraction": 0.125,
+        "maxPositions": 2,
+        "maxHoldDays": 1,
+        "cooldownAfterLossDays": 3,
+        "benchmarkMarket": "KRW-BTC",
+        "benchmarkTrendMinPercent": 2,
+        "benchmarkMinUpBars": 1,
+        "benchmarkExitConfirmationBars": 1,
+        "regimeExitConfirmationBars": 1,
+        "relativeTrendMinPercent": null,
+        "volatilityLookbackDays": 14,
+        "volatilityTargetPercent": null,
+        "excludeBenchmarkFromEntries": false,
+        "excludeBenchmarkFromBreadth": false,
+        "benchmarkExposureMinPercent": null,
+        "benchmarkExposureMaxPercent": null,
+        "exitOnBenchmarkOff": true,
+        "stopLossPercent": 0,
+        "maxPortfolioDrawdownPercent": 15,
+        "mode": "fixed",
+        "entryExecution": "close",
+        "exitExecution": "close",
+        "maxEntryGapPercent": 0,
+        "entryWindowEndTimestamp": null,
+        "excludeCurrentUtcDay": true
+      }
+    }
+  ],
+  "sourceCodeSha256": {
+    "src/research/dailyMomentumStudy.js": "86fb81d654f884b029dc2103c64efd81973dd914e2f1a5e19db628fcb291a1ae",
+    "src/research/dailyMomentumRollingWindowStudy.js": "c18c02301adb96ef852bc9bbf54eab184e0fb1fcc2205dc51fd36acc3c2424a4"
+  },
+  "sourceHashVerification": {
+    "recomputedAfterSimulation": true,
+    "allUnchanged": true,
+    "files": [
+      {
+        "path": "docs/audits/coinpilot-2026-09-29/coinpilot-daily-momentum-candles-1000d-20260928T0733Z.json",
+        "sha256Before": "f37d2ab7fd2e2a5dadd6581aecbe5a996d024ac51ac18314309aa2765ce7d58a",
+        "sha256After": "f37d2ab7fd2e2a5dadd6581aecbe5a996d024ac51ac18314309aa2765ce7d58a",
+        "unchanged": true
+      },
+      {
+        "path": "docs/audits/coinpilot-2026-09-29/coinpilot-daily-momentum-fixed-hold1-postselection-trailing-windows-20260929T0518Z.json",
+        "sha256Before": "731b649f5982f986b85bfaa1a9baf39ff9158a60f66929a5af7820bf06fc92a5",
+        "sha256After": "731b649f5982f986b85bfaa1a9baf39ff9158a60f66929a5af7820bf06fc92a5",
+        "unchanged": true
+      },
+      {
+        "path": "docs/audits/coinpilot-2026-09-29/coinpilot-daily-momentum-fixed-hold1-trailing-cost-0p40-20260929T0522Z.json",
+        "sha256Before": "6649cfe69b8e876108fac21d2e91c71db5d2b796712664be23030db16c73c3c5",
+        "sha256After": "6649cfe69b8e876108fac21d2e91c71db5d2b796712664be23030db16c73c3c5",
+        "unchanged": true
+      },
+      {
+        "path": "docs/audits/coinpilot-2026-09-29/coinpilot-daily-momentum-fixed-hold1-trailing-cost-0p50-20260929T0522Z.json",
+        "sha256Before": "31f1ddd994e5c440dd78a57711b344ec6f1663c796541cd5b847a7c120fb0a13",
+        "sha256After": "31f1ddd994e5c440dd78a57711b344ec6f1663c796541cd5b847a7c120fb0a13",
+        "unchanged": true
+      },
+      {
+        "path": "src/research/dailyMomentumRollingWindowStudy.js",
+        "sha256Before": "c18c02301adb96ef852bc9bbf54eab184e0fb1fcc2205dc51fd36acc3c2424a4",
+        "sha256After": "c18c02301adb96ef852bc9bbf54eab184e0fb1fcc2205dc51fd36acc3c2424a4",
+        "unchanged": true
+      },
+      {
+        "path": "src/research/dailyMomentumStudy.js",
+        "sha256Before": "86fb81d654f884b029dc2103c64efd81973dd914e2f1a5e19db628fcb291a1ae",
+        "sha256After": "86fb81d654f884b029dc2103c64efd81973dd914e2f1a5e19db628fcb291a1ae",
+        "unchanged": true
+      }
+    ]
+  },
+  "windowDays": [
+    120,
+    180,
+    240,
+    365,
+    500,
+    800
+  ],
+  "costPercentScenarios": [
+    0.3,
+    0.4,
+    0.5
+  ],
+  "preservedConfig": {
+    "baseConfig": {
+      "initialBalance": 100000000,
+      "trendLookbackDays": 7,
+      "trendMinPercent": 2,
+      "breadthMin": 3,
+      "requireUpBar": true,
+      "minUpBars": 2,
+      "costPercent": 0.3,
+      "positionFraction": 0.125,
+      "maxPositions": 2,
+      "maxHoldDays": 1,
+      "cooldownAfterLossDays": 3,
+      "benchmarkMarket": "KRW-BTC",
+      "benchmarkTrendMinPercent": 2,
+      "benchmarkMinUpBars": 1,
+      "benchmarkExitConfirmationBars": 1,
+      "regimeExitConfirmationBars": 1,
+      "relativeTrendMinPercent": null,
+      "volatilityLookbackDays": 14,
+      "volatilityTargetPercent": null,
+      "excludeBenchmarkFromEntries": false,
+      "excludeBenchmarkFromBreadth": false,
+      "benchmarkExposureMinPercent": null,
+      "benchmarkExposureMaxPercent": null,
+      "exitOnBenchmarkOff": true,
+      "stopLossPercent": 0,
+      "maxPortfolioDrawdownPercent": 15,
+      "mode": "fixed",
+      "entryExecution": "close",
+      "exitExecution": "close",
+      "maxEntryGapPercent": 0,
+      "entryWindowEndTimestamp": null,
+      "excludeCurrentUtcDay": true
+    },
+    "onlyRecordedDifferenceAcrossSourceReports": "costPercent"
+  },
+  "reproduction": {
+    "method": "For each market, slice the final windowDays cached bars exactly as dailyMomentumRollingWindowStudy does, then call maintained simulateDailyMomentumPortfolio with the source report config.",
+    "simulationCount": 18,
+    "parityTolerance": {
+      "tradeCount": "exact integer",
+      "pnlKrwAbsolute": 0.0001,
+      "returnAndMaxDrawdownPercentagePointsAbsolute": 1e-8
+    },
+    "parityPassCount": 18,
+    "parityMismatchCount": 0,
+    "closedTradeAccountingCompleteCount": 18,
+    "noOpenOrBoundaryPositionsCount": 18,
+    "summaryMatrix": [
+      {
+        "costPercent": 0.3,
+        "windowDays": 120,
+        "sourceReport": "coinpilot-daily-momentum-fixed-hold1-postselection-trailing-windows-20260929T0518Z.json",
+        "sourceStatus": "POSITIVE_OBSERVATION",
+        "reproducedStatus": "POSITIVE_OBSERVATION",
+        "parityStatus": "PASS",
+        "tradeCount": 52,
+        "recordedTradeCount": 52,
+        "netProfitKrw": 3154613.0780771673,
+        "recordedNetProfitKrw": 3154613.0780771673,
+        "netProfitAbsDiffKrw": 0,
+        "returnPercent": 3.154613078077162,
+        "recordedReturnPercent": 3.154613078077162,
+        "returnAbsDiffPercentagePoints": 0,
+        "maxDrawdownPercent": 1.7022527451150637,
+        "recordedMaxDrawdownPercent": 1.7022527451150637,
+        "maxDrawdownAbsDiffPercentagePoints": 0,
+        "realizedProfitKrw": 3154613.078077225,
+        "recordedRealizedProfitKrw": 3154613.078077225,
+        "realizedAbsDiffKrw": 0,
+        "closedTradeAccountingComplete": true,
+        "noOpenOrBoundaryPositions": true,
+        "monthlyTradeCount": 52,
+        "concentration": {
+          "totalNetKrw": 3154613.078077226,
+          "bestOneMonth": {
+            "exitMonthUtc": "2026-08",
+            "netProfitKrw": 1243901.5987033914
+          },
+          "bestTwoMonths": [
+            {
+              "exitMonthUtc": "2026-08",
+              "netProfitKrw": 1243901.5987033914
+            },
+            {
+              "exitMonthUtc": "2026-06",
+              "netProfitKrw": 691881.2489108843
+            }
+          ],
+          "bestOneMonthContributionKrw": 1243901.5987033914,
+          "bestTwoMonthContributionKrw": 1935782.8476142758,
+          "bestOneMonthShareOfTotalNetPercent": 39.43119387121682,
+          "bestTwoMonthsShareOfTotalNetPercent": 61.36355869018835,
+          "positiveMonthCount": 4,
+          "negativeMonthCount": 0,
+          "zeroNetMonthCount": 0,
+          "largestPositiveMonthShareOfPositiveMonthNetPercent": 39.43119387121682,
+          "largestPositiveMonthShareDenominatorKrw": 3154613.078077226,
+          "recordedNetExcludingBestOneMonthKrw": 1910711.4793738343,
+          "recordedNetExcludingBestTwoMonthsKrw": 1218830.2304629502,
+          "residualAfterBestOneMonthRemainsPositive": true,
+          "residualAfterBestTwoMonthsRemainsPositive": true,
+          "residualIsResimulation": false,
+          "residualReturnPercent": null,
+          "residualMaxDrawdownPercent": null
+        }
+      },
+      {
+        "costPercent": 0.3,
+        "windowDays": 180,
+        "sourceReport": "coinpilot-daily-momentum-fixed-hold1-postselection-trailing-windows-20260929T0518Z.json",
+        "sourceStatus": "POSITIVE_OBSERVATION",
+        "reproducedStatus": "POSITIVE_OBSERVATION",
+        "parityStatus": "PASS",
+        "tradeCount": 81,
+        "recordedTradeCount": 81,
+        "netProfitKrw": 3928890.9058567733,
+        "recordedNetProfitKrw": 3928890.9058567733,
+        "netProfitAbsDiffKrw": 0,
+        "returnPercent": 3.9288909058567745,
+        "recordedReturnPercent": 3.9288909058567745,
+        "returnAbsDiffPercentagePoints": 0,
+        "maxDrawdownPercent": 2.008387204692006,
+        "recordedMaxDrawdownPercent": 2.008387204692006,
+        "maxDrawdownAbsDiffPercentagePoints": 0,
+        "realizedProfitKrw": 3928890.905856708,
+        "recordedRealizedProfitKrw": 3928890.905856708,
+        "realizedAbsDiffKrw": 0,
+        "closedTradeAccountingComplete": true,
+        "noOpenOrBoundaryPositions": true,
+        "monthlyTradeCount": 81,
+        "concentration": {
+          "totalNetKrw": 3928890.9058567095,
+          "bestOneMonth": {
+            "exitMonthUtc": "2026-05",
+            "netProfitKrw": 2690037.6956583043
+          },
+          "bestTwoMonths": [
+            {
+              "exitMonthUtc": "2026-05",
+              "netProfitKrw": 2690037.6956583043
+            },
+            {
+              "exitMonthUtc": "2026-08",
+              "netProfitKrw": 1253238.315686534
+            }
+          ],
+          "bestOneMonthContributionKrw": 2690037.6956583043,
+          "bestTwoMonthContributionKrw": 3943276.011344838,
+          "bestOneMonthShareOfTotalNetPercent": 68.4681188690764,
+          "bestTwoMonthsShareOfTotalNetPercent": 100.36613654674618,
+          "positiveMonthCount": 5,
+          "negativeMonthCount": 1,
+          "zeroNetMonthCount": 0,
+          "largestPositiveMonthShareOfPositiveMonthNetPercent": 45.83992424679353,
+          "largestPositiveMonthShareDenominatorKrw": 5868329.27815423,
+          "recordedNetExcludingBestOneMonthKrw": 1238853.2101984052,
+          "recordedNetExcludingBestTwoMonthsKrw": -14385.105488128727,
+          "residualAfterBestOneMonthRemainsPositive": true,
+          "residualAfterBestTwoMonthsRemainsPositive": false,
+          "residualIsResimulation": false,
+          "residualReturnPercent": null,
+          "residualMaxDrawdownPercent": null
+        }
+      },
+      {
+        "costPercent": 0.3,
+        "windowDays": 240,
+        "sourceReport": "coinpilot-daily-momentum-fixed-hold1-postselection-trailing-windows-20260929T0518Z.json",
+        "sourceStatus": "POSITIVE_OBSERVATION",
+        "reproducedStatus": "POSITIVE_OBSERVATION",
+        "parityStatus": "PASS",
+        "tradeCount": 100,
+        "recordedTradeCount": 100,
+        "netProfitKrw": 4368604.924844354,
+        "recordedNetProfitKrw": 4368604.924844354,
+        "netProfitAbsDiffKrw": 0,
+        "returnPercent": 4.368604924844344,
+        "recordedReturnPercent": 4.368604924844344,
+        "returnAbsDiffPercentagePoints": 0,
+        "maxDrawdownPercent": 2.9110163055182743,
+        "recordedMaxDrawdownPercent": 2.9110163055182743,
+        "maxDrawdownAbsDiffPercentagePoints": 0,
+        "realizedProfitKrw": 4368604.924844467,
+        "recordedRealizedProfitKrw": 4368604.924844467,
+        "realizedAbsDiffKrw": 0,
+        "closedTradeAccountingComplete": true,
+        "noOpenOrBoundaryPositions": true,
+        "monthlyTradeCount": 100,
+        "concentration": {
+          "totalNetKrw": 4368604.924844467,
+          "bestOneMonth": {
+            "exitMonthUtc": "2026-05",
+            "netProfitKrw": 2701419.009132128
+          },
+          "bestTwoMonths": [
+            {
+              "exitMonthUtc": "2026-05",
+              "netProfitKrw": 2701419.009132128
+            },
+            {
+              "exitMonthUtc": "2026-08",
+              "netProfitKrw": 1258540.6570445213
+            }
+          ],
+          "bestOneMonthContributionKrw": 2701419.009132128,
+          "bestTwoMonthContributionKrw": 3959959.6661766497,
+          "bestOneMonthShareOfTotalNetPercent": 61.8371094572784,
+          "bestTwoMonthsShareOfTotalNetPercent": 90.64586370939995,
+          "positiveMonthCount": 7,
+          "negativeMonthCount": 1,
+          "zeroNetMonthCount": 0,
+          "largestPositiveMonthShareOfPositiveMonthNetPercent": 39.49040184168538,
+          "largestPositiveMonthShareDenominatorKrw": 6840697.696523709,
+          "recordedNetExcludingBestOneMonthKrw": 1667185.9157123384,
+          "recordedNetExcludingBestTwoMonthsKrw": 408645.258667817,
+          "residualAfterBestOneMonthRemainsPositive": true,
+          "residualAfterBestTwoMonthsRemainsPositive": true,
+          "residualIsResimulation": false,
+          "residualReturnPercent": null,
+          "residualMaxDrawdownPercent": null
+        }
+      },
+      {
+        "costPercent": 0.3,
+        "windowDays": 365,
+        "sourceReport": "coinpilot-daily-momentum-fixed-hold1-postselection-trailing-windows-20260929T0518Z.json",
+        "sourceStatus": "POSITIVE_OBSERVATION",
+        "reproducedStatus": "POSITIVE_OBSERVATION",
+        "parityStatus": "PASS",
+        "tradeCount": 124,
+        "recordedTradeCount": 124,
+        "netProfitKrw": 2479230.699369386,
+        "recordedNetProfitKrw": 2479230.699369386,
+        "netProfitAbsDiffKrw": 0,
+        "returnPercent": 2.4792306993693947,
+        "recordedReturnPercent": 2.4792306993693947,
+        "returnAbsDiffPercentagePoints": 0,
+        "maxDrawdownPercent": 4.292126730109614,
+        "recordedMaxDrawdownPercent": 4.292126730109614,
+        "maxDrawdownAbsDiffPercentagePoints": 0,
+        "realizedProfitKrw": 2479230.6993694995,
+        "recordedRealizedProfitKrw": 2479230.6993694995,
+        "realizedAbsDiffKrw": 0,
+        "closedTradeAccountingComplete": true,
+        "noOpenOrBoundaryPositions": true,
+        "monthlyTradeCount": 124,
+        "concentration": {
+          "totalNetKrw": 2479230.6993695004,
+          "bestOneMonth": {
+            "exitMonthUtc": "2026-05",
+            "netProfitKrw": 2652515.4959373535
+          },
+          "bestTwoMonths": [
+            {
+              "exitMonthUtc": "2026-05",
+              "netProfitKrw": 2652515.4959373535
+            },
+            {
+              "exitMonthUtc": "2026-08",
+              "netProfitKrw": 1235757.423706829
+            }
+          ],
+          "bestOneMonthContributionKrw": 2652515.4959373535,
+          "bestTwoMonthContributionKrw": 3888272.9196441825,
+          "bestOneMonthShareOfTotalNetPercent": 106.98945832721101,
+          "bestTwoMonthsShareOfTotalNetPercent": 156.83384852539214,
+          "positiveMonthCount": 8,
+          "negativeMonthCount": 4,
+          "zeroNetMonthCount": 0,
+          "largestPositiveMonthShareOfPositiveMonthNetPercent": 37.66450184428262,
+          "largestPositiveMonthShareDenominatorKrw": 7042481.291545341,
+          "recordedNetExcludingBestOneMonthKrw": -173284.79656785307,
+          "recordedNetExcludingBestTwoMonthsKrw": -1409042.2202746822,
+          "residualAfterBestOneMonthRemainsPositive": false,
+          "residualAfterBestTwoMonthsRemainsPositive": false,
+          "residualIsResimulation": false,
+          "residualReturnPercent": null,
+          "residualMaxDrawdownPercent": null
+        }
+      },
+      {
+        "costPercent": 0.3,
+        "windowDays": 500,
+        "sourceReport": "coinpilot-daily-momentum-fixed-hold1-postselection-trailing-windows-20260929T0518Z.json",
+        "sourceStatus": "POSITIVE_OBSERVATION",
+        "reproducedStatus": "POSITIVE_OBSERVATION",
+        "parityStatus": "PASS",
+        "tradeCount": 175,
+        "recordedTradeCount": 175,
+        "netProfitKrw": 4530512.938467622,
+        "recordedNetProfitKrw": 4530512.938467622,
+        "netProfitAbsDiffKrw": 0,
+        "returnPercent": 4.5305129384676235,
+        "recordedReturnPercent": 4.5305129384676235,
+        "returnAbsDiffPercentagePoints": 0,
+        "maxDrawdownPercent": 4.292126730109558,
+        "recordedMaxDrawdownPercent": 4.292126730109558,
+        "maxDrawdownAbsDiffPercentagePoints": 0,
+        "realizedProfitKrw": 4530512.938467516,
+        "recordedRealizedProfitKrw": 4530512.938467516,
+        "realizedAbsDiffKrw": 0,
+        "closedTradeAccountingComplete": true,
+        "noOpenOrBoundaryPositions": true,
+        "monthlyTradeCount": 175,
+        "concentration": {
+          "totalNetKrw": 4530512.938467516,
+          "bestOneMonth": {
+            "exitMonthUtc": "2025-07",
+            "netProfitKrw": 3790830.2234326936
+          },
+          "bestTwoMonths": [
+            {
+              "exitMonthUtc": "2025-07",
+              "netProfitKrw": 3790830.2234326936
+            },
+            {
+              "exitMonthUtc": "2026-05",
+              "netProfitKrw": 2705609.746241696
+            }
+          ],
+          "bestOneMonthContributionKrw": 3790830.2234326936,
+          "bestTwoMonthContributionKrw": 6496439.96967439,
+          "bestOneMonthShareOfTotalNetPercent": 83.67331193882373,
+          "bestTwoMonthsShareOfTotalNetPercent": 143.3930342525821,
+          "positiveMonthCount": 10,
+          "negativeMonthCount": 6,
+          "zeroNetMonthCount": 0,
+          "largestPositiveMonthShareOfPositiveMonthNetPercent": 32.92750230975262,
+          "largestPositiveMonthShareDenominatorKrw": 11512656.465018023,
+          "recordedNetExcludingBestOneMonthKrw": 739682.7150348218,
+          "recordedNetExcludingBestTwoMonthsKrw": -1965927.0312068746,
+          "residualAfterBestOneMonthRemainsPositive": true,
+          "residualAfterBestTwoMonthsRemainsPositive": false,
+          "residualIsResimulation": false,
+          "residualReturnPercent": null,
+          "residualMaxDrawdownPercent": null
+        }
+      },
+      {
+        "costPercent": 0.3,
+        "windowDays": 800,
+        "sourceReport": "coinpilot-daily-momentum-fixed-hold1-postselection-trailing-windows-20260929T0518Z.json",
+        "sourceStatus": "POSITIVE_OBSERVATION",
+        "reproducedStatus": "POSITIVE_OBSERVATION",
+        "parityStatus": "PASS",
+        "tradeCount": 341,
+        "recordedTradeCount": 341,
+        "netProfitKrw": 10009591.080743074,
+        "recordedNetProfitKrw": 10009591.080743074,
+        "netProfitAbsDiffKrw": 0,
+        "returnPercent": 10.009591080743085,
+        "recordedReturnPercent": 10.009591080743085,
+        "returnAbsDiffPercentagePoints": 0,
+        "maxDrawdownPercent": 11.034275831345033,
+        "recordedMaxDrawdownPercent": 11.034275831345033,
+        "maxDrawdownAbsDiffPercentagePoints": 0,
+        "realizedProfitKrw": 10009591.080743033,
+        "recordedRealizedProfitKrw": 10009591.080743033,
+        "realizedAbsDiffKrw": 0,
+        "closedTradeAccountingComplete": true,
+        "noOpenOrBoundaryPositions": true,
+        "monthlyTradeCount": 341,
+        "concentration": {
+          "totalNetKrw": 10009591.080743032,
+          "bestOneMonth": {
+            "exitMonthUtc": "2024-11",
+            "netProfitKrw": 13033129.225979952
+          },
+          "bestTwoMonths": [
+            {
+              "exitMonthUtc": "2024-11",
+              "netProfitKrw": 13033129.225979952
+            },
+            {
+              "exitMonthUtc": "2025-04",
+              "netProfitKrw": 4578213.255485779
+            }
+          ],
+          "bestOneMonthContributionKrw": 13033129.225979952,
+          "bestTwoMonthContributionKrw": 17611342.48146573,
+          "bestOneMonthShareOfTotalNetPercent": 130.2064102404119,
+          "bestTwoMonthsShareOfTotalNetPercent": 175.9446748563719,
+          "positiveMonthCount": 13,
+          "negativeMonthCount": 12,
+          "zeroNetMonthCount": 0,
+          "largestPositiveMonthShareOfPositiveMonthNetPercent": 42.84790333587123,
+          "largestPositiveMonthShareDenominatorKrw": 30417192.467545852,
+          "recordedNetExcludingBestOneMonthKrw": -3023538.1452369196,
+          "recordedNetExcludingBestTwoMonthsKrw": -7601751.400722701,
+          "residualAfterBestOneMonthRemainsPositive": false,
+          "residualAfterBestTwoMonthsRemainsPositive": false,
+          "residualIsResimulation": false,
+          "residualReturnPercent": null,
+          "residualMaxDrawdownPercent": null
+        }
+      },
+      {
+        "costPercent": 0.4,
+        "windowDays": 120,
+        "sourceReport": "coinpilot-daily-momentum-fixed-hold1-trailing-cost-0p40-20260929T0522Z.json",
+        "sourceStatus": "POSITIVE_OBSERVATION",
+        "reproducedStatus": "POSITIVE_OBSERVATION",
+        "parityStatus": "PASS",
+        "tradeCount": 49,
+        "recordedTradeCount": 49,
+        "netProfitKrw": 2567845.7631941885,
+        "recordedNetProfitKrw": 2567845.7631941885,
+        "netProfitAbsDiffKrw": 0,
+        "returnPercent": 2.5678457631941987,
+        "recordedReturnPercent": 2.5678457631941987,
+        "returnAbsDiffPercentagePoints": 0,
+        "maxDrawdownPercent": 1.970570704426773,
+        "recordedMaxDrawdownPercent": 1.970570704426773,
+        "maxDrawdownAbsDiffPercentagePoints": 0,
+        "realizedProfitKrw": 2567845.7631942322,
+        "recordedRealizedProfitKrw": 2567845.7631942322,
+        "realizedAbsDiffKrw": 0,
+        "closedTradeAccountingComplete": true,
+        "noOpenOrBoundaryPositions": true,
+        "monthlyTradeCount": 49,
+        "concentration": {
+          "totalNetKrw": 2567845.7631942346,
+          "bestOneMonth": {
+            "exitMonthUtc": "2026-08",
+            "netProfitKrw": 950982.5950555536
+          },
+          "bestTwoMonths": [
+            {
+              "exitMonthUtc": "2026-08",
+              "netProfitKrw": 950982.5950555536
+            },
+            {
+              "exitMonthUtc": "2026-07",
+              "netProfitKrw": 599764.7658602741
+            }
+          ],
+          "bestOneMonthContributionKrw": 950982.5950555536,
+          "bestTwoMonthContributionKrw": 1550747.3609158276,
+          "bestOneMonthShareOfTotalNetPercent": 37.034256834514565,
+          "bestTwoMonthsShareOfTotalNetPercent": 60.39098543780129,
+          "positiveMonthCount": 4,
+          "negativeMonthCount": 0,
+          "zeroNetMonthCount": 0,
+          "largestPositiveMonthShareOfPositiveMonthNetPercent": 37.034256834514565,
+          "largestPositiveMonthShareDenominatorKrw": 2567845.7631942346,
+          "recordedNetExcludingBestOneMonthKrw": 1616863.168138681,
+          "recordedNetExcludingBestTwoMonthsKrw": 1017098.402278407,
+          "residualAfterBestOneMonthRemainsPositive": true,
+          "residualAfterBestTwoMonthsRemainsPositive": true,
+          "residualIsResimulation": false,
+          "residualReturnPercent": null,
+          "residualMaxDrawdownPercent": null
+        }
+      },
+      {
+        "costPercent": 0.4,
+        "windowDays": 180,
+        "sourceReport": "coinpilot-daily-momentum-fixed-hold1-trailing-cost-0p40-20260929T0522Z.json",
+        "sourceStatus": "POSITIVE_OBSERVATION",
+        "reproducedStatus": "POSITIVE_OBSERVATION",
+        "parityStatus": "PASS",
+        "tradeCount": 78,
+        "recordedTradeCount": 78,
+        "netProfitKrw": 2983276.8997730166,
+        "recordedNetProfitKrw": 2983276.8997730166,
+        "netProfitAbsDiffKrw": 0,
+        "returnPercent": 2.983276899773024,
+        "recordedReturnPercent": 2.983276899773024,
+        "returnAbsDiffPercentagePoints": 0,
+        "maxDrawdownPercent": 2.2600247065523567,
+        "recordedMaxDrawdownPercent": 2.2600247065523567,
+        "maxDrawdownAbsDiffPercentagePoints": 0,
+        "realizedProfitKrw": 2983276.899773019,
+        "recordedRealizedProfitKrw": 2983276.899773019,
+        "realizedAbsDiffKrw": 0,
+        "closedTradeAccountingComplete": true,
+        "noOpenOrBoundaryPositions": true,
+        "monthlyTradeCount": 78,
+        "concentration": {
+          "totalNetKrw": 2983276.8997730208,
+          "bestOneMonth": {
+            "exitMonthUtc": "2026-05",
+            "netProfitKrw": 2566818.7226258395
+          },
+          "bestTwoMonths": [
+            {
+              "exitMonthUtc": "2026-05",
+              "netProfitKrw": 2566818.7226258395
+            },
+            {
+              "exitMonthUtc": "2026-08",
+              "netProfitKrw": 954834.3653388327
+            }
+          ],
+          "bestOneMonthContributionKrw": 2566818.7226258395,
+          "bestTwoMonthContributionKrw": 3521653.087964672,
+          "bestOneMonthShareOfTotalNetPercent": 86.04024396197126,
+          "bestTwoMonthsShareOfTotalNetPercent": 118.04647058516804,
+          "positiveMonthCount": 5,
+          "negativeMonthCount": 1,
+          "zeroNetMonthCount": 0,
+          "largestPositiveMonthShareOfPositiveMonthNetPercent": 49.888946000163884,
+          "largestPositiveMonthShareDenominatorKrw": 5145065.046307868,
+          "recordedNetExcludingBestOneMonthKrw": 416458.177147181,
+          "recordedNetExcludingBestTwoMonthsKrw": -538376.1881916517,
+          "residualAfterBestOneMonthRemainsPositive": true,
+          "residualAfterBestTwoMonthsRemainsPositive": false,
+          "residualIsResimulation": false,
+          "residualReturnPercent": null,
+          "residualMaxDrawdownPercent": null
+        }
+      },
+      {
+        "costPercent": 0.4,
+        "windowDays": 240,
+        "sourceReport": "coinpilot-daily-momentum-fixed-hold1-trailing-cost-0p40-20260929T0522Z.json",
+        "sourceStatus": "POSITIVE_OBSERVATION",
+        "reproducedStatus": "POSITIVE_OBSERVATION",
+        "parityStatus": "PASS",
+        "tradeCount": 97,
+        "recordedTradeCount": 97,
+        "netProfitKrw": 3185008.7458398193,
+        "recordedNetProfitKrw": 3185008.7458398193,
+        "netProfitAbsDiffKrw": 0,
+        "returnPercent": 3.1850087458398235,
+        "recordedReturnPercent": 3.1850087458398235,
+        "returnAbsDiffPercentagePoints": 0,
+        "maxDrawdownPercent": 3.2074484402067824,
+        "recordedMaxDrawdownPercent": 3.2074484402067824,
+        "maxDrawdownAbsDiffPercentagePoints": 0,
+        "realizedProfitKrw": 3185008.7458398575,
+        "recordedRealizedProfitKrw": 3185008.7458398575,
+        "realizedAbsDiffKrw": 0,
+        "closedTradeAccountingComplete": true,
+        "noOpenOrBoundaryPositions": true,
+        "monthlyTradeCount": 97,
+        "concentration": {
+          "totalNetKrw": 3185008.7458398584,
+          "bestOneMonth": {
+            "exitMonthUtc": "2026-05",
+            "netProfitKrw": 2571846.8116032197
+          },
+          "bestTwoMonths": [
+            {
+              "exitMonthUtc": "2026-05",
+              "netProfitKrw": 2571846.8116032197
+            },
+            {
+              "exitMonthUtc": "2026-08",
+              "netProfitKrw": 956704.7709523109
+            }
+          ],
+          "bestOneMonthContributionKrw": 2571846.8116032197,
+          "bestTwoMonthContributionKrw": 3528551.5825555306,
+          "bestOneMonthShareOfTotalNetPercent": 80.74850076824661,
+          "bestTwoMonthsShareOfTotalNetPercent": 110.78624468973264,
+          "positiveMonthCount": 6,
+          "negativeMonthCount": 2,
+          "zeroNetMonthCount": 0,
+          "largestPositiveMonthShareOfPositiveMonthNetPercent": 42.560855873949535,
+          "largestPositiveMonthShareDenominatorKrw": 6042751.628914926,
+          "recordedNetExcludingBestOneMonthKrw": 613161.9342366386,
+          "recordedNetExcludingBestTwoMonthsKrw": -343542.8367156723,
+          "residualAfterBestOneMonthRemainsPositive": true,
+          "residualAfterBestTwoMonthsRemainsPositive": false,
+          "residualIsResimulation": false,
+          "residualReturnPercent": null,
+          "residualMaxDrawdownPercent": null
+        }
+      },
+      {
+        "costPercent": 0.4,
+        "windowDays": 365,
+        "sourceReport": "coinpilot-daily-momentum-fixed-hold1-trailing-cost-0p40-20260929T0522Z.json",
+        "sourceStatus": "POSITIVE_OBSERVATION",
+        "reproducedStatus": "POSITIVE_OBSERVATION",
+        "parityStatus": "PASS",
+        "tradeCount": 121,
+        "recordedTradeCount": 121,
+        "netProfitKrw": 1030467.6650843173,
+        "recordedNetProfitKrw": 1030467.6650843173,
+        "netProfitAbsDiffKrw": 0,
+        "returnPercent": 1.0304676650843225,
+        "recordedReturnPercent": 1.0304676650843225,
+        "returnAbsDiffPercentagePoints": 0,
+        "maxDrawdownPercent": 4.85565566427581,
+        "recordedMaxDrawdownPercent": 4.85565566427581,
+        "maxDrawdownAbsDiffPercentagePoints": 0,
+        "realizedProfitKrw": 1030467.6650843512,
+        "recordedRealizedProfitKrw": 1030467.6650843512,
+        "realizedAbsDiffKrw": 0,
+        "closedTradeAccountingComplete": true,
+        "noOpenOrBoundaryPositions": true,
+        "monthlyTradeCount": 121,
+        "concentration": {
+          "totalNetKrw": 1030467.6650843514,
+          "bestOneMonth": {
+            "exitMonthUtc": "2026-05",
+            "netProfitKrw": 2518145.700595341
+          },
+          "bestTwoMonths": [
+            {
+              "exitMonthUtc": "2026-05",
+              "netProfitKrw": 2518145.700595341
+            },
+            {
+              "exitMonthUtc": "2026-08",
+              "netProfitKrw": 936728.4220986832
+            }
+          ],
+          "bestOneMonthContributionKrw": 2518145.700595341,
+          "bestTwoMonthContributionKrw": 3454874.1226940244,
+          "bestOneMonthShareOfTotalNetPercent": 244.36921078830864,
+          "bestTwoMonthsShareOfTotalNetPercent": 335.2724437414751,
+          "positiveMonthCount": 7,
+          "negativeMonthCount": 5,
+          "zeroNetMonthCount": 0,
+          "largestPositiveMonthShareOfPositiveMonthNetPercent": 40.642684127032865,
+          "largestPositiveMonthShareDenominatorKrw": 6195815.445467675,
+          "recordedNetExcludingBestOneMonthKrw": -1487678.0355109894,
+          "recordedNetExcludingBestTwoMonthsKrw": -2424406.4576096726,
+          "residualAfterBestOneMonthRemainsPositive": false,
+          "residualAfterBestTwoMonthsRemainsPositive": false,
+          "residualIsResimulation": false,
+          "residualReturnPercent": null,
+          "residualMaxDrawdownPercent": null
+        }
+      },
+      {
+        "costPercent": 0.4,
+        "windowDays": 500,
+        "sourceReport": "coinpilot-daily-momentum-fixed-hold1-trailing-cost-0p40-20260929T0522Z.json",
+        "sourceStatus": "POSITIVE_OBSERVATION",
+        "reproducedStatus": "POSITIVE_OBSERVATION",
+        "parityStatus": "PASS",
+        "tradeCount": 172,
+        "recordedTradeCount": 172,
+        "netProfitKrw": 2891616.2062163353,
+        "recordedNetProfitKrw": 2891616.2062163353,
+        "netProfitAbsDiffKrw": 0,
+        "returnPercent": 2.891616206216341,
+        "recordedReturnPercent": 2.891616206216341,
+        "returnAbsDiffPercentagePoints": 0,
+        "maxDrawdownPercent": 4.85565566427581,
+        "recordedMaxDrawdownPercent": 4.85565566427581,
+        "maxDrawdownAbsDiffPercentagePoints": 0,
+        "realizedProfitKrw": 2891616.206216411,
+        "recordedRealizedProfitKrw": 2891616.206216411,
+        "realizedAbsDiffKrw": 0,
+        "closedTradeAccountingComplete": true,
+        "noOpenOrBoundaryPositions": true,
+        "monthlyTradeCount": 172,
+        "concentration": {
+          "totalNetKrw": 2891616.2062164084,
+          "bestOneMonth": {
+            "exitMonthUtc": "2025-07",
+            "netProfitKrw": 3549433.0328113614
+          },
+          "bestTwoMonths": [
+            {
+              "exitMonthUtc": "2025-07",
+              "netProfitKrw": 3549433.0328113614
+            },
+            {
+              "exitMonthUtc": "2026-05",
+              "netProfitKrw": 2564534.1149552246
+            }
+          ],
+          "bestOneMonthContributionKrw": 3549433.0328113614,
+          "bestTwoMonthContributionKrw": 6113967.147766586,
+          "bestOneMonthShareOfTotalNetPercent": 122.74910567940434,
+          "bestTwoMonthsShareOfTotalNetPercent": 211.43771205261453,
+          "positiveMonthCount": 9,
+          "negativeMonthCount": 7,
+          "zeroNetMonthCount": 0,
+          "largestPositiveMonthShareOfPositiveMonthNetPercent": 33.15883549505196,
+          "largestPositiveMonthShareDenominatorKrw": 10704335.60111306,
+          "recordedNetExcludingBestOneMonthKrw": -657816.8265949531,
+          "recordedNetExcludingBestTwoMonthsKrw": -3222350.941550177,
+          "residualAfterBestOneMonthRemainsPositive": false,
+          "residualAfterBestTwoMonthsRemainsPositive": false,
+          "residualIsResimulation": false,
+          "residualReturnPercent": null,
+          "residualMaxDrawdownPercent": null
+        }
+      },
+      {
+        "costPercent": 0.4,
+        "windowDays": 800,
+        "sourceReport": "coinpilot-daily-momentum-fixed-hold1-trailing-cost-0p40-20260929T0522Z.json",
+        "sourceStatus": "POSITIVE_OBSERVATION",
+        "reproducedStatus": "POSITIVE_OBSERVATION",
+        "parityStatus": "PASS",
+        "tradeCount": 338,
+        "recordedTradeCount": 338,
+        "netProfitKrw": 6401158.003631249,
+        "recordedNetProfitKrw": 6401158.003631249,
+        "netProfitAbsDiffKrw": 0,
+        "returnPercent": 6.401158003631258,
+        "recordedReturnPercent": 6.401158003631258,
+        "returnAbsDiffPercentagePoints": 0,
+        "maxDrawdownPercent": 11.592175292359354,
+        "recordedMaxDrawdownPercent": 11.592175292359354,
+        "maxDrawdownAbsDiffPercentagePoints": 0,
+        "realizedProfitKrw": 6401158.003631066,
+        "recordedRealizedProfitKrw": 6401158.003631066,
+        "realizedAbsDiffKrw": 0,
+        "closedTradeAccountingComplete": true,
+        "noOpenOrBoundaryPositions": true,
+        "monthlyTradeCount": 338,
+        "concentration": {
+          "totalNetKrw": 6401158.003631072,
+          "bestOneMonth": {
+            "exitMonthUtc": "2024-11",
+            "netProfitKrw": 12860327.760507854
+          },
+          "bestTwoMonths": [
+            {
+              "exitMonthUtc": "2024-11",
+              "netProfitKrw": 12860327.760507854
+            },
+            {
+              "exitMonthUtc": "2025-04",
+              "netProfitKrw": 4325690.430528694
+            }
+          ],
+          "bestOneMonthContributionKrw": 12860327.760507854,
+          "bestTwoMonthContributionKrw": 17186018.19103655,
+          "bestOneMonthShareOfTotalNetPercent": 200.9062696657824,
+          "bestTwoMonthsShareOfTotalNetPercent": 268.48295544786953,
+          "positiveMonthCount": 12,
+          "negativeMonthCount": 13,
+          "zeroNetMonthCount": 0,
+          "largestPositiveMonthShareOfPositiveMonthNetPercent": 44.9012973050215,
+          "largestPositiveMonthShareDenominatorKrw": 28641327.828783307,
+          "recordedNetExcludingBestOneMonthKrw": -6459169.756876784,
+          "recordedNetExcludingBestTwoMonthsKrw": -10784860.187405476,
+          "residualAfterBestOneMonthRemainsPositive": false,
+          "residualAfterBestTwoMonthsRemainsPositive": false,
+          "residualIsResimulation": false,
+          "residualReturnPercent": null,
+          "residualMaxDrawdownPercent": null
+        }
+      },
+      {
+        "costPercent": 0.5,
+        "windowDays": 120,
+        "sourceReport": "coinpilot-daily-momentum-fixed-hold1-trailing-cost-0p50-20260929T0522Z.json",
+        "sourceStatus": "POSITIVE_OBSERVATION",
+        "reproducedStatus": "POSITIVE_OBSERVATION",
+        "parityStatus": "PASS",
+        "tradeCount": 49,
+        "recordedTradeCount": 49,
+        "netProfitKrw": 1977131.1969115585,
+        "recordedNetProfitKrw": 1977131.1969115585,
+        "netProfitAbsDiffKrw": 0,
+        "returnPercent": 1.9771311969115635,
+        "recordedReturnPercent": 1.9771311969115635,
+        "returnAbsDiffPercentagePoints": 0,
+        "maxDrawdownPercent": 2.087394286115582,
+        "recordedMaxDrawdownPercent": 2.087394286115582,
+        "maxDrawdownAbsDiffPercentagePoints": 0,
+        "realizedProfitKrw": 1977131.1969115962,
+        "recordedRealizedProfitKrw": 1977131.1969115962,
+        "realizedAbsDiffKrw": 0,
+        "closedTradeAccountingComplete": true,
+        "noOpenOrBoundaryPositions": true,
+        "monthlyTradeCount": 49,
+        "concentration": {
+          "totalNetKrw": 1977131.1969115962,
+          "bestOneMonth": {
+            "exitMonthUtc": "2026-08",
+            "netProfitKrw": 815054.3078700148
+          },
+          "bestTwoMonths": [
+            {
+              "exitMonthUtc": "2026-08",
+              "netProfitKrw": 815054.3078700148
+            },
+            {
+              "exitMonthUtc": "2026-06",
+              "netProfitKrw": 478436.35979657294
+            }
+          ],
+          "bestOneMonthContributionKrw": 815054.3078700148,
+          "bestTwoMonthContributionKrw": 1293490.6676665877,
+          "bestOneMonthShareOfTotalNetPercent": 41.22408817094086,
+          "bestTwoMonthsShareOfTotalNetPercent": 65.42260168101652,
+          "positiveMonthCount": 4,
+          "negativeMonthCount": 0,
+          "zeroNetMonthCount": 0,
+          "largestPositiveMonthShareOfPositiveMonthNetPercent": 41.22408817094086,
+          "largestPositiveMonthShareDenominatorKrw": 1977131.1969115962,
+          "recordedNetExcludingBestOneMonthKrw": 1162076.8890415814,
+          "recordedNetExcludingBestTwoMonthsKrw": 683640.5292450085,
+          "residualAfterBestOneMonthRemainsPositive": true,
+          "residualAfterBestTwoMonthsRemainsPositive": true,
+          "residualIsResimulation": false,
+          "residualReturnPercent": null,
+          "residualMaxDrawdownPercent": null
+        }
+      },
+      {
+        "costPercent": 0.5,
+        "windowDays": 180,
+        "sourceReport": "coinpilot-daily-momentum-fixed-hold1-trailing-cost-0p50-20260929T0522Z.json",
+        "sourceStatus": "POSITIVE_OBSERVATION",
+        "reproducedStatus": "POSITIVE_OBSERVATION",
+        "parityStatus": "PASS",
+        "tradeCount": 78,
+        "recordedTradeCount": 78,
+        "netProfitKrw": 2038902.213474661,
+        "recordedNetProfitKrw": 2038902.213474661,
+        "netProfitAbsDiffKrw": 0,
+        "returnPercent": 2.0389022134746693,
+        "recordedReturnPercent": 2.0389022134746693,
+        "returnAbsDiffPercentagePoints": 0,
+        "maxDrawdownPercent": 2.5731074294541627,
+        "recordedMaxDrawdownPercent": 2.5731074294541627,
+        "maxDrawdownAbsDiffPercentagePoints": 0,
+        "realizedProfitKrw": 2038902.2134746704,
+        "recordedRealizedProfitKrw": 2038902.2134746704,
+        "realizedAbsDiffKrw": 0,
+        "closedTradeAccountingComplete": true,
+        "noOpenOrBoundaryPositions": true,
+        "monthlyTradeCount": 78,
+        "concentration": {
+          "totalNetKrw": 2038902.2134746718,
+          "bestOneMonth": {
+            "exitMonthUtc": "2026-05",
+            "netProfitKrw": 2444252.513316666
+          },
+          "bestTwoMonths": [
+            {
+              "exitMonthUtc": "2026-05",
+              "netProfitKrw": 2444252.513316666
+            },
+            {
+              "exitMonthUtc": "2026-08",
+              "netProfitKrw": 815548.0139839281
+            }
+          ],
+          "bestOneMonthContributionKrw": 2444252.513316666,
+          "bestTwoMonthContributionKrw": 3259800.527300594,
+          "bestOneMonthShareOfTotalNetPercent": 119.88081121120571,
+          "bestTwoMonthsShareOfTotalNetPercent": 159.88017992021707,
+          "positiveMonthCount": 5,
+          "negativeMonthCount": 1,
+          "zeroNetMonthCount": 0,
+          "largestPositiveMonthShareOfPositiveMonthNetPercent": 55.26755379348182,
+          "largestPositiveMonthShareDenominatorKrw": 4422581.325835589,
+          "recordedNetExcludingBestOneMonthKrw": -405350.29984199407,
+          "recordedNetExcludingBestTwoMonthsKrw": -1220898.313825922,
+          "residualAfterBestOneMonthRemainsPositive": false,
+          "residualAfterBestTwoMonthsRemainsPositive": false,
+          "residualIsResimulation": false,
+          "residualReturnPercent": null,
+          "residualMaxDrawdownPercent": null
+        }
+      },
+      {
+        "costPercent": 0.5,
+        "windowDays": 240,
+        "sourceReport": "coinpilot-daily-momentum-fixed-hold1-trailing-cost-0p50-20260929T0522Z.json",
+        "sourceStatus": "POSITIVE_OBSERVATION",
+        "reproducedStatus": "POSITIVE_OBSERVATION",
+        "parityStatus": "PASS",
+        "tradeCount": 97,
+        "recordedTradeCount": 97,
+        "netProfitKrw": 1845143.7881302834,
+        "recordedNetProfitKrw": 1845143.7881302834,
+        "netProfitAbsDiffKrw": 0,
+        "returnPercent": 1.8451437881302768,
+        "recordedReturnPercent": 1.8451437881302768,
+        "returnAbsDiffPercentagePoints": 0,
+        "maxDrawdownPercent": 3.717861335405505,
+        "recordedMaxDrawdownPercent": 3.717861335405505,
+        "maxDrawdownAbsDiffPercentagePoints": 0,
+        "realizedProfitKrw": 1845143.7881303094,
+        "recordedRealizedProfitKrw": 1845143.7881303094,
+        "realizedAbsDiffKrw": 0,
+        "closedTradeAccountingComplete": true,
+        "noOpenOrBoundaryPositions": true,
+        "monthlyTradeCount": 97,
+        "concentration": {
+          "totalNetKrw": 1845143.7881303101,
+          "bestOneMonth": {
+            "exitMonthUtc": "2026-05",
+            "netProfitKrw": 2439611.199975862
+          },
+          "bestTwoMonths": [
+            {
+              "exitMonthUtc": "2026-05",
+              "netProfitKrw": 2439611.199975862
+            },
+            {
+              "exitMonthUtc": "2026-02",
+              "netProfitKrw": 875108.0193570687
+            }
+          ],
+          "bestOneMonthContributionKrw": 2439611.199975862,
+          "bestTwoMonthContributionKrw": 3314719.2193329306,
+          "bestOneMonthShareOfTotalNetPercent": 132.2179450549991,
+          "bestTwoMonthsShareOfTotalNetPercent": 179.6455777948745,
+          "positiveMonthCount": 6,
+          "negativeMonthCount": 2,
+          "zeroNetMonthCount": 0,
+          "largestPositiveMonthShareOfPositiveMonthNetPercent": 46.12359187971168,
+          "largestPositiveMonthShareDenominatorKrw": 5289291.4462044975,
+          "recordedNetExcludingBestOneMonthKrw": -594467.4118455518,
+          "recordedNetExcludingBestTwoMonthsKrw": -1469575.4312026203,
+          "residualAfterBestOneMonthRemainsPositive": false,
+          "residualAfterBestTwoMonthsRemainsPositive": false,
+          "residualIsResimulation": false,
+          "residualReturnPercent": null,
+          "residualMaxDrawdownPercent": null
+        }
+      },
+      {
+        "costPercent": 0.5,
+        "windowDays": 365,
+        "sourceReport": "coinpilot-daily-momentum-fixed-hold1-trailing-cost-0p50-20260929T0522Z.json",
+        "sourceStatus": "NEGATIVE_OBSERVATION",
+        "reproducedStatus": "NEGATIVE_OBSERVATION",
+        "parityStatus": "PASS",
+        "tradeCount": 121,
+        "recordedTradeCount": 121,
+        "netProfitKrw": -563555.6237984598,
+        "recordedNetProfitKrw": -563555.6237984598,
+        "netProfitAbsDiffKrw": 0,
+        "returnPercent": -0.5635556237984618,
+        "recordedReturnPercent": -0.5635556237984618,
+        "returnAbsDiffPercentagePoints": 0,
+        "maxDrawdownPercent": 5.626550535131272,
+        "recordedMaxDrawdownPercent": 5.626550535131272,
+        "maxDrawdownAbsDiffPercentagePoints": 0,
+        "realizedProfitKrw": -563555.6237983688,
+        "recordedRealizedProfitKrw": -563555.6237983688,
+        "realizedAbsDiffKrw": 0,
+        "closedTradeAccountingComplete": true,
+        "noOpenOrBoundaryPositions": true,
+        "monthlyTradeCount": 121,
+        "concentration": {
+          "totalNetKrw": -563555.6237983687,
+          "bestOneMonth": {
+            "exitMonthUtc": "2026-05",
+            "netProfitKrw": 2381912.915657652
+          },
+          "bestTwoMonths": [
+            {
+              "exitMonthUtc": "2026-05",
+              "netProfitKrw": 2381912.915657652
+            },
+            {
+              "exitMonthUtc": "2026-02",
+              "netProfitKrw": 854411.1840127689
+            }
+          ],
+          "bestOneMonthContributionKrw": 2381912.915657652,
+          "bestTwoMonthContributionKrw": 3236324.099670421,
+          "bestOneMonthShareOfTotalNetPercent": null,
+          "bestTwoMonthsShareOfTotalNetPercent": null,
+          "positiveMonthCount": 7,
+          "negativeMonthCount": 5,
+          "zeroNetMonthCount": 0,
+          "largestPositiveMonthShareOfPositiveMonthNetPercent": 44.13303680721363,
+          "largestPositiveMonthShareDenominatorKrw": 5397119.908295828,
+          "recordedNetExcludingBestOneMonthKrw": -2945468.53945602,
+          "recordedNetExcludingBestTwoMonthsKrw": -3799879.723468789,
+          "residualAfterBestOneMonthRemainsPositive": false,
+          "residualAfterBestTwoMonthsRemainsPositive": false,
+          "residualIsResimulation": false,
+          "residualReturnPercent": null,
+          "residualMaxDrawdownPercent": null
+        }
+      },
+      {
+        "costPercent": 0.5,
+        "windowDays": 500,
+        "sourceReport": "coinpilot-daily-momentum-fixed-hold1-trailing-cost-0p50-20260929T0522Z.json",
+        "sourceStatus": "POSITIVE_OBSERVATION",
+        "reproducedStatus": "POSITIVE_OBSERVATION",
+        "parityStatus": "PASS",
+        "tradeCount": 172,
+        "recordedTradeCount": 172,
+        "netProfitKrw": 758962.3060951233,
+        "recordedNetProfitKrw": 758962.3060951233,
+        "netProfitAbsDiffKrw": 0,
+        "returnPercent": 0.7589623060951123,
+        "recordedReturnPercent": 0.7589623060951123,
+        "returnAbsDiffPercentagePoints": 0,
+        "maxDrawdownPercent": 5.783651972848771,
+        "recordedMaxDrawdownPercent": 5.783651972848771,
+        "maxDrawdownAbsDiffPercentagePoints": 0,
+        "realizedProfitKrw": 758962.3060950288,
+        "recordedRealizedProfitKrw": 758962.3060950288,
+        "realizedAbsDiffKrw": 0,
+        "closedTradeAccountingComplete": true,
+        "noOpenOrBoundaryPositions": true,
+        "monthlyTradeCount": 172,
+        "concentration": {
+          "totalNetKrw": 758962.3060950292,
+          "bestOneMonth": {
+            "exitMonthUtc": "2025-07",
+            "netProfitKrw": 3253680.03831958
+          },
+          "bestTwoMonths": [
+            {
+              "exitMonthUtc": "2025-07",
+              "netProfitKrw": 3253680.03831958
+            },
+            {
+              "exitMonthUtc": "2026-05",
+              "netProfitKrw": 2413592.674101992
+            }
+          ],
+          "bestOneMonthContributionKrw": 3253680.03831958,
+          "bestTwoMonthContributionKrw": 5667272.712421572,
+          "bestOneMonthShareOfTotalNetPercent": 428.7011373542692,
+          "bestTwoMonthsShareOfTotalNetPercent": 746.7133304130095,
+          "positiveMonthCount": 9,
+          "negativeMonthCount": 7,
+          "zeroNetMonthCount": 0,
+          "largestPositiveMonthShareOfPositiveMonthNetPercent": 33.98152633562581,
+          "largestPositiveMonthShareDenominatorKrw": 9574849.599702831,
+          "recordedNetExcludingBestOneMonthKrw": -2494717.732224551,
+          "recordedNetExcludingBestTwoMonthsKrw": -4908310.406326544,
+          "residualAfterBestOneMonthRemainsPositive": false,
+          "residualAfterBestTwoMonthsRemainsPositive": false,
+          "residualIsResimulation": false,
+          "residualReturnPercent": null,
+          "residualMaxDrawdownPercent": null
+        }
+      },
+      {
+        "costPercent": 0.5,
+        "windowDays": 800,
+        "sourceReport": "coinpilot-daily-momentum-fixed-hold1-trailing-cost-0p50-20260929T0522Z.json",
+        "sourceStatus": "POSITIVE_OBSERVATION",
+        "reproducedStatus": "POSITIVE_OBSERVATION",
+        "parityStatus": "PASS",
+        "tradeCount": 338,
+        "recordedTradeCount": 338,
+        "netProfitKrw": 2176374.411454335,
+        "recordedNetProfitKrw": 2176374.411454335,
+        "netProfitAbsDiffKrw": 0,
+        "returnPercent": 2.1763744114543293,
+        "recordedReturnPercent": 2.1763744114543293,
+        "returnAbsDiffPercentagePoints": 0,
+        "maxDrawdownPercent": 13.59525818474825,
+        "recordedMaxDrawdownPercent": 13.59525818474825,
+        "maxDrawdownAbsDiffPercentagePoints": 0,
+        "realizedProfitKrw": 2176374.4114542548,
+        "recordedRealizedProfitKrw": 2176374.4114542548,
+        "realizedAbsDiffKrw": 0,
+        "closedTradeAccountingComplete": true,
+        "noOpenOrBoundaryPositions": true,
+        "monthlyTradeCount": 338,
+        "concentration": {
+          "totalNetKrw": 2176374.4114542557,
+          "bestOneMonth": {
+            "exitMonthUtc": "2024-11",
+            "netProfitKrw": 12321524.689111456
+          },
+          "bestTwoMonths": [
+            {
+              "exitMonthUtc": "2024-11",
+              "netProfitKrw": 12321524.689111456
+            },
+            {
+              "exitMonthUtc": "2025-04",
+              "netProfitKrw": 4071526.1845122357
+            }
+          ],
+          "bestOneMonthContributionKrw": 12321524.689111456,
+          "bestTwoMonthContributionKrw": 16393050.873623691,
+          "bestOneMonthShareOfTotalNetPercent": 566.1491250891063,
+          "bestTwoMonthsShareOfTotalNetPercent": 753.2275139492123,
+          "positiveMonthCount": 12,
+          "negativeMonthCount": 13,
+          "zeroNetMonthCount": 0,
+          "largestPositiveMonthShareOfPositiveMonthNetPercent": 47.05400754722749,
+          "largestPositiveMonthShareDenominatorKrw": 26185919.8214828,
+          "recordedNetExcludingBestOneMonthKrw": -10145150.2776572,
+          "recordedNetExcludingBestTwoMonthsKrw": -14216676.462169439,
+          "residualAfterBestOneMonthRemainsPositive": false,
+          "residualAfterBestTwoMonthsRemainsPositive": false,
+          "residualIsResimulation": false,
+          "residualReturnPercent": null,
+          "residualMaxDrawdownPercent": null
+        }
+      }
+    ]
+  },
+  "monthBasis": {
+    "grouping": "UTC exitTimestamp YYYY-MM",
+    "includedMonths": "Only exit-trading months containing at least one closed trade; edge months may be partial relative to the trailing window.",
+    "monthlyProfitFields": "profitAmount already includes the source config costPercent; grossGainsKrw sums positive closed-trade profitAmount and grossLossesKrw sums the absolute value of negative closed-trade profitAmount."
+  },
+  "monthlyExitProfitRows": [
+    {
+      "costPercent": 0.3,
+      "windowDays": 120,
+      "exitMonthUtc": "2026-06",
+      "closedTradeCount": 9,
+      "netProfitKrw": 691881.2489108843,
+      "grossGainsKrw": 1646276.5384656638,
+      "grossLossesKrw": 954395.2895547797
+    },
+    {
+      "costPercent": 0.3,
+      "windowDays": 120,
+      "exitMonthUtc": "2026-07",
+      "closedTradeCount": 14,
+      "netProfitKrw": 592071.6799375194,
+      "grossGainsKrw": 2391379.3102785335,
+      "grossLossesKrw": 1799307.6303410144
+    },
+    {
+      "costPercent": 0.3,
+      "windowDays": 120,
+      "exitMonthUtc": "2026-08",
+      "closedTradeCount": 13,
+      "netProfitKrw": 1243901.5987033914,
+      "grossGainsKrw": 3585818.4750633617,
+      "grossLossesKrw": 2341916.87635997
+    },
+    {
+      "costPercent": 0.3,
+      "windowDays": 120,
+      "exitMonthUtc": "2026-09",
+      "closedTradeCount": 16,
+      "netProfitKrw": 626758.5505254308,
+      "grossGainsKrw": 3899378.600389311,
+      "grossLossesKrw": 3272620.0498638805
+    },
+    {
+      "costPercent": 0.3,
+      "windowDays": 180,
+      "exitMonthUtc": "2026-04",
+      "closedTradeCount": 19,
+      "netProfitKrw": -1939438.3722975203,
+      "grossGainsKrw": 617815.4471919937,
+      "grossLossesKrw": 2557253.819489514
+    },
+    {
+      "costPercent": 0.3,
+      "windowDays": 180,
+      "exitMonthUtc": "2026-05",
+      "closedTradeCount": 10,
+      "netProfitKrw": 2690037.6956583043,
+      "grossGainsKrw": 3859808.7746985997,
+      "grossLossesKrw": 1169771.0790402952
+    },
+    {
+      "costPercent": 0.3,
+      "windowDays": 180,
+      "exitMonthUtc": "2026-06",
+      "closedTradeCount": 9,
+      "netProfitKrw": 697074.5048836692,
+      "grossGainsKrw": 1658633.479024034,
+      "grossLossesKrw": 961558.9741403648
+    },
+    {
+      "costPercent": 0.3,
+      "windowDays": 180,
+      "exitMonthUtc": "2026-07",
+      "closedTradeCount": 14,
+      "netProfitKrw": 596515.7659609405,
+      "grossGainsKrw": 2409328.987200473,
+      "grossLossesKrw": 1812813.2212395328
+    },
+    {
+      "costPercent": 0.3,
+      "windowDays": 180,
+      "exitMonthUtc": "2026-08",
+      "closedTradeCount": 13,
+      "netProfitKrw": 1253238.315686534,
+      "grossGainsKrw": 3612733.6042741365,
+      "grossLossesKrw": 2359495.2885876023
+    },
+    {
+      "costPercent": 0.3,
+      "windowDays": 180,
+      "exitMonthUtc": "2026-09",
+      "closedTradeCount": 16,
+      "netProfitKrw": 631462.9959647817,
+      "grossGainsKrw": 3928647.309779114,
+      "grossLossesKrw": 3297184.3138143327
+    },
+    {
+      "costPercent": 0.3,
+      "windowDays": 240,
+      "exitMonthUtc": "2026-02",
+      "closedTradeCount": 1,
+      "netProfitKrw": 900108.0193570687,
+      "grossGainsKrw": 900108.0193570687,
+      "grossLossesKrw": 0
+    },
+    {
+      "costPercent": 0.3,
+      "windowDays": 240,
+      "exitMonthUtc": "2026-03",
+      "closedTradeCount": 14,
+      "netProfitKrw": 47432.01270760773,
+      "grossGainsKrw": 1932759.4209857474,
+      "grossLossesKrw": 1885327.4082781398
+    },
+    {
+      "costPercent": 0.3,
+      "windowDays": 240,
+      "exitMonthUtc": "2026-04",
+      "closedTradeCount": 23,
+      "netProfitKrw": -2472092.7716792426,
+      "grossGainsKrw": 899306.7039017029,
+      "grossLossesKrw": 3371399.475580946
+    },
+    {
+      "costPercent": 0.3,
+      "windowDays": 240,
+      "exitMonthUtc": "2026-05",
+      "closedTradeCount": 10,
+      "netProfitKrw": 2701419.009132128,
+      "grossGainsKrw": 3876139.2869753465,
+      "grossLossesKrw": 1174720.2778432183
+    },
+    {
+      "costPercent": 0.3,
+      "windowDays": 240,
+      "exitMonthUtc": "2026-06",
+      "closedTradeCount": 9,
+      "netProfitKrw": 700023.7659544323,
+      "grossGainsKrw": 1665651.0117498462,
+      "grossLossesKrw": 965627.2457954139
+    },
+    {
+      "costPercent": 0.3,
+      "windowDays": 240,
+      "exitMonthUtc": "2026-07",
+      "closedTradeCount": 14,
+      "netProfitKrw": 599039.5718300696,
+      "grossGainsKrw": 2419522.646757421,
+      "grossLossesKrw": 1820483.0749273517
+    },
+    {
+      "costPercent": 0.3,
+      "windowDays": 240,
+      "exitMonthUtc": "2026-08",
+      "closedTradeCount": 13,
+      "netProfitKrw": 1258540.6570445213,
+      "grossGainsKrw": 3628018.76318251,
+      "grossLossesKrw": 2369478.106137988
+    },
+    {
+      "costPercent": 0.3,
+      "windowDays": 240,
+      "exitMonthUtc": "2026-09",
+      "closedTradeCount": 16,
+      "netProfitKrw": 634134.6604978814,
+      "grossGainsKrw": 3945269.071858078,
+      "grossLossesKrw": 3311134.411360196
+    },
+    {
+      "costPercent": 0.3,
+      "windowDays": 365,
+      "exitMonthUtc": "2025-10",
+      "closedTradeCount": 4,
+      "netProfitKrw": -1470913.3995524237,
+      "grossGainsKrw": 0,
+      "grossLossesKrw": 1470913.3995524237
+    },
+    {
+      "costPercent": 0.3,
+      "windowDays": 365,
+      "exitMonthUtc": "2025-11",
+      "closedTradeCount": 1,
+      "netProfitKrw": -91540.49053143995,
+      "grossGainsKrw": 0,
+      "grossLossesKrw": 91540.49053143995
+    },
+    {
+      "costPercent": 0.3,
+      "windowDays": 365,
+      "exitMonthUtc": "2025-12",
+      "closedTradeCount": 4,
+      "netProfitKrw": 325620.0487270788,
+      "grossGainsKrw": 818327.5605057933,
+      "grossLossesKrw": 492707.5117787145
+    },
+    {
+      "costPercent": 0.3,
+      "windowDays": 365,
+      "exitMonthUtc": "2026-01",
+      "closedTradeCount": 15,
+      "netProfitKrw": -573455.9740867593,
+      "grossGainsKrw": 2494552.269407696,
+      "grossLossesKrw": 3068008.2434944552
+    },
+    {
+      "costPercent": 0.3,
+      "windowDays": 365,
+      "exitMonthUtc": "2026-02",
+      "closedTradeCount": 1,
+      "netProfitKrw": 883813.4555546569,
+      "grossGainsKrw": 883813.4555546569,
+      "grossLossesKrw": 0
+    },
+    {
+      "costPercent": 0.3,
+      "windowDays": 365,
+      "exitMonthUtc": "2026-03",
+      "closedTradeCount": 14,
+      "netProfitKrw": 46573.35581230227,
+      "grossGainsKrw": 1897770.8740306161,
+      "grossLossesKrw": 1851197.5182183138
+    },
+    {
+      "costPercent": 0.3,
+      "windowDays": 365,
+      "exitMonthUtc": "2026-04",
+      "closedTradeCount": 23,
+      "netProfitKrw": -2427340.7280052165,
+      "grossGainsKrw": 883026.6462313691,
+      "grossLossesKrw": 3310367.374236585
+    },
+    {
+      "costPercent": 0.3,
+      "windowDays": 365,
+      "exitMonthUtc": "2026-05",
+      "closedTradeCount": 10,
+      "netProfitKrw": 2652515.4959373535,
+      "grossGainsKrw": 3805969.9322308255,
+      "grossLossesKrw": 1153454.4362934725
+    },
+    {
+      "costPercent": 0.3,
+      "windowDays": 365,
+      "exitMonthUtc": "2026-06",
+      "closedTradeCount": 9,
+      "netProfitKrw": 687351.3070136753,
+      "grossGainsKrw": 1635497.9011233067,
+      "grossLossesKrw": 948146.5941096314
+    },
+    {
+      "costPercent": 0.3,
+      "windowDays": 365,
+      "exitMonthUtc": "2026-07",
+      "closedTradeCount": 14,
+      "netProfitKrw": 588195.219470752,
+      "grossGainsKrw": 2375722.274700822,
+      "grossLossesKrw": 1787527.0552300697
+    },
+    {
+      "costPercent": 0.3,
+      "windowDays": 365,
+      "exitMonthUtc": "2026-08",
+      "closedTradeCount": 13,
+      "netProfitKrw": 1235757.423706829,
+      "grossGainsKrw": 3562341.1090102377,
+      "grossLossesKrw": 2326583.6853034087
+    },
+    {
+      "costPercent": 0.3,
+      "windowDays": 365,
+      "exitMonthUtc": "2026-09",
+      "closedTradeCount": 16,
+      "netProfitKrw": 622654.985322692,
+      "grossGainsKrw": 3873848.2676583873,
+      "grossLossesKrw": 3251193.282335696
+    },
+    {
+      "costPercent": 0.3,
+      "windowDays": 500,
+      "exitMonthUtc": "2025-06",
+      "closedTradeCount": 6,
+      "netProfitKrw": -1374081.6975204477,
+      "grossGainsKrw": 328309.93535159255,
+      "grossLossesKrw": 1702391.6328720402
+    },
+    {
+      "costPercent": 0.3,
+      "windowDays": 500,
+      "exitMonthUtc": "2025-07",
+      "closedTradeCount": 20,
+      "netProfitKrw": 3790830.2234326936,
+      "grossGainsKrw": 5295211.875386249,
+      "grossLossesKrw": 1504381.6519535556
+    },
+    {
+      "costPercent": 0.3,
+      "windowDays": 500,
+      "exitMonthUtc": "2025-08",
+      "closedTradeCount": 6,
+      "netProfitKrw": -1268567.088070498,
+      "grossGainsKrw": 498433.1633057928,
+      "grossLossesKrw": 1767000.2513762908
+    },
+    {
+      "costPercent": 0.3,
+      "windowDays": 500,
+      "exitMonthUtc": "2025-09",
+      "closedTradeCount": 12,
+      "netProfitKrw": 538378.6616131517,
+      "grossGainsKrw": 1719189.859852946,
+      "grossLossesKrw": 1180811.1982397945
+    },
+    {
+      "costPercent": 0.3,
+      "windowDays": 500,
+      "exitMonthUtc": "2025-10",
+      "closedTradeCount": 11,
+      "netProfitKrw": -1185259.5782085261,
+      "grossGainsKrw": 399247.9168253166,
+      "grossLossesKrw": 1584507.4950338427
+    },
+    {
+      "costPercent": 0.3,
+      "windowDays": 500,
+      "exitMonthUtc": "2025-11",
+      "closedTradeCount": 1,
+      "netProfitKrw": -93372.8167609012,
+      "grossGainsKrw": 0,
+      "grossLossesKrw": 93372.8167609012
+    },
+    {
+      "costPercent": 0.3,
+      "windowDays": 500,
+      "exitMonthUtc": "2025-12",
+      "closedTradeCount": 4,
+      "netProfitKrw": 332137.8437777418,
+      "grossGainsKrw": 834707.6677643493,
+      "grossLossesKrw": 502569.8239866075
+    },
+    {
+      "costPercent": 0.3,
+      "windowDays": 500,
+      "exitMonthUtc": "2026-01",
+      "closedTradeCount": 15,
+      "netProfitKrw": -584934.5931837315,
+      "grossGainsKrw": 2544484.638433269,
+      "grossLossesKrw": 3129419.231617001
+    },
+    {
+      "costPercent": 0.3,
+      "windowDays": 500,
+      "exitMonthUtc": "2026-02",
+      "closedTradeCount": 1,
+      "netProfitKrw": 901504.3655242445,
+      "grossGainsKrw": 901504.3655242445,
+      "grossLossesKrw": 0
+    },
+    {
+      "costPercent": 0.3,
+      "windowDays": 500,
+      "exitMonthUtc": "2026-03",
+      "closedTradeCount": 14,
+      "netProfitKrw": 47505.59444193466,
+      "grossGainsKrw": 1935757.7291349114,
+      "grossLossesKrw": 1888252.1346929767
+    },
+    {
+      "costPercent": 0.3,
+      "windowDays": 500,
+      "exitMonthUtc": "2026-04",
+      "closedTradeCount": 23,
+      "netProfitKrw": -2475927.752806401,
+      "grossGainsKrw": 900701.8069805598,
+      "grossLossesKrw": 3376629.559786961
+    },
+    {
+      "costPercent": 0.3,
+      "windowDays": 500,
+      "exitMonthUtc": "2026-05",
+      "closedTradeCount": 10,
+      "netProfitKrw": 2705609.746241696,
+      "grossGainsKrw": 3882152.378871446,
+      "grossLossesKrw": 1176542.6326297503
+    },
+    {
+      "costPercent": 0.3,
+      "windowDays": 500,
+      "exitMonthUtc": "2026-06",
+      "closedTradeCount": 9,
+      "netProfitKrw": 701109.7195083417,
+      "grossGainsKrw": 1668234.952072667,
+      "grossLossesKrw": 967125.2325643252
+    },
+    {
+      "costPercent": 0.3,
+      "windowDays": 500,
+      "exitMonthUtc": "2026-07",
+      "closedTradeCount": 14,
+      "netProfitKrw": 599968.8676391537,
+      "grossGainsKrw": 2423276.0753477043,
+      "grossLossesKrw": 1823307.2077085502
+    },
+    {
+      "costPercent": 0.3,
+      "windowDays": 500,
+      "exitMonthUtc": "2026-08",
+      "closedTradeCount": 13,
+      "netProfitKrw": 1260493.0431858604,
+      "grossGainsKrw": 3633646.9433403043,
+      "grossLossesKrw": 2373153.900154444
+    },
+    {
+      "costPercent": 0.3,
+      "windowDays": 500,
+      "exitMonthUtc": "2026-09",
+      "closedTradeCount": 16,
+      "netProfitKrw": 635118.3996532033,
+      "grossGainsKrw": 3951389.4054497145,
+      "grossLossesKrw": 3316271.005796511
+    },
+    {
+      "costPercent": 0.3,
+      "windowDays": 800,
+      "exitMonthUtc": "2024-08",
+      "closedTradeCount": 7,
+      "netProfitKrw": -865676.9983859584,
+      "grossGainsKrw": 422054.4242221152,
+      "grossLossesKrw": 1287731.4226080738
+    },
+    {
+      "costPercent": 0.3,
+      "windowDays": 800,
+      "exitMonthUtc": "2024-09",
+      "closedTradeCount": 26,
+      "netProfitKrw": 689745.3734945231,
+      "grossGainsKrw": 4281870.2035610275,
+      "grossLossesKrw": 3592124.830066505
+    },
+    {
+      "costPercent": 0.3,
+      "windowDays": 800,
+      "exitMonthUtc": "2024-10",
+      "closedTradeCount": 23,
+      "netProfitKrw": -36593.21959693264,
+      "grossGainsKrw": 4586059.80643374,
+      "grossLossesKrw": 4622653.026030672
+    },
+    {
+      "costPercent": 0.3,
+      "windowDays": 800,
+      "exitMonthUtc": "2024-11",
+      "closedTradeCount": 35,
+      "netProfitKrw": 13033129.225979952,
+      "grossGainsKrw": 20886418.483625107,
+      "grossLossesKrw": 7853289.257645158
+    },
+    {
+      "costPercent": 0.3,
+      "windowDays": 800,
+      "exitMonthUtc": "2024-12",
+      "closedTradeCount": 21,
+      "netProfitKrw": -3266755.8038597936,
+      "grossGainsKrw": 4205898.271514487,
+      "grossLossesKrw": 7472654.075374282
+    },
+    {
+      "costPercent": 0.3,
+      "windowDays": 800,
+      "exitMonthUtc": "2025-01",
+      "closedTradeCount": 15,
+      "netProfitKrw": -4103364.6699077114,
+      "grossGainsKrw": 1140223.7119963109,
+      "grossLossesKrw": 5243588.381904022
+    },
+    {
+      "costPercent": 0.3,
+      "windowDays": 800,
+      "exitMonthUtc": "2025-03",
+      "closedTradeCount": 13,
+      "netProfitKrw": -3016360.478601082,
+      "grossGainsKrw": 2096147.8408963373,
+      "grossLossesKrw": 5112508.3194974195
+    },
+    {
+      "costPercent": 0.3,
+      "windowDays": 800,
+      "exitMonthUtc": "2025-04",
+      "closedTradeCount": 15,
+      "netProfitKrw": 4578213.255485779,
+      "grossGainsKrw": 5555960.390771674,
+      "grossLossesKrw": 977747.1352858949
+    },
+    {
+      "costPercent": 0.3,
+      "windowDays": 800,
+      "exitMonthUtc": "2025-05",
+      "closedTradeCount": 11,
+      "netProfitKrw": -1770730.2022022356,
+      "grossGainsKrw": 2015747.6369867993,
+      "grossLossesKrw": 3786477.8391890344
+    },
+    {
+      "costPercent": 0.3,
+      "windowDays": 800,
+      "exitMonthUtc": "2025-06",
+      "closedTradeCount": 6,
+      "netProfitKrw": -1446105.652851242,
+      "grossGainsKrw": 345518.65020536655,
+      "grossLossesKrw": 1791624.3030566084
+    },
+    {
+      "costPercent": 0.3,
+      "windowDays": 800,
+      "exitMonthUtc": "2025-07",
+      "closedTradeCount": 20,
+      "netProfitKrw": 3989530.62616117,
+      "grossGainsKrw": 5572766.044303658,
+      "grossLossesKrw": 1583235.4181424887
+    },
+    {
+      "costPercent": 0.3,
+      "windowDays": 800,
+      "exitMonthUtc": "2025-08",
+      "closedTradeCount": 6,
+      "netProfitKrw": -1335060.382792478,
+      "grossGainsKrw": 524559.0683040934,
+      "grossLossesKrw": 1859619.4510965715
+    },
+    {
+      "costPercent": 0.3,
+      "windowDays": 800,
+      "exitMonthUtc": "2025-09",
+      "closedTradeCount": 12,
+      "netProfitKrw": 566598.3524401607,
+      "grossGainsKrw": 1809303.026991875,
+      "grossLossesKrw": 1242704.6745517147
+    },
+    {
+      "costPercent": 0.3,
+      "windowDays": 800,
+      "exitMonthUtc": "2025-10",
+      "closedTradeCount": 11,
+      "netProfitKrw": -1247386.221093249,
+      "grossGainsKrw": 420174.92151450575,
+      "grossLossesKrw": 1667561.1426077546
+    },
+    {
+      "costPercent": 0.3,
+      "windowDays": 800,
+      "exitMonthUtc": "2025-11",
+      "closedTradeCount": 1,
+      "netProfitKrw": -98267.05237704623,
+      "grossGainsKrw": 0,
+      "grossLossesKrw": 98267.05237704623
+    },
+    {
+      "costPercent": 0.3,
+      "windowDays": 800,
+      "exitMonthUtc": "2025-12",
+      "closedTradeCount": 4,
+      "netProfitKrw": 349547.2025277213,
+      "grossGainsKrw": 878459.7589870302,
+      "grossLossesKrw": 528912.556459309
+    },
+    {
+      "costPercent": 0.3,
+      "windowDays": 800,
+      "exitMonthUtc": "2026-01",
+      "closedTradeCount": 15,
+      "netProfitKrw": -615594.5627378889,
+      "grossGainsKrw": 2677856.510185228,
+      "grossLossesKrw": 3293451.0729231164
+    },
+    {
+      "costPercent": 0.3,
+      "windowDays": 800,
+      "exitMonthUtc": "2026-02",
+      "closedTradeCount": 1,
+      "netProfitKrw": 948757.6767867419,
+      "grossGainsKrw": 948757.6767867419,
+      "grossLossesKrw": 0
+    },
+    {
+      "costPercent": 0.3,
+      "windowDays": 800,
+      "exitMonthUtc": "2026-03",
+      "closedTradeCount": 14,
+      "netProfitKrw": 49995.65075970875,
+      "grossGainsKrw": 2037222.5317489342,
+      "grossLossesKrw": 1987226.8809892253
+    },
+    {
+      "costPercent": 0.3,
+      "windowDays": 800,
+      "exitMonthUtc": "2026-04",
+      "closedTradeCount": 23,
+      "netProfitKrw": -2605706.142397205,
+      "grossGainsKrw": 947913.0512824059,
+      "grossLossesKrw": 3553619.1936796107
+    },
+    {
+      "costPercent": 0.3,
+      "windowDays": 800,
+      "exitMonthUtc": "2026-05",
+      "closedTradeCount": 10,
+      "netProfitKrw": 2847427.162089322,
+      "grossGainsKrw": 4085639.52961927,
+      "grossLossesKrw": 1238212.3675299473
+    },
+    {
+      "costPercent": 0.3,
+      "windowDays": 800,
+      "exitMonthUtc": "2026-06",
+      "closedTradeCount": 9,
+      "netProfitKrw": 737859.1320148737,
+      "grossGainsKrw": 1755677.263462279,
+      "grossLossesKrw": 1017818.1314474056
+    },
+    {
+      "costPercent": 0.3,
+      "windowDays": 800,
+      "exitMonthUtc": "2026-07",
+      "closedTradeCount": 14,
+      "netProfitKrw": 631416.8746977486,
+      "grossGainsKrw": 2550294.671199735,
+      "grossLossesKrw": 1918877.796501986
+    },
+    {
+      "costPercent": 0.3,
+      "windowDays": 800,
+      "exitMonthUtc": "2026-08",
+      "closedTradeCount": 13,
+      "netProfitKrw": 1326563.128247772,
+      "grossGainsKrw": 3824108.417070193,
+      "grossLossesKrw": 2497545.288822421
+    },
+    {
+      "costPercent": 0.3,
+      "windowDays": 800,
+      "exitMonthUtc": "2026-09",
+      "closedTradeCount": 16,
+      "netProfitKrw": 668408.806860381,
+      "grossGainsKrw": 4158505.688670889,
+      "grossLossesKrw": 3490096.8818105077
+    },
+    {
+      "costPercent": 0.4,
+      "windowDays": 120,
+      "exitMonthUtc": "2026-06",
+      "closedTradeCount": 9,
+      "netProfitKrw": 585113.9873338736,
+      "grossGainsKrw": 1587812.6019892753,
+      "grossLossesKrw": 1002698.6146554017
+    },
+    {
+      "costPercent": 0.4,
+      "windowDays": 120,
+      "exitMonthUtc": "2026-07",
+      "closedTradeCount": 13,
+      "netProfitKrw": 599764.7658602741,
+      "grossGainsKrw": 2319226.0687150033,
+      "grossLossesKrw": 1719461.3028547291
+    },
+    {
+      "costPercent": 0.4,
+      "windowDays": 120,
+      "exitMonthUtc": "2026-08",
+      "closedTradeCount": 11,
+      "netProfitKrw": 950982.5950555536,
+      "grossGainsKrw": 3015512.6261064215,
+      "grossLossesKrw": 2064530.0310508679
+    },
+    {
+      "costPercent": 0.4,
+      "windowDays": 120,
+      "exitMonthUtc": "2026-09",
+      "closedTradeCount": 16,
+      "netProfitKrw": 431984.4149445334,
+      "grossGainsKrw": 3821465.6744468384,
+      "grossLossesKrw": 3389481.2595023047
+    },
+    {
+      "costPercent": 0.4,
+      "windowDays": 180,
+      "exitMonthUtc": "2026-04",
+      "closedTradeCount": 19,
+      "netProfitKrw": -2161788.146534848,
+      "grossGainsKrw": 556946.6374487497,
+      "grossLossesKrw": 2718734.7839835975
+    },
+    {
+      "costPercent": 0.4,
+      "windowDays": 180,
+      "exitMonthUtc": "2026-05",
+      "closedTradeCount": 10,
+      "netProfitKrw": 2566818.7226258395,
+      "grossGainsKrw": 3792178.499515089,
+      "grossLossesKrw": 1225359.7768892501
+    },
+    {
+      "costPercent": 0.4,
+      "windowDays": 180,
+      "exitMonthUtc": "2026-06",
+      "closedTradeCount": 9,
+      "netProfitKrw": 587483.8778875606,
+      "grossGainsKrw": 1594243.7285183575,
+      "grossLossesKrw": 1006759.8506307969
+    },
+    {
+      "costPercent": 0.4,
+      "windowDays": 180,
+      "exitMonthUtc": "2026-07",
+      "closedTradeCount": 13,
+      "netProfitKrw": 602193.9965466287,
+      "grossGainsKrw": 2328619.6434219726,
+      "grossLossesKrw": 1726425.6468753438
+    },
+    {
+      "costPercent": 0.4,
+      "windowDays": 180,
+      "exitMonthUtc": "2026-08",
+      "closedTradeCount": 11,
+      "netProfitKrw": 954834.3653388327,
+      "grossGainsKrw": 3027726.3742680387,
+      "grossLossesKrw": 2072892.008929206
+    },
+    {
+      "costPercent": 0.4,
+      "windowDays": 180,
+      "exitMonthUtc": "2026-09",
+      "closedTradeCount": 16,
+      "netProfitKrw": 433734.08390900714,
+      "grossGainsKrw": 3836943.778883173,
+      "grossLossesKrw": 3403209.694974166
+    },
+    {
+      "costPercent": 0.4,
+      "windowDays": 240,
+      "exitMonthUtc": "2026-02",
+      "closedTradeCount": 1,
+      "netProfitKrw": 887608.0193570687,
+      "grossGainsKrw": 887608.0193570687,
+      "grossLossesKrw": 0
+    },
+    {
+      "costPercent": 0.4,
+      "windowDays": 240,
+      "exitMonthUtc": "2026-03",
+      "closedTradeCount": 14,
+      "netProfitKrw": -119529.85245824174,
+      "grossGainsKrw": 1826086.0053876834,
+      "grossLossesKrw": 1945615.8578459253
+    },
+    {
+      "costPercent": 0.4,
+      "windowDays": 240,
+      "exitMonthUtc": "2026-04",
+      "closedTradeCount": 23,
+      "netProfitKrw": -2738213.030616827,
+      "grossGainsKrw": 823827.4400043027,
+      "grossLossesKrw": 3562040.47062113
+    },
+    {
+      "costPercent": 0.4,
+      "windowDays": 240,
+      "exitMonthUtc": "2026-05",
+      "closedTradeCount": 10,
+      "netProfitKrw": 2571846.8116032197,
+      "grossGainsKrw": 3799606.9208311713,
+      "grossLossesKrw": 1227760.1092279516
+    },
+    {
+      "costPercent": 0.4,
+      "windowDays": 240,
+      "exitMonthUtc": "2026-06",
+      "closedTradeCount": 9,
+      "netProfitKrw": 588634.688104409,
+      "grossGainsKrw": 1597366.6601254717,
+      "grossLossesKrw": 1008731.9720210626
+    },
+    {
+      "costPercent": 0.4,
+      "windowDays": 240,
+      "exitMonthUtc": "2026-07",
+      "closedTradeCount": 13,
+      "netProfitKrw": 603373.6221156615,
+      "grossGainsKrw": 2333181.12906893,
+      "grossLossesKrw": 1729807.5069532688
+    },
+    {
+      "costPercent": 0.4,
+      "windowDays": 240,
+      "exitMonthUtc": "2026-08",
+      "closedTradeCount": 11,
+      "netProfitKrw": 956704.7709523109,
+      "grossGainsKrw": 3033657.32586769,
+      "grossLossesKrw": 2076952.5549153795
+    },
+    {
+      "costPercent": 0.4,
+      "windowDays": 240,
+      "exitMonthUtc": "2026-09",
+      "closedTradeCount": 16,
+      "netProfitKrw": 434583.71678225696,
+      "grossGainsKrw": 3844459.889994318,
+      "grossLossesKrw": 3409876.173212062
+    },
+    {
+      "costPercent": 0.4,
+      "windowDays": 365,
+      "exitMonthUtc": "2025-10",
+      "closedTradeCount": 4,
+      "netProfitKrw": -1517437.2985782034,
+      "grossGainsKrw": 0,
+      "grossLossesKrw": 1517437.2985782034
+    },
+    {
+      "costPercent": 0.4,
+      "windowDays": 365,
+      "exitMonthUtc": "2025-11",
+      "closedTradeCount": 1,
+      "netProfitKrw": -103807.58687623196,
+      "grossGainsKrw": 0,
+      "grossLossesKrw": 103807.58687623196
+    },
+    {
+      "costPercent": 0.4,
+      "windowDays": 365,
+      "exitMonthUtc": "2025-12",
+      "closedTradeCount": 4,
+      "netProfitKrw": 279238.7016794063,
+      "grossGainsKrw": 794709.4687762782,
+      "grossLossesKrw": 515470.76709687186
+    },
+    {
+      "costPercent": 0.4,
+      "windowDays": 365,
+      "exitMonthUtc": "2026-01",
+      "closedTradeCount": 15,
+      "netProfitKrw": -746030.7383930582,
+      "grossGainsKrw": 2408952.7386422064,
+      "grossLossesKrw": 3154983.4770352645
+    },
+    {
+      "costPercent": 0.4,
+      "windowDays": 365,
+      "exitMonthUtc": "2026-02",
+      "closedTradeCount": 1,
+      "netProfitKrw": 869074.4361887682,
+      "grossGainsKrw": 869074.4361887682,
+      "grossLossesKrw": 0
+    },
+    {
+      "costPercent": 0.4,
+      "windowDays": 365,
+      "exitMonthUtc": "2026-03",
+      "closedTradeCount": 14,
+      "netProfitKrw": -117034.02500590077,
+      "grossGainsKrw": 1787956.655364644,
+      "grossLossesKrw": 1904990.680370545
+    },
+    {
+      "costPercent": 0.4,
+      "windowDays": 365,
+      "exitMonthUtc": "2026-04",
+      "closedTradeCount": 23,
+      "netProfitKrw": -2681038.131529929,
+      "grossGainsKrw": 806625.6188820603,
+      "grossLossesKrw": 3487663.7504119896
+    },
+    {
+      "costPercent": 0.4,
+      "windowDays": 365,
+      "exitMonthUtc": "2026-05",
+      "closedTradeCount": 10,
+      "netProfitKrw": 2518145.700595341,
+      "grossGainsKrw": 3720269.7254269617,
+      "grossLossesKrw": 1202124.0248316205
+    },
+    {
+      "costPercent": 0.4,
+      "windowDays": 365,
+      "exitMonthUtc": "2026-06",
+      "closedTradeCount": 9,
+      "netProfitKrw": 576343.7784801002,
+      "grossGainsKrw": 1564013.054479649,
+      "grossLossesKrw": 987669.2759995488
+    },
+    {
+      "costPercent": 0.4,
+      "windowDays": 365,
+      "exitMonthUtc": "2026-07",
+      "closedTradeCount": 13,
+      "netProfitKrw": 590774.9581072627,
+      "grossGainsKrw": 2284463.445632912,
+      "grossLossesKrw": 1693688.4875256491
+    },
+    {
+      "costPercent": 0.4,
+      "windowDays": 365,
+      "exitMonthUtc": "2026-08",
+      "closedTradeCount": 11,
+      "netProfitKrw": 936728.4220986832,
+      "grossGainsKrw": 2970313.440811517,
+      "grossLossesKrw": 2033585.0187128335
+    },
+    {
+      "costPercent": 0.4,
+      "windowDays": 365,
+      "exitMonthUtc": "2026-09",
+      "closedTradeCount": 16,
+      "netProfitKrw": 425509.4483181131,
+      "grossGainsKrw": 3764186.148033295,
+      "grossLossesKrw": 3338676.6997151827
+    },
+    {
+      "costPercent": 0.4,
+      "windowDays": 500,
+      "exitMonthUtc": "2025-06",
+      "closedTradeCount": 6,
+      "netProfitKrw": -1443733.6224731202,
+      "grossGainsKrw": 304913.4958476888,
+      "grossLossesKrw": 1748647.118320809
+    },
+    {
+      "costPercent": 0.4,
+      "windowDays": 500,
+      "exitMonthUtc": "2025-07",
+      "closedTradeCount": 20,
+      "netProfitKrw": 3549433.0328113614,
+      "grossGainsKrw": 5133093.927635978,
+      "grossLossesKrw": 1583660.8948246161
+    },
+    {
+      "costPercent": 0.4,
+      "windowDays": 500,
+      "exitMonthUtc": "2025-08",
+      "closedTradeCount": 6,
+      "netProfitKrw": -1337417.0199033695,
+      "grossGainsKrw": 485683.4705758025,
+      "grossLossesKrw": 1823100.490479172
+    },
+    {
+      "costPercent": 0.4,
+      "windowDays": 500,
+      "exitMonthUtc": "2025-09",
+      "closedTradeCount": 12,
+      "netProfitKrw": 844949.9408140288,
+      "grossGainsKrw": 2086267.149042725,
+      "grossLossesKrw": 1241317.2082286961
+    },
+    {
+      "costPercent": 0.4,
+      "windowDays": 500,
+      "exitMonthUtc": "2025-10",
+      "closedTradeCount": 11,
+      "netProfitKrw": -1316457.7179679452,
+      "grossGainsKrw": 362373.3587446196,
+      "grossLossesKrw": 1678831.0767125648
+    },
+    {
+      "costPercent": 0.4,
+      "windowDays": 500,
+      "exitMonthUtc": "2025-11",
+      "closedTradeCount": 1,
+      "netProfitKrw": -105719.89455270031,
+      "grossGainsKrw": 0,
+      "grossLossesKrw": 105719.89455270031
+    },
+    {
+      "costPercent": 0.4,
+      "windowDays": 500,
+      "exitMonthUtc": "2025-12",
+      "closedTradeCount": 4,
+      "netProfitKrw": 284382.7410397011,
+      "grossGainsKrw": 809349.3333895928,
+      "grossLossesKrw": 524966.5923498917
+    },
+    {
+      "costPercent": 0.4,
+      "windowDays": 500,
+      "exitMonthUtc": "2026-01",
+      "closedTradeCount": 15,
+      "netProfitKrw": -759773.8601709616,
+      "grossGainsKrw": 2453329.6377974423,
+      "grossLossesKrw": 3213103.4979684036
+    },
+    {
+      "costPercent": 0.4,
+      "windowDays": 500,
+      "exitMonthUtc": "2026-02",
+      "closedTradeCount": 1,
+      "netProfitKrw": 885084.2266651394,
+      "grossGainsKrw": 885084.2266651394,
+      "grossLossesKrw": 0
+    },
+    {
+      "costPercent": 0.4,
+      "windowDays": 500,
+      "exitMonthUtc": "2026-03",
+      "closedTradeCount": 14,
+      "netProfitKrw": -119189.98557835494,
+      "grossGainsKrw": 1820893.778171699,
+      "grossLossesKrw": 1940083.7637500537
+    },
+    {
+      "costPercent": 0.4,
+      "windowDays": 500,
+      "exitMonthUtc": "2026-04",
+      "closedTradeCount": 23,
+      "netProfitKrw": -2730427.294250202,
+      "grossGainsKrw": 821484.998715861,
+      "grossLossesKrw": 3551912.292966063
+    },
+    {
+      "costPercent": 0.4,
+      "windowDays": 500,
+      "exitMonthUtc": "2026-05",
+      "closedTradeCount": 10,
+      "netProfitKrw": 2564534.1149552246,
+      "grossGainsKrw": 3788803.255283012,
+      "grossLossesKrw": 1224269.1403277873
+    },
+    {
+      "costPercent": 0.4,
+      "windowDays": 500,
+      "exitMonthUtc": "2026-06",
+      "closedTradeCount": 9,
+      "netProfitKrw": 586960.985420729,
+      "grossGainsKrw": 1592824.765262832,
+      "grossLossesKrw": 1005863.7798421029
+    },
+    {
+      "costPercent": 0.4,
+      "windowDays": 500,
+      "exitMonthUtc": "2026-07",
+      "closedTradeCount": 13,
+      "netProfitKrw": 601658.011277556,
+      "grossGainsKrw": 2326547.0458316514,
+      "grossLossesKrw": 1724889.0345540955
+    },
+    {
+      "costPercent": 0.4,
+      "windowDays": 500,
+      "exitMonthUtc": "2026-08",
+      "closedTradeCount": 11,
+      "netProfitKrw": 953984.5110441013,
+      "grossGainsKrw": 3025031.5338267563,
+      "grossLossesKrw": 2071047.0227826545
+    },
+    {
+      "costPercent": 0.4,
+      "windowDays": 500,
+      "exitMonthUtc": "2026-09",
+      "closedTradeCount": 16,
+      "netProfitKrw": 433348.0370852201,
+      "grossGainsKrw": 3833528.691128169,
+      "grossLossesKrw": 3400180.6540429494
+    },
+    {
+      "costPercent": 0.4,
+      "windowDays": 800,
+      "exitMonthUtc": "2024-08",
+      "closedTradeCount": 7,
+      "netProfitKrw": -947917.1781097385,
+      "grossGainsKrw": 411073.23602793674,
+      "grossLossesKrw": 1358990.4141376754
+    },
+    {
+      "costPercent": 0.4,
+      "windowDays": 800,
+      "exitMonthUtc": "2024-09",
+      "closedTradeCount": 26,
+      "netProfitKrw": 385858.6405418569,
+      "grossGainsKrw": 4109776.1163527644,
+      "grossLossesKrw": 3723917.475810908
+    },
+    {
+      "costPercent": 0.4,
+      "windowDays": 800,
+      "exitMonthUtc": "2024-10",
+      "closedTradeCount": 23,
+      "netProfitKrw": -450285.2684153792,
+      "grossGainsKrw": 4434754.364629109,
+      "grossLossesKrw": 4885039.633044488
+    },
+    {
+      "costPercent": 0.4,
+      "windowDays": 800,
+      "exitMonthUtc": "2024-11",
+      "closedTradeCount": 35,
+      "netProfitKrw": 12860327.760507854,
+      "grossGainsKrw": 20810132.47250829,
+      "grossLossesKrw": 7949804.712000432
+    },
+    {
+      "costPercent": 0.4,
+      "windowDays": 800,
+      "exitMonthUtc": "2024-12",
+      "closedTradeCount": 21,
+      "netProfitKrw": -3510345.0647484874,
+      "grossGainsKrw": 4050435.158382871,
+      "grossLossesKrw": 7560780.22313136
+    },
+    {
+      "costPercent": 0.4,
+      "windowDays": 800,
+      "exitMonthUtc": "2025-01",
+      "closedTradeCount": 15,
+      "netProfitKrw": -4242725.216915641,
+      "grossGainsKrw": 1063931.0024987527,
+      "grossLossesKrw": 5306656.2194143925
+    },
+    {
+      "costPercent": 0.4,
+      "windowDays": 800,
+      "exitMonthUtc": "2025-03",
+      "closedTradeCount": 13,
+      "netProfitKrw": -3132884.753806516,
+      "grossGainsKrw": 2008818.3165353057,
+      "grossLossesKrw": 5141703.070341822
+    },
+    {
+      "costPercent": 0.4,
+      "windowDays": 800,
+      "exitMonthUtc": "2025-04",
+      "closedTradeCount": 15,
+      "netProfitKrw": 4325690.430528694,
+      "grossGainsKrw": 5374795.473480637,
+      "grossLossesKrw": 1049105.0429519434
+    },
+    {
+      "costPercent": 0.4,
+      "windowDays": 800,
+      "exitMonthUtc": "2025-05",
+      "closedTradeCount": 11,
+      "netProfitKrw": -1876808.0170394783,
+      "grossGainsKrw": 1933450.8498803896,
+      "grossLossesKrw": 3810258.866919868
+    },
+    {
+      "costPercent": 0.4,
+      "windowDays": 800,
+      "exitMonthUtc": "2025-06",
+      "closedTradeCount": 6,
+      "netProfitKrw": -1492978.096213793,
+      "grossGainsKrw": 315313.8248320114,
+      "grossLossesKrw": 1808291.9210458044
+    },
+    {
+      "costPercent": 0.4,
+      "windowDays": 800,
+      "exitMonthUtc": "2025-07",
+      "closedTradeCount": 20,
+      "netProfitKrw": 3670501.046368559,
+      "grossGainsKrw": 5308179.210123804,
+      "grossLossesKrw": 1637678.1637552453
+    },
+    {
+      "costPercent": 0.4,
+      "windowDays": 800,
+      "exitMonthUtc": "2025-08",
+      "closedTradeCount": 6,
+      "netProfitKrw": -1383035.1285986165,
+      "grossGainsKrw": 502249.70311396226,
+      "grossLossesKrw": 1885284.8317125787
+    },
+    {
+      "costPercent": 0.4,
+      "windowDays": 800,
+      "exitMonthUtc": "2025-09",
+      "closedTradeCount": 12,
+      "netProfitKrw": 873770.4340995726,
+      "grossGainsKrw": 2157427.871656552,
+      "grossLossesKrw": 1283657.4375569792
+    },
+    {
+      "costPercent": 0.4,
+      "windowDays": 800,
+      "exitMonthUtc": "2025-10",
+      "closedTradeCount": 11,
+      "netProfitKrw": -1361360.9234582558,
+      "grossGainsKrw": 374733.59270415775,
+      "grossLossesKrw": 1736094.5161624136
+    },
+    {
+      "costPercent": 0.4,
+      "windowDays": 800,
+      "exitMonthUtc": "2025-11",
+      "closedTradeCount": 1,
+      "netProfitKrw": -109325.9064167513,
+      "grossGainsKrw": 0,
+      "grossLossesKrw": 109325.9064167513
+    },
+    {
+      "costPercent": 0.4,
+      "windowDays": 800,
+      "exitMonthUtc": "2025-12",
+      "closedTradeCount": 4,
+      "netProfitKrw": 294082.7841816222,
+      "grossGainsKrw": 836955.5215220432,
+      "grossLossesKrw": 542872.737340421
+    },
+    {
+      "costPercent": 0.4,
+      "windowDays": 800,
+      "exitMonthUtc": "2026-01",
+      "closedTradeCount": 15,
+      "netProfitKrw": -785689.0728692358,
+      "grossGainsKrw": 2537010.536437722,
+      "grossLossesKrw": 3322699.6093069576
+    },
+    {
+      "costPercent": 0.4,
+      "windowDays": 800,
+      "exitMonthUtc": "2026-02",
+      "closedTradeCount": 1,
+      "netProfitKrw": 915273.6648550151,
+      "grossGainsKrw": 915273.6648550151,
+      "grossLossesKrw": 0
+    },
+    {
+      "costPercent": 0.4,
+      "windowDays": 800,
+      "exitMonthUtc": "2026-03",
+      "closedTradeCount": 14,
+      "netProfitKrw": -123255.45030370419,
+      "grossGainsKrw": 1883002.8504049354,
+      "grossLossesKrw": 2006258.3007086394
+    },
+    {
+      "costPercent": 0.4,
+      "windowDays": 800,
+      "exitMonthUtc": "2026-04",
+      "closedTradeCount": 23,
+      "netProfitKrw": -2823559.7482566405,
+      "grossGainsKrw": 849505.1236322047,
+      "grossLossesKrw": 3673064.8718888448
+    },
+    {
+      "costPercent": 0.4,
+      "windowDays": 800,
+      "exitMonthUtc": "2026-05",
+      "closedTradeCount": 10,
+      "netProfitKrw": 2652008.099709176,
+      "grossGainsKrw": 3918035.974885236,
+      "grossLossesKrw": 1266027.8751760602
+    },
+    {
+      "costPercent": 0.4,
+      "windowDays": 800,
+      "exitMonthUtc": "2026-06",
+      "closedTradeCount": 9,
+      "netProfitKrw": 606981.7041900533,
+      "grossGainsKrw": 1647154.6056887405,
+      "grossLossesKrw": 1040172.9014986872
+    },
+    {
+      "costPercent": 0.4,
+      "windowDays": 800,
+      "exitMonthUtc": "2026-07",
+      "closedTradeCount": 13,
+      "netProfitKrw": 622180.0325673778,
+      "grossGainsKrw": 2405903.5026748776,
+      "grossLossesKrw": 1783723.4701075004
+    },
+    {
+      "costPercent": 0.4,
+      "windowDays": 800,
+      "exitMonthUtc": "2026-08",
+      "closedTradeCount": 11,
+      "netProfitKrw": 986524.0768420136,
+      "grossGainsKrw": 3128212.677227064,
+      "grossLossesKrw": 2141688.6003850503
+    },
+    {
+      "costPercent": 0.4,
+      "windowDays": 800,
+      "exitMonthUtc": "2026-09",
+      "closedTradeCount": 16,
+      "netProfitKrw": 448129.15439151495,
+      "grossGainsKrw": 3964286.955690163,
+      "grossLossesKrw": 3516157.8012986486
+    },
+    {
+      "costPercent": 0.5,
+      "windowDays": 120,
+      "exitMonthUtc": "2026-06",
+      "closedTradeCount": 9,
+      "netProfitKrw": 478436.35979657294,
+      "grossGainsKrw": 1529370.031748579,
+      "grossLossesKrw": 1050933.671952006
+    },
+    {
+      "costPercent": 0.5,
+      "windowDays": 120,
+      "exitMonthUtc": "2026-07",
+      "closedTradeCount": 13,
+      "netProfitKrw": 444653.02719869715,
+      "grossGainsKrw": 2256483.608976224,
+      "grossLossesKrw": 1811830.5817775265
+    },
+    {
+      "costPercent": 0.5,
+      "windowDays": 120,
+      "exitMonthUtc": "2026-08",
+      "closedTradeCount": 11,
+      "netProfitKrw": 815054.3078700148,
+      "grossGainsKrw": 2945259.838222238,
+      "grossLossesKrw": 2130205.5303522227
+    },
+    {
+      "costPercent": 0.5,
+      "windowDays": 120,
+      "exitMonthUtc": "2026-09",
+      "closedTradeCount": 16,
+      "netProfitKrw": 238987.50204631127,
+      "grossGainsKrw": 3743891.61049138,
+      "grossLossesKrw": 3504904.1084450693
+    },
+    {
+      "costPercent": 0.5,
+      "windowDays": 180,
+      "exitMonthUtc": "2026-04",
+      "closedTradeCount": 19,
+      "netProfitKrw": -2383679.112360917,
+      "grossGainsKrw": 500990.7086257399,
+      "grossLossesKrw": 2884669.8209866574
+    },
+    {
+      "costPercent": 0.5,
+      "windowDays": 180,
+      "exitMonthUtc": "2026-05",
+      "closedTradeCount": 10,
+      "netProfitKrw": 2444252.513316666,
+      "grossGainsKrw": 3724871.5471033375,
+      "grossLossesKrw": 1280619.0337866722
+    },
+    {
+      "costPercent": 0.5,
+      "windowDays": 180,
+      "exitMonthUtc": "2026-06",
+      "closedTradeCount": 9,
+      "netProfitKrw": 478726.1649711107,
+      "grossGainsKrw": 1530296.4231900075,
+      "grossLossesKrw": 1051570.2582188966
+    },
+    {
+      "costPercent": 0.5,
+      "windowDays": 180,
+      "exitMonthUtc": "2026-07",
+      "closedTradeCount": 13,
+      "netProfitKrw": 444922.3686597248,
+      "grossGainsKrw": 2257850.43784019,
+      "grossLossesKrw": 1812928.0691804653
+    },
+    {
+      "costPercent": 0.5,
+      "windowDays": 180,
+      "exitMonthUtc": "2026-08",
+      "closedTradeCount": 11,
+      "netProfitKrw": 815548.0139839281,
+      "grossGainsKrw": 2947043.882273232,
+      "grossLossesKrw": 2131495.868289304
+    },
+    {
+      "costPercent": 0.5,
+      "windowDays": 180,
+      "exitMonthUtc": "2026-09",
+      "closedTradeCount": 16,
+      "netProfitKrw": 239132.26490415947,
+      "grossGainsKrw": 3746159.4129679515,
+      "grossLossesKrw": 3507027.148063793
+    },
+    {
+      "costPercent": 0.5,
+      "windowDays": 240,
+      "exitMonthUtc": "2026-02",
+      "closedTradeCount": 1,
+      "netProfitKrw": 875108.0193570687,
+      "grossGainsKrw": 875108.0193570687,
+      "grossLossesKrw": 0
+    },
+    {
+      "costPercent": 0.5,
+      "windowDays": 240,
+      "exitMonthUtc": "2026-03",
+      "closedTradeCount": 14,
+      "netProfitKrw": -446235.73431261076,
+      "grossGainsKrw": 1724613.238135538,
+      "grossLossesKrw": 2170848.972448149
+    },
+    {
+      "costPercent": 0.5,
+      "windowDays": 240,
+      "exitMonthUtc": "2026-04",
+      "closedTradeCount": 23,
+      "netProfitKrw": -2997911.9237615764,
+      "grossGainsKrw": 752394.1512917329,
+      "grossLossesKrw": 3750306.075053309
+    },
+    {
+      "costPercent": 0.5,
+      "windowDays": 240,
+      "exitMonthUtc": "2026-05",
+      "closedTradeCount": 10,
+      "netProfitKrw": 2439611.199975862,
+      "grossGainsKrw": 3717798.5070184204,
+      "grossLossesKrw": 1278187.3070425582
+    },
+    {
+      "costPercent": 0.5,
+      "windowDays": 240,
+      "exitMonthUtc": "2026-06",
+      "closedTradeCount": 9,
+      "netProfitKrw": 477817.1270857181,
+      "grossGainsKrw": 1527390.59199391,
+      "grossLossesKrw": 1049573.464908192
+    },
+    {
+      "costPercent": 0.5,
+      "windowDays": 240,
+      "exitMonthUtc": "2026-07",
+      "closedTradeCount": 13,
+      "netProfitKrw": 444077.5197277783,
+      "grossGainsKrw": 2253563.0774706723,
+      "grossLossesKrw": 1809485.557742894
+    },
+    {
+      "costPercent": 0.5,
+      "windowDays": 240,
+      "exitMonthUtc": "2026-08",
+      "closedTradeCount": 11,
+      "netProfitKrw": 813999.3958044446,
+      "grossGainsKrw": 2941447.8343967516,
+      "grossLossesKrw": 2127448.4385923073
+    },
+    {
+      "costPercent": 0.5,
+      "windowDays": 240,
+      "exitMonthUtc": "2026-09",
+      "closedTradeCount": 16,
+      "netProfitKrw": 238678.1842536258,
+      "grossGainsKrw": 3739045.950031755,
+      "grossLossesKrw": 3500367.76577813
+    },
+    {
+      "costPercent": 0.5,
+      "windowDays": 365,
+      "exitMonthUtc": "2025-10",
+      "closedTradeCount": 4,
+      "netProfitKrw": -1563950.2112758579,
+      "grossGainsKrw": 0,
+      "grossLossesKrw": 1563950.2112758579
+    },
+    {
+      "costPercent": 0.5,
+      "windowDays": 365,
+      "exitMonthUtc": "2025-11",
+      "closedTradeCount": 1,
+      "netProfitKrw": -116063.06519992545,
+      "grossGainsKrw": 0,
+      "grossLossesKrw": 116063.06519992545
+    },
+    {
+      "costPercent": 0.5,
+      "windowDays": 365,
+      "exitMonthUtc": "2025-12",
+      "closedTradeCount": 4,
+      "netProfitKrw": 232923.41234733834,
+      "grossGainsKrw": 771130.0002201805,
+      "grossLossesKrw": 538206.5878728421
+    },
+    {
+      "costPercent": 0.5,
+      "windowDays": 365,
+      "exitMonthUtc": "2026-01",
+      "closedTradeCount": 15,
+      "netProfitKrw": -917970.7782714753,
+      "grossGainsKrw": 2323604.2472840627,
+      "grossLossesKrw": 3241575.0255555385
+    },
+    {
+      "costPercent": 0.5,
+      "windowDays": 365,
+      "exitMonthUtc": "2026-02",
+      "closedTradeCount": 1,
+      "netProfitKrw": 854411.1840127689,
+      "grossGainsKrw": 854411.1840127689,
+      "grossLossesKrw": 0
+    },
+    {
+      "costPercent": 0.5,
+      "windowDays": 365,
+      "exitMonthUtc": "2026-03",
+      "closedTradeCount": 14,
+      "netProfitKrw": -435681.98858805915,
+      "grossGainsKrw": 1683825.089206775,
+      "grossLossesKrw": 2119507.0777948345
+    },
+    {
+      "costPercent": 0.5,
+      "windowDays": 365,
+      "exitMonthUtc": "2026-04",
+      "closedTradeCount": 23,
+      "netProfitKrw": -2927009.488758878,
+      "grossGainsKrw": 734599.573343813,
+      "grossLossesKrw": 3661609.0621026903
+    },
+    {
+      "costPercent": 0.5,
+      "windowDays": 365,
+      "exitMonthUtc": "2026-05",
+      "closedTradeCount": 10,
+      "netProfitKrw": 2381912.915657652,
+      "grossGainsKrw": 3629870.3177651954,
+      "grossLossesKrw": 1247957.402107543
+    },
+    {
+      "costPercent": 0.5,
+      "windowDays": 365,
+      "exitMonthUtc": "2026-06",
+      "closedTradeCount": 9,
+      "netProfitKrw": 466516.4622703677,
+      "grossGainsKrw": 1491266.878246943,
+      "grossLossesKrw": 1024750.4159765753
+    },
+    {
+      "costPercent": 0.5,
+      "windowDays": 365,
+      "exitMonthUtc": "2026-07",
+      "closedTradeCount": 13,
+      "netProfitKrw": 433574.81708695076,
+      "grossGainsKrw": 2200264.944073757,
+      "grossLossesKrw": 1766690.1269868063
+    },
+    {
+      "costPercent": 0.5,
+      "windowDays": 365,
+      "exitMonthUtc": "2026-08",
+      "closedTradeCount": 11,
+      "netProfitKrw": 794747.8164649007,
+      "grossGainsKrw": 2871880.8093487094,
+      "grossLossesKrw": 2077132.9928838082
+    },
+    {
+      "costPercent": 0.5,
+      "windowDays": 365,
+      "exitMonthUtc": "2026-09",
+      "closedTradeCount": 16,
+      "netProfitKrw": 233033.3004558487,
+      "grossGainsKrw": 3650615.245866305,
+      "grossLossesKrw": 3417581.9454104565
+    },
+    {
+      "costPercent": 0.5,
+      "windowDays": 500,
+      "exitMonthUtc": "2025-06",
+      "closedTradeCount": 6,
+      "netProfitKrw": -1513352.7471587053,
+      "grossGainsKrw": 281528.04267191,
+      "grossLossesKrw": 1794880.7898306153
+    },
+    {
+      "costPercent": 0.5,
+      "windowDays": 500,
+      "exitMonthUtc": "2025-07",
+      "closedTradeCount": 20,
+      "netProfitKrw": 3253680.03831958,
+      "grossGainsKrw": 4916260.2693448085,
+      "grossLossesKrw": 1662580.2310252292
+    },
+    {
+      "costPercent": 0.5,
+      "windowDays": 500,
+      "exitMonthUtc": "2025-08",
+      "closedTradeCount": 6,
+      "netProfitKrw": -1405035.811375727,
+      "grossGainsKrw": 472757.81365531636,
+      "grossLossesKrw": 1877793.6250310433
+    },
+    {
+      "costPercent": 0.5,
+      "windowDays": 500,
+      "exitMonthUtc": "2025-09",
+      "closedTradeCount": 12,
+      "netProfitKrw": 852267.2407809108,
+      "grossGainsKrw": 2075801.5740843224,
+      "grossLossesKrw": 1223534.333303412
+    },
+    {
+      "costPercent": 0.5,
+      "windowDays": 500,
+      "exitMonthUtc": "2025-10",
+      "closedTradeCount": 11,
+      "netProfitKrw": -1442296.3829605528,
+      "grossGainsKrw": 324444.93557216384,
+      "grossLossesKrw": 1766741.3185327165
+    },
+    {
+      "costPercent": 0.5,
+      "windowDays": 500,
+      "exitMonthUtc": "2025-11",
+      "closedTradeCount": 1,
+      "netProfitKrw": -117606.71939721929,
+      "grossGainsKrw": 0,
+      "grossLossesKrw": 117606.71939721929
+    },
+    {
+      "costPercent": 0.5,
+      "windowDays": 500,
+      "exitMonthUtc": "2025-12",
+      "closedTradeCount": 4,
+      "netProfitKrw": 236021.32469782315,
+      "grossGainsKrw": 781386.1317418547,
+      "grossLossesKrw": 545364.8070440316
+    },
+    {
+      "costPercent": 0.5,
+      "windowDays": 500,
+      "exitMonthUtc": "2026-01",
+      "closedTradeCount": 15,
+      "netProfitKrw": -930179.9116631451,
+      "grossGainsKrw": 2354508.4926871224,
+      "grossLossesKrw": 3284688.4043502677
+    },
+    {
+      "costPercent": 0.5,
+      "windowDays": 500,
+      "exitMonthUtc": "2026-02",
+      "closedTradeCount": 1,
+      "netProfitKrw": 865774.9663507957,
+      "grossGainsKrw": 865774.9663507957,
+      "grossLossesKrw": 0
+    },
+    {
+      "costPercent": 0.5,
+      "windowDays": 500,
+      "exitMonthUtc": "2026-03",
+      "closedTradeCount": 14,
+      "netProfitKrw": -441476.6169585129,
+      "grossGainsKrw": 1706220.1867512474,
+      "grossLossesKrw": 2147696.8037097603
+    },
+    {
+      "costPercent": 0.5,
+      "windowDays": 500,
+      "exitMonthUtc": "2026-04",
+      "closedTradeCount": 23,
+      "netProfitKrw": -2965939.104093942,
+      "grossGainsKrw": 744369.8453314528,
+      "grossLossesKrw": 3710308.9494253946
+    },
+    {
+      "costPercent": 0.5,
+      "windowDays": 500,
+      "exitMonthUtc": "2026-05",
+      "closedTradeCount": 10,
+      "netProfitKrw": 2413592.674101992,
+      "grossGainsKrw": 3678148.075568667,
+      "grossLossesKrw": 1264555.4014666746
+    },
+    {
+      "costPercent": 0.5,
+      "windowDays": 500,
+      "exitMonthUtc": "2026-06",
+      "closedTradeCount": 9,
+      "netProfitKrw": 472721.19324011955,
+      "grossGainsKrw": 1511100.9259857808,
+      "grossLossesKrw": 1038379.7327456612
+    },
+    {
+      "costPercent": 0.5,
+      "windowDays": 500,
+      "exitMonthUtc": "2026-07",
+      "closedTradeCount": 13,
+      "netProfitKrw": 439341.4197962995,
+      "grossGainsKrw": 2229528.7603466376,
+      "grossLossesKrw": 1790187.3405503382
+    },
+    {
+      "costPercent": 0.5,
+      "windowDays": 500,
+      "exitMonthUtc": "2026-08",
+      "closedTradeCount": 11,
+      "netProfitKrw": 805318.068082527,
+      "grossGainsKrw": 2910077.205918474,
+      "grossLossesKrw": 2104759.137835947
+    },
+    {
+      "costPercent": 0.5,
+      "windowDays": 500,
+      "exitMonthUtc": "2026-09",
+      "closedTradeCount": 16,
+      "netProfitKrw": 236132.67433278542,
+      "grossGainsKrw": 3699168.913971482,
+      "grossLossesKrw": 3463036.2396386964
+    },
+    {
+      "costPercent": 0.5,
+      "windowDays": 800,
+      "exitMonthUtc": "2024-08",
+      "closedTradeCount": 7,
+      "netProfitKrw": -1030107.0684989046,
+      "grossGainsKrw": 400097.17478688323,
+      "grossLossesKrw": 1430204.2432857878
+    },
+    {
+      "costPercent": 0.5,
+      "windowDays": 800,
+      "exitMonthUtc": "2024-09",
+      "closedTradeCount": 26,
+      "netProfitKrw": 83326.53851435852,
+      "grossGainsKrw": 3938470.605051908,
+      "grossLossesKrw": 3855144.06653755
+    },
+    {
+      "costPercent": 0.5,
+      "windowDays": 800,
+      "exitMonthUtc": "2024-10",
+      "closedTradeCount": 23,
+      "netProfitKrw": -714842.48842465,
+      "grossGainsKrw": 4296239.105354311,
+      "grossLossesKrw": 5011081.593778961
+    },
+    {
+      "costPercent": 0.5,
+      "windowDays": 800,
+      "exitMonthUtc": "2024-11",
+      "closedTradeCount": 35,
+      "netProfitKrw": 12321524.689111456,
+      "grossGainsKrw": 20387785.79736957,
+      "grossLossesKrw": 8066261.108258117
+    },
+    {
+      "costPercent": 0.5,
+      "windowDays": 800,
+      "exitMonthUtc": "2024-12",
+      "closedTradeCount": 21,
+      "netProfitKrw": -3741305.140250092,
+      "grossGainsKrw": 3889768.791593862,
+      "grossLossesKrw": 7631073.931843954
+    },
+    {
+      "costPercent": 0.5,
+      "windowDays": 800,
+      "exitMonthUtc": "2025-01",
+      "closedTradeCount": 15,
+      "netProfitKrw": -4369362.376609716,
+      "grossGainsKrw": 987248.0152347919,
+      "grossLossesKrw": 5356610.391844507
+    },
+    {
+      "costPercent": 0.5,
+      "windowDays": 800,
+      "exitMonthUtc": "2025-03",
+      "closedTradeCount": 13,
+      "netProfitKrw": -3239158.5879885787,
+      "grossGainsKrw": 1919581.383538156,
+      "grossLossesKrw": 5158739.971526735
+    },
+    {
+      "costPercent": 0.5,
+      "windowDays": 800,
+      "exitMonthUtc": "2025-04",
+      "closedTradeCount": 15,
+      "netProfitKrw": 4071526.1845122357,
+      "grossGainsKrw": 5187314.057154737,
+      "grossLossesKrw": 1115787.8726425022
+    },
+    {
+      "costPercent": 0.5,
+      "windowDays": 800,
+      "exitMonthUtc": "2025-05",
+      "closedTradeCount": 11,
+      "netProfitKrw": -1974866.2372975259,
+      "grossGainsKrw": 1855290.151720863,
+      "grossLossesKrw": 3830156.389018389
+    },
+    {
+      "costPercent": 0.5,
+      "windowDays": 800,
+      "exitMonthUtc": "2025-06",
+      "closedTradeCount": 6,
+      "netProfitKrw": -1534641.6176909856,
+      "grossGainsKrw": 285488.39762742264,
+      "grossLossesKrw": 1820130.0153184081
+    },
+    {
+      "costPercent": 0.5,
+      "windowDays": 800,
+      "exitMonthUtc": "2025-07",
+      "closedTradeCount": 20,
+      "netProfitKrw": 3299450.710900243,
+      "grossGainsKrw": 4985419.048468562,
+      "grossLossesKrw": 1685968.337568318
+    },
+    {
+      "costPercent": 0.5,
+      "windowDays": 800,
+      "exitMonthUtc": "2025-08",
+      "closedTradeCount": 6,
+      "netProfitKrw": -1424800.9491056798,
+      "grossGainsKrw": 479408.265710812,
+      "grossLossesKrw": 1904209.2148164918
+    },
+    {
+      "costPercent": 0.5,
+      "windowDays": 800,
+      "exitMonthUtc": "2025-09",
+      "closedTradeCount": 12,
+      "netProfitKrw": 864256.3867232252,
+      "grossGainsKrw": 2105002.6120078024,
+      "grossLossesKrw": 1240746.2252845766
+    },
+    {
+      "costPercent": 0.5,
+      "windowDays": 800,
+      "exitMonthUtc": "2025-10",
+      "closedTradeCount": 11,
+      "netProfitKrw": -1462585.6783833615,
+      "grossGainsKrw": 329009.0177012097,
+      "grossLossesKrw": 1791594.6960845713
+    },
+    {
+      "costPercent": 0.5,
+      "windowDays": 800,
+      "exitMonthUtc": "2025-11",
+      "closedTradeCount": 1,
+      "netProfitKrw": -119261.13488473481,
+      "grossGainsKrw": 0,
+      "grossLossesKrw": 119261.13488473481
+    },
+    {
+      "costPercent": 0.5,
+      "windowDays": 800,
+      "exitMonthUtc": "2025-12",
+      "closedTradeCount": 4,
+      "netProfitKrw": 239341.5204907623,
+      "grossGainsKrw": 792378.1679512598,
+      "grossLossesKrw": 553036.6474604975
+    },
+    {
+      "costPercent": 0.5,
+      "windowDays": 800,
+      "exitMonthUtc": "2026-01",
+      "closedTradeCount": 15,
+      "netProfitKrw": -943265.0828159393,
+      "grossGainsKrw": 2387630.199811967,
+      "grossLossesKrw": 3330895.282627906
+    },
+    {
+      "costPercent": 0.5,
+      "windowDays": 800,
+      "exitMonthUtc": "2026-02",
+      "closedTradeCount": 1,
+      "netProfitKrw": 877954.1302657091,
+      "grossGainsKrw": 877954.1302657091,
+      "grossLossesKrw": 0
+    },
+    {
+      "costPercent": 0.5,
+      "windowDays": 800,
+      "exitMonthUtc": "2026-03",
+      "closedTradeCount": 14,
+      "netProfitKrw": -447687.0253111619,
+      "grossGainsKrw": 1730222.1920494214,
+      "grossLossesKrw": 2177909.217360583
+    },
+    {
+      "costPercent": 0.5,
+      "windowDays": 800,
+      "exitMonthUtc": "2026-04",
+      "closedTradeCount": 23,
+      "netProfitKrw": -3007662.0227672183,
+      "grossGainsKrw": 754841.1602943038,
+      "grossLossesKrw": 3762503.183061522
+    },
+    {
+      "costPercent": 0.5,
+      "windowDays": 800,
+      "exitMonthUtc": "2026-05",
+      "closedTradeCount": 10,
+      "netProfitKrw": 2447545.5393894063,
+      "grossGainsKrw": 3729889.890770939,
+      "grossLossesKrw": 1282344.351381533
+    },
+    {
+      "costPercent": 0.5,
+      "windowDays": 800,
+      "exitMonthUtc": "2026-06",
+      "closedTradeCount": 9,
+      "netProfitKrw": 479371.13014322956,
+      "grossGainsKrw": 1532358.1193499304,
+      "grossLossesKrw": 1052986.9892067008
+    },
+    {
+      "costPercent": 0.5,
+      "windowDays": 800,
+      "exitMonthUtc": "2026-07",
+      "closedTradeCount": 13,
+      "netProfitKrw": 445521.7915721936,
+      "grossGainsKrw": 2260892.3331925115,
+      "grossLossesKrw": 1815370.5416203176
+    },
+    {
+      "costPercent": 0.5,
+      "windowDays": 800,
+      "exitMonthUtc": "2026-08",
+      "closedTradeCount": 11,
+      "netProfitKrw": 816646.7633394012,
+      "grossGainsKrw": 2951014.295431843,
+      "grossLossesKrw": 2134367.5320924413
+    },
+    {
+      "costPercent": 0.5,
+      "windowDays": 800,
+      "exitMonthUtc": "2026-09",
+      "closedTradeCount": 16,
+      "netProfitKrw": 239454.4365205838,
+      "grossGainsKrw": 3751206.4367727116,
+      "grossLossesKrw": 3511752.0002521286
+    }
+  ],
+  "concentrationRules": {
+    "bestMonthSelection": "Rank positive-net exit months only; best two uses up to two positive-net months.",
+    "bestMonthShare": "Share of total closed-trade net is null when total net is nonpositive. For positive total net it may exceed 100% when negative months offset top positive months.",
+    "maximumPositiveMonthShareDenominator": "Sum of positive monthly net profitAmount; included explicitly per run.",
+    "residualAccounting": "Subtract the selected positive-net month(s) from the recorded closed-trade accounting net; this is not a simulator rerun.",
+    "residualReturnPercent": null,
+    "residualMaxDrawdownPercent": null
+  },
+  "failureCount": 0,
+  "failedRuns": [],
+  "interpretationLimits": [
+    "The trailing windows overlap and this configuration was selected after prior research; they are not independent holdouts and do not establish statistical significance.",
+    "Positive/negative residual net after omitting months is fixed-recorded-trade arithmetic only; it does not describe changed trade paths, return, or drawdown.",
+    "Cached historical simulator output is not actual fill evidence, forward validation, or profitability promotion.",
+    "No optimizer, parameter tuning, candidate discovery, market discovery, or market-set change was performed."
+  ]
+}

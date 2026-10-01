@@ -112,6 +112,8 @@ class DashboardServer {
       createDefaultManualOrderIdempotencyStore(tradingSystem, idempotencyFile, {
         writerLockPath: `${path.resolve(portfolioPath)}.manual_order_writer.lock`
       });
+    this.releaseManualOrderWriterLockOnStop = options.releaseManualOrderWriterLockOnStop ??
+      options.manualOrderIdempotencyStore == null;
     this.logger = options.logger || new Logger('debug', {
       logDir: resolveLogDirectory(PROJECT_ROOT, dashboardEnv.STAGING_OUTPUT_DIR)
     });
@@ -338,8 +340,8 @@ class DashboardServer {
   }
 
   // 캐시 저장
-  setCache(key, data, time = Date.now()) {
-    this.cache.set(key, { data, time });
+  setCache(key, data, time = Date.now(), metadata = {}) {
+    this.cache.set(key, { data, time, ...metadata });
   }
 
   // Observer GET routes share a short-lived account snapshot. Every caller
@@ -394,7 +396,29 @@ class DashboardServer {
     if (cached) {
       return {
         tickers: cached.data,
-        fetchedAt: Number.isFinite(cached.time) ? new Date(cached.time).toISOString() : null
+        fetchedAt: cached.fetchedAt ||
+          (Number.isFinite(cached.time) ? new Date(cached.time).toISOString() : null),
+        ...(cached.fetchedAtByMarket ? { fetchedAtByMarket: cached.fetchedAtByMarket } : {}),
+        ...(cached.snapshotSource ? { snapshotSource: cached.snapshotSource } : {}),
+        ...(cached.fallbackReason ? { fallbackReason: cached.fallbackReason } : {})
+      };
+    }
+
+    const publicSnapshot = publicMarketDataSource?.getCachedTickerSnapshot?.(requestedCoins, {
+      maxAgeMs: this.cacheTTL.ticker || 1_000
+    });
+    if (Array.isArray(publicSnapshot?.tickers) && publicSnapshot.tickers.length > 0) {
+      const cachedAt = Date.now();
+      this.setCache(cacheKey, publicSnapshot.tickers, cachedAt, {
+        fetchedAt: publicSnapshot.fetchedAt,
+        fetchedAtByMarket: publicSnapshot.fetchedAtByMarket,
+        snapshotSource: 'collector_cache'
+      });
+      return {
+        tickers: publicSnapshot.tickers,
+        fetchedAt: publicSnapshot.fetchedAt,
+        fetchedAtByMarket: publicSnapshot.fetchedAtByMarket,
+        snapshotSource: 'collector_cache'
       };
     }
 
@@ -408,10 +432,38 @@ class DashboardServer {
         : this.tradingSystem.upbit.getTicker(requestedCoins))
       .then(data => {
         const cachedAt = Date.now();
-        this.setCache(cacheKey, data, cachedAt);
+        this.setCache(cacheKey, data, cachedAt, {
+          fetchedAt: new Date(cachedAt).toISOString(),
+          snapshotSource: 'upstream'
+        });
         return {
           tickers: data,
-          fetchedAt: new Date(cachedAt).toISOString()
+          fetchedAt: new Date(cachedAt).toISOString(),
+          snapshotSource: 'upstream'
+        };
+      })
+      .catch(error => {
+        const fallback = publicMarketDataSource?.getLastGoodTickerSnapshot?.(requestedCoins);
+        if (!Array.isArray(fallback?.tickers) || fallback.tickers.length === 0) throw error;
+
+        const cachedAt = Date.now();
+        const fallbackReason = String(error?.code || error?.response?.status || 'UPSTREAM_UNAVAILABLE')
+          .replace(/[^A-Za-z0-9_-]/g, '_')
+          .slice(0, 48);
+        this.cache.set(cacheKey, {
+          data: fallback.tickers,
+          time: cachedAt,
+          fetchedAt: fallback.fetchedAt,
+          fetchedAtByMarket: fallback.fetchedAtByMarket,
+          snapshotSource: 'last_good',
+          fallbackReason
+        });
+        return {
+          tickers: fallback.tickers,
+          fetchedAt: fallback.fetchedAt,
+          fetchedAtByMarket: fallback.fetchedAtByMarket,
+          snapshotSource: 'last_good',
+          fallbackReason
         };
       })
       .finally(() => {
@@ -449,16 +501,16 @@ class DashboardServer {
       });
     });
     this.app.get('/ready', (req, res) => {
-      const readiness = this.buildReadiness();
-      res.status(readiness.ready ? 200 : 503).json(readiness);
+      this.withRateCoordinatorReadiness(this.buildReadiness())
+        .then(readiness => res.status(readiness.ready ? 200 : 503).json(readiness));
     });
     this.app.get('/service-ready', (req, res) => {
-      const readiness = this.buildServiceReadiness();
-      res.status(readiness.ready ? 200 : 503).json(readiness);
+      this.withRateCoordinatorReadiness(this.buildServiceReadiness())
+        .then(readiness => res.status(readiness.ready ? 200 : 503).json(readiness));
     });
     this.app.get('/trading-ready', (req, res) => {
-      const readiness = this.buildTradingReadiness();
-      res.status(readiness.ready ? 200 : 503).json(readiness);
+      this.withRateCoordinatorReadiness(this.buildTradingReadiness())
+        .then(readiness => res.status(readiness.ready ? 200 : 503).json(readiness));
     });
 
     // 공개 인증 엔드포인트는 가드보다 먼저 마운트한다.
@@ -710,17 +762,27 @@ class DashboardServer {
           : {
             tickers: [],
             priceMap: new Map(),
+            freshPriceMap: new Map(),
             sourceAsOfByMarket: new Map(),
+            quoteFreshnessByMarket: new Map(),
+            fetchedAtByMarket: new Map(),
             sourceAsOf: null,
             fetchedAt: null,
             complete: true,
+            allQuotesFresh: true,
+            freshMarkets: [],
+            staleMarkets: [],
+            sourceSkewMs: null,
+            captureSkewMs: null,
+            snapshotSource: 'none',
+            fallbackReason: null,
             unavailableMarkets: []
           };
 
         if (holdingsEntries.length > 0) {
           for (const [coin, holding] of holdingsEntries) {
             const ticker = marketSnapshot.tickers.find(item => item.market === coin) || null;
-            const currentPrice = marketSnapshot.priceMap.get(coin) ?? null;
+            const currentPrice = marketSnapshot.freshPriceMap.get(coin) ?? null;
             const valuationAvailable = Number.isFinite(currentPrice) && currentPrice > 0;
             const change24h = ticker?.signed_change_rate;
             const change24hAvailable = change24h !== null && change24h !== undefined &&
@@ -750,7 +812,8 @@ class DashboardServer {
                 : null,
               valuationAvailable,
               sourceAsOf: marketSnapshot.sourceAsOfByMarket.get(coin) ?? null,
-              fetchedAt: marketSnapshot.fetchedAt,
+              quoteFreshnessReason: marketSnapshot.quoteFreshnessByMarket.get(coin)?.reason ?? null,
+              fetchedAt: marketSnapshot.fetchedAtByMarket?.get(coin) ?? marketSnapshot.fetchedAt,
               weight: null
             });
           }
@@ -801,10 +864,17 @@ class DashboardServer {
               : null,
             totalAssets: totalAssets === null ? null : Math.round(totalAssets),
             valuationAvailable,
-            valuationStatus: valuationAvailable ? 'available' : 'unavailable',
+            valuationStatus: valuationAvailable
+              ? 'available'
+              : marketSnapshot.staleMarkets?.length > 0 ? 'stale' : 'unavailable',
             valuationAsOf: marketSnapshot.sourceAsOf,
             sourceAsOf: marketSnapshot.sourceAsOf,
             fetchedAt: marketSnapshot.fetchedAt,
+            staleMarkets: marketSnapshot.staleMarkets || [],
+            sourceSkewMs: marketSnapshot.sourceSkewMs ?? null,
+            captureSkewMs: marketSnapshot.captureSkewMs ?? null,
+            snapshotSource: marketSnapshot.snapshotSource ?? 'upstream',
+            fallbackReason: marketSnapshot.fallbackReason ?? null,
             unavailableMarkets: marketSnapshot.unavailableMarkets
           },
           topGainers,
@@ -1312,6 +1382,9 @@ class DashboardServer {
       Promise.resolve()
         .then(async () => {
           const trader = this.tradingSystem;
+          if (typeof trader?.upbit?.assertRateCoordinatorReady === 'function') {
+            await trader.upbit.assertRateCoordinatorReady();
+          }
           const mutableTrader = trader && trader.readOnlyObserver !== true &&
             (typeof trader.dryRun === 'boolean' ||
               typeof trader.withManualPortfolioTransaction === 'function' ||
@@ -1367,7 +1440,9 @@ class DashboardServer {
    */
   buildReadiness(now = Date.now()) {
     const checks = {
-      httpServerListening: this.httpServer?.listening === true
+      httpServerListening: this.httpServer?.listening === true,
+      marketDataScheduler: this.buildMarketDataSchedulerDiagnostics(),
+      publicMarketSnapshot: this.buildPublicMarketSnapshotDiagnostics()
     };
     let ready = checks.httpServerListening;
 
@@ -1478,7 +1553,9 @@ class DashboardServer {
    */
   buildServiceReadiness(now = Date.now()) {
     const checks = {
-      httpServerListening: this.httpServer?.listening === true
+      httpServerListening: this.httpServer?.listening === true,
+      marketDataScheduler: this.buildMarketDataSchedulerDiagnostics(),
+      publicMarketSnapshot: this.buildPublicMarketSnapshotDiagnostics()
     };
     return {
       ready: checks.httpServerListening,
@@ -1486,6 +1563,123 @@ class DashboardServer {
       timestamp: new Date(now).toISOString(),
       checks
     };
+  }
+
+  async withRateCoordinatorReadiness(readiness) {
+    const upbit = this.tradingSystem?.upbit;
+    if (typeof upbit?.getRateCoordinatorStatus !== 'function') return readiness;
+
+    let status;
+    try {
+      status = await upbit.getRateCoordinatorStatus();
+    } catch {
+      status = {
+        required: upbit.rateCoordinatorRequired === true,
+        enabled: upbit.rateCoordinatorRequired === true,
+        available: false,
+        failureCode: 'UPBIT_RATE_COORDINATOR_UNAVAILABLE'
+      };
+    }
+    const safeInteger = value => {
+      if (value === null || value === undefined || value === '') return null;
+      const number = Number(value);
+      return Number.isFinite(number) && number >= 0 ? Math.floor(number) : null;
+    };
+    const failureCode = typeof status?.failureCode === 'string' &&
+      /^UPBIT_RATE_COORDINATOR_[A-Z0-9_]+$/.test(status.failureCode)
+      ? status.failureCode
+      : null;
+    const coordinator = {
+      required: status?.required === true,
+      enabled: status?.enabled === true,
+      available: status?.available === true ? true : status?.available === false ? false : null,
+      failureCode,
+      queuedTotal: safeInteger(status?.queuedTotal),
+      inFlightTotal: safeInteger(status?.inFlightTotal),
+      maxInFlight: safeInteger(status?.maxInFlight),
+      nextStartInMs: safeInteger(status?.nextStartInMs)
+    };
+    const checks = { ...readiness.checks, marketDataCoordinator: coordinator };
+    return {
+      ...readiness,
+      ready: readiness.ready && (!coordinator.required || coordinator.available === true),
+      checks
+    };
+  }
+
+  /**
+   * Public readiness diagnostics for the process-local market-data scheduler.
+   * Scheduler pressure is observable here but does not make the HTTP service
+   * unready by itself; trading readiness continues to use the trader's
+   * fail-closed analysis and risk health contracts above.
+   */
+  buildMarketDataSchedulerDiagnostics() {
+    const unavailable = { available: false };
+    try {
+      const upbit = this.tradingSystem?.upbit;
+      if (typeof upbit?.getQueueStatus !== 'function') return unavailable;
+      const status = upbit.getQueueStatus();
+      if (!status || typeof status !== 'object' || Array.isArray(status)) return unavailable;
+
+      const nonNegativeInteger = value => {
+        if (value === null || value === undefined || value === '') return null;
+        const number = Number(value);
+        return Number.isFinite(number) && number >= 0 ? Math.floor(number) : null;
+      };
+      const priorityValues = value => ({
+        normal: nonNegativeInteger(value?.normal),
+        risk: nonNegativeInteger(value?.risk)
+      });
+      const queuedByPriority = priorityValues(status.queuedByPriority);
+      const maxQueuedByPriority = priorityValues(status.maxQueuedByPriority);
+      const isQueueSaturated = (queued, maximum) => {
+        if (queued === null || maximum === null) return null;
+        return maximum === 0 ? queued > 0 : queued >= maximum;
+      };
+      const normalQueueSaturated = isQueueSaturated(queuedByPriority.normal, maxQueuedByPriority.normal);
+      const riskQueueSaturated = isQueueSaturated(queuedByPriority.risk, maxQueuedByPriority.risk);
+      const backoffRemainingMs = nonNegativeInteger(status.backoffRemainingMs);
+
+      return {
+        available: true,
+        queueLength: nonNegativeInteger(status.queueLength),
+        queuedByPriority,
+        oldestWaitAgeMsByPriority: priorityValues(status.oldestWaitAgeMsByPriority),
+        inFlightByPriority: priorityValues(status.inFlightByPriority),
+        inFlightTotal: nonNegativeInteger(status.inFlightTotal),
+        maxInFlight: nonNegativeInteger(status.maxInFlight),
+        maxQueuedByPriority,
+        nextStartInMs: nonNegativeInteger(status.nextStartInMs),
+        backoffRemainingMs,
+        pressure: {
+          normalQueueSaturated,
+          riskQueueSaturated,
+          backoffActive: backoffRemainingMs === null ? null : backoffRemainingMs > 0
+        }
+      };
+    } catch {
+      return unavailable;
+    }
+  }
+
+  buildPublicMarketSnapshotDiagnostics() {
+    try {
+      const status = this.publicMarketDataSource?.getSnapshotStoreStatus?.();
+      if (!status || typeof status !== 'object') return { available: false };
+      return {
+        available: status.available === true,
+        marketCount: Number.isSafeInteger(status.marketCount) && status.marketCount >= 0
+          ? status.marketCount
+          : null,
+        persistedAt: typeof status.persistedAt === 'string' ? status.persistedAt : null,
+        dirty: status.dirty === true,
+        readOnly: status.readOnly === true,
+        persistenceHealthy: status.persistenceHealthy === true,
+        loadHealthy: status.loadHealthy === true
+      };
+    } catch {
+      return { available: false };
+    }
   }
 
   /**
@@ -1861,9 +2055,19 @@ class DashboardServer {
     }
 
     return new Promise(resolve => {
-      const logClosed = () => {
+      const logClosed = async () => {
         try {
-          this.manualOrderIdempotencyStore?.releaseWriterLock?.();
+          await this.publicMarketDataSource?.flushSnapshot?.();
+        } catch (error) {
+          this.logger.error('Public market snapshot flush failed', {
+            error: error.message,
+            code: error.code
+          });
+        }
+        try {
+          if (this.releaseManualOrderWriterLockOnStop) {
+            this.manualOrderIdempotencyStore?.releaseWriterLock?.();
+          }
         } catch (error) {
           this.logger.error('Manual order writer lock release failed', {
             error: error.message,
@@ -1883,7 +2087,7 @@ class DashboardServer {
         this.server.close(logClosed);
         this.server = null;
       } else {
-        resolve();
+        logClosed().finally(resolve);
       }
     });
   }

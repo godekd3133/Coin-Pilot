@@ -1,6 +1,31 @@
-# CoinPilot Signal Ledger — Design QA
+# CoinPilot — Design QA
 
-## Comparison target
+## Active reference: Toss Design System (2026-09-30)
+
+- Toss Design System is the sole visual reference for new design work. Use its [foundation colors](https://tossmini-docs.toss.im/tds-mobile/foundation/colors/), [Typography](https://tossmini-docs.toss.im/tds-react-native/foundation/typography/), [Top](https://tossmini-docs.toss.im/tds-mobile/components/top/), [Paragraph](https://tossmini-docs.toss.im/tds-mobile/components/paragraph/), [Segmented Control](https://tossmini-docs.toss.im/tds-mobile/components/segmented-control/), and [Border](https://tossmini-docs.toss.im/tds-mobile/components/border/) docs as the source for tokens, hierarchy, selection, badges, and separators.
+- The PWA is a vanilla HTML/CSS/JavaScript app and does not load the React TDS component package. Apply TDS token names and component behavior in the existing semantic markup; do not describe the PWA as using Toss React components. SwiftUI maps the same roles to native controls.
+- `Top` maps to one page heading, concise supporting text, and at most one primary page action. `Paragraph` maps to body copy, balance typography, and status text. Segmented controls represent one selected mode with an exposed selected state. Readiness and freshness use labeled states with restrained semantic colors. List rows use separators and clear tap targets instead of repeated outlined status cards.
+- Current semantic color mapping:
+
+  | CoinPilot role | Toss token | CSS value |
+  | --- | --- | --- |
+  | page background | `grey50` | `#f9fafb` |
+  | secondary surface | `grey100` | `#f2f4f6` |
+  | divider | `grey200` | `#e5e8eb` |
+  | secondary text | `grey600` | `#6b7684` |
+  | body text | `grey700` | `#4e5968` |
+  | primary text | `grey900` | `#191f28` |
+  | selected action | `blue700` | `#1b64da` |
+  | positive state | `green900` | `#027648` |
+  | negative state | `red900` | `#a51926` |
+  | warning surface | `yellow50` | `#fff9e7` |
+
+  Dark amber warning text is a CoinPilot contrast token, not an official TDS token.
+- UI acceptance must preserve the product's meaning: server/account freshness, paper/live mode, order lock, last-good quote, mock data, and historical local replay remain explicit. Color alone never communicates safety state; warnings retain their reason and recovery action. Motion remains subordinate to data/readiness transitions.
+- Current-source CUA review used the dashboard-only mock from `src/scripts/runDashboard.js`, which provides deterministic fake Upbit data and writes only process-specific files under the OS temp directory. At the available ~640×853 viewport it shows a 1,000,000 KRW fake Paper account, stopped automation, no positions/trades, and an empty history with a gated snapshot action. The Market screen shows the exchange trade time separately from server capture time and labels each fake quote row with its capture time. No exchange or order was called. The mobile stats row now places win rate across a compact separated row.
+- The captured screen was inspected inline, but no screenshot file was saved. This source review does not approve the design at 390×844, 1280×720, native iOS, VoiceOver, installed PWA, or stale/last-good/one-record states. The previous Product Design audit asked for approval before using direct Playwright CLI/MCP to create saved screenshot artifacts; that authorization remains pending.
+
+## Historical comparison target — Signal Ledger (superseded)
 
 - Source visual truth: `/Users/kimminkyu/.codex/generated_images/01a089ce-7d0d-79e1-863e-765434a6db3b/exec-8532932d-395f-46ae-ad1d-2dd4aa3813d1.png`
 - Source concept: selected ideation direction 2, “Signal Ledger”.

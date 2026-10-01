@@ -1,12 +1,20 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 import DashboardServer from '../src/api/dashboardServer.js';
-import { createPublicMarketDataSource } from '../src/api/publicMarketDataSource.js';
+import {
+  createPublicMarketDataSource,
+  isPublicMarketDataSource
+} from '../src/api/publicMarketDataSource.js';
 import { readCurrentMarketPrices } from '../src/api/marketValuation.js';
-import { MARKET_DATA_FRESHNESS } from '../src/api/marketDataProvider.js';
+import { getMarketDataProvider, MARKET_DATA_FRESHNESS } from '../src/api/marketDataProvider.js';
 import createMarketRoutes from '../src/api/routes/market.js';
+import { UpbitMarketDataAdapter } from '../src/market-data/marketDataAdapters.js';
 import UpbitAPI from '../src/api/upbit.js';
 import { sharedUpbitRequestScheduler } from '../src/api/upbitRequestScheduler.js';
+import { PublicMarketSnapshotStore } from '../src/api/publicMarketSnapshotStore.js';
 
 const sourceAsOf = '2026-09-29T12:00:00.000Z';
 
@@ -76,9 +84,10 @@ test('the public source creates a blank-credential Upbit client on the shared sc
   });
 
   const source = createPublicMarketDataSource();
+  assert.equal(isPublicMarketDataSource(source), true);
   assert.deepEqual(
     Object.getOwnPropertyNames(Object.getPrototypeOf(source)).sort(),
-    ['constructor', ...methodNames].sort()
+    ['constructor', ...methodNames, 'getLastGoodTickerSnapshot', 'getCachedTickerSnapshot', 'getSnapshotStoreStatus', 'flushSnapshot', 'close'].sort()
   );
   assert.equal('getAccounts' in source, false);
   assert.equal('placeOrder' in source, false);
@@ -96,6 +105,246 @@ test('the public source creates a blank-credential Upbit client on the shared sc
   ]);
   assert.equal(observed.every(({ accessKey, secretKey }) => accessKey === '' && secretKey === ''), true);
   assert.equal(observed.every(({ scheduler }) => scheduler === sharedUpbitRequestScheduler), true);
+});
+
+test('public source records normal ticker reads but does not delay or persist priority risk reads', async t => {
+  const original = Object.getOwnPropertyDescriptor(UpbitAPI.prototype, 'getTicker');
+  const observedOptions = [];
+  UpbitAPI.prototype.getTicker = async function (markets, options = {}) {
+    observedOptions.push(options);
+    return [{
+      market: Array.isArray(markets) ? markets[0] : markets,
+      trade_price: 100,
+      trade_timestamp: Date.now()
+    }];
+  };
+  t.after(() => Object.defineProperty(UpbitAPI.prototype, 'getTicker', original));
+
+  const recorded = [];
+  const store = {
+    recordTickers(rows, fetchedAt) { recorded.push({ rows, fetchedAt }); },
+    getTickerSnapshot(markets) { return { markets }; },
+    getCachedTickerSnapshot(markets) { return { markets }; },
+    flush() { return Promise.resolve({ dirty: false }); },
+    close() { return Promise.resolve({ dirty: false }); }
+  };
+  const source = createPublicMarketDataSource({ snapshotStore: store });
+
+  await source.getTicker(['KRW-BTC']);
+  await source.getTicker(['KRW-BTC'], { priority: 'risk' });
+
+  assert.equal(recorded.length, 1);
+  assert.equal(recorded[0].rows[0].market, 'KRW-BTC');
+  assert.equal(typeof recorded[0].fetchedAt, 'string');
+  assert.deepEqual(source.getLastGoodTickerSnapshot(['KRW-BTC']), { markets: ['KRW-BTC'] });
+  await source.flushSnapshot();
+  await source.close();
+  assert.deepEqual(observedOptions, [{}, { priority: 'risk' }]);
+});
+
+test('dashboard cached reads reuse the source snapshot while fresh reads still hit Upbit', async t => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'coinpilot-market-capture-reuse-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const store = new PublicMarketSnapshotStore({
+    filePath: path.join(directory, 'market_snapshot.json'),
+    persistIntervalMs: 60_000
+  });
+  const originalGetTicker = Object.getOwnPropertyDescriptor(UpbitAPI.prototype, 'getTicker');
+  let upstreamReads = 0;
+  UpbitAPI.prototype.getTicker = async function (markets) {
+    upstreamReads += 1;
+    const requested = Array.isArray(markets) ? markets : [markets];
+    return requested.map(market => ({
+      market,
+      trade_price: 100,
+      trade_timestamp: Date.now(),
+      signed_change_rate: 0
+    }));
+  };
+  t.after(() => Object.defineProperty(UpbitAPI.prototype, 'getTicker', originalGetTicker));
+
+  const source = createPublicMarketDataSource({ snapshotStore: store });
+  const dashboard = Object.create(DashboardServer.prototype);
+  Object.assign(dashboard, {
+    publicMarketDataSource: source,
+    tradingSystem: { maxCandleAgeSeconds: 90 },
+    cache: new Map(),
+    cacheTTL: { ticker: 1000 },
+    inFlightTickerRequests: new Map()
+  });
+
+  const strategyTickers = await source.getTicker(['KRW-BTC']);
+  const cachedSnapshot = await dashboard.getCachedTickerWithMetadata(['KRW-BTC']);
+  assert.equal(strategyTickers[0].trade_price, 100);
+  assert.equal(cachedSnapshot.snapshotSource, 'collector_cache');
+  assert.equal(typeof cachedSnapshot.fetchedAtByMarket['KRW-BTC'], 'string');
+  assert.equal(upstreamReads, 1, 'the Dashboard cache reader reuses the recent strategy observation');
+
+  const freshTickers = await getMarketDataProvider(dashboard).getTickers(['KRW-BTC'], {
+    freshness: MARKET_DATA_FRESHNESS.FRESH
+  });
+  assert.equal(freshTickers[0].trade_price, 100);
+  assert.equal(upstreamReads, 2, 'the explicit fresh-read contract bypasses the collector cache');
+  await source.close();
+});
+
+test('dashboard serves a persisted last-good quote on cached reads but never on fresh reads', async t => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'coinpilot-last-good-dashboard-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const filePath = path.join(directory, 'market_snapshot.json');
+  const fetchedAt = Date.now() - 10_000;
+  const saved = new PublicMarketSnapshotStore({ filePath, persistIntervalMs: 60_000 });
+  saved.recordTickers([{
+    market: 'KRW-BTC',
+    trade_price: 100,
+    trade_timestamp: Date.now() - 20_000
+  }], fetchedAt);
+  await saved.flush();
+  await saved.close();
+
+  const source = createPublicMarketDataSource({
+    snapshotStore: new PublicMarketSnapshotStore({ filePath })
+  });
+  const originalGetTicker = Object.getOwnPropertyDescriptor(UpbitAPI.prototype, 'getTicker');
+  UpbitAPI.prototype.getTicker = async () => {
+    const error = new Error('synthetic public quote outage');
+    error.code = 'ENETDOWN';
+    throw error;
+  };
+  t.after(() => Object.defineProperty(UpbitAPI.prototype, 'getTicker', originalGetTicker));
+
+  const dashboard = Object.create(DashboardServer.prototype);
+  Object.assign(dashboard, {
+    publicMarketDataSource: source,
+    tradingSystem: {},
+    cache: new Map(),
+    cacheTTL: { ticker: 1000 },
+    inFlightTickerRequests: new Map()
+  });
+
+  const cached = await dashboard.getCachedTickerWithMetadata(['KRW-BTC']);
+  assert.equal(cached.snapshotSource, 'last_good');
+  assert.equal(cached.fallbackReason, 'ENETDOWN');
+  assert.equal(cached.tickers[0].trade_price, 100);
+  assert.equal(cached.fetchedAt, new Date(fetchedAt).toISOString());
+
+  await assert.rejects(
+    () => getMarketDataProvider(dashboard).getTickers(['KRW-BTC'], {
+      freshness: MARKET_DATA_FRESHNESS.FRESH
+    }),
+    /synthetic public quote outage/
+  );
+  await source.close();
+});
+
+test('the shared public reader singleflights identical ticker and candle reads without caching them', async t => {
+  const originals = new Map(['getTicker', 'getMinuteCandles'].map(name => [
+    name,
+    Object.getOwnPropertyDescriptor(UpbitAPI.prototype, name)
+  ]));
+  const tickerCalls = [];
+  const tickerResolvers = [];
+  const candleCalls = [];
+  const candleResolvers = [];
+  UpbitAPI.prototype.getTicker = function (markets, options = {}) {
+    tickerCalls.push({ markets, options, accessKey: this.accessKey, secretKey: this.secretKey });
+    return new Promise(resolve => tickerResolvers.push(resolve));
+  };
+  UpbitAPI.prototype.getMinuteCandles = function (...args) {
+    candleCalls.push({ args, accessKey: this.accessKey, secretKey: this.secretKey });
+    return new Promise(resolve => candleResolvers.push(resolve));
+  };
+  t.after(() => {
+    for (const [name, descriptor] of originals) {
+      Object.defineProperty(UpbitAPI.prototype, name, descriptor);
+    }
+  });
+
+  const source = createPublicMarketDataSource();
+  const requestedMarkets = ['KRW-BTC'];
+  const firstTickerRead = source.getTicker(requestedMarkets);
+  requestedMarkets[0] = 'KRW-ETH';
+  const overlappingTickerRead = source.getTicker(['KRW-BTC']);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(tickerCalls.length, 1, 'matching ticker reads should share the same in-flight upstream request');
+  assert.deepEqual(tickerCalls[0].markets, ['KRW-BTC'], 'the upstream call must use the same immutable args as the single-flight key');
+  tickerResolvers.shift()([{ market: 'KRW-BTC', trade_price: 123, market_event: { warning: 'stable' } }]);
+  const [firstTickers, secondTickers] = await Promise.all([firstTickerRead, overlappingTickerRead]);
+  assert.notStrictEqual(firstTickers, secondTickers);
+  assert.notStrictEqual(firstTickers[0], secondTickers[0]);
+  firstTickers[0].trade_price = 0;
+  firstTickers[0].market_event.warning = 'changed by one caller';
+  assert.equal(secondTickers[0].trade_price, 123, 'callers must not mutate another consumer’s rows');
+  assert.equal(secondTickers[0].market_event.warning, 'stable', 'nested JSON rows are isolated too');
+
+  const normalTicker = source.getTicker(['KRW-BTC'], { priority: 'normal' });
+  const riskTicker = source.getTicker(['KRW-BTC'], { priority: 'risk' });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(tickerCalls.length, 3, 'different priority lanes must not be merged');
+  tickerResolvers.shift()([{ market: 'KRW-BTC', trade_price: 124 }]);
+  tickerResolvers.shift()([{ market: 'KRW-BTC', trade_price: 125 }]);
+  await Promise.all([normalTicker, riskTicker]);
+
+  const cursor = '2026-09-30T12:00:00.000Z';
+  const firstCandleRead = source.getMinuteCandles('KRW-BTC', 1, 60, { to: cursor });
+  const overlappingCandleRead = source.getMinuteCandles('KRW-BTC', 1, 60, { to: cursor });
+  const nextPage = source.getMinuteCandles('KRW-BTC', 1, 60, { to: '2026-09-30T11:00:00.000Z' });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(candleCalls.length, 2, 'matching pages share one read while a different cursor remains independent');
+  assert.equal(candleCalls.every(call => call.accessKey === '' && call.secretKey === ''), true,
+    'all shared-source calls must use the credential-free reader');
+  candleResolvers.shift()([{ market: 'KRW-BTC', trade_price: 1 }]);
+  candleResolvers.shift()([{ market: 'KRW-BTC', trade_price: 2 }]);
+  await Promise.all([firstCandleRead, overlappingCandleRead, nextPage]);
+
+  const mutableCursor = { to: cursor };
+  const originalCursorRead = source.getMinuteCandles('KRW-BTC', 1, 60, mutableCursor);
+  mutableCursor.to = '2026-09-30T10:00:00.000Z';
+  const matchingCursorRead = source.getMinuteCandles('KRW-BTC', 1, 60, { to: cursor });
+  const changedCursorRead = source.getMinuteCandles('KRW-BTC', 1, 60, { to: mutableCursor.to });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(candleCalls.length, 4, 'cursor mutation cannot change a keyed request or merge a different page');
+  assert.deepEqual(candleCalls.slice(-2).map(call => call.args[3].to), [cursor, mutableCursor.to]);
+  candleResolvers.shift()([{ market: 'KRW-BTC', trade_price: 3 }]);
+  candleResolvers.shift()([{ market: 'KRW-BTC', trade_price: 4 }]);
+  await Promise.all([originalCursorRead, matchingCursorRead, changedCursorRead]);
+
+  const strategyAdapter = new UpbitMarketDataAdapter(source);
+  const dashboardProvider = getMarketDataProvider({ publicMarketDataSource: source });
+  const strategyCandleRead = strategyAdapter.getMinuteCandles('KRW-BTC', 1, 30);
+  const dashboardCandleRead = dashboardProvider.getMinuteCandles('KRW-BTC', 1, 30);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(candleCalls.length, 5, 'strategy and dashboard defaults should share the same in-flight candle request');
+  assert.equal(candleCalls[4].args.length, 3, 'an empty default-options object is normalized away');
+  candleResolvers.shift()([{ market: 'KRW-BTC', trade_price: 5 }]);
+  await Promise.all([strategyCandleRead, dashboardCandleRead]);
+});
+
+test('a failed public read clears its single-flight entry so a later call retries', async t => {
+  const original = Object.getOwnPropertyDescriptor(UpbitAPI.prototype, 'getMarkets');
+  let calls = 0;
+  UpbitAPI.prototype.getMarkets = function () {
+    calls += 1;
+    return calls === 1
+      ? Promise.reject(new Error('temporary public read failure'))
+      : Promise.resolve([{ market: 'KRW-BTC' }]);
+  };
+  t.after(() => Object.defineProperty(UpbitAPI.prototype, 'getMarkets', original));
+
+  const source = createPublicMarketDataSource();
+  await assert.rejects(source.getMarkets(), /temporary public read failure/);
+  assert.deepEqual(await source.getMarkets(), [{ market: 'KRW-BTC' }]);
+  assert.equal(calls, 2);
+});
+
+test('only factory-created credential-free readers pass the public-source brand check', () => {
+  assert.equal(isPublicMarketDataSource({
+    getMarkets() {},
+    getTicker() {},
+    getMinuteCandles() {}
+  }), false);
+  assert.equal(isPublicMarketDataSource(null), false);
+  assert.equal(isPublicMarketDataSource(createPublicMarketDataSource({ requestTimeoutMs: 2500 })), true);
 });
 
 test('dashboard routes and account valuation use the injected source and preserve ticker cache metadata', async () => {

@@ -3,11 +3,16 @@ import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import { v4 as uuidv4 } from 'uuid';
 import { sharedUpbitRequestScheduler } from './upbitRequestScheduler.js';
+import {
+  UpbitRateCoordinatorClient,
+  resolveUpbitRateCoordinatorPaths
+} from './upbitRateCoordinator.js';
 
 // Upbit documents progressively longer temporary 418 blocks but does not
 // specify a fixed fallback duration. Keep every lane closed for five minutes
 // when the response omits a trusted duration, and fail the current operation.
 const UPBIT_418_FALLBACK_BACKOFF_MS = 5 * 60 * 1000;
+const RATE_COORDINATOR_LEASE = Symbol('upbitRateCoordinatorLease');
 
 function serializeQueryString(query) {
   const params = new URLSearchParams();
@@ -90,7 +95,40 @@ function isSchedulerAdmissionError(error) {
     'UPBIT_REQUEST_DEADLINE',
     'UPBIT_FILL_DEADLINE'
   ]
-    .includes(error?.code) || error?.name === 'AbortError';
+    .includes(error?.code) ||
+    error?.code?.startsWith?.('UPBIT_RATE_COORDINATOR_') ||
+    error?.name === 'AbortError';
+}
+
+function isEnvironmentFlagEnabled(value) {
+  return ['true', '1', 'yes', 'on'].includes(String(value ?? '').trim().toLowerCase());
+}
+
+function resolveRateCoordinator(options = {}) {
+  const required = isEnvironmentFlagEnabled(process.env.UPBIT_RATE_COORDINATOR_REQUIRED) ||
+    options.rateCoordinatorRequired === true;
+  if (options.rateCoordinator && typeof options.rateCoordinator.acquireTurn === 'function') {
+    return { client: options.rateCoordinator, required };
+  }
+  if (!required) return { client: null, required: false };
+
+  // The portfolio root is profile-scoped; requiring an explicit coordinator
+  // root prevents Paper and LIVE from silently creating separate host queues.
+  const stateDir = typeof process.env.UPBIT_RATE_COORDINATOR_STATE_DIR === 'string'
+    ? process.env.UPBIT_RATE_COORDINATOR_STATE_DIR.trim()
+    : '';
+  if (typeof stateDir !== 'string' || !stateDir.trim()) {
+    const error = new Error(
+      'UPBIT_RATE_COORDINATOR_STATE_DIR must be set explicitly when shared Upbit coordination is required.'
+    );
+    error.code = 'UPBIT_RATE_COORDINATOR_STATE_ROOT_REQUIRED';
+    throw error;
+  }
+  const { socketPath } = resolveUpbitRateCoordinatorPaths(stateDir);
+  return {
+    client: new UpbitRateCoordinatorClient({ socketPath }),
+    required: true
+  };
 }
 
 class UpbitAPI {
@@ -100,6 +138,11 @@ class UpbitAPI {
     this.baseURL = 'https://api.upbit.com/v1';
     this.axios = options.axios || axios;
     this.scheduler = options.scheduler || sharedUpbitRequestScheduler;
+    const rateCoordinator = resolveRateCoordinator(options);
+    this.rateCoordinator = rateCoordinator.client;
+    this.rateCoordinatorRequired = rateCoordinator.required;
+    this.rateCoordinatorAvailable = null;
+    this.rateCoordinatorFailureCode = null;
     this.random = typeof options.random === 'function' ? options.random : Math.random;
     const configuredTimeout = options.requestTimeoutMs ?? process.env.UPBIT_REQUEST_TIMEOUT_MS;
     const parsedTimeout = Number(configuredTimeout);
@@ -208,13 +251,64 @@ class UpbitAPI {
   }
 
   async scheduleRequest(requestFn, requestOptions = {}) {
-    return this.scheduler.schedule(startedAt => {
+    const schedulerOptions = this.getSchedulerOptions(requestOptions);
+    const coordinatorBudgetMs = schedulerOptions.queueWaitTimeoutMs;
+    const coordinatorBudgetStartedAt = process.hrtime.bigint();
+    return this.scheduler.schedule(async startedAt => {
+      if (this.rateCoordinator && schedulerOptions.rateLimitScope === 'ip') {
+        let lease;
+        const elapsedCoordinatorBudgetMs = Number(
+          process.hrtime.bigint() - coordinatorBudgetStartedAt
+        ) / 1_000_000;
+        const remainingCoordinatorBudgetMs = Math.max(
+          0,
+          coordinatorBudgetMs - elapsedCoordinatorBudgetMs
+        );
+        try {
+          lease = await this.rateCoordinator.acquireTurn({
+            scope: 'ip',
+            group: schedulerOptions.rateLimitGroup,
+            priority: schedulerOptions.priority,
+            priorityOrder: schedulerOptions.priorityOrder,
+            deadlineAt: this.getCurrentTime() + remainingCoordinatorBudgetMs,
+            queueWaitTimeoutMs: remainingCoordinatorBudgetMs,
+            minRequestIntervalMs: schedulerOptions.minRequestIntervalMs,
+            signal: schedulerOptions.signal
+          });
+          this.rateCoordinatorAvailable = true;
+          this.rateCoordinatorFailureCode = null;
+          this.lastRequestTime = this.getCurrentTime();
+        } catch (error) {
+          this.rateCoordinatorAvailable = false;
+          this.rateCoordinatorFailureCode = error?.code?.startsWith?.('UPBIT_RATE_COORDINATOR_')
+            ? error.code
+            : 'UPBIT_RATE_COORDINATOR_UNAVAILABLE';
+          throw error;
+        }
+
+        let holdLeaseForBackoff = false;
+        try {
+          return await requestFn();
+        } catch (error) {
+          if (error?.response?.status === 418 || error?.response?.status === 429) {
+            Object.defineProperty(error, RATE_COORDINATOR_LEASE, {
+              configurable: true,
+              value: lease
+            });
+            holdLeaseForBackoff = true;
+          }
+          throw error;
+        } finally {
+          if (!holdLeaseForBackoff) await lease.release();
+        }
+      }
+
       this.lastRequestTime = startedAt;
       return requestFn();
-    }, this.getSchedulerOptions(requestOptions));
+    }, schedulerOptions);
   }
 
-  applyRateLimitBackoff(error, attempt = 0, requestOptions = {}) {
+  async applyRateLimitBackoff(error, attempt = 0, requestOptions = {}) {
     const headers = error.response?.headers;
     const retryAfterHeader = getHeader(headers, 'Retry-After');
     const remaining = parseRemainingReq(getHeader(headers, 'Remaining-Req'));
@@ -227,19 +321,51 @@ class UpbitAPI {
       rateLimitGroup: remaining?.group || requestOptions.rateLimitGroup,
       rateLimitScope: requestOptions.rateLimitScope
     });
+    if (this.rateCoordinator && requestOptions.rateLimitScope === 'ip') {
+      try {
+        await this.rateCoordinator.applyBackoff(waitTime, {
+          scope: 'ip',
+          group: remaining?.group || requestOptions.rateLimitGroup
+        });
+        this.rateCoordinatorAvailable = true;
+        this.rateCoordinatorFailureCode = null;
+      } catch (coordinatorError) {
+        this.rateCoordinatorAvailable = false;
+        this.rateCoordinatorFailureCode = coordinatorError?.code?.startsWith?.('UPBIT_RATE_COORDINATOR_')
+          ? coordinatorError.code
+          : 'UPBIT_RATE_COORDINATOR_UNAVAILABLE';
+        throw coordinatorError;
+      }
+    }
     return waitTime;
   }
 
-  applyTemporaryBlockBackoff(error, requestOptions = {}) {
+  async applyTemporaryBlockBackoff(error, requestOptions = {}) {
     const { durationMs, source } = getTemporaryBlockDurationMs(error, this.getCurrentTime());
     this.scheduler.applyBackoff(durationMs, {
       rateLimitScope: requestOptions.rateLimitScope,
       rateLimitScopeWide: true
     });
+    if (this.rateCoordinator && requestOptions.rateLimitScope === 'ip') {
+      try {
+        await this.rateCoordinator.applyBackoff(durationMs, {
+          scope: 'ip',
+          scopeWide: true
+        });
+        this.rateCoordinatorAvailable = true;
+        this.rateCoordinatorFailureCode = null;
+      } catch (coordinatorError) {
+        this.rateCoordinatorAvailable = false;
+        this.rateCoordinatorFailureCode = coordinatorError?.code?.startsWith?.('UPBIT_RATE_COORDINATOR_')
+          ? coordinatorError.code
+          : 'UPBIT_RATE_COORDINATOR_UNAVAILABLE';
+        throw coordinatorError;
+      }
+    }
     return { durationMs, source };
   }
 
-  observeRateLimitResponse(response, requestOptions = {}) {
+  async observeRateLimitResponse(response, requestOptions = {}) {
     const parsed = parseRemainingReq(getHeader(response?.headers, 'Remaining-Req'));
     if (!parsed || parsed.remaining !== 0) return;
     const now = this.getCurrentTime();
@@ -247,6 +373,19 @@ class UpbitAPI {
       rateLimitGroup: parsed.group,
       rateLimitScope: requestOptions.rateLimitScope
     });
+    if (this.rateCoordinator && requestOptions.rateLimitScope === 'ip') {
+      try {
+        await this.rateCoordinator.observeRemaining(parsed.group, parsed.remaining);
+        this.rateCoordinatorAvailable = true;
+        this.rateCoordinatorFailureCode = null;
+      } catch (error) {
+        this.rateCoordinatorAvailable = false;
+        this.rateCoordinatorFailureCode = error?.code?.startsWith?.('UPBIT_RATE_COORDINATOR_')
+          ? error.code
+          : 'UPBIT_RATE_COORDINATOR_UNAVAILABLE';
+        throw error;
+      }
+    }
   }
 
   /**
@@ -316,8 +455,70 @@ class UpbitAPI {
       maxQueuedByPriority: shared.maxQueuedByPriority,
       nextStartInMs: shared.nextStartInMs,
       backoffRemainingMs: shared.backoffRemainingMs,
-      backoffRemainingMsByScopeAndGroup: shared.backoffRemainingMsByScopeAndGroup
+      backoffRemainingMsByScopeAndGroup: shared.backoffRemainingMsByScopeAndGroup,
+      rateCoordinatorRequired: this.rateCoordinatorRequired,
+      rateCoordinatorEnabled: Boolean(this.rateCoordinator),
+      rateCoordinatorAvailable: this.rateCoordinatorAvailable,
+      rateCoordinatorFailureCode: this.rateCoordinatorFailureCode
     };
+  }
+
+  async getRateCoordinatorStatus() {
+    if (!this.rateCoordinator) {
+      return {
+        required: this.rateCoordinatorRequired,
+        enabled: false,
+        available: null,
+        failureCode: null
+      };
+    }
+
+    try {
+      const status = await this.rateCoordinator.getStatus();
+      if (!status || status.available !== true) {
+        const unavailable = new Error('Shared Upbit rate coordinator is unavailable.');
+        unavailable.code = status?.failureCode || 'UPBIT_RATE_COORDINATOR_UNAVAILABLE';
+        throw unavailable;
+      }
+      this.rateCoordinatorAvailable = true;
+      this.rateCoordinatorFailureCode = null;
+      const asNonNegativeInteger = value => {
+        if (value === null || value === undefined || value === '') return null;
+        const number = Number(value);
+        return Number.isFinite(number) && number >= 0 ? Math.floor(number) : null;
+      };
+      return {
+        required: this.rateCoordinatorRequired,
+        enabled: true,
+        available: true,
+        failureCode: null,
+        queuedTotal: asNonNegativeInteger(status.queuedTotal),
+        inFlightTotal: asNonNegativeInteger(status.inFlightTotal),
+        maxInFlight: asNonNegativeInteger(status.maxInFlight),
+        nextStartInMs: asNonNegativeInteger(status.nextStartInMs)
+      };
+    } catch (error) {
+      this.rateCoordinatorAvailable = false;
+      this.rateCoordinatorFailureCode = error?.code?.startsWith?.('UPBIT_RATE_COORDINATOR_')
+        ? error.code
+        : 'UPBIT_RATE_COORDINATOR_UNAVAILABLE';
+      return {
+        required: this.rateCoordinatorRequired,
+        enabled: true,
+        available: false,
+        failureCode: this.rateCoordinatorFailureCode
+      };
+    }
+  }
+
+  async assertRateCoordinatorReady() {
+    const status = await this.getRateCoordinatorStatus();
+    if (status.required && status.available !== true) {
+      const error = new Error('Required shared Upbit rate coordinator is unavailable.');
+      error.code = status.failureCode || 'UPBIT_RATE_COORDINATOR_UNAVAILABLE';
+      throw error;
+    }
+    return status;
   }
 
   /**
@@ -349,15 +550,32 @@ class UpbitAPI {
         // response duration (or the conservative shared fallback) and fail
         // this request instead of retrying into the block.
         if (status === 418) {
-          const { durationMs, source } = this.applyTemporaryBlockBackoff(error, requestOptions);
-          console.error(`Rate limited with HTTP 418. Shared cooldown: ${durationMs}ms (${source})`);
+          try {
+            const { durationMs, source } = await this.applyTemporaryBlockBackoff(error, requestOptions);
+            console.error(`Rate limited with HTTP 418. Shared cooldown: ${durationMs}ms (${source})`);
+          } finally {
+            const lease = error?.[RATE_COORDINATOR_LEASE];
+            if (lease) {
+              delete error[RATE_COORDINATOR_LEASE];
+              await lease.release();
+            }
+          }
           throw error;
         }
 
         // Rate limit - 재시도
         if (status === 429) {
-          const waitTime = this.applyRateLimitBackoff(error, attempt, requestOptions);
-          console.log(`Rate limited. Waiting ${waitTime}ms before retry (${attempt + 1}/${attempts})`);
+          let waitTime;
+          try {
+            waitTime = await this.applyRateLimitBackoff(error, attempt, requestOptions);
+            console.log(`Rate limited. Waiting ${waitTime}ms before retry (${attempt + 1}/${attempts})`);
+          } finally {
+            const lease = error?.[RATE_COORDINATOR_LEASE];
+            if (lease) {
+              delete error[RATE_COORDINATOR_LEASE];
+              await lease.release();
+            }
+          }
           if (this.getDeadlineRemainingMs(requestOptions) === 0) {
             throw createRequestDeadlineError(requestOptions.deadlineAt);
           }
@@ -467,7 +685,7 @@ class UpbitAPI {
           `${this.baseURL}/market/all`,
           this.getRequestConfigWithOptions({}, priorityOptions)
         );
-        this.observeRateLimitResponse(response, priorityOptions);
+        await this.observeRateLimitResponse(response, priorityOptions);
         return response.data;
       }, 3, priorityOptions);
     } catch (error) {
@@ -506,7 +724,7 @@ class UpbitAPI {
           params
         }, priorityOptions)
       );
-      this.observeRateLimitResponse(response, priorityOptions);
+      await this.observeRateLimitResponse(response, priorityOptions);
       return response.data;
     }, 3, priorityOptions);
   }
@@ -531,7 +749,7 @@ class UpbitAPI {
       const response = await this.axios.get(`${this.baseURL}/candles/days`, this.getRequestConfigWithOptions({
         params
       }, priorityOptions));
-      this.observeRateLimitResponse(response, priorityOptions);
+      await this.observeRateLimitResponse(response, priorityOptions);
       return response.data;
     }, 3, priorityOptions);
   }
@@ -550,7 +768,7 @@ class UpbitAPI {
       const response = await this.axios.get(`${this.baseURL}/ticker`, this.getRequestConfigWithOptions({
         params: { markets: marketString }
       }, priorityOptions));
-      this.observeRateLimitResponse(response, priorityOptions);
+      await this.observeRateLimitResponse(response, priorityOptions);
       return response.data;
     }, 3, priorityOptions);
   }
@@ -572,7 +790,7 @@ class UpbitAPI {
       const response = await this.axios.get(`${this.baseURL}/orderbook`, this.getRequestConfigWithOptions({
         params: { markets: marketString }
       }, priorityOptions));
-      this.observeRateLimitResponse(response, priorityOptions);
+      await this.observeRateLimitResponse(response, priorityOptions);
       return response.data;
     }, 3, priorityOptions);
   }
@@ -592,7 +810,7 @@ class UpbitAPI {
       const response = await this.axios.get(`${this.baseURL}/accounts`, this.getRequestConfigWithOptions({
         headers: { Authorization: `Bearer ${token}` }
       }, priorityOptions));
-      this.observeRateLimitResponse(response, priorityOptions);
+      await this.observeRateLimitResponse(response, priorityOptions);
       return response.data;
     }, 3, priorityOptions);
   }
@@ -614,7 +832,7 @@ class UpbitAPI {
         params: query,
         headers: { Authorization: `Bearer ${token}` }
       }, priorityOptions));
-      this.observeRateLimitResponse(response, priorityOptions);
+      await this.observeRateLimitResponse(response, priorityOptions);
       return response.data;
     }, 3, priorityOptions);
   }
@@ -663,7 +881,7 @@ class UpbitAPI {
         }, priorityOptions);
         requestDispatched = true;
         const result = await this.axios.post(`${this.baseURL}/orders`, query, requestConfig);
-        this.observeRateLimitResponse(result, priorityOptions);
+        await this.observeRateLimitResponse(result, priorityOptions);
         return result;
       }, priorityOptions);
       return { success: true, data: response.data };
@@ -681,9 +899,9 @@ class UpbitAPI {
         };
       }
       if (error.response?.status === 429) {
-        this.applyRateLimitBackoff(error, 0, priorityOptions);
+        await this.applyRateLimitBackoff(error, 0, priorityOptions);
       } else if (error.response?.status === 418) {
-        const { durationMs, source } = this.applyTemporaryBlockBackoff(error, priorityOptions);
+        const { durationMs, source } = await this.applyTemporaryBlockBackoff(error, priorityOptions);
         console.error(`Rate limited with HTTP 418. Shared cooldown: ${durationMs}ms (${source})`);
       }
       const parsedError = this.parseApiError(error);
@@ -729,7 +947,7 @@ class UpbitAPI {
         params: query,
         headers: { Authorization: `Bearer ${token}` }
       }, priorityOptions));
-      this.observeRateLimitResponse(response, priorityOptions);
+      await this.observeRateLimitResponse(response, priorityOptions);
       return response.data;
     }, 3, priorityOptions);
   }
@@ -753,7 +971,7 @@ class UpbitAPI {
         params: query,
         headers: { Authorization: `Bearer ${token}` }
       }, priorityOptions));
-      this.observeRateLimitResponse(response, priorityOptions);
+      await this.observeRateLimitResponse(response, priorityOptions);
       return response.data;
     }, 3, priorityOptions);
   }
@@ -780,7 +998,7 @@ class UpbitAPI {
         params: query,
         headers: { Authorization: `Bearer ${token}` }
       }, priorityOptions));
-      this.observeRateLimitResponse(response, priorityOptions);
+      await this.observeRateLimitResponse(response, priorityOptions);
       return response.data;
     }, 3, priorityOptions);
   }

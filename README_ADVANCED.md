@@ -65,8 +65,13 @@
 git clone <repository-url>
 cd coin-automandation
 
-# 의존성 설치
-npm install
+# README.md의 지원 Node LTS 버전 선택
+nvm install
+nvm use
+node --version
+
+# 잠금 파일 기준 의존성 설치
+npm ci
 
 # 환경변수 설정
 cp .env.example .env

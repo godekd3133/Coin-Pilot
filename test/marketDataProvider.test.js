@@ -138,6 +138,70 @@ test('malformed or missing ticker timestamps stay unavailable in a partial snaps
   assert.deepEqual(snapshot.unavailableMarkets, ['KRW-ETH', 'KRW-XRP', 'KRW-SOL', 'KRW-ADA']);
 });
 
+test('complete ticker coverage remains separate from quote freshness and capture skew', async () => {
+  const now = Date.parse('2026-09-29T12:02:00.000Z');
+  const provider = new MarketDataProvider({
+    now: () => now,
+    maximumQuoteAgeSeconds: 90,
+    readTickers: async () => ({
+      tickers: [
+        { market: 'KRW-BTC', trade_price: 100, trade_timestamp: now - 1_000 },
+        { market: 'KRW-ETH', trade_price: 200, trade_timestamp: now - 120_000 },
+        { market: 'KRW-XRP', trade_price: 300, trade_timestamp: now + 10_000 }
+      ],
+      fetchedAt: new Date(now).toISOString()
+    })
+  });
+
+  const snapshot = await provider.getSnapshot(['KRW-BTC', 'KRW-ETH', 'KRW-XRP']);
+
+  assert.equal(snapshot.complete, true, 'all three quote rows are structurally present');
+  assert.equal(snapshot.allQuotesFresh, false);
+  assert.deepEqual(snapshot.freshMarkets, ['KRW-BTC']);
+  assert.deepEqual(snapshot.staleMarkets, ['KRW-ETH', 'KRW-XRP']);
+  assert.deepEqual(snapshot.unavailableMarkets, []);
+  assert.deepEqual([...snapshot.freshPriceMap], [['KRW-BTC', 100]]);
+  assert.equal(snapshot.priceMap.get('KRW-ETH'), 200, 'stale values remain available for explicitly labelled display');
+  assert.equal(snapshot.quoteFreshnessByMarket.get('KRW-ETH').reason, 'market_source_stale');
+  assert.equal(snapshot.quoteFreshnessByMarket.get('KRW-XRP').reason, 'market_source_timestamp_in_future');
+  assert.equal(snapshot.sourceSkewMs, 130_000);
+  assert.equal(snapshot.maximumQuoteAgeMs, 90_000);
+});
+
+test('last-good fallback is visibly stale even when its source quote remains inside the normal age limit', async () => {
+  const now = Date.parse('2026-09-29T12:02:00.000Z');
+  const sourceAsOf = new Date(now - 1_000).toISOString();
+  const fetchedAt = new Date(now - 2_000).toISOString();
+  const provider = new MarketDataProvider({
+    now: () => now,
+    maximumQuoteAgeSeconds: 90,
+    readTickers: async () => ({
+      tickers: [{
+        market: 'KRW-BTC',
+        trade_price: 100,
+        trade_timestamp: sourceAsOf,
+        fetchedAt
+      }],
+      fetchedAt,
+      fetchedAtByMarket: { 'KRW-BTC': fetchedAt },
+      snapshotSource: 'last_good',
+      fallbackReason: 'ETIMEDOUT'
+    })
+  });
+
+  const snapshot = await provider.getSnapshot(['KRW-BTC']);
+
+  assert.equal(snapshot.complete, true);
+  assert.equal(snapshot.allQuotesFresh, false);
+  assert.deepEqual(snapshot.freshMarkets, []);
+  assert.deepEqual(snapshot.staleMarkets, ['KRW-BTC']);
+  assert.deepEqual([...snapshot.freshPriceMap], []);
+  assert.equal(snapshot.quoteFreshnessByMarket.get('KRW-BTC').reason, 'market_snapshot_last_good');
+  assert.equal(snapshot.fetchedAtByMarket.get('KRW-BTC'), fetchedAt);
+  assert.equal(snapshot.snapshotSource, 'last_good');
+  assert.equal(snapshot.fallbackReason, 'ETIMEDOUT');
+});
+
 test('provider filters tickers outside the requested market set', async () => {
   const provider = new MarketDataProvider({
     readTickers: async () => [

@@ -29,12 +29,48 @@ Keep the LIVE release in `/opt/coinpilot-live/current`, separate from the
 Paper checkout. Use the same reviewed application revision and install its
 locked Node dependencies there. Keep persistent runtime files under
 `/var/lib/coinpilot-live` so a code update cannot replace the portfolio,
-execution evidence, log files, or encrypted Upbit credentials.
+execution evidence, log files, or encrypted Upbit credentials. The host-wide
+public quota coordinator uses the separate `/var/lib/coinpilot-rate` directory;
+profile state must remain separate from the shared rate state.
+
+The systemd units invoke `/usr/bin/node` directly. Provision a supported Node
+LTS runtime at that path before installing the release: CoinPilot accepts
+Node.js `24.21.0` and later `24.x` patches. Keep the host on the latest
+security-patched release for its selected LTS line. A user-local `nvm` install
+is not sufficient unless `/usr/bin/node` is deliberately managed to point to
+that verified release.
+
+After placing the reviewed checkout at the release path, verify the exact
+binary systemd will use and install only the lockfile dependencies as the
+service owner:
+
+```sh
+cd /opt/coinpilot-live/current
+/usr/bin/node --version
+/usr/bin/node src/scripts/verifyNodeRuntime.js
+sudo -u ubuntu npm ci --omit=dev
+```
+
+The version preflight must print `CoinPilot Node.js runtime` and exit zero
+before either service is enabled. The coordinator unit is installed alongside
+the LIVE unit; LIVE declares it as a required dependency so it starts before
+the trading process. `UPBIT_RATE_COORDINATOR_STATE_DIR` points both units to
+the coordinator's isolated shared state under `/var/lib/coinpilot-rate`.
+
+Every other CoinPilot process on this host that makes public Upbit requests
+must also set `UPBIT_RATE_COORDINATOR_REQUIRED=true` and the same
+`UPBIT_RATE_COORDINATOR_STATE_DIR`, then require and start after
+`coinpilot-upbit-rate.service`. Keep that process's `COINPILOT_STATE_DIR`
+profile-specific. Its systemd unit must allow access to `/var/lib/coinpilot-rate`
+and run as the same `ubuntu` account that owns the socket. Until the existing
+Paper unit adopts this contract, the coordinator only covers LIVE requests;
+the host's combined public-request quota is not coordinated.
 
 ```sh
 sudo install -d -o ubuntu -g ubuntu -m 0700 /var/lib/coinpilot-live
 sudo install -d -o root -g root -m 0755 /etc/coinpilot
 sudo install -o root -g root -m 0644 ops/systemd/coinpilot-live.service /etc/systemd/system/coinpilot-live.service
+sudo install -o root -g root -m 0644 ops/systemd/coinpilot-upbit-rate.service /etc/systemd/system/coinpilot-upbit-rate.service
 sudo install -o root -g root -m 0600 ops/systemd/coinpilot-live.env.example /etc/coinpilot/coinpilot-live.env
 ```
 
@@ -70,7 +106,8 @@ enrollment endpoint can reject plain HTTP. Port `3101` stays loopback-only and
 does not need a Lightsail firewall rule.
 
 After the LIVE environment file and Nginx include are installed, confirm the
-capacity gate before starting the service:
+capacity gate before starting the service. Starting LIVE also starts its
+required coordinator dependency:
 
 ```sh
 sudo install -o root -g root -m 0644 ops/nginx/coinpilot-live-location.conf /etc/nginx/snippets/coinpilot-live-location.conf

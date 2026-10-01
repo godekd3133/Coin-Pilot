@@ -1,0 +1,27 @@
+[Unit]
+Description=CoinPilot host-wide Upbit public request coordinator
+After=local-fs.target
+Before=coinpilot-live.service
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+StateDirectory=coinpilot-rate
+StateDirectoryMode=0700
+WorkingDirectory=/opt/coinpilot-live/current
+EnvironmentFile=/etc/coinpilot/coinpilot-live.env
+Environment=NODE_ENV=production
+ExecStartPre=/usr/bin/node /opt/coinpilot-live/current/src/scripts/verifyNodeRuntime.js
+ExecStart=/usr/bin/node /opt/coinpilot-live/current/src/scripts/runUpbitRateCoordinator.js
+Restart=on-failure
+RestartSec=2s
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/coinpilot-rate
+
+[Install]
+WantedBy=multi-user.target

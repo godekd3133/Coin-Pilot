@@ -56,17 +56,40 @@ market data supplied explicitly at build time.
   Preview profile has no valid bundled file, it remains offline and displays an
   unavailable state even when a prior server URL or token is saved.
 - **Bundled Local Market Data** packages only a public KRW market list and its
-  OHLCV candles. The native app opens directly to a Market-only, read-only
-  screen. It shows no account, portfolio, ledger, trade, private record, API
-  key, order or automation controls, and it makes no server requests or
-  background refreshes. The packaged data is static until a new app build is
-  installed; the app does not fetch or update it. A missing or invalid package
-  produces an explicit unavailable state and never falls back to Server or
-  Bundled Preview. This profile has no replay/backtest controls and runs no
-  automation. Package reading and validation run away from the UI thread;
-  the chart displays at most the newest 200 candles for the selected interval
-  and labels the visible time range and full row count. Market details also
-  offer a VoiceOver-readable range summary and an expandable table of the 20
+  OHLCV candles. The native app opens directly to a Market-only offline screen.
+  It shows no account, portfolio, live ledger, private record, API key, order
+  or automation controls, and it makes no server requests or background
+  refreshes. The packaged data is static until a new app build is installed;
+  the app does not fetch or update it. A missing or invalid package produces an
+  explicit unavailable state and never falls back to Server or Bundled Preview.
+  Market details can run a deterministic single-market historical simulation
+  over the full selected candle series. Replay requires at least 18 candles
+  with valid, increasing timestamps, no gap beyond the Node simulator's
+  `1.5 × interval` threshold, and an interval no coarser than the 30-minute
+  maximum-hold rule. The 60-minute interval remains available for chart viewing
+  but cannot be replayed at this strategy resolution. Replay does not fill
+  gaps. It applies the pinned default strategy, 0.05% fee, and 0.10% adverse
+  slippage on each side. Results are historical simulations, not live fills or
+  persistent DRY_RUN activity; the newest five are saved in the app's private
+  Application Support area. If stop-loss and take-profit both touch within one
+  candle, stop-loss wins; if a candle opens below the stop, replay uses that
+  worse open plus slippage.
+  Market detail also provides an accelerated historical playback session at
+  4, 10, or 20 candles per second. You can pause, resume, or restart it. The
+  session shows each candle's historical close and the corresponding simulated
+  balance; neither is a current quote, account balance, or fill. A bounded,
+  versioned 16 KiB checkpoint ties the next candle to the dataset fingerprint,
+  strategy config, and engine version. It is replaced atomically about once per
+  second and when the session changes state. Relaunch restores the last saved
+  cursor as paused and waits for you to resume. An abnormal process stop may
+  replay up to one second of frames already shown. This is historical playback;
+  it does not run continuous DRY_RUN automation. The SHA-256 checks detect
+  package/checkpoint changes and do not authenticate the original market-data
+  publisher or prove power-loss durability.
+  Package reading and validation run away from the UI thread; the chart
+  displays at most the newest 200 candles while replay uses the full series.
+  Market detail labels the visible time range and full row count, offers a
+  VoiceOver-readable range summary, and includes an expandable table of the 20
   latest OHLCV rows. No public market dataset is checked into this repository.
 
 ### Bundled local market data schema
@@ -79,15 +102,41 @@ validating it. The file is limited to 50 MiB. Server/default and
 
 Generate a current public-data pack outside the repository with:
 
+Run the generator under a supported Node.js LTS version from the repository's
+`.nvmrc`/`README.md` runtime setup. It uses public candle GETs and does not need
+account credentials.
+
 ```sh
 npm --prefix mobile run market-data:pack -- /private/tmp/coinpilot-public-market-v1.json
 ```
 
-The generator uses the four existing scalp markets (BTC, ETH, XRP, SOL), fetches
-up to 200 candles for 1/5/15/60-minute intervals with paced public GET requests,
-requires a new absolute output path, and never writes account, ledger, order, or
-credential data. The packaged values are a static public-data snapshot, not a
-live ticker or fill record; regenerate and explicitly rebuild to refresh it.
+The generator defaults to the four existing scalp markets (BTC, ETH, XRP, SOL)
+and the 1/5/15/60-minute intervals. Its optional second argument sets the
+uniform candle count for each selected market/interval pair (default `200`):
+
+```sh
+npm --prefix mobile run market-data:pack -- /private/tmp/coinpilot-public-market-v1.json 1000
+```
+
+The count is collected newest-first through paged public Upbit GET requests,
+with no more than 200 candles requested per API call and pacing between every
+request. The installed app's build validator allows at most 20,000 candles in
+total for each market across its selected intervals. Therefore, with `n`
+selected intervals, the count cannot exceed `floor(20,000 / n)`; using all four
+default intervals gives a per-interval ceiling of 5,000. The 50 MiB serialized
+JSON limit can lower that ceiling further depending on the actual data. The
+pack generator enforces both limits. It requires a new absolute output path and
+never writes account, ledger, order, or credential data. The packaged values
+are a static public-data snapshot, not a live ticker or fill record; the
+installed app does not refresh it or run persistent DRY_RUN automation. The
+offline historical simulation is isolated from server APIs, account state, and
+orders. Regenerate and explicitly rebuild to refresh the snapshot.
+
+The pack's `source` value is metadata supplied by the pack; it is not a signed
+Upbit attestation. The SHA-256 sidecar checks that the bundled bytes still
+match the build output, not where the data came from. The app does not apply a
+maximum pack-age cutoff and does not check origin or freshness online, so this
+historical dataset must not be treated as a current quote or used for orders.
 
 The version 1 JSON schema is closed: unknown or duplicate keys are rejected at
 build time, including keys nested under a market or candle. Its only fields are:
@@ -217,10 +266,14 @@ In a standalone browser, the mobile connection shell stays on its setup page
 until the user submits a server address. It never redirects to a hard-coded or
 previously saved host just because the page opened.
 
-Run the native address, store, and simulator-build checks with:
+Run the native address, store, local replay, Node/Swift parity, persistence,
+and simulator-build checks with:
 
 ```sh
 npm run test:server-policy
+npm run test:offline-replay
+npm run verify:offline-replay-parity
+npm run test:offline-replay-persistence
 npm run test:store
 npm run ios:build:sim
 npm run ios:build:preview

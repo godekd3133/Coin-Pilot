@@ -482,3 +482,123 @@ test('paper forward cohort blocks profitability when a strict close cannot be co
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('paper forward cohort adds allowlisted active owner observations without changing persisted state', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'coinpilot-paper-cohort-owner-health-'));
+  const now = Date.parse('2026-09-29T16:30:00.000Z');
+  try {
+    const writeLedger = (directoryName, ledger) => {
+      const directory = path.join(root, directoryName);
+      fs.mkdirSync(directory);
+      fs.writeFileSync(path.join(directory, 'paper_validation.json'), JSON.stringify(ledger));
+    };
+    writeLedger('.paper-forward-active-r5', {
+      sessionId: 'r5-session',
+      active: true,
+      state: 'RUNNING',
+      stopReason: null,
+      processId: 11906,
+      heartbeatAt: '2026-09-29T15:52:20.080Z',
+      telemetry: { heartbeatAt: '2026-09-29T15:52:20.080Z' },
+      configSnapshotComplete: true,
+      configSnapshot: {
+        strategyMode: 'oversold_reaction_scalping',
+        checkInterval: 60_000,
+        maxHoldMinutes: 30,
+        winnerExtendMinutes: 0
+      },
+      startedAt: '2026-09-28T14:04:03.722Z',
+      strictTrades: [],
+      strictOpenPositions: [{ coin: 'KRW-ETH', entryTime: '2026-09-29T15:29:10.198Z' }],
+      shadow: { positions: { 'KRW-BTC': {} }, trades: [] }
+    });
+    writeLedger('.paper-forward-active-reused-pid', {
+      sessionId: 'reused-session',
+      active: true,
+      state: 'RUNNING',
+      stopReason: null,
+      processId: 20391,
+      heartbeatAt: new Date(now - 10_000).toISOString(),
+      telemetry: { heartbeatAt: new Date(now - 10_000).toISOString() },
+      configSnapshotComplete: true,
+      configSnapshot: { strategyMode: 'oversold_reaction_scalping', maxHoldMinutes: 30, winnerExtendMinutes: 0 },
+      strictTrades: [],
+      strictOpenPositions: []
+    });
+    writeLedger('.paper-forward-v68-stopped', {
+      sessionId: 'v68-session',
+      active: false,
+      state: 'STOPPED',
+      stopReason: 'owner_process_missing',
+      processId: 20391,
+      heartbeatAt: '2026-09-29T15:52:20.080Z',
+      telemetry: { heartbeatAt: '2026-09-29T15:52:20.080Z' },
+      configSnapshotComplete: true,
+      configSnapshot: { strategyMode: 'oversold_reaction_scalping', maxHoldMinutes: 30, winnerExtendMinutes: 0 },
+      strictTrades: [],
+      strictOpenPositions: []
+    });
+
+    const probedPids = [];
+    const report = summarizePaperForwardCohort({
+      rootDir: root,
+      now,
+      processExistsProbe: pid => {
+        probedPids.push(pid);
+        return { pid, exists: pid === 20391, observation: 'fixture' };
+      }
+    });
+    const byName = Object.fromEntries(report.sessions.map(row => [row.directoryName, row]));
+    const r5 = byName['.paper-forward-active-r5'];
+    assert.equal(r5.active, true);
+    assert.equal(r5.state, 'RUNNING');
+    assert.equal(r5.stopReason, null);
+    assert.equal(r5.observationHealth?.ownerProcessStatus, 'missing');
+    assert.equal(r5.observationHealth?.heartbeatStatus, 'stale');
+    assert.equal(r5.observationHealth?.attentionRequired, true);
+    assert.ok(r5.observationHealth?.findings.includes('active_owner_process_missing'));
+    assert.ok(r5.observationHealth?.findings.includes('active_heartbeat_stale'));
+    assert.ok(r5.observationHealth?.findings.includes('unclosed_hard_max_hold_deadline_reached'));
+    assert.equal(r5.observationHealth?.strictPositions[0].deadlineStatus, 'hard_deadline_reached');
+    assert.equal(r5.observationHealth?.strictPositions[0].hardDeadlineReached, true);
+    assert.equal(r5.strictCohortEligible, false);
+    assert.equal(r5.strictCohortExclusionReason, 'session_still_active');
+
+    const reused = byName['.paper-forward-active-reused-pid'];
+    assert.equal(reused.observationHealth?.ownerProcessStatus, 'exists_identity_unverified');
+    assert.equal(reused.observationHealth?.heartbeatStatus, 'fresh');
+    const stopped = byName['.paper-forward-v68-stopped'];
+    assert.equal(stopped.active, false);
+    assert.equal(stopped.state, 'STOPPED');
+    assert.equal(stopped.stopReason, 'owner_process_missing');
+    assert.equal(stopped.observationHealth, null);
+    assert.deepEqual(probedPids, [11906, 20391]);
+
+    assert.equal(report.observedActiveOwnerMissingSessionCount, 1);
+    assert.equal(report.observedActiveHeartbeatStaleSessionCount, 1);
+    assert.equal(report.observedStrictHardDeadlineReachedPositionCount, 1);
+    assert.equal(report.activeSessionCount, 2);
+    assert.equal(report.stopReasonCounts.none, 2);
+    assert.equal(report.stopReasonCounts.owner_process_missing, 1);
+
+    const observationHealth = r5.observationHealth;
+    assert.deepEqual(Object.keys(observationHealth).sort(), [
+      'attentionRequired', 'findings', 'heartbeatReason', 'heartbeatStatus', 'observedAt',
+      'ownerProcessStatus', 'scope', 'strictPositions'
+    ].sort());
+    assert.deepEqual(Object.keys(observationHealth.strictPositions[0]).sort(), [
+      'baseDeadlineAt', 'deadlineStatus', 'hardDeadlineAt', 'hardDeadlineReached', 'market'
+    ].sort());
+    const serializedHealth = JSON.stringify([r5.observationHealth, reused.observationHealth]);
+    for (const forbidden of ['11906', '20391', 'processId', 'sourcePath', 'command', 'configSnapshot', 'paper_validation.json']) {
+      assert.equal(serializedHealth.includes(forbidden), false, `observationHealth must omit ${forbidden}`);
+    }
+
+    const missingRoot = summarizePaperForwardCohort({ rootDir: path.join(root, 'missing') });
+    assert.equal(missingRoot.observedActiveOwnerMissingSessionCount, 0);
+    assert.equal(missingRoot.observedActiveHeartbeatStaleSessionCount, 0);
+    assert.equal(missingRoot.observedStrictHardDeadlineReachedPositionCount, 0);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

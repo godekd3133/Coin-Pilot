@@ -61,18 +61,24 @@ function setMarketListHeaders(res, marketList) {
 }
 
 function mapPriceRows(snapshot) {
-  return snapshot.tickers.map(ticker => ({
-    coin: ticker.market,
-    price: ticker.trade_price,
-    change: ticker.signed_change_rate * 100,
-    changePrice: ticker.signed_change_price,
-    high: ticker.high_price,
-    low: ticker.low_price,
-    volume: ticker.acc_trade_volume_24h,
-    volumeKrw: ticker.acc_trade_price_24h,
-    sourceAsOf: snapshot.sourceAsOfByMarket.get(ticker.market) ?? null,
-    fetchedAt: snapshot.fetchedAt
-  }));
+  return snapshot.tickers.map(ticker => {
+    const quoteFreshness = snapshot.quoteFreshnessByMarket?.get(ticker.market) ?? null;
+    return {
+      coin: ticker.market,
+      price: ticker.trade_price,
+      change: ticker.signed_change_rate * 100,
+      changePrice: ticker.signed_change_price,
+      high: ticker.high_price,
+      low: ticker.low_price,
+      volume: ticker.acc_trade_volume_24h,
+      volumeKrw: ticker.acc_trade_price_24h,
+      sourceAsOf: snapshot.sourceAsOfByMarket.get(ticker.market) ?? null,
+      fetchedAt: snapshot.fetchedAtByMarket?.get(ticker.market) ?? snapshot.fetchedAt,
+      quoteFresh: quoteFreshness?.fresh === true,
+      quoteAgeMs: quoteFreshness?.ageMs ?? null,
+      quoteFreshnessReason: quoteFreshness ? quoteFreshness.reason : 'market_quote_unavailable'
+    };
+  });
 }
 
 function sendRouteError(res, error) {
@@ -250,6 +256,14 @@ export default function createMarketRoutes(server) {
         missingMarkets,
         unavailableMarkets: snapshot.unavailableMarkets,
         complete: snapshot.complete,
+        allQuotesFresh: snapshot.allQuotesFresh,
+        freshMarkets: snapshot.freshMarkets,
+        staleMarkets: snapshot.staleMarkets,
+        maximumQuoteAgeMs: snapshot.maximumQuoteAgeMs,
+        sourceSkewMs: snapshot.sourceSkewMs,
+        captureSkewMs: snapshot.captureSkewMs,
+        snapshotSource: snapshot.snapshotSource,
+        fallbackReason: snapshot.fallbackReason,
         sourceAsOf: snapshot.sourceAsOf,
         fetchedAt: snapshot.fetchedAt,
         marketListStale: marketList.stale,

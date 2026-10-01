@@ -3,6 +3,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import UpbitAPI from '../src/api/upbit.js';
+import { createPublicMarketDataSource } from '../src/api/publicMarketDataSource.js';
 import {
   FixtureMarketDataAdapter,
   getMarketDataAdapterKind,
@@ -72,9 +74,13 @@ function makeCandles(market = 'KRW-BTC', count = 60) {
   });
 }
 
-function makeFixtureAdapter({ price = 123, market = 'KRW-BTC', candles = makeCandles(market) } = {}) {
+function makeFixtureAdapter({ price = 123, market = 'KRW-BTC', candles = makeCandles(market), tradeTimestamp } = {}) {
   return new FixtureMarketDataAdapter({
-    tickers: [{ market, trade_price: price }],
+    tickers: [{
+      market,
+      trade_price: price,
+      ...(Number.isFinite(tradeTimestamp) ? { trade_timestamp: tradeTimestamp } : {})
+    }],
     candleSets: [{ market, unit: 1, candles }]
   });
 }
@@ -166,7 +172,7 @@ test('fixture adapter is deterministic, isolated from caller mutation, and stric
 
 test('DRY_RUN trader routes analysis, revalidation, and portfolio mark prices through the fixture adapter', async t => {
   const root = createRoot(t);
-  const adapter = makeFixtureAdapter();
+  const adapter = makeFixtureAdapter({ tradeTimestamp: Date.now() });
   const trader = new MultiCoinTrader(makeConfig(root), { marketDataAdapter: adapter });
   const exchangeReadCalls = [];
   trader.upbit.getTicker = async (...args) => {
@@ -229,6 +235,58 @@ test('LIVE trader rejects injected adapters and keeps its own Upbit adapter immu
   const changedModeTrader = new MultiCoinTrader(makeConfig(root), { marketDataAdapter: fixture });
   changedModeTrader.dryRun = false;
   assert.throws(() => changedModeTrader.marketDataAdapter, /DRY_RUN only/);
+});
+
+test('a LIVE trader shares a credential-free market source while keeping account and order credentials private', async t => {
+  const root = createRoot(t);
+  const descriptors = new Map(['getTicker', 'getMinuteCandles'].map(name => [
+    name,
+    Object.getOwnPropertyDescriptor(UpbitAPI.prototype, name)
+  ]));
+  const reads = [];
+  UpbitAPI.prototype.getTicker = async function (markets, requestOptions = {}) {
+    reads.push({ method: 'ticker', reader: this, accessKey: this.accessKey, secretKey: this.secretKey, markets, requestOptions });
+    return [{ market: 'KRW-BTC', trade_price: 123 }];
+  };
+  UpbitAPI.prototype.getMinuteCandles = async function (market, unit, count, requestOptions = {}) {
+    reads.push({ method: 'candles', reader: this, accessKey: this.accessKey, secretKey: this.secretKey, market, unit, count, requestOptions });
+    return makeCandles(market, count);
+  };
+  t.after(() => {
+    for (const [name, descriptor] of descriptors) {
+      Object.defineProperty(UpbitAPI.prototype, name, descriptor);
+    }
+  });
+
+  const publicMarketDataSource = createPublicMarketDataSource({ requestTimeoutMs: 2500 });
+  const trader = new MultiCoinTrader(makeConfig(root, {
+    dryRun: false,
+    accessKey: 'private-account-access-test',
+    secretKey: 'private-account-secret-test'
+  }), { publicMarketDataSource });
+
+  assert.strictEqual(trader.publicMarketDataSource, publicMarketDataSource);
+  assert.equal(trader.upbit.accessKey, 'private-account-access-test');
+  assert.equal(trader.upbit.secretKey, 'private-account-secret-test');
+  assert.equal('accessKey' in trader.riskUpbit, false);
+
+  assert.deepEqual(await trader.marketDataAdapter.getTickers(['KRW-BTC']), [
+    { market: 'KRW-BTC', trade_price: 123 }
+  ]);
+  assert.equal((await trader.marketDataAdapter.getMinuteCandles('KRW-BTC', 1, 60)).length, 60);
+  assert.deepEqual(await trader.riskUpbit.getTicker(['KRW-BTC'], { priority: 'risk' }), [
+    { market: 'KRW-BTC', trade_price: 123 }
+  ]);
+
+  assert.equal(reads.every(read => read.accessKey === '' && read.secretKey === ''), true);
+  assert.equal(reads.every(read => read.reader === reads[0].reader), true,
+    'strategy ticker/candles and protective ticker must share the injected public reader');
+  assert.equal(reads[2].requestOptions.priority, 'risk');
+  assert.throws(() => new MultiCoinTrader(makeConfig(root, { dryRun: false }), {
+    publicMarketDataSource: {
+      getMarkets() {}, getTicker() {}, getMinuteCandles() {}
+    }
+  }), /built-in credential-free public market data source/);
 });
 
 test('trader rejects unrecognized injected adapters instead of treating them as exchange-backed', t => {

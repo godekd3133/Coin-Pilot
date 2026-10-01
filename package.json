@@ -5,6 +5,8 @@
   "main": "src/index.js",
   "type": "module",
   "scripts": {
+    "prestart": "node src/scripts/verifyNodeRuntime.js",
+    "predev": "node src/scripts/verifyNodeRuntime.js",
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
     "backtest": "node src/scripts/runBacktest.js",
@@ -53,7 +55,7 @@
     "ai:smoke": "node src/scripts/runAiAdvisorSmoke.js",
     "ai:replay": "node src/scripts/runAiHistoricalReplay.js",
     "ai:robustness": "node src/scripts/runAiReplayRobustness.js",
-    "test": "NODE_ENV=test node --test && npm --prefix mobile run test:auto-connect && npm --prefix mobile run test:server-policy && npm --prefix mobile run test:store",
+    "test": "NODE_ENV=test node --test && npm --prefix mobile run test:auto-connect && npm --prefix mobile run test:server-policy && npm --prefix mobile run test:offline-replay && npm --prefix mobile run verify:offline-replay-parity && npm --prefix mobile run test:offline-replay-persistence && npm --prefix mobile run test:store",
     "lint": "eslint ."
   },
   "keywords": [
@@ -79,7 +81,7 @@
   },
   "homepage": "https://github.com/godekd3133/Coin-Pilot#readme",
   "engines": {
-    "node": ">=20.0.0"
+    "node": "^24.21.0"
   },
   "dependencies": {
     "axios": "^1.6.2",

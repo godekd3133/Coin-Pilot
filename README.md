@@ -19,11 +19,20 @@
 
 ## 설치
 
+`nvm`을 설치한 개발 환경에서는 저장소의 `.nvmrc` 버전을 적용하세요.
+
 ```bash
 git clone https://github.com/godekd3133/Coin-Pilot.git
 cd Coin-Pilot
-npm install
+nvm install
+nvm use
+node --version
+npm ci
 ```
+
+## Node.js runtime
+
+CoinPilot supports Node.js `24.21.0` and later patches in the `24.x` LTS line. `.nvmrc` pins the development baseline to Node.js `24.21.0`; the commands above install and select that version when using nvm. Production should use the latest security-patched release on this supported LTS line. The LIVE and public-rate-coordinator systemd units run the same version preflight before starting. Other major releases are rejected even when their numeric version is higher.
 
 ## 설정
 
@@ -45,6 +54,8 @@ TARGET_COINS=ALL
 시장 분석 클라이언트와 독립 포지션 리스크 클라이언트는 같은 프로세스-wide 요청 슬롯을 공유합니다. backlog가 생기면 risk ticker가 분석 요청보다 다음 슬롯을 우선 배정받아 열린 포지션의 보호 확인이 분석 요청에 굶지 않도록 합니다. 기존 120ms safety slot과 `RISK_CHECK_STALE` fail-closed 경계는 유지됩니다.
 
 시장 분석 클라이언트와 독립 포지션 리스크 클라이언트는 같은 프로세스-wide 요청 슬롯을 공유합니다. 따라서 리스크 확인을 빠르게 유지하면서도 두 클라이언트가 각자 Upbit 요청 한도를 초과하지 않도록 합니다. 열린 포지션이 있는 동안에는 risk ticker 요청 시작 자체를 ledger에 기록하고, 성공 timestamp가 허용 공백보다 오래되면 요청 실패 callback을 기다리지 않고 `RISK_CHECK_STALE`로 paper/live를 fail-closed 중지합니다. watchdog이 실행되기 전에 늦은 성공 callback이 도착해도 마지막 정상 관찰부터의 공백을 역산해 같은 오류로 기록하고 continuity를 되살리지 않습니다. 정상 성공 timestamp도 risk interval의 5배 이내 주기로 throttled persistence하여 읽기 전용 Observer가 낡은 파일 상태를 정상 관찰로 오인하지 않게 합니다. 포지션이 없는 idle 구간의 오래된 risk timestamp는 outage로 오인하지 않습니다.
+
+이 요청 큐는 기본적으로 프로세스 내부에서만 공유됩니다. 같은 공인 IP를 쓰는 여러 CoinPilot 프로세스까지 공개 `ip` quota를 조정하려면 하나의 `coinpilot-upbit-rate` daemon을 실행하고, 모든 프로세스에서 `UPBIT_RATE_COORDINATOR_REQUIRED=true`와 동일한 별도 `UPBIT_RATE_COORDINATOR_STATE_DIR`을 지정해야 합니다. LIVE systemd 예시는 이 의존성을 강제합니다. 인증된 `pocket` 요청은 이 host-wide coordinator 대상이 아니므로 해당 계정의 private API 동시 사용은 별도로 제한해야 합니다.
 
 열린 포지션이 없더라도 전체 대상 시장을 분석하지 못한 상태가 계속되면 유효한 forward 표본으로 보지 않습니다. `SCALP_MAX_ANALYSIS_DATA_GAP_SECONDS`(스캘핑 기본 60초)를 넘는 부분 분석 공백은 paper/live 루프를 fail-closed로 중지하고 `analysisDataHealth.continuityEligible=false`로 기록합니다. batch ticker가 실패했어도 개별 fallback으로 모든 시장 분석이 완료되면 완전한 cycle로 인정하며, 실제 시장 누락만 공백으로 판정합니다.
 
@@ -287,7 +298,7 @@ shadow/loose 진단 장부에만 미청산 포지션이 남은 경우에도 `end
 
 격리 smoke가 필요하면 `npm run paper:smoke`를 사용합니다. 기본 60초 동안 `PAPER_SMOKE_MARKETS`를 읽기 전용으로 분석하고 `.paper-smoke/` 아래에 가상 포트폴리오와 paper ledger를 저장합니다. 기존 `dry_portfolio.json`은 읽거나 수정하지 않습니다. 이 smoke는 연결·상태 저장 검증용이며, 7일 수익성 승격 증거로 사용하지 않습니다.
 
-동일 호스트에서 여러 `paper:forward` 또는 AI paper smoke를 동시에 실행하지 마세요. 각 Node 프로세스의 내부 요청 슬롯은 프로세스 사이에서 공유되지 않으므로 Upbit 공용 rate budget이 겹쳐 `stale_candle_snapshot`이 늘고 해당 원장이 효능·수익성 표본으로 부적합해질 수 있습니다. 실행기는 다른 살아 있는 paper owner를 발견하면 `PAPER_CONCURRENT_SESSION`으로 market resolution 전에 fail-closed하며, 새 process 사이의 startup race도 `.paper-session.lock`으로 막습니다. 장기 forward를 종료한 뒤 새 세션을 별도 출력 디렉터리에서 시작하고, 동시 실험이 불가피하면 `PAPER_ALLOW_CONCURRENT_SESSIONS=true`를 명시한 진단 실행으로만 사용한 뒤 freshness와 `analysisDataHealth`를 먼저 확인합니다.
+동일 호스트에서 여러 `paper:forward` 또는 AI paper smoke를 동시에 실행하지 마세요. 기본 설정은 프로세스별 요청 큐를 사용하며, host-wide coordinator를 켜도 동시 세션은 API 대기와 시장 데이터 freshness를 악화시키고 독립적인 성과 표본을 만들지 않습니다. 실행기는 다른 살아 있는 paper owner를 발견하면 `PAPER_CONCURRENT_SESSION`으로 market resolution 전에 fail-closed하며, 새 process 사이의 startup race도 `.paper-session.lock`으로 막습니다. 장기 forward를 종료한 뒤 새 세션을 별도 출력 디렉터리에서 시작하고, 동시 실험이 불가피하면 `PAPER_ALLOW_CONCURRENT_SESSIONS=true`를 명시한 진단 실행으로만 사용한 뒤 freshness와 `analysisDataHealth`를 먼저 확인합니다.
 
 실제 DRY_RUN 분석 이벤트를 AI 자문과 함께 관찰하려면 다음처럼 선택형 paper AI monitoring을 켤 수 있습니다. 이 모드는 별도 `ai_monitoring_sessions.json`에 provider 응답과 미래 가격 평가를 저장하며, AI 의견을 주문에 연결하지 않습니다. provider 호출 비용과 지연을 의도적으로 발생시키므로 기본값은 꺼져 있습니다.
 

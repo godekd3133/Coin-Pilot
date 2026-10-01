@@ -114,14 +114,30 @@ export default function createPortfolioRoutes(server) {
         );
         const pnl = await server.tradingSystem.calculateCumulativePnL({
           allowAveragePriceFallback: false,
-          priceMapOverride: marketSnapshot.priceMap,
+          priceMapOverride: marketSnapshot.freshPriceMap,
           accountsOverride: accounts
         });
+        const valuationAvailable = marketSnapshot.allQuotesFresh === true &&
+          pnl.valuationAvailable !== false && pnl.totalAssets !== null &&
+          pnl.totalAssets !== undefined && Number.isFinite(Number(pnl.totalAssets));
         res.json({
           ...pnl,
+          totalAssets: valuationAvailable ? pnl.totalAssets : null,
+          profit: valuationAvailable ? pnl.profit : null,
+          profitPercent: valuationAvailable ? pnl.profitPercent : null,
+          valuationAvailable,
+          valuationStatus: valuationAvailable
+            ? 'available'
+            : marketSnapshot.staleMarkets?.length > 0 ? 'stale' : 'unavailable',
           valuationAsOf: marketSnapshot.asOf,
           sourceAsOf: marketSnapshot.sourceAsOf,
-          fetchedAt: marketSnapshot.fetchedAt
+          fetchedAt: marketSnapshot.fetchedAt,
+          staleMarkets: marketSnapshot.staleMarkets || [],
+          unavailableMarkets: marketSnapshot.unavailableMarkets || [],
+          sourceSkewMs: marketSnapshot.sourceSkewMs ?? null,
+          captureSkewMs: marketSnapshot.captureSkewMs ?? null,
+          snapshotSource: marketSnapshot.snapshotSource ?? 'upstream',
+          fallbackReason: marketSnapshot.fallbackReason ?? null
         });
       } else {
         const accounts = await getObserverAccountInfo(server);
@@ -148,7 +164,7 @@ export default function createPortfolioRoutes(server) {
         const marketSnapshot = await readCurrentMarketPrices(server, positionCoins);
         let valuationAvailable = true;
         for (const [market, holding] of holdings.entries()) {
-          const price = marketSnapshot.priceMap.get(market);
+          const price = marketSnapshot.freshPriceMap.get(market);
           if (!Number.isFinite(price) || price <= 0) {
             valuationAvailable = false;
             break;
@@ -172,6 +188,12 @@ export default function createPortfolioRoutes(server) {
           valuationAsOf: marketSnapshot.asOf,
           sourceAsOf: marketSnapshot.sourceAsOf,
           fetchedAt: marketSnapshot.fetchedAt,
+          staleMarkets: marketSnapshot.staleMarkets || [],
+          unavailableMarkets: marketSnapshot.unavailableMarkets || [],
+          sourceSkewMs: marketSnapshot.sourceSkewMs ?? null,
+          captureSkewMs: marketSnapshot.captureSkewMs ?? null,
+          snapshotSource: marketSnapshot.snapshotSource ?? 'upstream',
+          fallbackReason: marketSnapshot.fallbackReason ?? null,
           mode: server.tradingSystem.dryRun ? 'DRY_RUN' : 'LIVE'
         });
       }

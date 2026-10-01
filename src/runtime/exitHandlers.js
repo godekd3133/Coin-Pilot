@@ -46,7 +46,7 @@ export function setupExitHandlers(
   let shutdownPromise = null;
   let shutdownExitCode = 0;
 
-  const releaseRuntimeWriterLock = () => {
+  const releaseRuntimeWriterLock = async () => {
     if (!runtimeWriterLockStore || runtimeWriterLockReleaseStarted) return false;
     runtimeWriterLockReleaseStarted = true;
     return runtimeWriterLockStore.releaseWriterLock();
@@ -253,7 +253,7 @@ export function setupExitHandlers(
       // lock after confirming this PID has exited.
       if (traderSafelyStopped && cleanupSucceeded) {
         try {
-          releaseRuntimeWriterLock();
+          await releaseRuntimeWriterLock();
         } catch (error) {
           shutdownExitCode = Math.max(shutdownExitCode, 1);
           consoleApi.error(`⚠️ profile writer lock 해제 실패: ${error.message}`);

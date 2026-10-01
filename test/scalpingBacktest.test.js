@@ -56,6 +56,12 @@ function syntheticGivebackAfterRebound() {
   return candles;
 }
 
+function syntheticStopGapDown() {
+  const candles = syntheticGivebackAfterRebound();
+  candles[candles.length - 1] = candle(30, 90, 90, 99, 89.5);
+  return candles;
+}
+
 function syntheticReboundWithMinuteGap() {
   return syntheticRebound().map((value, index) => ({
     ...value,
@@ -254,6 +260,19 @@ test('스캘핑 시뮬레이터가 수수료를 포함한 지연 반등 수익�
   assert.ok(result.metrics.totalReturnPercent > 0);
   assert.equal(result.trades[0].type, 'OPEN');
   assert.equal(result.trades.at(-1).reason, 'TAKE_PROFIT');
+});
+
+test('stop gap-through uses the worse candle-open fill before adverse slippage', () => {
+  const result = simulateScalping(syntheticStopGapDown());
+  const close = result.trades.at(-1);
+
+  assert.equal(close.reason, 'STOP_LOSS');
+  assert.equal(close.exitTime, Date.UTC(2026, 0, 1, 0, 30));
+  assert.equal(close.exitPrice, 90 * (1 - 0.001));
+  assert.ok(close.exitPrice < 96.096 * (1 - 0.012),
+    'a gap below the trigger must not be backfilled at the stop trigger price');
+  assert.ok(close.netProfit < -1_200,
+    'the gap loss must include the worse opening fill instead of the stop trigger fill');
 });
 
 test('백테스트 청산 거래는 MFE/MAE를 함께 기록해 exit 후보를 진단할 수 있다', () => {

@@ -45,6 +45,133 @@ test('service readiness is independent of the trading loop and its first market 
   assert.equal(trading.checks.analysisCycleFresh, false);
 });
 
+test('readiness exposes scheduler queue and backoff pressure without changing listener readiness', () => {
+  const trader = healthyTrader();
+  trader.upbit = {
+    getQueueStatus: () => ({
+      queueLength: 5,
+      queuedByPriority: { normal: 5, risk: 0 },
+      oldestWaitAgeMsByPriority: { normal: 4_200, risk: null },
+      inFlightByPriority: { normal: 2, risk: 1 },
+      inFlightTotal: 3,
+      maxInFlight: 4,
+      maxQueuedByPriority: { normal: 5, risk: 5 },
+      nextStartInMs: 120,
+      backoffRemainingMs: 3_000
+    })
+  };
+  const dashboard = readinessServer(trader);
+
+  const service = dashboard.buildServiceReadiness();
+  const trading = dashboard.buildReadiness();
+
+  assert.equal(service.ready, true);
+  assert.equal(service.checks.marketDataScheduler.available, true);
+  assert.equal(service.checks.marketDataScheduler.queueLength, 5);
+  assert.equal(service.checks.marketDataScheduler.oldestWaitAgeMsByPriority.normal, 4_200);
+  assert.equal(service.checks.marketDataScheduler.inFlightTotal, 3);
+  assert.equal(service.checks.marketDataScheduler.pressure.normalQueueSaturated, true);
+  assert.equal(service.checks.marketDataScheduler.pressure.backoffActive, true);
+  assert.equal(trading.ready, false, 'existing analysis/risk gates remain authoritative');
+  assert.equal(trading.checks.marketDataScheduler.queueLength, 5);
+});
+
+test('missing or failing scheduler diagnostics stay unavailable and do not make HTTP unready', () => {
+  const missing = readinessServer({}).buildServiceReadiness();
+  const throwing = readinessServer({
+    upbit: { getQueueStatus() { throw new Error('internal scheduler detail'); } }
+  }).buildServiceReadiness();
+
+  assert.equal(missing.ready, true);
+  assert.deepEqual(missing.checks.marketDataScheduler, { available: false });
+  assert.equal(throwing.ready, true);
+  assert.deepEqual(throwing.checks.marketDataScheduler, { available: false });
+  assert.deepEqual(missing.checks.publicMarketSnapshot, { available: false });
+});
+
+test('service readiness exposes sanitized durable market snapshot health without gating the listener', () => {
+  const dashboard = readinessServer(healthyTrader());
+  dashboard.publicMarketDataSource = {
+    getSnapshotStoreStatus() {
+      return {
+        available: true,
+        marketCount: 12,
+        persistedAt: '2026-09-30T00:00:00.000Z',
+        dirty: false,
+        readOnly: false,
+        persistenceHealthy: false,
+        loadHealthy: true,
+        filePath: '/private/path/must-not-leak'
+      };
+    }
+  };
+
+  const service = dashboard.buildServiceReadiness();
+
+  assert.equal(service.ready, true);
+  assert.deepEqual(service.checks.publicMarketSnapshot, {
+    available: true,
+    marketCount: 12,
+    persistedAt: '2026-09-30T00:00:00.000Z',
+    dirty: false,
+    readOnly: false,
+    persistenceHealthy: false,
+    loadHealthy: true
+  });
+  assert.equal(JSON.stringify(service).includes('/private/path'), false);
+});
+
+test('shared coordinator status gates readiness only when it is required and strips internal paths', async () => {
+  const trader = healthyTrader();
+  trader.upbit = {
+    async getRateCoordinatorStatus() {
+      return {
+        required: true,
+        enabled: true,
+        available: false,
+        failureCode: 'UPBIT_RATE_COORDINATOR_UNAVAILABLE',
+        socketPath: '/var/lib/coinpilot-rate/private.sock',
+        queuedTotal: 4,
+        inFlightTotal: 2,
+        maxInFlight: 4,
+        nextStartInMs: 80
+      };
+    }
+  };
+  const dashboard = readinessServer(trader);
+
+  const readiness = await dashboard.withRateCoordinatorReadiness(dashboard.buildServiceReadiness());
+
+  assert.equal(readiness.ready, false);
+  assert.deepEqual(readiness.checks.marketDataCoordinator, {
+    required: true,
+    enabled: true,
+    available: false,
+    failureCode: 'UPBIT_RATE_COORDINATOR_UNAVAILABLE',
+    queuedTotal: 4,
+    inFlightTotal: 2,
+    maxInFlight: 4,
+    nextStartInMs: 80
+  });
+  assert.equal(JSON.stringify(readiness).includes('/var/lib/coinpilot-rate'), false);
+});
+
+test('optional disabled coordinator keeps ordinary single-process service readiness', async () => {
+  const trader = healthyTrader();
+  trader.upbit = {
+    async getRateCoordinatorStatus() {
+      return { required: false, enabled: false, available: null, failureCode: null };
+    }
+  };
+
+  const dashboard = readinessServer(trader);
+  const readiness = await dashboard.withRateCoordinatorReadiness(dashboard.buildServiceReadiness());
+
+  assert.equal(readiness.ready, true);
+  assert.equal(readiness.checks.marketDataCoordinator.required, false);
+  assert.equal(readiness.checks.marketDataCoordinator.available, null);
+});
+
 test('trading readiness passes only after a complete fresh analysis cycle', () => {
   const now = 1_800_000_000_000;
   const lastCompleteAt = new Date(now - 30_000).toISOString();

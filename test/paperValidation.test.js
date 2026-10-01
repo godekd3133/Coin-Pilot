@@ -7,6 +7,10 @@ import MultiCoinTrader from '../src/trader/multiCoinTrader.js';
 import { createLossCircuitBreakerState } from '../src/risk/lossCircuitBreaker.js';
 import { VALIDATION_SNAPSHOT_KEYS, LIVE_GATE_COMPARABLE_KEYS } from '../src/research/scalpingValidationConfig.js';
 
+function currentTicker(market, trade_price) {
+  return { market, trade_price, trade_timestamp: Date.now() };
+}
+
 test('데이터 공백 중지 원인과 미청산 shadow 상태는 다음 paper 세션에 섞이지 않는다', async () => {
   const suffix = `coinpilot-data-gap-boundary-${Date.now()}`;
   const ledger = path.join(os.tmpdir(), `${suffix}.json`);
@@ -992,7 +996,7 @@ test('winner shadow blocked signal은 strict 지연 재검증 취소 시 미체�
     }));
     trader.upbit = {
     async getTicker() {
-      return [{ market: 'KRW-BTC', trade_price: 100 }];
+      return [currentTicker('KRW-BTC', 100)];
     },
     async getMinuteCandles() {
       return candles;
@@ -1491,7 +1495,7 @@ test('분석 cycle은 prefetched ticker/candle을 사용해 중복 조회를 피
   trader.upbit = {
     async getTicker() {
       tickerCalls += 1;
-      return [{ market: 'KRW-BTC', trade_price: 99 }];
+      return [currentTicker('KRW-BTC', 99)];
     },
     async getMinuteCandles() {
       candleCalls += 1;
@@ -1508,7 +1512,7 @@ test('분석 cycle은 prefetched ticker/candle을 사용해 중복 조회를 피
     'KRW-BTC',
     { overall: 'neutral', score: 0 },
     {
-      ticker: { market: 'KRW-BTC', trade_price: 100 },
+      ticker: currentTicker('KRW-BTC', 100),
       candles: Array.from({ length: 50 }, () => ({}))
     }
   );
@@ -1516,6 +1520,131 @@ test('분석 cycle은 prefetched ticker/candle을 사용해 중복 조회를 피
   assert.equal(result.currentPrice, 100);
   assert.equal(tickerCalls, 0);
   assert.equal(candleCalls, 0);
+});
+
+test('오래된 거래소 시세는 자동 분석 입력으로 사용하지 않는다', async () => {
+  const trader = new MultiCoinTrader({
+    strategyMode: 'oversold_reaction_scalping',
+    targetCoins: ['KRW-BTC'],
+    dryRun: true,
+    dryRunSeedMoney: 1_000_000,
+    useNews: false,
+    maxCandleAgeSeconds: 90
+  });
+  const now = Date.now();
+  const freshCandles = Array.from({ length: 50 }, (_, index) => ({
+    candle_date_time_utc: new Date(now - index * 60_000).toISOString(),
+    trade_price: 100,
+    opening_price: 99,
+    high_price: 101,
+    low_price: 98,
+    candle_acc_trade_volume: 100
+  }));
+  trader.getAccountInfo = async () => [];
+  trader.upbit = {
+    async getTicker() {
+      return [{
+        market: 'KRW-BTC',
+        trade_price: 100,
+        trade_timestamp: now - 120_000
+      }];
+    },
+    async getMinuteCandles() { return freshCandles; }
+  };
+  trader.buildTechnicalAnalysis = () => ({ indicators: { rebound: { available: true } } });
+
+  await assert.rejects(
+    () => trader.analyzeCoin('KRW-BTC', { overall: 'neutral', score: 0 }),
+    error => error.code === 'MARKET_QUOTE_STALE' && error.freshness?.reason === 'market_source_stale'
+  );
+});
+
+test('오래된 위험 감시 시세는 손절 가격으로 사용하지 않고 감시 실패로 기록한다', async () => {
+  const trader = new MultiCoinTrader({
+    strategyMode: 'oversold_reaction_scalping',
+    targetCoins: ['KRW-BTC'],
+    dryRun: true,
+    dryRunSeedMoney: 100_000,
+    maxRiskDataGapSeconds: 30,
+    maxCandleAgeSeconds: 90,
+    useNews: false
+  });
+  const strategy = trader.getStrategy('KRW-BTC');
+  strategy.openPosition(100_000, 1, 'BUY');
+  trader.virtualPortfolio = {
+    krwBalance: 0,
+    holdings: new Map([['KRW-BTC', { amount: 1, avgPrice: 100_000 }]])
+  };
+  trader.calculateTotalAssets = async () => 100_000;
+  trader.saveVirtualPortfolio = () => {};
+  trader.riskUpbit = {
+    async getTicker() {
+      return [{
+        market: 'KRW-BTC',
+        trade_price: 98_000,
+        trade_timestamp: Date.now() - 120_000
+      }];
+    }
+  };
+  trader.getAccountInfo = async () => [
+    { currency: 'KRW', balance: '0', locked: '0' },
+    { currency: 'BTC', balance: '1', locked: '0', avg_buy_price: '100000' }
+  ];
+  trader.isRunning = true;
+
+  await trader.monitorOpenPositions();
+
+  assert.ok(strategy.currentPosition);
+  assert.equal(trader.riskMonitorState.lastSuccessAt, null);
+  assert.equal(trader.riskMonitorState.consecutiveFailures, 1);
+  assert.equal(trader.riskMonitorState.lastFailureCode, 'STALE_RISK_TICKER');
+  trader.isRunning = false;
+  trader.stopPositionRiskMonitor();
+});
+
+test('지연 후 오래된 거래소 시세는 캔들이 최신이어도 진입 확인을 취소한다', async () => {
+  const trader = new MultiCoinTrader({
+    strategyMode: 'oversold_reaction_scalping',
+    targetCoins: ['KRW-BTC'],
+    dryRun: true,
+    dryRunSeedMoney: 1_000_000,
+    useNews: false,
+    maxCandleAgeSeconds: 90
+  });
+  const now = Date.now();
+  const freshCandles = Array.from({ length: 50 }, (_, index) => ({
+    candle_date_time_utc: new Date(now - index * 60_000).toISOString(),
+    trade_price: 100,
+    opening_price: 99,
+    high_price: 101,
+    low_price: 98,
+    candle_acc_trade_volume: 100
+  }));
+  trader.sleep = async () => {};
+  trader.upbit = {
+    async getTicker() {
+      return [{ market: 'KRW-BTC', trade_price: 100, trade_timestamp: now - 120_000 }];
+    },
+    async getMinuteCandles() { return freshCandles; }
+  };
+  let validationCalls = 0;
+  let revalidationReason = null;
+  trader.recordPaperEntryConfirmation = (_coin, _outcome, reason) => {
+    revalidationReason = reason;
+  };
+
+  const confirmation = await trader.confirmScalpingEntry(
+    'KRW-BTC',
+    { entryDelayMs: 1_000 },
+    {
+      getEntryDelayMs: () => 1_000,
+      validateEntry: () => { validationCalls += 1; return { valid: true }; }
+    }
+  );
+
+  assert.equal(confirmation, null);
+  assert.equal(validationCalls, 0);
+  assert.equal(revalidationReason, 'market_source_stale');
 });
 
 test('오래된 캔들은 초기 분석과 지연 후 재검증에서 strict/shadow 진입을 fail-closed 한다', async () => {
@@ -1541,7 +1670,7 @@ test('오래된 캔들은 초기 분석과 지연 후 재검증에서 strict/sha
   trader.getAccountInfo = async () => [];
   trader.upbit = {
     async getTicker() {
-      return [{ market: 'KRW-BTC', trade_price: 100 }];
+      return [currentTicker('KRW-BTC', 100)];
     },
     async getMinuteCandles() {
       return staleCandles;
@@ -1646,7 +1775,7 @@ test('지연 후 진입 재검증 성공도 시도/성공 telemetry에 기록한
   }));
   trader.upbit = {
     async getTicker() {
-      return [{ market: 'KRW-BTC', trade_price: 100 }];
+      return [currentTicker('KRW-BTC', 100)];
     },
     async getMinuteCandles() {
       return freshCandles;
@@ -1864,7 +1993,7 @@ test('캔들 수가 부족한 마켓은 stale과 별도의 데이터 품질 tele
   trader.getAccountInfo = async () => [];
   trader.upbit = {
     async getTicker() {
-      return [{ market: 'KRW-BFC', trade_price: 100 }];
+      return [currentTicker('KRW-BFC', 100)];
     },
     async getMinuteCandles() {
       return Array.from({ length: 40 }, () => ({}));
@@ -1902,10 +2031,10 @@ test('전체 분석 cycle은 20개 시장 ticker를 한 번만 batch 조회한�
     async getTicker(requestedMarkets) {
       if (Array.isArray(requestedMarkets)) {
         batchTickerCalls += 1;
-        return requestedMarkets.map(market => ({ market, trade_price: 100 }));
+        return requestedMarkets.map(market => currentTicker(market, 100));
       }
       individualTickerCalls += 1;
-      return [{ market: requestedMarkets, trade_price: 100 }];
+      return [currentTicker(requestedMarkets, 100)];
     },
     async getMinuteCandles() {
       candleCalls += 1;
@@ -2356,7 +2485,7 @@ test('독립 포지션 리스크 모니터가 빠른 손절을 실행한다', as
   trader.saveVirtualPortfolio = () => {};
   trader.riskUpbit = {
     async getTicker() {
-      return [{ market: 'KRW-BTC', trade_price: 98_000 }];
+      return [currentTicker('KRW-BTC', 98_000)];
     }
   };
   trader.getAccountInfo = async () => [
@@ -2411,7 +2540,7 @@ test('독립 포지션 리스크 모니터가 shadow 손익도 실시간 가격�
   trader.savePaperValidation = () => { saveCount += 1; };
   trader.riskUpbit = {
     async getTicker() {
-      return [{ market: 'KRW-BTC', trade_price: 98_000 }];
+      return [currentTicker('KRW-BTC', 98_000)];
     }
   };
   trader.isRunning = true;
@@ -2457,7 +2586,7 @@ test('idle 이후 새 diagnostic position 보호는 이전 risk 성공 시각을
   };
   trader.riskUpbit = {
     async getTicker() {
-      return [{ market: 'KRW-BTC', trade_price: 100_000 }];
+      return [currentTicker('KRW-BTC', 100_000)];
     }
   };
   trader.isRunning = true;
@@ -2632,7 +2761,7 @@ test('risk monitor는 네트워크 대기 전에 활성 보호 상태를 paper l
   assert.equal(saveCount, 1);
   assert.deepEqual(riskRequestOptions, { priority: 'risk' });
 
-  resolveTicker([{ market: 'KRW-BTC', trade_price: 100_000 }]);
+  resolveTicker([currentTicker('KRW-BTC', 100_000)]);
   await pending;
 
   assert.equal(trader.riskMonitorState.lastSuccessAt !== null, true);
@@ -2728,7 +2857,7 @@ test('진행 중인 risk ticker 요청도 마지막 성공 시각 초과 시 fai
   assert.equal(trader.riskMonitorState.lastFailureCode, 'RISK_CHECK_STALE');
   assert.equal(trader.riskMonitorState.continuityEligible, false);
 
-  resolveTicker([{ market: 'KRW-BTC', trade_price: 100_000 }]);
+  resolveTicker([currentTicker('KRW-BTC', 100_000)]);
   await pending;
   assert.equal(trader.riskMonitorState.continuityEligible, false);
 });
@@ -2934,7 +3063,7 @@ test('shadow 리스크 모니터도 break-even/trailing 보호 출구 상태를 
   trader.savePaperValidation = () => {};
   trader.riskUpbit = {
     async getTicker() {
-      return [{ market: 'KRW-BTC', trade_price: price }];
+      return [currentTicker('KRW-BTC', price)];
     }
   };
   trader.isRunning = true;
@@ -3197,7 +3326,7 @@ test('risk monitor는 winnerShadow book에 strict가 아닌 shadow winner-hold �
     },
     snapshots: []
   };
-  trader.riskUpbit.getTicker = async () => [{ market: 'KRW-BTC', trade_price: 101 }];
+  trader.riskUpbit.getTicker = async () => [currentTicker('KRW-BTC', 101)];
 
   try {
     await trader.monitorOpenPositions();

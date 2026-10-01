@@ -69,6 +69,7 @@ test('/api/market/prices keeps its array body and adds nullable source/fetch met
       }
     },
     marketDataProvider: new MarketDataProvider({
+      now: () => Date.parse(fetchedAt) + 1_000,
       async readMarkets() { return [{ market: 'KRW-BTC' }, { market: 'KRW-ETH' }]; },
       async readTickers(markets, { freshness }) {
         assert.deepEqual(markets, ['KRW-BTC', 'KRW-ETH']);
@@ -86,11 +87,13 @@ test('/api/market/prices keeps its array body and adds nullable source/fetch met
   assert.deepEqual(result.body, [
     {
       coin: 'KRW-BTC', price: 100, change: 1, changePrice: 1, high: 101, low: 98,
-      volume: 12, volumeKrw: 1200, sourceAsOf, fetchedAt
+      volume: 12, volumeKrw: 1200, sourceAsOf, fetchedAt,
+      quoteFresh: true, quoteAgeMs: 2_000, quoteFreshnessReason: null
     },
     {
       coin: 'KRW-ETH', price: 200, change: -2, changePrice: -4, high: 205, low: 198,
-      volume: 8, volumeKrw: 1600, sourceAsOf: null, fetchedAt
+      volume: 8, volumeKrw: 1600, sourceAsOf: null, fetchedAt,
+      quoteFresh: false, quoteAgeMs: null, quoteFreshnessReason: 'market_quote_unavailable'
     }
   ]);
 });
@@ -249,6 +252,7 @@ test('/api/market/prices/snapshot reports requested, returned, missing, and unus
       }
     },
     marketDataProvider: new MarketDataProvider({
+      now: () => Date.parse('2026-09-29T12:00:02.000Z'),
       async readMarkets() {
         return ['KRW-BTC', 'KRW-ETH', 'KRW-XRP'].map(market => ({ market }));
       },
@@ -284,11 +288,18 @@ test('/api/market/prices/snapshot reports requested, returned, missing, and unus
   assert.deepEqual(result.body.missingMarkets, ['KRW-XRP']);
   assert.deepEqual(result.body.unavailableMarkets, ['KRW-ETH', 'KRW-XRP']);
   assert.equal(result.body.complete, false);
+  assert.equal(result.body.allQuotesFresh, false);
+  assert.deepEqual(result.body.freshMarkets, ['KRW-BTC']);
+  assert.deepEqual(result.body.staleMarkets, []);
+  assert.equal(result.body.maximumQuoteAgeMs, 90_000);
+  assert.equal(result.body.sourceSkewMs, 0);
   assert.equal(result.body.sourceAsOf, sourceAsOf);
   assert.equal(result.body.fetchedAt, fetchedAt);
   assert.equal(result.body.marketListStale, false);
   assert.equal(result.body.marketListFetchedAt, result.headers['x-market-list-fetched-at']);
   assert.equal(result.body.prices.length, 2);
+  assert.equal(result.body.prices[0].quoteFresh, true);
+  assert.equal(result.body.prices[0].quoteAgeMs, 2_000);
 });
 
 test('/target-coins has router-scoped cache state and coalesces concurrent market-list reads', async () => {

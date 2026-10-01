@@ -4,11 +4,13 @@ import dotenv from 'dotenv';
 import MultiCoinTrader from './trader/multiCoinTrader.js';
 import DashboardServer from './api/dashboardServer.js';
 import { createPublicMarketDataSource as createDefaultPublicMarketDataSource } from './api/publicMarketDataSource.js';
+import { createPublicMarketSnapshotStore } from './api/publicMarketSnapshotStore.js';
 import Logger from './utils/logger.js';
 import { loadEnv, formatEnvErrors, formatEnvWarnings } from './config/envLoader.js';
 import { runAfterDashboardReady as runAfterDashboardReadyDefault } from './runtime/dashboardStartup.js';
 import { acquireHeadlessRuntimeWriterLock, setupExitHandlers } from './runtime/exitHandlers.js';
 import { createProfileWriterStartup } from './runtime/profileWriterStartup.js';
+import { derivePublicMarketSnapshotFilePath } from './runtime/profileStoragePlan.js';
 
 let activeExitHandlers = null;
 
@@ -106,7 +108,9 @@ export async function runLegacyMultiCoinRuntime(config, dependencies = {}) {
     config,
     dependencies.profileWriterStartupOptions
   );
-  const createTrader = dependencies.createTrader || (() => new MultiCoinTrader(config));
+  const createTrader = dependencies.createTrader || (publicMarketDataSource => (
+    new MultiCoinTrader(config, { publicMarketDataSource })
+  ));
   const createDashboard = dependencies.createDashboard ||
     ((trader, port, options) => new DashboardServer(trader, port, options));
   const createPublicMarketDataSource = dependencies.createPublicMarketDataSource ||
@@ -117,20 +121,29 @@ export async function runLegacyMultiCoinRuntime(config, dependencies = {}) {
   const consoleApi = dependencies.consoleApi || dependencies.exitHandlerOptions?.consoleApi || console;
   const logger = dependencies.logger || null;
   let trader = null;
+  let publicMarketDataSource = null;
   let manualOrderIdempotencyStore = null;
   let dashboardServer = null;
   let exitHandlers = null;
   let runtimeLifecycleInstalled = false;
 
   try {
-    const runtime = profileWriterStartup.createTraderAndStore(createTrader);
+    const runtime = profileWriterStartup.createTraderAndStore(() => {
+      publicMarketDataSource = createPublicMarketDataSource({
+        requestTimeoutMs: config.upbitRequestTimeoutMs,
+        snapshotStore: createPublicMarketSnapshotStore({
+          filePath: derivePublicMarketSnapshotFilePath(config.virtualPortfolioFile)
+        })
+      });
+      return createTrader(publicMarketDataSource);
+    });
     trader = runtime.trader;
     manualOrderIdempotencyStore = runtime.manualOrderIdempotencyStore;
 
     if (config.enableDashboard) {
-      const publicMarketDataSource = createPublicMarketDataSource();
       dashboardServer = createDashboard(trader, config.dashboardPort, {
         publicMarketDataSource,
+        releaseManualOrderWriterLockOnStop: false,
         manualOrderIdempotencyStore
       });
     }
@@ -142,7 +155,20 @@ export async function runLegacyMultiCoinRuntime(config, dependencies = {}) {
         createStore: () => manualOrderIdempotencyStore
       });
       const runtimeWriterLockOwner = {
-        releaseWriterLock: () => profileWriterStartup.releaseWriterLock()
+        releaseWriterLock: async () => {
+          let closeError = null;
+          try {
+            await publicMarketDataSource?.close?.();
+          } catch (error) {
+            closeError = error;
+          }
+          const released = profileWriterStartup.releaseWriterLock();
+          if (closeError) {
+            closeError.profileWriterLockReleased = released;
+            throw closeError;
+          }
+          return released;
+        }
       };
 
       exitHandlers = createExitHandlers(trader, dashboardServer, null, null, logger, {
@@ -177,6 +203,11 @@ export async function runLegacyMultiCoinRuntime(config, dependencies = {}) {
         if (error && typeof error === 'object') error.dashboardStartupCleanupError = cleanupError;
       }
       try {
+        try {
+          await publicMarketDataSource?.close?.();
+        } catch (closeError) {
+          if (error && typeof error === 'object') error.publicMarketSnapshotCloseError = closeError;
+        }
         profileWriterStartup.releaseWriterLock();
       } catch (releaseError) {
         if (error && typeof error === 'object') error.writerLockReleaseError = releaseError;

@@ -129,7 +129,7 @@ test('dashboard and restarted optimizer resolve persistence from one configured 
   firstDashboard.saveOptimizationState({ enabled: false, interval: ONE_HOUR, lastRun: '2026-09-30T00:00:00.000Z' });
 
   const optimizer = new ParameterOptimizer({ cwd: firstWorkingDirectory, stateDir });
-  optimizer.saveOptimalParameters({ rsiPeriod: 9, takeProfitPercent: 1.5 });
+  await optimizer.saveOptimalParameters({ rsiPeriod: 9, takeProfitPercent: 1.5 });
   await firstDashboard.stop();
 
   const restartedDashboard = makeDashboard(secondWorkingDirectory);

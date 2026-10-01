@@ -189,7 +189,7 @@ test('portfolio analysis does not substitute average price when the market snaps
 });
 
 test('portfolio analysis exposes source time and calculates values from a complete fixture snapshot', async t => {
-  const sourceAsOf = new Date('2026-09-29T12:00:00.000Z').toISOString();
+  const sourceAsOf = new Date().toISOString();
   const adapter = new FixtureMarketDataAdapter({
     markets: ['KRW-BTC'],
     tickers: [{ market: 'KRW-BTC', trade_price: 120, trade_timestamp: sourceAsOf }]

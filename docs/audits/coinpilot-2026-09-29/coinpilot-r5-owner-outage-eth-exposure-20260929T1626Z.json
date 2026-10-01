@@ -1,7 +1,11 @@
 {
   "schemaVersion": 1,
   "auditId": "coinpilot-r5-owner-outage-eth-exposure-20260929T1626Z",
-  "createdAt": "2026-09-29T16:30:00Z",
+  "createdAt": "2026-09-29T16:34:32Z",
+  "observationCutoffAt": "2026-09-29T16:30:00.000Z",
+  "researchOnly": true,
+  "promoted": false,
+  "actualFillsObserved": false,
   "scope": "Read-only market-data and persisted-ledger exposure audit. No production code, test, order, process, ledger, or lock changes.",
   "limitations": [
     "A candle OHLC range is not a tick path, execution, or proof of an exit.",
@@ -164,7 +168,7 @@
         "feeOnlyNet": -530.1365011886714,
         "feeAndConfiguredSlippageNet": -929.4600994866317
       },
-      "qualification": "Conditional counterfactual if the position remained open until the scheduled deadline. Candle low/high bound possible prices during the minute; neither is an observed fill or a known 15:59:10.198Z price. The candle close occurs at 16:00Z and is shown only as a later mark."
+      "qualification": "Conditional counterfactual if the position remained open until the scheduled deadline. Candle low/high bound possible prices during the minute; neither is an observed fill or a known 15:59:10.198Z price. The 15:59 bucket finalizes at 16:00Z; its close is the candle's final trade price, not a trade asserted at exactly 16:00Z, and is shown only as a later mark."
     },
     "latestCompletedCandle": {
       "minute": "2026-09-29T16:29:00Z",

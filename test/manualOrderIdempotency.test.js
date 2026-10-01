@@ -36,7 +36,7 @@ class TemporaryDashboardServer extends DashboardServer {
   }
 }
 
-function makeTemporaryDashboard(trader, root, port = 0) {
+function makeTemporaryDashboard(trader, root, port = 0, options = {}) {
   return new TemporaryDashboardServer(trader, port, {
     env: {
       ...process.env,
@@ -47,7 +47,8 @@ function makeTemporaryDashboard(trader, root, port = 0) {
       DASHBOARD_TLS_CERT_FILE: '',
       DASHBOARD_TLS_KEY_FILE: '',
       STAGING_OUTPUT_DIR: path.join(root, 'logs')
-    }
+    },
+    ...options
   });
 }
 
@@ -882,6 +883,49 @@ test('DashboardServer orderly stop releases its profile writer lock', async t =>
   });
   assert.equal(nextReservation.kind, 'reserved');
   nextStore.releaseWriterLock();
+});
+
+test('DashboardServer stop preserves a caller-owned profile lock until the runtime owner releases it', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'coinpilot-dashboard-external-lock-'));
+  const trader = makeDryTrader(root);
+  const profilePath = path.join(root, 'dry_portfolio.json');
+  const externalStore = new ManualOrderIdempotencyStore({
+    filePath: `${profilePath}.manual_order_idempotency.json`,
+    writerLockPath: `${profilePath}.manual_order_writer.lock`
+  });
+  let dashboard = null;
+  let stopped = false;
+  let snapshotFlushCount = 0;
+  t.after(async () => {
+    if (!stopped && dashboard && (dashboard.io || dashboard.server)) await dashboard.stop();
+    if (externalStore.writerLock) externalStore.releaseWriterLock();
+    if (dashboard) await dashboard.logger.flush();
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  await externalStore.initialize();
+  dashboard = makeTemporaryDashboard(trader, root, 0, {
+    manualOrderIdempotencyStore: externalStore,
+    releaseManualOrderWriterLockOnStop: false,
+    publicMarketDataSource: {
+      async getMarkets() { return []; },
+      async getTicker() { return []; },
+      async getMinuteCandles() { return []; },
+      async flushSnapshot() { snapshotFlushCount += 1; }
+    }
+  });
+  await dashboard.start();
+  assert.equal(fs.existsSync(externalStore.writerLockPath), true);
+
+  await dashboard.stop();
+  stopped = true;
+  await dashboard.logger.flush();
+
+  assert.equal(fs.existsSync(externalStore.writerLockPath), true,
+    'DashboardServer does not release ownership that the runtime supplied');
+  assert.equal(snapshotFlushCount, 1, 'DashboardServer drains its shared public snapshot writer before shutdown completes');
+  assert.equal(externalStore.releaseWriterLock(), true);
+  assert.equal(fs.existsSync(externalStore.writerLockPath), false);
 });
 
 test('mutable DashboardServer claims the profile before listening while observers skip the lock', async t => {

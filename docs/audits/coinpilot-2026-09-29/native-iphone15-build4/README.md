@@ -1,10 +1,10 @@
 # Physical iPhone TestFlight capture
 
 - Device: paired iPhone 15 Pro Max
-- Installed app: CoinPilot `1.0 (4)`, verified with `xcrun devicectl device info apps`
-- New TestFlight build: CoinPilot `1.0 (5)`, `Ready to Submit`, attached to `CI CoinPilot Internal`; Build 5 is not installed on this phone yet
-- Build 6 upload is complete; App Store Connect marks it Ready to Submit and lists it as Testing in CI CoinPilot Internal (1 tester). It is not installed on this phone
-- Capture: `more-screen.png`, taken after launching `com.godekd3133.coinpilot`
+- Last verified installed app: CoinPilot `1.0 (5)`, checked with `xcrun devicectl device info apps` before the Build 7 upload; Build 7 is not installed on this phone
+- Build 7 upload is complete; App Store Connect marks it `Ready to Submit` and lists `1.0 (7)` as `Testing` in `CI CoinPilot Internal` (1 tester)
+- Build 6 upload is complete; App Store Connect marks it `Ready to Submit` and lists it as `Testing` in `CI CoinPilot Internal` (1 tester). It is not installed on this phone
+- Capture: `more-screen.png` is from the earlier Build 4 native More-tab inspection after launching `com.godekd3133.coinpilot`
 - Screen: native More tab with dashboard feature entry points and five-tab navigation
 - Orders, token entry, and account changes were not performed during this review
 - The iPhone's saved Paper and LIVE addresses currently match

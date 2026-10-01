@@ -117,6 +117,14 @@ function resolvePortfolioPath(config = {}, options = {}) {
   return { ...pathInfo, source, configuredPath };
 }
 
+/** Derive the local public quote snapshot from the exact owned portfolio profile. */
+export function derivePublicMarketSnapshotFilePath(virtualPortfolioFile) {
+  if (typeof virtualPortfolioFile !== 'string' || !virtualPortfolioFile.trim()) {
+    throw new TypeError('A virtual portfolio path is required for the public market snapshot.');
+  }
+  return `${path.resolve(virtualPortfolioFile)}.market_snapshot.json`;
+}
+
 /**
  * Resolve the virtual portfolio using MultiCoinTrader's startup precedence.
  * The returned configuredPath preserves the historic relative-path contract;
@@ -336,6 +344,14 @@ function resolveContextStoragePaths({ name, cwd, projectRoot, config, env, liveC
     cwd: absoluteCwd,
     env: selectedEnv
   });
+  const publicMarketSnapshotPath = {
+    configuredPath: `${portfolioPath.configuredPath}.market_snapshot.json`,
+    absolutePath: derivePublicMarketSnapshotFilePath(portfolioPath.absolutePath),
+    source: 'derivedFromVirtualPortfolio',
+    resolutionBase: 'virtualPortfolio.absolutePath',
+    scope: 'profile-derived',
+    defaultSharing: portfolioPath.defaultSharing
+  };
 
   const manualOrderIdempotencyPath = selectedConfig.manualOrderIdempotencyFile
     ? describePath(selectedConfig.manualOrderIdempotencyFile, {
@@ -458,6 +474,10 @@ function resolveContextStoragePaths({ name, cwd, projectRoot, config, env, liveC
   const dashboardOptimizationHistory = dashboardOptimizationPaths.optimizationHistoryFile;
   const cwdOptimalConfig = cwdOptimizationPaths.optimalConfigFile;
   const cwdOptimizationHistory = cwdOptimizationPaths.optimizationHistoryFile;
+  const dashboardOptimalConfigWriterLockPath = `${dashboardOptimalConfig.absolutePath}.optimizer_config_writer.lock`;
+  const cwdOptimalConfigWriterLockPath = `${cwdOptimalConfig.absolutePath}.optimizer_config_writer.lock`;
+  const dashboardOptimizationHistoryWriterLockPath = `${dashboardOptimizationHistory.absolutePath}.optimizer_history_writer.lock`;
+  const cwdOptimizationHistoryWriterLockPath = `${cwdOptimizationHistory.absolutePath}.optimizer_history_writer.lock`;
 
   const reconcileEvidencePath = resolveConfiguredFile({
     configValue: null,
@@ -476,6 +496,13 @@ function resolveContextStoragePaths({ name, cwd, projectRoot, config, env, liveC
       ['MultiCoinTrader persistence'],
       ['MultiCoinTrader startup hydration', 'ManualOrderIdempotencyStore receipt recovery'],
       'virtualPortfolio'
+    ),
+    profileResource(
+      'publicMarketSnapshot',
+      publicMarketSnapshotPath,
+      ['PublicMarketDataSource ticker capture under the profile writer lock'],
+      ['DashboardServer last-good read-only quote fallback'],
+      'publicMarketSnapshot'
     ),
     profileResource(
       'manualOrderIdempotency',
@@ -602,11 +629,39 @@ function resolveContextStoragePaths({ name, cwd, projectRoot, config, env, liveC
       'optimalConfig'
     ),
     profileResource(
+      'optimalConfigWriterLock.dashboard',
+      {
+        configuredPath: dashboardOptimalConfigWriterLockPath,
+        absolutePath: dashboardOptimalConfigWriterLockPath,
+        source: 'derivedFromOptimalConfig',
+        resolutionBase: 'optimalConfig.dashboard.absolutePath',
+        scope: 'config-derived',
+        defaultSharing: dashboardOptimalConfig.defaultSharing
+      },
+      ['writeOptimizerJsonAtomically'],
+      ['writeOptimizerJsonAtomically owner verification/release'],
+      'optimizerConfigWriterLock'
+    ),
+    profileResource(
       'optimizationHistory.dashboard',
       dashboardOptimizationHistory,
       ['DashboardServer optimization cycle'],
       ['GET /api/optimization/optimization-history'],
       'optimizationHistory'
+    ),
+    profileResource(
+      'optimizationHistoryWriterLock.dashboard',
+      {
+        configuredPath: dashboardOptimizationHistoryWriterLockPath,
+        absolutePath: dashboardOptimizationHistoryWriterLockPath,
+        source: 'derivedFromOptimizationHistory',
+        resolutionBase: 'optimizationHistory.dashboard.absolutePath',
+        scope: 'history-derived',
+        defaultSharing: dashboardOptimizationHistory.defaultSharing
+      },
+      ['appendOptimizerHistory'],
+      ['appendOptimizerHistory owner verification/release'],
+      'optimizerHistoryWriterLock'
     ),
     profileResource(
       'optimalConfig.cwdOptimizer',
@@ -616,11 +671,39 @@ function resolveContextStoragePaths({ name, cwd, projectRoot, config, env, liveC
       'optimalConfig'
     ),
     profileResource(
+      'optimalConfigWriterLock.cwdOptimizer',
+      {
+        configuredPath: cwdOptimalConfigWriterLockPath,
+        absolutePath: cwdOptimalConfigWriterLockPath,
+        source: 'derivedFromOptimalConfig',
+        resolutionBase: 'optimalConfig.cwdOptimizer.absolutePath',
+        scope: 'config-derived',
+        defaultSharing: cwdOptimalConfig.defaultSharing
+      },
+      ['writeOptimizerJsonAtomically'],
+      ['writeOptimizerJsonAtomically owner verification/release'],
+      'optimizerConfigWriterLock'
+    ),
+    profileResource(
       'optimizationHistory.cwdOptimizer',
       cwdOptimizationHistory,
       ['src/index.js optimization loop', 'runOptimization CLI'],
       ['src/index.js optimization loop', 'runOptimization CLI'],
       'optimizationHistory'
+    ),
+    profileResource(
+      'optimizationHistoryWriterLock.cwdOptimizer',
+      {
+        configuredPath: cwdOptimizationHistoryWriterLockPath,
+        absolutePath: cwdOptimizationHistoryWriterLockPath,
+        source: 'derivedFromOptimizationHistory',
+        resolutionBase: 'optimizationHistory.cwdOptimizer.absolutePath',
+        scope: 'history-derived',
+        defaultSharing: cwdOptimizationHistory.defaultSharing
+      },
+      ['appendOptimizerHistory'],
+      ['appendOptimizerHistory owner verification/release'],
+      'optimizerHistoryWriterLock'
     )
   ].map(resource => ({ ...resource, context: name }));
 }
