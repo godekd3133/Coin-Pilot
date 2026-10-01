@@ -3,6 +3,7 @@ import UpbitAPI from '../api/upbit.js';
 import BacktestEngine from '../backtest/backtestEngine.js';
 import fs from 'fs';
 import { pathToFileURL } from 'node:url';
+import { envNumber, envString } from '../config/envConfig.js';
 
 dotenv.config();
 
@@ -52,13 +53,13 @@ async function runBacktest() {
   console.log('🔄 백테스팅 시작...\n');
 
   const upbit = new UpbitAPI(
-    process.env.UPBIT_ACCESS_KEY || '',
-    process.env.UPBIT_SECRET_KEY || ''
+    envString('UPBIT_ACCESS_KEY', ''),
+    envString('UPBIT_SECRET_KEY', '')
   );
 
-  const targetCoin = process.env.TARGET_COIN || 'KRW-BTC';
-  const candleUnit = parseInt(process.env.BACKTEST_CANDLE_UNIT) || 15; // 15분봉 기본
-  const candleCount = parseInt(process.env.BACKTEST_CANDLE_COUNT) || 500; // 500개 캔들
+  const targetCoin = envString('TARGET_COIN', 'KRW-BTC');
+  const candleUnit = envNumber('BACKTEST_CANDLE_UNIT', NaN) || 15; // 15분봉 기본
+  const candleCount = envNumber('BACKTEST_CANDLE_COUNT', NaN) || 500; // 500개 캔들
 
   console.log(`타겟 코인: ${targetCoin}`);
   console.log(`캔들: ${candleUnit}분봉, ${candleCount}개\n`);
@@ -78,11 +79,11 @@ async function runBacktest() {
   // 전략 설정
   // 백테스팅에서는 뉴스 데이터가 없으므로 기술적 분석 가중치를 높이고 임계값을 조정
   const strategy = {
-    rsiPeriod: parseInt(process.env.RSI_PERIOD) || 14,
-    rsiOversold: parseInt(process.env.RSI_OVERSOLD) || 30,
-    rsiOverbought: parseInt(process.env.RSI_OVERBOUGHT) || 70,
-    stopLossPercent: parseFloat(process.env.STOP_LOSS_PERCENT) || 5,
-    takeProfitPercent: parseFloat(process.env.TAKE_PROFIT_PERCENT) || 10,
+    rsiPeriod: envNumber('RSI_PERIOD', NaN) || 14,
+    rsiOversold: envNumber('RSI_OVERSOLD', NaN) || 30,
+    rsiOverbought: envNumber('RSI_OVERBOUGHT', NaN) || 70,
+    stopLossPercent: envNumber('STOP_LOSS_PERCENT', NaN) || 5,
+    takeProfitPercent: envNumber('TAKE_PROFIT_PERCENT', NaN) || 10,
     investmentAmount: 100000,
     // 백테스팅 전용 설정: 뉴스 없이 기술적 분석만 사용
     technicalWeight: 0.9,  // 기술적 분석 90%

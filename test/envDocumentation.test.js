@@ -114,16 +114,34 @@ const TYPED_ENV_MIGRATED_FILES = [
   'src/scripts/validateShadowCandidate.js',
   'src/api/routes/research.js',
   'src/scripts/validateDailyMomentumRobustness.js',
-  'src/scripts/runRegimeMomentumShadow.js'
+  'src/scripts/runRegimeMomentumShadow.js',
+  'src/scripts/runOptimization.js',
+  'src/scripts/runAiHistoricalReplay.js',
+  'src/scripts/validateRegimeMomentum.js',
+  'src/scripts/validateHigherTimeframeMomentum.js',
+  'src/scripts/startMomentumShadowCandidateIfReady.js',
+  'src/scripts/runScalpingVariantForward.js',
+  'src/scripts/preflightMomentumShadowCandidate.js',
+  'src/ai/aiAdvisorService.js',
+  'src/scripts/validateDailyMarketNeutral.js',
+  'src/scripts/runBacktest.js'
 ];
 
 test('envConfig로 이전된 파일은 직접 env 접근이 없다', () => {
   for (const file of TYPED_ENV_MIGRATED_FILES) {
     const source = fs.readFileSync(file, 'utf8');
+    // `process.env.X = ...` writes are child-process env propagation (e.g. the
+    // optimizer's runtime-param handoff), not config reads — only reads count.
     const directReads = [
-      ...source.matchAll(/process\.env\.([A-Z_][A-Z0-9_]*)/g),
-      ...source.matchAll(/process\.env\[['"]([A-Z_][A-Z0-9_]*)['"]\]/g)
-    ].map(match => match[1]);
+      ...source.matchAll(/process\.env\.([A-Z_][A-Z0-9_]*)/g)
+    ].filter(match =>
+      // `process.env.X = v` / `+= v` writes are child-process env propagation,
+      // not config reads — `==`/`===` comparisons still count as reads.
+      !/^\s*\+?=(?!=)/.test(source.slice(match.index + match[0].length))
+    ).map(match => match[1])
+      .concat(
+        [...source.matchAll(/process\.env\[['"]([A-Z_][A-Z0-9_]*)['"]\]/g)].map(match => match[1])
+      );
     assert.deepEqual(directReads, [], `${file} must read env through envConfig accessors`);
   }
 });

@@ -6,10 +6,10 @@ import {
   simulateHigherTimeframeMomentumPortfolio,
   walkForwardValidateHigherTimeframeMomentum
 } from '../research/higherTimeframeMomentum.js';
+import { envList, envNumber, envRaw, envString } from '../config/envConfig.js';
 
 dotenv.config();
 
-const number = (value, fallback) => Number.isFinite(Number(value)) ? Number(value) : fallback;
 
 function loadCandleCache(filePath) {
   if (!filePath) {
@@ -34,10 +34,8 @@ function loadCandleCache(filePath) {
 }
 
 function resolveMarkets(cache) {
-  const explicit = (process.env.SCALP_HTF_MOMENTUM_MARKETS || 'KRW-BTC,KRW-ETH,KRW-XRP,KRW-SOL')
-    .split(',')
-    .map(market => market.trim().toUpperCase())
-    .filter(Boolean);
+  const explicit = envList('SCALP_HTF_MOMENTUM_MARKETS', ['KRW-BTC', 'KRW-ETH', 'KRW-XRP', 'KRW-SOL'])
+    .map(market => market.toUpperCase());
   const markets = [...new Set(explicit)];
   const missing = markets.filter(market => !Array.isArray(cache[market]));
   if (missing.length > 0) {
@@ -49,7 +47,7 @@ function resolveMarkets(cache) {
 function buildVariantConfig(overrides = {}) {
   return {
     ...DEFAULT_HIGHER_TIMEFRAME_MOMENTUM_CONFIG,
-    baseCandleUnit: number(process.env.SCALP_HTF_BASE_CANDLE_UNIT, 15),
+    baseCandleUnit: envNumber('SCALP_HTF_BASE_CANDLE_UNIT', 15),
     ...overrides
   };
 }
@@ -160,17 +158,17 @@ function aggregateMetrics(results, initialBalance) {
 
 function walkForwardOptions() {
   return {
-    folds: Math.max(1, Math.floor(number(process.env.SCALP_HTF_FOLDS, 3))),
-    minimumTrainingFraction: number(process.env.SCALP_HTF_MIN_TRAINING_FRACTION, 0.5),
-    validationFraction: number(process.env.SCALP_HTF_VALIDATION_FRACTION, 0.15),
-    minimumTrainingTrades: Math.max(0, Math.floor(number(process.env.SCALP_HTF_MIN_TRAINING_TRADES, 3))),
-    minimumValidationTrades: Math.max(1, Math.floor(number(process.env.SCALP_HTF_MIN_VALIDATION_TRADES, 5))),
-    minimumTrainingProfitFactor: number(process.env.SCALP_HTF_MIN_TRAINING_PF, 1),
-    minimumProfitFactor: number(process.env.SCALP_HTF_MIN_VALIDATION_PF, 1.05),
-    minimumTrainingReturnPercent: number(process.env.SCALP_HTF_MIN_TRAINING_RETURN, 0),
-    minimumReturnPercent: number(process.env.SCALP_HTF_MIN_VALIDATION_RETURN, 0.1),
-    maximumDrawdownPercent: number(process.env.SCALP_HTF_MAX_DRAWDOWN, 15),
-    minimumConfidenceLowerBoundPercent: number(process.env.SCALP_HTF_MIN_CONFIDENCE_LOWER, 0)
+    folds: Math.max(1, Math.floor(envNumber('SCALP_HTF_FOLDS', 3))),
+    minimumTrainingFraction: envNumber('SCALP_HTF_MIN_TRAINING_FRACTION', 0.5),
+    validationFraction: envNumber('SCALP_HTF_VALIDATION_FRACTION', 0.15),
+    minimumTrainingTrades: Math.max(0, Math.floor(envNumber('SCALP_HTF_MIN_TRAINING_TRADES', 3))),
+    minimumValidationTrades: Math.max(1, Math.floor(envNumber('SCALP_HTF_MIN_VALIDATION_TRADES', 5))),
+    minimumTrainingProfitFactor: envNumber('SCALP_HTF_MIN_TRAINING_PF', 1),
+    minimumProfitFactor: envNumber('SCALP_HTF_MIN_VALIDATION_PF', 1.05),
+    minimumTrainingReturnPercent: envNumber('SCALP_HTF_MIN_TRAINING_RETURN', 0),
+    minimumReturnPercent: envNumber('SCALP_HTF_MIN_VALIDATION_RETURN', 0.1),
+    maximumDrawdownPercent: envNumber('SCALP_HTF_MAX_DRAWDOWN', 15),
+    minimumConfidenceLowerBoundPercent: envNumber('SCALP_HTF_MIN_CONFIDENCE_LOWER', 0)
   };
 }
 
@@ -189,8 +187,8 @@ function summarizeFold(fold) {
 }
 
 export function runHigherTimeframeMomentumStudy({
-  inputFile = process.env.SCALP_HTF_MOMENTUM_CANDLES_FILE || process.argv[2],
-  outputFile = process.env.SCALP_HTF_MOMENTUM_OUTPUT_FILE || 'higher_timeframe_momentum_diagnostic.json',
+  inputFile = envRaw('SCALP_HTF_MOMENTUM_CANDLES_FILE') || process.argv[2],
+  outputFile = envString('SCALP_HTF_MOMENTUM_OUTPUT_FILE', 'higher_timeframe_momentum_diagnostic.json'),
   markets = null
 } = {}) {
   const cache = loadCandleCache(inputFile);
@@ -229,12 +227,10 @@ export function runHigherTimeframeMomentumStudy({
       portfolioCandles,
       {
         ...variant.config,
-        maxPositions: number(
-          process.env.SCALP_HTF_MAX_POSITIONS,
+        maxPositions: envNumber('SCALP_HTF_MAX_POSITIONS',
           variant.config.maxPositions
         ),
-        portfolioPositionFraction: number(
-          process.env.SCALP_HTF_PORTFOLIO_POSITION_FRACTION,
+        portfolioPositionFraction: envNumber('SCALP_HTF_PORTFOLIO_POSITION_FRACTION',
           variant.config.portfolioPositionFraction
         )
       }
@@ -302,7 +298,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
         console.log(`  ${market.market}: ${metrics.tradeCount} trades / ${metrics.totalReturnPercent.toFixed(4)}% / WF ${market.walkForward.allFoldsPassed ? 'PASS' : 'FAIL'}`);
       }
     }
-    console.log(`\nreport: ${process.env.SCALP_HTF_MOMENTUM_OUTPUT_FILE || 'higher_timeframe_momentum_diagnostic.json'}`);
+    console.log(`\nreport: ${envString('SCALP_HTF_MOMENTUM_OUTPUT_FILE', 'higher_timeframe_momentum_diagnostic.json')}`);
     console.log('판정: 연구 전용 · promotion/live 연결 없음');
   } catch (error) {
     console.error('❌ higher-timeframe momentum diagnostic 오류:', error.message);

@@ -7,6 +7,7 @@ import {
   evaluateStatisticalConfidenceGate
 } from '../backtest/scalpingBacktest.js';
 import { aggregateHigherTimeframeCandles } from '../research/higherTimeframeMomentum.js';
+import { envBool, envList, envNumber, envString } from '../config/envConfig.js';
 
 /**
  * Research-only validation lane for the regime-gated momentum candidate.
@@ -29,28 +30,26 @@ import { aggregateHigherTimeframeCandles } from '../research/higherTimeframeMome
  */
 dotenv.config();
 
-const number = (value, fallback) => (Number.isFinite(Number(value)) ? Number(value) : fallback);
 
 const CONFIG = {
-  cacheFile: process.env.REGIME_CANDLES_FILE || '',
-  markets: (process.env.REGIME_MARKETS || 'KRW-BTC,KRW-ETH,KRW-XRP,KRW-SOL')
-    .split(',').map((m) => m.trim()).filter(Boolean),
-  sourceUnitMinutes: number(process.env.REGIME_SOURCE_UNIT_MINUTES, 15),
-  signalUnitMinutes: number(process.env.REGIME_SIGNAL_UNIT_MINUTES, 60),
-  rsiPeriod: number(process.env.REGIME_RSI_PERIOD, 14),
-  rsiEntryThreshold: number(process.env.REGIME_RSI_THRESHOLD, 65),
-  trendLookbackHours: number(process.env.REGIME_TREND_LOOKBACK_HOURS, 168),
-  requireUpBar: process.env.REGIME_REQUIRE_UP_BAR !== 'false',
-  maxHoldHours: number(process.env.REGIME_MAX_HOLD_HOURS, 48),
-  stopLossPercent: number(process.env.REGIME_STOP_LOSS_PERCENT, 0),
-  takeProfitPercent: number(process.env.REGIME_TAKE_PROFIT_PERCENT, 0),
-  maxPositions: number(process.env.REGIME_MAX_POSITIONS, 4),
-  positionFraction: number(process.env.REGIME_POSITION_FRACTION, 0.25),
-  initialBalance: number(process.env.REGIME_INITIAL_BALANCE, 100_000_000),
-  costPercent: number(process.env.REGIME_COST_PERCENT, 0.2),
-  trainFraction: Math.min(0.9, Math.max(0.1, number(process.env.REGIME_TRAIN_FRACTION, 0.6))),
-  reportFile: process.env.REGIME_REPORT_FILE || '',
-  maxGapIntervals: number(process.env.REGIME_MAX_GAP_INTERVALS, 1.5)
+  cacheFile: envString('REGIME_CANDLES_FILE', ''),
+  markets: envList('REGIME_MARKETS', ['KRW-BTC', 'KRW-ETH', 'KRW-XRP', 'KRW-SOL']),
+  sourceUnitMinutes: envNumber('REGIME_SOURCE_UNIT_MINUTES', 15),
+  signalUnitMinutes: envNumber('REGIME_SIGNAL_UNIT_MINUTES', 60),
+  rsiPeriod: envNumber('REGIME_RSI_PERIOD', 14),
+  rsiEntryThreshold: envNumber('REGIME_RSI_THRESHOLD', 65),
+  trendLookbackHours: envNumber('REGIME_TREND_LOOKBACK_HOURS', 168),
+  requireUpBar: envBool('REGIME_REQUIRE_UP_BAR', true),
+  maxHoldHours: envNumber('REGIME_MAX_HOLD_HOURS', 48),
+  stopLossPercent: envNumber('REGIME_STOP_LOSS_PERCENT', 0),
+  takeProfitPercent: envNumber('REGIME_TAKE_PROFIT_PERCENT', 0),
+  maxPositions: envNumber('REGIME_MAX_POSITIONS', 4),
+  positionFraction: envNumber('REGIME_POSITION_FRACTION', 0.25),
+  initialBalance: envNumber('REGIME_INITIAL_BALANCE', 100_000_000),
+  costPercent: envNumber('REGIME_COST_PERCENT', 0.2),
+  trainFraction: Math.min(0.9, Math.max(0.1, envNumber('REGIME_TRAIN_FRACTION', 0.6))),
+  reportFile: envString('REGIME_REPORT_FILE', ''),
+  maxGapIntervals: envNumber('REGIME_MAX_GAP_INTERVALS', 1.5)
 };
 
 function resampleCandles(candles, unitMinutes) {

@@ -7,14 +7,13 @@ import {
   evaluateDailyMarketNeutralCostSensitivity,
   evaluateDailyMarketNeutralVariants
 } from '../research/dailyMarketNeutralStudy.js';
+import { envNumber, envRaw, envString } from '../config/envConfig.js';
 
 dotenv.config();
 
-const number = (value, fallback) => Number.isFinite(Number(value)) ? Number(value) : fallback;
-const inputFile = process.env.DAILY_MARKET_NEUTRAL_CANDLES_FILE ||
-  process.env.DAILY_MOMENTUM_CANDLES_FILE || process.argv[2];
-const outputFile = process.env.DAILY_MARKET_NEUTRAL_REPORT_FILE ||
-  '/private/tmp/coinpilot-daily-market-neutral-report.json';
+const inputFile = envRaw('DAILY_MARKET_NEUTRAL_CANDLES_FILE') ||
+  envRaw('DAILY_MOMENTUM_CANDLES_FILE') || process.argv[2];
+const outputFile = envString('DAILY_MARKET_NEUTRAL_REPORT_FILE', '/private/tmp/coinpilot-daily-market-neutral-report.json');
 
 function loadCandles(file) {
   if (!file || !fs.existsSync(file)) {
@@ -25,7 +24,7 @@ function loadCandles(file) {
   if (!candles || typeof candles !== 'object' || Array.isArray(candles)) {
     throw new Error('FAIL_CLOSED: daily candle cache 형식이 잘못되었습니다.');
   }
-  const requestedMarkets = (process.env.DAILY_MARKET_NEUTRAL_MARKETS || Object.keys(candles).join(','))
+  const requestedMarkets = (envRaw('DAILY_MARKET_NEUTRAL_MARKETS') || Object.keys(candles).join(','))
     .split(',').map(market => market.trim().toUpperCase()).filter(Boolean);
   const markets = [...new Set(requestedMarkets)];
   const missing = markets.filter(market => !Array.isArray(candles[market]));
@@ -48,14 +47,14 @@ function printVariant(variant) {
 
 function main() {
   const { candles, markets } = loadCandles(inputFile);
-  const segmentCount = Math.max(2, Math.floor(number(process.env.DAILY_MARKET_NEUTRAL_SEGMENTS, 4)));
+  const segmentCount = Math.max(2, Math.floor(envNumber('DAILY_MARKET_NEUTRAL_SEGMENTS', 4)));
   const baseConfig = {
     ...DEFAULT_DAILY_MARKET_NEUTRAL_CONFIG,
-    initialBalance: number(process.env.DAILY_MARKET_NEUTRAL_INITIAL_BALANCE, 100_000_000),
-    costPercent: number(process.env.DAILY_MARKET_NEUTRAL_COST_PERCENT, 0.2),
-    shortBorrowCostPercentPerDay: number(process.env.DAILY_MARKET_NEUTRAL_SHORT_BORROW_COST_PER_DAY, 0),
-    longExposure: number(process.env.DAILY_MARKET_NEUTRAL_LONG_EXPOSURE, 0.4),
-    shortExposure: number(process.env.DAILY_MARKET_NEUTRAL_SHORT_EXPOSURE, 0.4)
+    initialBalance: envNumber('DAILY_MARKET_NEUTRAL_INITIAL_BALANCE', 100_000_000),
+    costPercent: envNumber('DAILY_MARKET_NEUTRAL_COST_PERCENT', 0.2),
+    shortBorrowCostPercentPerDay: envNumber('DAILY_MARKET_NEUTRAL_SHORT_BORROW_COST_PER_DAY', 0),
+    longExposure: envNumber('DAILY_MARKET_NEUTRAL_LONG_EXPOSURE', 0.4),
+    shortExposure: envNumber('DAILY_MARKET_NEUTRAL_SHORT_EXPOSURE', 0.4)
   };
   const report = evaluateDailyMarketNeutralVariants(candles, {
     variants: DEFAULT_DAILY_MARKET_NEUTRAL_VARIANTS,

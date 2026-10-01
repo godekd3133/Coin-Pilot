@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
+import { envBool, envRaw, envString } from '../config/envConfig.js';
 
 const DEFAULT_TIMEOUT_MS = 60_000;
 const DEFAULT_PROVIDER_FAILURE_COOLDOWN_MS = 30_000;
@@ -438,30 +439,30 @@ export class AIAdvisorService {
   constructor(options = {}) {
     this.workspaceRoot = options.workspaceRoot || process.cwd();
     this.now = typeof options.now === 'function' ? options.now : () => Date.now();
-    const configuredEnabled = options.enabled ?? options.config?.aiAdvisorEnabled ?? process.env.AI_ADVISOR_ENABLED !== 'false';
+    const configuredEnabled = options.enabled ?? options.config?.aiAdvisorEnabled ?? envBool('AI_ADVISOR_ENABLED', true);
     this.enabled = configuredEnabled !== false;
-    this.timeoutMs = Math.max(3_000, Number(options.timeoutMs || options.config?.aiAdvisorTimeoutMs || process.env.AI_ADVISOR_TIMEOUT_MS || DEFAULT_TIMEOUT_MS));
+    this.timeoutMs = Math.max(3_000, Number(options.timeoutMs || options.config?.aiAdvisorTimeoutMs || envRaw('AI_ADVISOR_TIMEOUT_MS') || DEFAULT_TIMEOUT_MS));
     this.evaluationMinutes = resolveEvaluationMinutes(
-      options.evaluationMinutes ?? options.config?.aiEvaluationMinutes ?? process.env.AI_EVALUATION_MINUTES
+      options.evaluationMinutes ?? options.config?.aiEvaluationMinutes ?? envRaw('AI_EVALUATION_MINUTES')
     );
     this.evaluationNeutralBandPercent = resolveNeutralBandPercent(
-      options.evaluationNeutralBandPercent ?? options.config?.aiEvaluationNeutralBandPercent ?? process.env.AI_EVALUATION_NEUTRAL_BAND_PERCENT
+      options.evaluationNeutralBandPercent ?? options.config?.aiEvaluationNeutralBandPercent ?? envRaw('AI_EVALUATION_NEUTRAL_BAND_PERCENT')
     );
     this.models = {
-      gpt: options.models?.gpt || options.config?.aiGptModel || process.env.AI_GPT_MODEL || '',
-      claude: options.models?.claude || options.config?.aiClaudeModel || process.env.AI_CLAUDE_MODEL || ''
+      gpt: options.models?.gpt || options.config?.aiGptModel || envString('AI_GPT_MODEL', ''),
+      claude: options.models?.claude || options.config?.aiClaudeModel || envString('AI_CLAUDE_MODEL', '')
     };
-    this.allowLocalBrief = options.allowLocalBrief ?? options.config?.aiLocalBriefEnabled ?? process.env.AI_LOCAL_BRIEF_ENABLED !== 'false';
+    this.allowLocalBrief = options.allowLocalBrief ?? options.config?.aiLocalBriefEnabled ?? envBool('AI_LOCAL_BRIEF_ENABLED', true);
     this.executables = {
-      gpt: options.executables?.gpt || options.config?.aiCodexBin || process.env.AI_CODEX_BIN || 'codex',
-      claude: options.executables?.claude || options.config?.aiClaudeBin || process.env.AI_CLAUDE_BIN || 'claude'
+      gpt: options.executables?.gpt || options.config?.aiCodexBin || envString('AI_CODEX_BIN', 'codex'),
+      claude: options.executables?.claude || options.config?.aiClaudeBin || envString('AI_CLAUDE_BIN', 'claude')
     };
     // The application invocation intentionally isolates Codex from a broken
     // user config. Keep the warning visible, but do not let `codex login
     // status` block an execution path that can still authenticate and answer.
     this.gptIgnoreUserConfig = options.gptIgnoreUserConfig ??
       options.config?.aiCodexIgnoreUserConfig ??
-      process.env.AI_CODEX_IGNORE_USER_CONFIG !== 'false';
+      envBool('AI_CODEX_IGNORE_USER_CONFIG', true);
     this.argumentBuilder = options.argumentBuilder || providerArgs;
     this.runner = options.runner || ((provider, prompt, runnerOptions) => this.runProvider(provider, prompt, runnerOptions));
     this.preflightProviderStatus = options.preflightProviderStatus ?? !options.runner;
@@ -471,7 +472,7 @@ export class AIAdvisorService {
     this.providerExecutionTail = Promise.resolve();
     this.providerFailureCooldownMs = Math.max(0, Number(
       options.providerFailureCooldownMs ?? options.config?.aiProviderFailureCooldownMs ??
-      process.env.AI_PROVIDER_FAILURE_COOLDOWN_MS ?? DEFAULT_PROVIDER_FAILURE_COOLDOWN_MS
+      envRaw('AI_PROVIDER_FAILURE_COOLDOWN_MS') ?? DEFAULT_PROVIDER_FAILURE_COOLDOWN_MS
     ));
     this.providerCooldownUntil = new Map();
     this.statusCache = null;

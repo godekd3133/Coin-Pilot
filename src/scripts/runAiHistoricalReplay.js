@@ -4,13 +4,9 @@ import path from 'node:path';
 import AIAdvisorService from '../ai/aiAdvisorService.js';
 import { collectScalpingCandidates } from '../backtest/scalpingBacktest.js';
 import { scoreAdviceOutcome } from '../ai/monitoringSessionService.js';
+import { envBool, envList, envNumber, envString } from '../config/envConfig.js';
 
 dotenv.config();
-
-function number(value, fallback) {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : fallback;
-}
 
 export function summarizeRows(rows) {
   const summary = {};
@@ -124,32 +120,32 @@ function buildReplayEvent(market, candidate, sampleIndex) {
 }
 
 export async function main() {
-  const candleFile = path.resolve(process.env.AI_REPLAY_CANDLES_FILE || '.cap-study-candles.json');
-  const outputFile = path.resolve(process.env.AI_REPLAY_OUTPUT_FILE || '/tmp/coinpilot-ai-historical-replay.json');
-  const provider = process.env.AI_REPLAY_PROVIDER || 'gpt';
-  const maxSamples = Math.max(1, Math.floor(number(process.env.AI_REPLAY_MAX_SAMPLES, 20)));
-  const horizonCandles = Math.max(1, Math.floor(number(process.env.AI_REPLAY_HORIZON_CANDLES, 5)));
-  const minimumSpacingCandles = Math.max(1, Math.floor(number(process.env.AI_REPLAY_MIN_SPACING_CANDLES, 5)));
-  const neutralBandPercent = Math.max(0, number(process.env.AI_REPLAY_NEUTRAL_BAND_PERCENT, 0.3));
-  const confirmedOnly = process.env.AI_REPLAY_CONFIRMED_ONLY === 'true';
-  const marketsFilter = (process.env.AI_REPLAY_MARKETS || '').split(',').map(item => item.trim().toUpperCase()).filter(Boolean);
+  const candleFile = path.resolve(envString('AI_REPLAY_CANDLES_FILE', '.cap-study-candles.json'));
+  const outputFile = path.resolve(envString('AI_REPLAY_OUTPUT_FILE', '/tmp/coinpilot-ai-historical-replay.json'));
+  const provider = envString('AI_REPLAY_PROVIDER', 'gpt');
+  const maxSamples = Math.max(1, Math.floor(envNumber('AI_REPLAY_MAX_SAMPLES', 20)));
+  const horizonCandles = Math.max(1, Math.floor(envNumber('AI_REPLAY_HORIZON_CANDLES', 5)));
+  const minimumSpacingCandles = Math.max(1, Math.floor(envNumber('AI_REPLAY_MIN_SPACING_CANDLES', 5)));
+  const neutralBandPercent = Math.max(0, envNumber('AI_REPLAY_NEUTRAL_BAND_PERCENT', 0.3));
+  const confirmedOnly = envBool('AI_REPLAY_CONFIRMED_ONLY', false);
+  const marketsFilter = envList('AI_REPLAY_MARKETS', []).map(item => item.toUpperCase());
   const raw = JSON.parse(fs.readFileSync(candleFile, 'utf8'));
   const markets = marketsFilter.length > 0 ? marketsFilter : Object.keys(raw).filter(key => key.startsWith('KRW-'));
   const baseConfig = {
-    signalProfile: process.env.SCALP_SIGNAL_PROFILE || 'rsi_rebound',
-    rsiPeriod: number(process.env.SCALP_RSI_PERIOD, 14),
-    rsiOversold: number(process.env.SCALP_RSI_OVERSOLD, 30),
-    rsiOverbought: number(process.env.SCALP_RSI_OVERBOUGHT, 70),
-    oversoldLookback: number(process.env.SCALP_OVERSOLD_LOOKBACK, 1),
-    minReboundPercent: number(process.env.SCALP_MIN_REBOUND_PERCENT, 0.15),
-    minRsiRecovery: number(process.env.SCALP_MIN_RSI_RECOVERY, 2),
-    minVolumeRatio: number(process.env.SCALP_MIN_VOLUME_RATIO, 1),
-    volumeLookback: number(process.env.SCALP_VOLUME_LOOKBACK, 20),
-    minCloseStrength: number(process.env.SCALP_MIN_CLOSE_STRENGTH, 0.65),
-    trendPeriod: number(process.env.SCALP_TREND_PERIOD, 30),
-    trendSlopeLookback: number(process.env.SCALP_TREND_SLOPE_LOOKBACK, 3),
-    minTrendSlopePercent: number(process.env.SCALP_MIN_TREND_SLOPE_PERCENT, -0.2),
-    requirePreviousHighBreak: process.env.SCALP_REQUIRE_PREVIOUS_HIGH_BREAK !== 'false'
+    signalProfile: envString('SCALP_SIGNAL_PROFILE', 'rsi_rebound'),
+    rsiPeriod: envNumber('SCALP_RSI_PERIOD', 14),
+    rsiOversold: envNumber('SCALP_RSI_OVERSOLD', 30),
+    rsiOverbought: envNumber('SCALP_RSI_OVERBOUGHT', 70),
+    oversoldLookback: envNumber('SCALP_OVERSOLD_LOOKBACK', 1),
+    minReboundPercent: envNumber('SCALP_MIN_REBOUND_PERCENT', 0.15),
+    minRsiRecovery: envNumber('SCALP_MIN_RSI_RECOVERY', 2),
+    minVolumeRatio: envNumber('SCALP_MIN_VOLUME_RATIO', 1),
+    volumeLookback: envNumber('SCALP_VOLUME_LOOKBACK', 20),
+    minCloseStrength: envNumber('SCALP_MIN_CLOSE_STRENGTH', 0.65),
+    trendPeriod: envNumber('SCALP_TREND_PERIOD', 30),
+    trendSlopeLookback: envNumber('SCALP_TREND_SLOPE_LOOKBACK', 3),
+    minTrendSlopePercent: envNumber('SCALP_MIN_TREND_SLOPE_PERCENT', -0.2),
+    requirePreviousHighBreak: envBool('SCALP_REQUIRE_PREVIOUS_HIGH_BREAK', true)
   };
 
   const candidates = markets.flatMap(market => {
@@ -164,7 +160,7 @@ export async function main() {
   const selected = candidates.slice(0, maxSamples);
   if (selected.length === 0) throw new Error('고정 candle window에서 replay 후보를 찾지 못했습니다.');
 
-  const advisor = new AIAdvisorService({ timeoutMs: number(process.env.AI_ADVISOR_TIMEOUT_MS, 60_000) });
+  const advisor = new AIAdvisorService({ timeoutMs: envNumber('AI_ADVISOR_TIMEOUT_MS', 60_000) });
   const rows = [];
   const consensusRows = [];
   const failures = [];
@@ -181,7 +177,7 @@ export async function main() {
         source: candleFile,
         warning: '과거 고정 candle window replay입니다. 이 결과는 live/promotion 증거가 아닙니다.',
         evaluation: {
-          horizonMinutes: horizonCandles * number(process.env.SCALP_VALIDATION_CANDLE_UNIT, 1),
+          horizonMinutes: horizonCandles * envNumber('SCALP_VALIDATION_CANDLE_UNIT', 1),
           neutralBandPercent
         }
       },

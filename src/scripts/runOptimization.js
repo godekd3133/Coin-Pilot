@@ -5,6 +5,7 @@ import { fetchCompleteUpbitCandleHistory } from '../market-data/completeUpbitCan
 import { resolveOptimizationStoragePaths } from '../runtime/optimizationStorage.js';
 import { appendOptimizerHistory, writeOptimizerJsonAtomically } from '../runtime/optimizerHistoryStore.js';
 import { pathToFileURL } from 'node:url';
+import { envBool, envNumber, envRaw, envString } from '../config/envConfig.js';
 
 dotenv.config();
 
@@ -29,45 +30,45 @@ async function runContinuousOptimization() {
   console.log('='.repeat(80));
 
   const upbit = new UpbitAPI(
-    process.env.UPBIT_ACCESS_KEY || '',
-    process.env.UPBIT_SECRET_KEY || ''
+    envString('UPBIT_ACCESS_KEY', ''),
+    envString('UPBIT_SECRET_KEY', '')
   );
 
-  const targetCoin = process.env.TARGET_COIN || 'KRW-BTC';
-  const candleUnit = parseInt(process.env.BACKTEST_CANDLE_UNIT) || 15;
-  const candleCount = parseInt(process.env.BACKTEST_CANDLE_COUNT) || 500;
+  const targetCoin = envString('TARGET_COIN', 'KRW-BTC');
+  const candleUnit = envNumber('BACKTEST_CANDLE_UNIT', NaN) || 15;
+  const candleCount = envNumber('BACKTEST_CANDLE_COUNT', NaN) || 500;
   const optimizationStoragePaths = resolveOptimizationStoragePaths({
     env: process.env,
-    stateDir: process.env.COINPILOT_STATE_DIR,
+    stateDir: envRaw('COINPILOT_STATE_DIR'),
     cwd: process.cwd(),
     projectRoot: process.cwd(),
     legacyBase: 'cwd'
   });
-  const isDryRun = process.env.DRY_RUN !== 'false';
+  const isDryRun = envBool('DRY_RUN', true);
 
   // 드라이 모드일 때 더 짧은 간격 (6시간), 실전은 24시간
   const interval = isDryRun
-    ? parseInt(process.env.OPTIMIZATION_INTERVAL_DRY) || 21600000  // 6시간
-    : parseInt(process.env.OPTIMIZATION_INTERVAL) || 86400000;      // 24시간
+    ? envNumber('OPTIMIZATION_INTERVAL_DRY', NaN) || 21600000  // 6시간
+    : envNumber('OPTIMIZATION_INTERVAL', NaN) || 86400000;      // 24시간
 
   console.log(`\n⚙️  설정:`);
   console.log(`  모드: ${isDryRun ? '🧪 모의투자' : '💰 실전투자'}`);
   console.log(`  타겟 코인: ${targetCoin}`);
   console.log(`  캔들: ${candleUnit}분봉, ${candleCount}개`);
   console.log(`  최적화 간격: ${interval / 3600000}시간`);
-  console.log(`  개체군 크기: ${process.env.POPULATION_SIZE || 20}`);
-  console.log(`  세대 수: ${process.env.GENERATIONS || 10}`);
+  console.log(`  개체군 크기: ${envRaw('POPULATION_SIZE') || 20}`);
+  console.log(`  세대 수: ${envRaw('GENERATIONS') || 10}`);
 
   if (isDryRun) {
     console.log(`\n💡 드라이 모드: 더 짧은 간격(${interval / 3600000}시간)으로 최적화`);
   }
 
   const optimizer = new ParameterOptimizer({
-    populationSize: parseInt(process.env.POPULATION_SIZE) || 20,
-    generations: parseInt(process.env.GENERATIONS) || 10,
-    mutationRate: parseFloat(process.env.MUTATION_RATE) || 0.2,
-    crossoverRate: parseFloat(process.env.CROSSOVER_RATE) || 0.7,
-    eliteSize: parseInt(process.env.ELITE_SIZE) || 2
+    populationSize: envNumber('POPULATION_SIZE', NaN) || 20,
+    generations: envNumber('GENERATIONS', NaN) || 10,
+    mutationRate: envNumber('MUTATION_RATE', NaN) || 0.2,
+    crossoverRate: envNumber('CROSSOVER_RATE', NaN) || 0.7,
+    eliteSize: envNumber('ELITE_SIZE', NaN) || 2
   });
 
   let cycleCount = 0;

@@ -15,14 +15,14 @@ import {
   acquirePaperSessionLock,
   assertNoConcurrentPaperSessions
 } from '../research/paperSessionConcurrency.js';
+import { envBool, envNumber, envRaw } from '../config/envConfig.js';
 
 dotenv.config();
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-const number = (value, fallback) => Number.isFinite(Number(value)) ? Number(value) : fallback;
 
 function resolveExplicitMarkets() {
-  const raw = process.env.SCALP_FORWARD_MARKETS || process.env.SCALP_VARIANT_MARKETS || '';
+  const raw = envRaw('SCALP_FORWARD_MARKETS') || envRaw('SCALP_VARIANT_MARKETS') || '';
   if (!raw || raw.trim().toUpperCase() === 'ALL') return null;
   return [...new Set(raw.split(',').map(market => market.trim().toUpperCase()).filter(Boolean))];
 }
@@ -36,9 +36,7 @@ async function resolveMarkets(upbit) {
     .filter(item => item.market?.startsWith('KRW-') && !excluded.has(item.market))
     .map(item => item.market);
   const tickers = await upbit.getTicker(markets);
-  const limit = number(
-    number(process.env.SCALP_VARIANT_MARKET_COUNT, 3)
-  );
+  const limit = envNumber('SCALP_VARIANT_MARKET_COUNT', 3);
   return (tickers || [])
     .filter(ticker => Number.isFinite(ticker?.acc_trade_price_24h))
     .sort((a, b) => b.acc_trade_price_24h - a.acc_trade_price_24h)
@@ -67,13 +65,13 @@ function writeJson(file, value) {
 }
 
 function createRunDirectory() {
-  const explicit = process.env.SCALP_FORWARD_VARIANT_OUTPUT_DIR;
+  const explicit = envRaw('SCALP_FORWARD_VARIANT_OUTPUT_DIR');
   const runDir = path.resolve(explicit || path.join(
     '.paper-forward-variants',
     `run-${Date.now()}`
   ));
   const manifestFile = path.join(runDir, 'variant_manifest.json');
-  if (fs.existsSync(manifestFile) && process.env.SCALP_FORWARD_VARIANT_RESET !== 'true') {
+  if (fs.existsSync(manifestFile) && !envBool('SCALP_FORWARD_VARIANT_RESET', false)) {
     throw new Error(`기존 variant run이 있습니다: ${manifestFile}. 새 output directory를 사용하세요.`);
   }
   fs.mkdirSync(runDir, { recursive: true });
@@ -102,24 +100,22 @@ export async function runForwardVariantSession({
 } = {}) {
   const { runDir, manifestFile } = createRunDirectory();
   const names = resolveForwardVariantNames(
-    process.env.SCALP_FORWARD_VARIANT_NAMES,
+    envRaw('SCALP_FORWARD_VARIANT_NAMES'),
     SCALPING_VARIANTS
   );
   const definitions = buildForwardVariantDefinitions(names, SCALPING_VARIANTS);
   const intervalMs = Math.max(
     1_000,
-    number(process.env.SCALP_FORWARD_VARIANT_INTERVAL_MS, 5_000)
+    envNumber('SCALP_FORWARD_VARIANT_INTERVAL_MS', 5_000)
   );
-  const candleUnit = Math.max(1, number(process.env.SCALP_CANDLE_UNIT, 1));
-  const candleCount = Math.max(50, number(process.env.SCALP_CANDLE_COUNT, 120));
-  const seedMoney = Math.max(5_000, number(
-    process.env.SCALP_FORWARD_VARIANT_SEED_MONEY,
-    number(process.env.PAPER_SMOKE_SEED_MONEY, 1_000_000)
+  const candleUnit = Math.max(1, envNumber('SCALP_CANDLE_UNIT', 1));
+  const candleCount = Math.max(50, envNumber('SCALP_CANDLE_COUNT', 120));
+  const seedMoney = Math.max(5_000, envNumber('SCALP_FORWARD_VARIANT_SEED_MONEY',
+    envNumber('PAPER_SMOKE_SEED_MONEY', 1_000_000)
   ));
   const configuredDuration = durationSeconds === null
-    ? number(
-      process.env.SCALP_FORWARD_VARIANT_SECONDS,
-      process.env.SCALP_FORWARD_VARIANT_MODE === 'true' ? 0 : 60
+    ? envNumber('SCALP_FORWARD_VARIANT_SECONDS',
+      envBool('SCALP_FORWARD_VARIANT_MODE', false) ? 0 : 60
     )
     : durationSeconds;
   let traders = [];
@@ -130,7 +126,7 @@ export async function runForwardVariantSession({
   let stopRequested = false;
 
   const upbit = new UpbitAPI('', '', {
-    requestTimeoutMs: number(process.env.UPBIT_REQUEST_TIMEOUT_MS, 10_000)
+    requestTimeoutMs: envNumber('UPBIT_REQUEST_TIMEOUT_MS', 10_000)
   });
   const markets = await resolveMarkets(upbit);
   if (markets.length === 0) throw new Error('forward variant 대상 market이 없습니다.');
@@ -175,8 +171,8 @@ export async function runForwardVariantSession({
       await trader.startPaperValidationSession({
         reset: true,
         seedMoney,
-        minDays: number(process.env.SCALP_PAPER_MIN_DAYS, 7),
-        minTrades: number(process.env.SCALP_PAPER_MIN_TRADES, 20)
+        minDays: envNumber('SCALP_PAPER_MIN_DAYS', 7),
+        minTrades: envNumber('SCALP_PAPER_MIN_TRADES', 20)
       });
       trader.paperValidation.researchVariant = {
         name,
