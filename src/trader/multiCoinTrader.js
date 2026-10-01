@@ -314,8 +314,13 @@ class MultiCoinTrader {
         .map(position => [position.market, position])
     );
     this._liveOrderStateUnknownMarkets = new Set(this.getLiveManagedMarkets());
+    // 복구 가능한 항목(미해결 주문/intent, 불완전 체결 기록)은 readback이
+    // 다시 기록을 써야 해소된다 — startup writer를 막으면 복구 자체가
+    // 불가능해진다. 시장 차단은 _liveEvidenceBlockedMarkets가 별도로 유지.
     const nonOrderStartupBlocks = this.liveExecutionEvidenceStartup.blockingReasons.filter(reason =>
-      !reason.startsWith('unresolved submitted orders:') && !reason.startsWith('unresolved order intents:'));
+      !reason.startsWith('unresolved submitted orders:') &&
+      !reason.startsWith('unresolved order intents:') &&
+      !reason.startsWith('incomplete fill records:'));
     if (nonOrderStartupBlocks.length > 0) {
       this.liveExecutionEvidenceDataError = `startup safety block: ${nonOrderStartupBlocks.join('; ')}`;
     }
