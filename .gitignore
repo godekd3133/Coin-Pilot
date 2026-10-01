@@ -33,3 +33,6 @@ optimal_config.json
 
 # Ignore vscode AI rules
 .github/instructions/codacy.instructions.md
+
+# Private app credentials baked into local builds (never commit)
+mobile/ios/App/LocalSecrets.json

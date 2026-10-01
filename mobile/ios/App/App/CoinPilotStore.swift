@@ -35,33 +35,99 @@ enum CoinPilotWorkspaceMode: String, CaseIterable, Identifiable, Equatable, Hash
 /// Info.plist에 빌드 타임으로 박는 선택적 서버 기본값. 개인용 앱이 주소/토큰
 /// 입력 없이 바로 서버에 붙도록 한다. 비어 있으면 기존 수동 입력 흐름이며,
 /// 저장된 주소/토큰이 있으면 그쪽이 항상 우선한다.
+/// Settings에서 한 탭으로 선택할 수 있는 미리 등록된 서버(거래소별 인스턴스 등).
+struct CoinPilotServerPreset: Equatable {
+    let label: String
+    let url: URL
+}
+
 struct CoinPilotBundledServerConfig {
     let paper: URL?
     let live: URL?
     let token: String?
+    /// secrets/plist의 paperServers/liveServers 배열. 기본값은 번들 주소 자체.
+    let paperPresets: [CoinPilotServerPreset]
+    let livePresets: [CoinPilotServerPreset]
 
-    static let none = CoinPilotBundledServerConfig(paper: nil, live: nil, token: nil)
+    static let none = CoinPilotBundledServerConfig(
+        paper: nil, live: nil, token: nil, paperPresets: [], livePresets: [])
+
+    init(
+        paper: URL? = nil,
+        live: URL? = nil,
+        token: String? = nil,
+        paperPresets: [CoinPilotServerPreset] = [],
+        livePresets: [CoinPilotServerPreset] = []
+    ) {
+        self.paper = paper
+        self.live = live
+        self.token = token
+        self.paperPresets = paperPresets
+        self.livePresets = livePresets
+    }
 
     static func load(bundle: Bundle = .main) -> Self {
-        func address(for key: String) -> URL? {
-            guard let raw = (bundle.object(forInfoDictionaryKey: key) as? String)?
-                .trimmingCharacters(in: .whitespacesAndNewlines),
-                  !raw.isEmpty,
-                  let parsed = URL(string: raw),
+        resolve(
+            secrets: secretsJSON(in: bundle),
+            plist: [
+                "paper": bundle.object(forInfoDictionaryKey: "CoinPilotPaperServerAddress") as? String,
+                "live": bundle.object(forInfoDictionaryKey: "CoinPilotLiveServerAddress") as? String,
+                "token": bundle.object(forInfoDictionaryKey: "CoinPilotDefaultToken") as? String
+            ].compactMapValues { $0 }
+        )
+    }
+
+    /// secrets(LocalSecrets.json)의 유효한 값이 plist(빌드 설정)보다 우선하고,
+    /// secrets 항목이 없거나 무효하면 plist 값으로 폴백한다.
+    static func resolve(secrets: [String: Any]?, plist: [String: Any]?) -> Self {
+        func address(_ raw: String?) -> URL? {
+            guard let trimmed = raw?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !trimmed.isEmpty,
+                  let parsed = URL(string: trimmed),
                   ServerAddressPolicy.allows(parsed) else { return nil }
             return parsed
         }
-        let rawToken = (bundle.object(forInfoDictionaryKey: "CoinPilotDefaultToken") as? String)?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        func token(_ raw: String?) -> String? {
+            let trimmed = raw?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return trimmed.isEmpty ? nil : trimmed
+        }
+        func presets(_ source: [String: Any]?, _ key: String, fallback: URL?) -> [CoinPilotServerPreset] {
+            let rows = (source?[key] as? [[String: Any]] ?? []).compactMap { row -> CoinPilotServerPreset? in
+                guard let url = address(row["url"] as? String) else { return nil }
+                let label = (row["label"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+                return CoinPilotServerPreset(label: label?.isEmpty == false ? label! : url.host ?? url.absoluteString, url: url)
+            }
+            if !rows.isEmpty { return rows }
+            return fallback.map { [CoinPilotServerPreset(label: $0.host ?? $0.absoluteString, url: $0)] } ?? []
+        }
+        let paper = address(secrets?["paper"] as? String) ?? address(plist?["paper"] as? String)
+        let live = address(secrets?["live"] as? String) ?? address(plist?["live"] as? String)
         return Self(
-            paper: address(for: "CoinPilotPaperServerAddress"),
-            live: address(for: "CoinPilotLiveServerAddress"),
-            token: rawToken?.isEmpty == false ? rawToken : nil
+            paper: paper,
+            live: live,
+            token: token(secrets?["token"] as? String) ?? token(plist?["token"] as? String),
+            paperPresets: presets(secrets, "paperServers", fallback: paper),
+            livePresets: presets(secrets, "liveServers", fallback: live)
         )
+    }
+
+    /// 개인 전용 자격증명 리소스. 빌드 스크립트가 LocalSecrets.json이 있을 때만 복사한다.
+    static func secretsJSON(in bundle: Bundle) -> [String: Any]? {
+        guard let url = bundle.url(forResource: "CoinPilotLocalSecrets", withExtension: "json"),
+              let data = try? Data(contentsOf: url, options: .mappedIfSafe),
+              data.count <= 16_384,
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        return object
     }
 
     func url(for workspace: CoinPilotWorkspaceMode) -> URL? {
         workspace == .live ? live : paper
+    }
+
+    func presets(for workspace: CoinPilotWorkspaceMode) -> [CoinPilotServerPreset] {
+        workspace == .live ? livePresets : paperPresets
     }
 }
 
@@ -583,7 +649,7 @@ final class CoinPilotAPIClient: CoinPilotAPIProviding, @unchecked Sendable {
             return range.contains(value)
         }
         let pathValue = components.path
-        if pathValue.range(of: "^/api/market/candles/KRW-[A-Z0-9]{2,15}$", options: .regularExpression) != nil {
+        if pathValue.range(of: "^/api/market/candles/[A-Z0-9]{2,10}-[A-Z0-9]{2,15}$", options: .regularExpression) != nil {
             guard hasOnlyQuery(["unit", "count"], required: ["unit", "count"]),
                   let unit = components.queryItems?.first(where: { $0.name == "unit" })?.value,
                   let count = components.queryItems?.first(where: { $0.name == "count" })?.value else { return false }
@@ -597,7 +663,7 @@ final class CoinPilotAPIClient: CoinPilotAPIProviding, @unchecked Sendable {
                   integerQuery("limit", 1...200) else { return false }
             return components.queryItems?.first(where: { $0.name == "source" })?.value.map { ["general", "system"].contains($0) } ?? true
         }
-        if pathValue.range(of: "^/api/news/KRW-[A-Z0-9]{2,15}$", options: .regularExpression) != nil {
+        if pathValue.range(of: "^/api/news/[A-Z0-9]{2,10}-[A-Z0-9]{2,15}$", options: .regularExpression) != nil {
             return hasOnlyQuery(["limit"]) && integerQuery("limit", 1...100, fallback: true)
         }
         if pathValue == "/api/ai/providers" {
@@ -619,7 +685,7 @@ final class CoinPilotAPIClient: CoinPilotAPIProviding, @unchecked Sendable {
         if pathValue.range(of: "^/api/backtest/results/[A-Z0-9_-]{1,40}$", options: .regularExpression) != nil {
             return queryItems.isEmpty
         }
-        if pathValue.range(of: "^/api/coin-detail/KRW-[A-Z0-9]{2,15}$", options: .regularExpression) != nil {
+        if pathValue.range(of: "^/api/coin-detail/[A-Z0-9]{2,10}-[A-Z0-9]{2,15}$", options: .regularExpression) != nil {
             return queryItems.isEmpty
         }
         if pathValue == "/api/logs" {
@@ -795,13 +861,15 @@ private final class CoinPilotTokenStore: CoinPilotTokenProviding {
 
     func save(_ token: String, for serverURL: URL) -> Bool {
         delete(for: serverURL)
-        let query: [String: Any] = [
+        var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: serverURL.absoluteString,
-            kSecValueData as String: Data(token.utf8),
-            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+            kSecValueData as String: Data(token.utf8)
         ]
+        #if canImport(UIKit)
+        query[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+        #endif
         return SecItemAdd(query as CFDictionary, nil) == errSecSuccess
     }
 
@@ -835,13 +903,15 @@ private final class CoinPilotKeychainPendingOrderStore: CoinPilotPendingOrderPro
 
     func save(_ data: Data, for serverURL: URL) -> Bool {
         guard clear(for: serverURL) else { return false }
-        let query: [String: Any] = [
+        var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: serverURL.absoluteString,
-            kSecValueData as String: data,
-            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+            kSecValueData as String: data
         ]
+        #if canImport(UIKit)
+        query[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+        #endif
         return SecItemAdd(query as CFDictionary, nil) == errSecSuccess
     }
 
@@ -1002,6 +1072,8 @@ struct CoinPilotStatus {
     let upbitCredentialsConfigured: Bool?
     let lastUpdate: String?
     let maxCandleAgeSeconds: Double?
+    let exchange: String?
+    let quoteCurrency: String?
 
     init(_ object: [String: Any]) {
         isRunning = object["isRunning"] as? Bool
@@ -1016,6 +1088,8 @@ struct CoinPilotStatus {
         liveManualPrepareOnBoot = object["liveManualPrepareOnBoot"] as? Bool
         upbitCredentialsConfigured = object["upbitCredentialsConfigured"] as? Bool
         lastUpdate = object["lastUpdate"] as? String
+        exchange = object["exchange"] as? String
+        quoteCurrency = object["quoteCurrency"] as? String
         let configuredMaxAge = (object["maxCandleAgeSeconds"] as? NSNumber)?.doubleValue
             ?? (object["maxCandleAgeSeconds"] as? String).flatMap(Double.init)
         maxCandleAgeSeconds = configuredMaxAge.flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
@@ -1274,7 +1348,7 @@ struct CoinPilotTrade: Identifiable {
     }
 
     private static func symbol(_ value: String) -> String? {
-        let symbol = value.replacingOccurrences(of: "KRW-", with: "")
+        let symbol = value.split(separator: "-").last.map(String.init) ?? value
         return symbol.isEmpty ? nil : symbol
     }
 
@@ -1743,6 +1817,9 @@ final class CoinPilotStore: ObservableObject {
     @Published private(set) var phase: CoinPilotScreenPhase = .connecting
     @Published private(set) var account: CoinPilotAccount?
     @Published private(set) var status: CoinPilotStatus?
+    @Published private(set) var serverExchange: String?
+    @Published private(set) var quoteCurrency = "KRW"
+
     @Published private(set) var pnl: CoinPilotPnL?
     @Published private(set) var todayRealizedProfit: Double?
     @Published private(set) var history: [CoinPilotHistoryPoint] = []
@@ -2488,6 +2565,10 @@ final class CoinPilotStore: ObservableObject {
                   let authRequired = body["authRequired"] as? Bool else {
                 throw CoinPilotAPIError.forStatusCode(response.statusCode)
             }
+            applyExchangeProfile(
+                exchange: body["exchange"] as? String,
+                quoteCurrency: body["quoteCurrency"] as? String
+            )
             authenticationRequired = authRequired
             guard authRequired else {
                 authenticationScope = .unauthenticated
@@ -2587,6 +2668,10 @@ final class CoinPilotStore: ObservableObject {
                   let authRequired = statusBody["authRequired"] as? Bool else {
                 throw CoinPilotAPIError.forStatusCode(statusResponse.statusCode)
             }
+            applyExchangeProfile(
+                exchange: statusBody["exchange"] as? String,
+                quoteCurrency: statusBody["quoteCurrency"] as? String
+            )
             authenticationRequired = authRequired
         if authRequired {
             let loginResponse = try await api.login(token: token, at: url)
@@ -2746,6 +2831,10 @@ final class CoinPilotStore: ObservableObject {
                   let authRequired = statusBody["authRequired"] as? Bool else {
                 throw CoinPilotAPIError.forStatusCode(statusResponse.statusCode)
             }
+            applyExchangeProfile(
+                exchange: statusBody["exchange"] as? String,
+                quoteCurrency: statusBody["quoteCurrency"] as? String
+            )
             guard authRequired else {
                 authenticationRequired = false
                 authenticationScope = .unauthenticated
@@ -3026,6 +3115,7 @@ final class CoinPilotStore: ObservableObject {
                 UserDefaults.standard.set(serverURL.absoluteString, forKey: Self.serverDefaultsKey)
             }
             status = newStatus
+            applyExchangeProfile(exchange: newStatus.exchange, quoteCurrency: newStatus.quoteCurrency)
             markResourceLoaded("status", at: updatedAt)
             successes += 1
         } else {
@@ -3130,7 +3220,7 @@ final class CoinPilotStore: ObservableObject {
             featureMessages.removeValue(forKey: "market-detail")
             offlineReplayMessage = nil
         }
-        guard selectedMarket.range(of: "^KRW-[A-Z0-9]{2,15}$", options: .regularExpression) != nil else {
+        guard selectedMarket.range(of: "^[A-Z0-9]{2,10}-[A-Z0-9]{2,15}$", options: .regularExpression) != nil else {
             featureMessages["market"] = "시장 코드를 확인해 주세요."
             candles = []
             marketCoinDetail = nil
@@ -4565,7 +4655,7 @@ final class CoinPilotStore: ObservableObject {
 
     func submitSmartBuy(totalAmount: Double, minimumScore: Int, maximumCoins: Int) async -> Bool {
         guard manualOrderBlockReason == nil else { orderMessage = manualOrderBlockReason; return false }
-        guard totalAmount.isFinite, totalAmount >= 5_000,
+        guard totalAmount.isFinite, totalAmount >= minimumOrderAmount,
               (0...100).contains(minimumScore), (1...30).contains(maximumCoins) else {
             orderMessage = "금액, 최소 점수, 최대 종목 수를 확인해 주세요."
             return false
@@ -4631,8 +4721,8 @@ final class CoinPilotStore: ObservableObject {
             return false
         }
         guard sellCoin != buyCoin,
-              sellCoin.range(of: "^KRW-[A-Z0-9]{2,15}$", options: .regularExpression) != nil,
-              buyCoin.range(of: "^KRW-[A-Z0-9]{2,15}$", options: .regularExpression) != nil else {
+              sellCoin.range(of: "^[A-Z0-9]{2,10}-[A-Z0-9]{2,15}$", options: .regularExpression) != nil,
+              buyCoin.range(of: "^[A-Z0-9]{2,10}-[A-Z0-9]{2,15}$", options: .regularExpression) != nil else {
             orderMessage = "매도·매수 종목을 확인해 주세요."
             return false
         }
@@ -4657,7 +4747,7 @@ final class CoinPilotStore: ObservableObject {
             orderMessage = "매도 수량이 현재 보유량을 넘었습니다. 새로고침 후 다시 확인해 주세요."
             return false
         }
-        if let buyAmount, (!buyAmount.isFinite || buyAmount < 5_000 || buyAmount > (holding.currentValue ?? 0)) {
+        if let buyAmount, (!buyAmount.isFinite || buyAmount < minimumOrderAmount || buyAmount > (holding.currentValue ?? 0)) {
             orderMessage = "매수 금액을 확인해 주세요. 매도 예상 금액 안에서 5,000원 이상이어야 합니다."
             return false
         }
@@ -4697,7 +4787,7 @@ final class CoinPilotStore: ObservableObject {
         var displayAmount = "보유량 전체"
         if action == "BUY" {
             let requested = amount ?? recommendation.suggestedAmount ?? 50_000
-            guard requested.isFinite, requested >= 5_000,
+            guard requested.isFinite, requested >= minimumOrderAmount,
                   let cash = account?.krwBalance, requested <= cash else {
                 orderMessage = "매수 금액이 최소 주문 금액보다 작거나 현재 잔액을 초과합니다."
                 return false
@@ -5145,6 +5235,9 @@ final class CoinPilotStore: ObservableObject {
     private func clearLoadedData() {
         account = nil
         status = nil
+        serverExchange = nil
+        quoteCurrency = "KRW"
+        CoinPilotFormatting.quoteSymbol = "₩"
         pnl = nil
         todayRealizedProfit = nil
         history = []
@@ -5316,6 +5409,20 @@ final class CoinPilotStore: ObservableObject {
         return requestGeneration
     }
 
+    private func applyExchangeProfile(exchange: String?, quoteCurrency quote: String?) {
+        serverExchange = exchange ?? serverExchange
+        if let quote, !quote.isEmpty {
+            quoteCurrency = quote
+            CoinPilotFormatting.quoteSymbol = quote == "KRW" ? "₩" : "$"
+        }
+    }
+
+    /// 최소 주문 금액 — 기준통화 단위. KRW 5,000 / USDT 계열 5.
+    var minimumOrderAmount: Double { quoteCurrency == "KRW" ? 5_000 : 5 }
+
+    /// 현재 워크스페이스의 번들 서버 프리셋 (거래소별 인스턴스 선택용).
+    var bundledServerPresets: [CoinPilotServerPreset] { bundledServers.presets(for: activeWorkspace) }
+
     private func markResourceLoaded(_ name: String, at date: Date) {
         lastSuccessfulResourceAt[name] = date
         resourceStates[name] = .current(at: date)
@@ -5358,22 +5465,25 @@ final class CoinPilotStore: ObservableObject {
 }
 
 enum CoinPilotFormatting {
+    /// 연결된 서버의 기준통화 표시 기호 — status/auth-status에서 갱신된다.
+    static var quoteSymbol = "₩"
+
     static func won(_ value: Double?, unavailable: String = "금액 미제공") -> String {
         guard let value, value.isFinite else { return unavailable }
         let sign = value < 0 ? "−" : ""
-        return "\(sign)₩\(number(abs(value), fractionDigits: 0))"
+        return "\(sign)\(quoteSymbol)\(number(abs(value), fractionDigits: 0))"
     }
 
     static func signedWon(_ value: Double?, unavailable: String = "손익 미제공") -> String {
         guard let value, value.isFinite else { return unavailable }
         let sign = value > 0 ? "+" : value < 0 ? "−" : ""
-        return "\(sign)₩\(number(abs(value), fractionDigits: 0))"
+        return "\(sign)\(quoteSymbol)\(number(abs(value), fractionDigits: 0))"
     }
 
     static func price(_ value: Double?) -> String {
         guard let value, value.isFinite else { return "시세 미제공" }
         let fractionDigits = value >= 1_000 ? 0 : value >= 1 ? 2 : 6
-        return "₩\(number(value, fractionDigits: fractionDigits))"
+        return "\(quoteSymbol)\(number(value, fractionDigits: fractionDigits))"
     }
 
     static func percent(_ value: Double?, signed: Bool = true, unavailable: String = "변동률 미제공") -> String {
@@ -5494,7 +5604,7 @@ enum CoinPilotFormatting {
 
     static func symbol(_ coin: String?) -> String {
         guard let coin else { return "자산 미제공" }
-        let symbol = coin.replacingOccurrences(of: "KRW-", with: "")
+        let symbol = coin.split(separator: "-").last.map(String.init) ?? coin
         switch symbol {
         case "BTC": return "비트코인"
         case "ETH": return "이더리움"
@@ -5505,7 +5615,7 @@ enum CoinPilotFormatting {
 
     static func ticker(_ coin: String?) -> String {
         guard let coin else { return "—" }
-        return coin.replacingOccurrences(of: "KRW-", with: "")
+        return coin.split(separator: "-").last.map(String.init) ?? coin
     }
 
     private static func parseDate(_ value: String) -> Date? {

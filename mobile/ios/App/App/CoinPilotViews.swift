@@ -26,9 +26,9 @@ struct CoinPilotNativeRootView: View {
                 NavigationView {
                     CoinPilotLocalMarketView(store: store)
                         .navigationTitle("시장")
-                        .navigationBarTitleDisplayMode(.inline)
+                        .cpInlineTitle()
                 }
-                .navigationViewStyle(StackNavigationViewStyle())
+                .cpStackNavigation()
             } else if store.phase == .dashboard && store.serverModeMatchesWorkspace {
                 CoinPilotTabView(store: store)
             } else if !store.didFinishInitialConnect {
@@ -183,9 +183,9 @@ private struct CoinPilotConnectionView: View {
                 VStack(alignment: .leading, spacing: 10) {
                     FieldTitle(title: "서버 주소")
                     TextField("https://example.com", text: $store.serverDraft)
-                        .keyboardType(.URL)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled(true)
+                        .cpKeyboardURL()
+                        .cpNoAutocapitalization()
+                        .cpNoAutocorrection()
                         .textFieldStyle(.plain)
                         .font(.body)
                         .padding(.horizontal, 15)
@@ -203,8 +203,8 @@ private struct CoinPilotConnectionView: View {
                     VStack(alignment: .leading, spacing: 10) {
                         FieldTitle(title: "서버 토큰")
                         SecureField("토큰 입력", text: $store.tokenDraft)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled(true)
+                            .cpNoAutocapitalization()
+                            .cpNoAutocorrection()
                             .textFieldStyle(.plain)
                             .font(.body)
                             .padding(.horizontal, 15)
@@ -342,10 +342,10 @@ private struct CoinPilotTabView: View {
             NavigationView {
                 CoinPilotHomeView(store: store)
                     .navigationTitle("홈")
-                    .navigationBarTitleDisplayMode(.inline)
+                    .cpInlineTitle()
                     .toolbar { workspaceToolbar; refreshToolbar }
             }
-            .navigationViewStyle(StackNavigationViewStyle())
+            .cpStackNavigation()
             .modifier(CoinPilotTabBarContentInset())
             .tabItem { Label("홈", systemImage: "house") }
             .tag(0)
@@ -353,10 +353,10 @@ private struct CoinPilotTabView: View {
             NavigationView {
                 CoinPilotTradingView(store: store)
                     .navigationTitle("주문")
-                    .navigationBarTitleDisplayMode(.inline)
+                    .cpInlineTitle()
                     .toolbar { workspaceToolbar; refreshToolbar }
             }
-            .navigationViewStyle(StackNavigationViewStyle())
+            .cpStackNavigation()
             .modifier(CoinPilotTabBarContentInset())
             .tabItem { Label("주문", systemImage: "arrow.left.arrow.right") }
             .tag(1)
@@ -364,10 +364,10 @@ private struct CoinPilotTabView: View {
             NavigationView {
                 CoinPilotAssetsView(store: store)
                     .navigationTitle("보유 자산")
-                    .navigationBarTitleDisplayMode(.inline)
+                    .cpInlineTitle()
                     .toolbar { workspaceToolbar; refreshToolbar }
             }
-            .navigationViewStyle(StackNavigationViewStyle())
+            .cpStackNavigation()
             .modifier(CoinPilotTabBarContentInset())
             .tabItem { Label("자산", systemImage: "chart.pie") }
             .tag(2)
@@ -375,10 +375,10 @@ private struct CoinPilotTabView: View {
             NavigationView {
                 CoinPilotDiscoverView(store: store)
                     .navigationTitle("시장")
-                    .navigationBarTitleDisplayMode(.inline)
+                    .cpInlineTitle()
                     .toolbar { workspaceToolbar; refreshToolbar }
             }
-            .navigationViewStyle(StackNavigationViewStyle())
+            .cpStackNavigation()
             .modifier(CoinPilotTabBarContentInset())
             .tabItem { Label("탐색", systemImage: "chart.xyaxis.line") }
             .tag(3)
@@ -386,10 +386,10 @@ private struct CoinPilotTabView: View {
             NavigationView {
                 CoinPilotMoreView(store: store)
                     .navigationTitle("전체 기능")
-                    .navigationBarTitleDisplayMode(.inline)
+                    .cpInlineTitle()
                     .toolbar { workspaceToolbar }
             }
-            .navigationViewStyle(StackNavigationViewStyle())
+            .cpStackNavigation()
             .modifier(CoinPilotTabBarContentInset())
             .tabItem { Label("더보기", systemImage: "square.grid.2x2") }
             .tag(4)
@@ -397,7 +397,7 @@ private struct CoinPilotTabView: View {
     }
 
     private var refreshToolbar: some ToolbarContent {
-        ToolbarItem(placement: .navigationBarTrailing) {
+        ToolbarItem(placement: .cpTrailing) {
             Button {
                 Task { await store.refresh() }
             } label: {
@@ -409,7 +409,7 @@ private struct CoinPilotTabView: View {
     }
 
     private var workspaceToolbar: some ToolbarContent {
-        ToolbarItem(placement: .navigationBarLeading) {
+        ToolbarItem(placement: .cpLeading) {
             Menu {
                 ForEach(CoinPilotWorkspaceMode.allCases) { mode in
                     Button {
@@ -532,7 +532,7 @@ private struct CoinPilotTradingView: View {
     private var orderDraftIsValid: Bool {
         guard !market.isEmpty else { return false }
         if side == .buy {
-            guard let amount = parsedBuyAmount, amount.isFinite, amount >= 5_000,
+            guard let amount = parsedBuyAmount, amount.isFinite, amount >= store.minimumOrderAmount,
                   let balance = store.account?.krwBalance, balance.isFinite, amount <= balance else { return false }
             return true
         }
@@ -731,18 +731,18 @@ private struct CoinPilotTradingView: View {
                 .pickerStyle(SegmentedPickerStyle())
                 FieldTitle(title: smartSide == .buy ? "총 투자 금액 (원)" : "목표 매도 금액 (원)")
                 TextField("금액 입력", text: $smartAmount)
-                    .keyboardType(.numberPad)
+                    .cpKeyboardNumberPad()
                     .textFieldStyle(.roundedBorder)
                     .accessibilityLabel(smartSide == .buy ? "조건 매수 총 투자 금액" : "조건 매도 목표 금액")
                 if smartSide == .buy {
                     HStack(spacing: 12) {
                         VStack(alignment: .leading, spacing: 5) {
                             Text("최소 신호 점수").font(.caption).foregroundColor(CoinPilotColors.secondaryInk)
-                            TextField("60", text: $smartMinimumScore).keyboardType(.numberPad).textFieldStyle(.roundedBorder)
+                            TextField("60", text: $smartMinimumScore).cpKeyboardNumberPad().textFieldStyle(.roundedBorder)
                         }
                         VStack(alignment: .leading, spacing: 5) {
                             Text("최대 종목 수").font(.caption).foregroundColor(CoinPilotColors.secondaryInk)
-                            TextField("10", text: $smartMaximumCoins).keyboardType(.numberPad).textFieldStyle(.roundedBorder)
+                            TextField("10", text: $smartMaximumCoins).cpKeyboardNumberPad().textFieldStyle(.roundedBorder)
                         }
                     }
                     Text("서버가 거래량 상위 종목을 분석해 잔액 범위 안에서 나눠 주문합니다. 조건을 충족한 종목이 없을 때는 서버 기준의 상위 후보가 사용될 수 있습니다.")
@@ -895,13 +895,28 @@ private struct CoinPilotTradingView: View {
                 if availableMarkets.isEmpty {
                     EmptyMessage(text: side == .buy ? "시세 종목을 불러오면 매수할 수 있습니다." : "매도할 보유 자산이 없습니다.")
                 } else {
-                    Picker("종목", selection: $market) {
-                        ForEach(availableMarkets, id: \.self) { coin in
-                            Text("\(CoinPilotFormatting.symbol(coin)) · \(CoinPilotFormatting.ticker(coin))").tag(coin)
+                    HStack {
+                        Picker("종목", selection: $market) {
+                            ForEach(availableMarkets, id: \.self) { coin in
+                                Text("\(CoinPilotFormatting.symbol(coin)) · \(CoinPilotFormatting.ticker(coin))").tag(coin)
+                            }
+                        }
+                        .pickerStyle(MenuPickerStyle())
+                        .accessibilityLabel("주문 종목")
+                        if !store.isBundledPreview && !store.isBundledLocalMarketData,
+                           market.range(of: "^KRW-[A-Z0-9]{2,15}$", options: .regularExpression) != nil {
+                            NavigationLink(destination: CoinPilotMarketDetailView(store: store, coin: market)) {
+                                Label("시세", systemImage: "chart.line.uptrend.xyaxis")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundColor(CoinPilotColors.blue)
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 6)
+                                    .background(CoinPilotColors.blue.opacity(0.08))
+                                    .clipShape(Capsule())
+                            }
+                            .buttonStyle(PlainButtonStyle())
                         }
                     }
-                    .pickerStyle(MenuPickerStyle())
-                    .accessibilityLabel("주문 종목")
 
                     HStack {
                         Text("현재가")
@@ -914,9 +929,9 @@ private struct CoinPilotTradingView: View {
                     }
 
                     if side == .buy {
-                        FieldTitle(title: "매수 금액 (KRW)")
-                        TextField("최소 5,000원", text: $buyAmount)
-                            .keyboardType(.numberPad)
+                        FieldTitle(title: "매수 금액 (\(store.quoteCurrency))")
+                        TextField("최소 \(CoinPilotFormatting.won(store.minimumOrderAmount))", text: $buyAmount)
+                            .cpKeyboardNumberPad()
                             .textFieldStyle(.plain)
                             .padding(.horizontal, 14)
                             .frame(minHeight: 50)
@@ -930,10 +945,24 @@ private struct CoinPilotTradingView: View {
                                     .foregroundColor(CoinPilotColors.blue)
                             }
                         }
+                        if let balance = store.account?.krwBalance, balance >= store.minimumOrderAmount {
+                            HStack(spacing: 8) {
+                                Text("잔고")
+                                    .font(.caption)
+                                    .foregroundColor(CoinPilotColors.secondaryInk)
+                                ForEach([25.0, 50.0, 100.0], id: \.self) { percent in
+                                    Button("\(Int(percent))%") {
+                                        buyAmount = String(Int((balance * percent / 100).rounded(.down)))
+                                    }
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundColor(CoinPilotColors.blue)
+                                }
+                            }
+                        }
                         Text("사용 가능 잔액 · \(CoinPilotFormatting.won(store.account?.krwBalance, unavailable: "확인 불가"))")
                             .font(.caption)
                             .foregroundColor(CoinPilotColors.secondaryInk)
-                        if let amount = parsedBuyAmount, amount.isFinite, amount >= 5_000,
+                        if let amount = parsedBuyAmount, amount.isFinite, amount >= store.minimumOrderAmount,
                            let price = currentPrice, price.isFinite, price > 0 {
                             Text("예상 수량 약 \(CoinPilotFormatting.quantity(amount * 0.9995 / price))개 · 수수료 0.05% 반영 추정")
                                 .font(.caption)
@@ -942,7 +971,7 @@ private struct CoinPilotTradingView: View {
                     } else {
                         FieldTitle(title: "매도 수량")
                         TextField("보유 수량", text: $sellQuantity)
-                            .keyboardType(.decimalPad)
+                            .cpKeyboardDecimalPad()
                             .textFieldStyle(.plain)
                             .padding(.horizontal, 14)
                             .frame(minHeight: 50)
@@ -1030,7 +1059,7 @@ private struct CoinPilotTradingView: View {
                     .fixedSize(horizontal: false, vertical: true)
                 if !store.isBundledPreview {
                     TextField("입금·출금 금액 (원)", text: $walletAmount)
-                        .keyboardType(.numberPad)
+                        .cpKeyboardNumberPad()
                         .textFieldStyle(.plain)
                         .padding(.horizontal, 14)
                         .frame(minHeight: 46)
@@ -1047,7 +1076,7 @@ private struct CoinPilotTradingView: View {
                     }
                     Divider().overlay(CoinPilotColors.line)
                     TextField("초기 잔액 (원)", text: $resetSeedMoney)
-                        .keyboardType(.numberPad)
+                        .cpKeyboardNumberPad()
                         .textFieldStyle(.plain)
                         .padding(.horizontal, 14)
                         .frame(minHeight: 46)
@@ -1287,8 +1316,8 @@ private struct CoinPilotLiveCredentialSetupView: View {
                 VStack(alignment: .leading, spacing: 7) {
                     FieldTitle(title: "Access Key")
                     SecureField("Access Key 입력", text: $store.liveAccessKeyDraft)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled(true)
+                        .cpNoAutocapitalization()
+                        .cpNoAutocorrection()
                         .textFieldStyle(.plain)
                         .font(.body)
                         .padding(.horizontal, 14)
@@ -1302,8 +1331,8 @@ private struct CoinPilotLiveCredentialSetupView: View {
                 VStack(alignment: .leading, spacing: 7) {
                     FieldTitle(title: "Secret Key")
                     SecureField("Secret Key 입력", text: $store.liveSecretKeyDraft)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled(true)
+                        .cpNoAutocapitalization()
+                        .cpNoAutocorrection()
                         .textFieldStyle(.plain)
                         .font(.body)
                         .padding(.horizontal, 14)
@@ -2341,7 +2370,18 @@ private struct CoinPilotAssetsView: View {
                 }
                 NativeCard {
                     VStack(alignment: .leading, spacing: 7) {
-                        SectionHeading(title: "보유 코인")
+                        HStack(alignment: .firstTextBaseline) {
+                            SectionHeading(title: "보유 코인")
+                            Spacer()
+                            if !sortedPositions.isEmpty {
+                                let valued = sortedPositions.compactMap(\.currentValue)
+                                let summary = valued.isEmpty ? "평가 미확인" : "평가 \(CoinPilotFormatting.won(valued.reduce(0, +)))"
+                                Text("\(sortedPositions.count)종목 · \(summary)")
+                                    .font(.caption)
+                                    .foregroundColor(CoinPilotColors.secondaryInk)
+                                    .monospacedDigit()
+                            }
+                        }
                         if !store.hasLoadedResource("account") {
                             EmptyMessage(text: store.emptyResourceMessage(for: "account", whenLoadedEmpty: "보유 중인 코인이 없습니다."))
                         } else if store.account?.hasPositionsField != true {
@@ -2442,6 +2482,11 @@ private struct CoinPilotAssetsView: View {
 
 private struct CoinPilotActivityView: View {
     @ObservedObject var store: CoinPilotStore
+    @State private var actionFilter = "전체"
+
+    private var filteredTrades: [CoinPilotTrade] {
+        actionFilter == "전체" ? store.trades : store.trades.filter { $0.action == actionFilter }
+    }
 
     var body: some View {
         ScrollView {
@@ -2465,18 +2510,25 @@ private struct CoinPilotActivityView: View {
                         EmptyMessage(text: store.emptyResourceMessage(for: "trades", whenLoadedEmpty: "아직 거래 내역이 없습니다."))
                     }
                 } else {
+                    Picker("거래 종류", selection: $actionFilter) {
+                        ForEach(["전체", "매수", "매도"], id: \.self) { Text($0).tag($0) }
+                    }
+                    .pickerStyle(SegmentedPickerStyle())
+                    .accessibilityLabel("거래 종류 필터")
                     NativeCard {
                         VStack(alignment: .leading, spacing: 8) {
-                            let buyCount = store.trades.filter { $0.action == "매수" }.count
-                            let sellCount = store.trades.filter { $0.action == "매도" }.count
-                            let profitValues = store.trades.compactMap(\.profit)
+                            let buyCount = filteredTrades.filter { $0.action == "매수" }.count
+                            let sellCount = filteredTrades.filter { $0.action == "매도" }.count
+                            let profitValues = filteredTrades.compactMap(\.profit)
                             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                                Text("표시된 거래 \(store.trades.count)건")
+                                Text("\(actionFilter == "전체" ? "표시된" : actionFilter) 거래 \(filteredTrades.count)건")
                                     .font(.subheadline.weight(.semibold))
                                     .foregroundColor(CoinPilotColors.ink)
-                                Text("매수 \(buyCount) · 매도 \(sellCount)")
-                                    .font(.caption)
-                                    .foregroundColor(CoinPilotColors.secondaryInk)
+                                if actionFilter == "전체" {
+                                    Text("매수 \(buyCount) · 매도 \(sellCount)")
+                                        .font(.caption)
+                                        .foregroundColor(CoinPilotColors.secondaryInk)
+                                }
                                 Spacer()
                                 if !profitValues.isEmpty {
                                     Text("실현 손익 \(CoinPilotFormatting.signedWon(profitValues.reduce(0, +)))")
@@ -2492,10 +2544,14 @@ private struct CoinPilotActivityView: View {
                     }
                     NativeCard {
                         VStack(spacing: 0) {
-                            ForEach(store.trades) { trade in
-                                TradeRow(trade: trade)
-                                if trade.id != store.trades.last?.id {
-                                    Divider().overlay(CoinPilotColors.line)
+                            if filteredTrades.isEmpty {
+                                EmptyMessage(text: "\(actionFilter) 내역이 없습니다.")
+                            } else {
+                                ForEach(filteredTrades) { trade in
+                                    TradeRow(trade: trade)
+                                    if trade.id != filteredTrades.last?.id {
+                                        Divider().overlay(CoinPilotColors.line)
+                                    }
                                 }
                             }
                         }
@@ -2590,6 +2646,13 @@ private struct CoinPilotSettingsView: View {
                             Text("서버 가동 상태를 확인하는 중입니다.")
                                 .font(.subheadline).foregroundColor(CoinPilotColors.secondaryInk)
                         } else {
+                            SettingsRow(
+                                title: "거래소",
+                                value: store.serverExchange == "binance"
+                                    ? "Binance (\(store.quoteCurrency) 기준)"
+                                    : "Upbit (KRW 기준)",
+                                symbol: "building.columns"
+                            )
                             SettingsRow(
                                 title: "가동 시간",
                                 value: (store.systemStatus["uptimeFormatted"] as? String) ?? "확인 불가",
@@ -2760,16 +2823,35 @@ private struct CoinPilotSettingsView: View {
     }
 }
 
+private enum CoinPilotMarketSort: String, CaseIterable {
+    case volume, change, price, name
+
+    var title: String {
+        switch self {
+        case .volume: return "거래대금"
+        case .change: return "등락률"
+        case .price: return "가격"
+        case .name: return "이름"
+        }
+    }
+}
+
 private struct CoinPilotDiscoverView: View {
     @ObservedObject var store: CoinPilotStore
     @State private var search = ""
+    @State private var sort: CoinPilotMarketSort = .volume
 
     private var visibleMarkets: [CoinPilotMarketPrice] {
         let source = store.markets.filter { market in
             guard let coin = market.coin else { return false }
             return search.isEmpty || coin.localizedCaseInsensitiveContains(search)
         }
-        return source.sorted { ($0.volumeKrw ?? 0) > ($1.volumeKrw ?? 0) }
+        switch sort {
+        case .volume: return source.sorted { ($0.volumeKrw ?? 0) > ($1.volumeKrw ?? 0) }
+        case .change: return source.sorted { ($0.change ?? -.greatestFiniteMagnitude) > ($1.change ?? -.greatestFiniteMagnitude) }
+        case .price: return source.sorted { ($0.price ?? 0) > ($1.price ?? 0) }
+        case .name: return source.sorted { CoinPilotFormatting.symbol($0.coin) < CoinPilotFormatting.symbol($1.coin) }
+        }
     }
 
     var body: some View {
@@ -2792,8 +2874,8 @@ private struct CoinPilotDiscoverView: View {
                                 .font(.subheadline)
                                 .foregroundColor(CoinPilotColors.secondaryInk)
                             TextField("종목 검색 · BTC, ETH", text: $search)
-                                .textInputAutocapitalization(.characters)
-                                .autocorrectionDisabled(true)
+                                .cpAutocapitalizeCharacters()
+                                .cpNoAutocorrection()
                                 .textFieldStyle(.plain)
                             if !search.isEmpty {
                                 Button {
@@ -2809,6 +2891,20 @@ private struct CoinPilotDiscoverView: View {
                         .frame(minHeight: 44)
                         .background(CoinPilotColors.paper)
                         .clipShape(RoundedRectangle(cornerRadius: 11))
+                        HStack {
+                            Picker("정렬", selection: $sort) {
+                                ForEach(CoinPilotMarketSort.allCases, id: \.self) { option in
+                                    Text(option.title).tag(option)
+                                }
+                            }
+                            .pickerStyle(MenuPickerStyle())
+                            .font(.caption.weight(.semibold))
+                            .accessibilityLabel("시장 정렬 기준")
+                            Spacer()
+                            Text("\(visibleMarkets.count)개 시장")
+                                .font(.caption)
+                                .foregroundColor(CoinPilotColors.secondaryInk)
+                        }
                         if visibleMarkets.isEmpty {
                             EmptyMessage(text: store.emptyResourceMessage(for: "market-prices", whenLoadedEmpty: "표시할 종목이 없습니다."))
                         } else {
@@ -2820,7 +2916,7 @@ private struct CoinPilotDiscoverView: View {
                                                 market: item.element,
                                                 isBundledPreview: store.isBundledPreview,
                                                 maximumAgeSeconds: store.marketPriceMaximumAgeSeconds,
-                                                rank: item.offset + 1
+                                                rank: sort == .volume ? item.offset + 1 : nil
                                             )
                                         }
                                         .buttonStyle(PlainButtonStyle())
@@ -2918,8 +3014,8 @@ private struct CoinPilotLocalMarketView: View {
                                     .font(.subheadline)
                                     .foregroundColor(CoinPilotColors.secondaryInk)
                                 TextField("시장 검색 · BTC, ETH", text: $search)
-                                    .textInputAutocapitalization(.characters)
-                                    .autocorrectionDisabled(true)
+                                    .cpAutocapitalizeCharacters()
+                                    .cpNoAutocorrection()
                                     .textFieldStyle(.plain)
                                 if !search.isEmpty {
                                     Button {
@@ -3224,7 +3320,7 @@ private struct CoinPilotLocalMarketDetailView: View {
         }
         .background(CoinPilotColors.paper.ignoresSafeArea())
         .navigationTitle(CoinPilotFormatting.ticker(marketCode))
-        .navigationBarTitleDisplayMode(.inline)
+        .cpInlineTitle()
         .task { await store.loadMarketDetail(coin: marketCode, interval: selectedInterval) }
         .task(id: playbackTaskID) {
             guard scenePhase == .active,
@@ -3253,14 +3349,14 @@ private struct CoinPilotLocalMarketDetailView: View {
                 NavigationView {
                     CoinPilotOfflineReplayResultView(result: result)
                         .navigationTitle("과거 시세 재생")
-                        .navigationBarTitleDisplayMode(.inline)
+                        .cpInlineTitle()
                         .toolbar {
-                            ToolbarItem(placement: .navigationBarTrailing) {
+                            ToolbarItem(placement: .cpTrailing) {
                                 Button("닫기") { showsOfflineReplayResult = false }
                             }
                         }
                 }
-                .navigationViewStyle(StackNavigationViewStyle())
+                .cpStackNavigation()
             }
         }
     }
@@ -3760,7 +3856,38 @@ private struct CoinPilotMarketDetailView: View {
                    !store.isBundledPreview, !store.isBundledLocalMarketData {
                     NativeCard {
                         VStack(alignment: .leading, spacing: 12) {
-                            SectionHeading(title: "보유 · 지표 · 주문 한도")
+                            HStack {
+                                SectionHeading(title: "보유 · 지표 · 주문 한도")
+                                Spacer()
+                                Button {
+                                    Task { await store.loadMarketDetail(coin: coin) }
+                                } label: {
+                                    Image(systemName: "arrow.clockwise")
+                                        .font(.callout.weight(.semibold))
+                                        .foregroundColor(CoinPilotColors.blue)
+                                        .frame(minWidth: 44, minHeight: 30)
+                                        .contentShape(Rectangle())
+                                }
+                                .accessibilityLabel("종목 상세 다시 불러오기")
+                            }
+                            HStack(spacing: 12) {
+                                detailRow("현재가", CoinPilotFormatting.price(detail.currentPrice))
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text("24시간 등락")
+                                        .font(.caption2)
+                                        .foregroundColor(CoinPilotColors.secondaryInk)
+                                    Text(CoinPilotFormatting.percent(detail.change24hPercent))
+                                        .font(.subheadline.weight(.semibold))
+                                        .monospacedDigit()
+                                        .foregroundColor(profitColor(detail.change24hPercent))
+                                }
+                            }
+                            HStack(spacing: 12) {
+                                detailRow("24시간 고가", CoinPilotFormatting.price(detail.high24h))
+                                detailRow("24시간 저가", CoinPilotFormatting.price(detail.low24h))
+                                detailRow("24시간 거래대금", CoinPilotFormatting.compactWon(detail.volume24h))
+                            }
+                            Divider().overlay(CoinPilotColors.line)
                             if detail.hasHolding {
                                 detailRow("보유 수량", CoinPilotFormatting.quantity(detail.holdingAmount))
                                 detailRow("평균 매입가", CoinPilotFormatting.price(detail.holdingAvgPrice))
@@ -3815,7 +3942,7 @@ private struct CoinPilotMarketDetailView: View {
         }
         .background(CoinPilotColors.paper.ignoresSafeArea())
         .navigationTitle(CoinPilotFormatting.ticker(coin))
-        .navigationBarTitleDisplayMode(.inline)
+        .cpInlineTitle()
                         .task { await store.loadMarketDetail(coin: coin) }
     }
 
@@ -4272,7 +4399,7 @@ private struct CoinPilotAnalysisView: View {
         }
         .background(CoinPilotColors.paper.ignoresSafeArea())
         .navigationTitle("전략 분석")
-        .navigationBarTitleDisplayMode(.inline)
+        .cpInlineTitle()
         .task { if store.analysisResults.isEmpty { await store.loadAnalysisFeatures() } }
     }
 
@@ -4336,7 +4463,7 @@ private struct CoinPilotMoreView: View {
                 NativeCard {
                     VStack(alignment: .leading, spacing: 12) {
                         SectionHeading(title: "기록과 자산")
-                        NavigationLink(destination: CoinPilotActivityView(store: store).navigationTitle("거래 내역").navigationBarTitleDisplayMode(.inline)) {
+                        NavigationLink(destination: CoinPilotActivityView(store: store).navigationTitle("거래 내역").cpInlineTitle()) {
                             FeatureMenuRow(title: "거래 내역", detail: "서버에 저장된 자동·수동 거래", symbol: "clock.arrow.circlepath")
                         }
                         Divider().overlay(CoinPilotColors.line)
@@ -4360,7 +4487,7 @@ private struct CoinPilotMoreView: View {
                             FeatureMenuRow(title: "전략 프리셋", detail: "서버에 저장된 투자 설정 적용", symbol: "square.stack.3d.up")
                         }
                         Divider().overlay(CoinPilotColors.line)
-                        NavigationLink(destination: CoinPilotSettingsView(store: store).navigationTitle("설정").navigationBarTitleDisplayMode(.inline)) {
+                        NavigationLink(destination: CoinPilotSettingsView(store: store).navigationTitle("설정").cpInlineTitle()) {
                             FeatureMenuRow(title: "설정", detail: "실거래·모의투자 서버, 튜닝, 앱 권한", symbol: "gearshape")
                         }
                     }
@@ -4481,7 +4608,7 @@ private struct CoinPilotNewsView: View {
         }
         .background(CoinPilotColors.paper.ignoresSafeArea())
         .navigationTitle("뉴스")
-        .navigationBarTitleDisplayMode(.inline)
+        .cpInlineTitle()
         .refreshFeatureWhenVisible(enabled: store.canOperate) { await store.loadNewsIfStale() }
     }
 
@@ -4563,8 +4690,8 @@ private struct CoinPilotAIDeskView: View {
                         Toggle("Claude", isOn: providerBinding("claude"))
                             .font(.subheadline).tint(CoinPilotColors.blue)
                         TextField("종목 제한 · BTC, ETH · 비우면 전체", text: $coins)
-                            .textInputAutocapitalization(.characters)
-                            .autocorrectionDisabled(true)
+                            .cpAutocapitalizeCharacters()
+                            .cpNoAutocorrection()
                             .textFieldStyle(.roundedBorder)
                         ForEach(Array(eventOptions.enumerated()), id: \.offset) { item in
                             let value = item.element.0
@@ -4768,7 +4895,7 @@ private struct CoinPilotAIDeskView: View {
         }
         .background(CoinPilotColors.paper.ignoresSafeArea())
         .navigationTitle("AI 자문")
-        .navigationBarTitleDisplayMode(.inline)
+        .cpInlineTitle()
         .refreshFeatureWhenVisible(enabled: store.canOperate) { await store.loadAIDeskIfStale() }
     }
 
@@ -5008,7 +5135,7 @@ private struct CoinPilotAccountAnalyticsView: View {
         }
         .background(CoinPilotColors.paper.ignoresSafeArea())
         .navigationTitle("포트폴리오 분석")
-        .navigationBarTitleDisplayMode(.inline)
+        .cpInlineTitle()
         .refreshFeatureWhenVisible(enabled: store.canOperate) { await store.loadAccountAnalyticsIfStale() }
     }
 
@@ -5244,7 +5371,7 @@ private struct CoinPilotResearchDeskView: View {
         }
         .background(CoinPilotColors.paper.ignoresSafeArea())
         .navigationTitle("주문 전 점검")
-        .navigationBarTitleDisplayMode(.inline)
+        .cpInlineTitle()
         .confirmationDialog(
             requestedPaperAction == true ? "모의투자 점검을 시작할까요?" : "모의투자 점검을 중지할까요?",
             isPresented: Binding(get: { requestedPaperAction != nil }, set: { if !$0 { requestedPaperAction = nil } }),
@@ -5386,7 +5513,7 @@ private struct CoinPilotOptimizationView: View {
         }
         .background(CoinPilotColors.paper.ignoresSafeArea())
         .navigationTitle("설정 후보 비교")
-        .navigationBarTitleDisplayMode(.inline)
+        .cpInlineTitle()
         .refreshFeatureWhenVisible(enabled: store.canOperate) { _ = await store.loadOptimizationIfStale() }
     }
 }
@@ -5424,7 +5551,7 @@ private struct CoinPilotPresetView: View {
         }
         .background(CoinPilotColors.paper.ignoresSafeArea())
         .navigationTitle("전략 프리셋")
-        .navigationBarTitleDisplayMode(.inline)
+        .cpInlineTitle()
         .confirmationDialog(
             requestedPreset?["name"] as? String ?? "프리셋 적용",
             isPresented: Binding(get: { requestedPreset != nil }, set: { if !$0 { requestedPreset = nil } }),
@@ -5555,8 +5682,8 @@ private struct CoinPilotTuningEditor: View {
                                         .font(.body.weight(.medium))
                                         .foregroundColor(CoinPilotColors.ink)
                                     TextField("KRW-BTC, KRW-ETH 또는 ALL", text: $universeDraft)
-                                        .textInputAutocapitalization(.never)
-                                        .autocorrectionDisabled(true)
+                                        .cpNoAutocapitalization()
+                                        .cpNoAutocorrection()
                                         .multilineTextAlignment(.leading)
                                         .textFieldStyle(.plain)
                                         .frame(minHeight: 38)
@@ -5574,7 +5701,7 @@ private struct CoinPilotTuningEditor: View {
                                         .font(.body.weight(.medium))
                                         .foregroundColor(CoinPilotColors.ink)
                                     TextField("20", text: $scalpMaxMarketsDraft)
-                                        .keyboardType(.numberPad)
+                                        .cpKeyboardNumberPad()
                                         .multilineTextAlignment(.trailing)
                                         .textFieldStyle(.plain)
                                         .frame(width: 106)
@@ -5591,7 +5718,7 @@ private struct CoinPilotTuningEditor: View {
                                         .font(.body.weight(.medium))
                                         .foregroundColor(CoinPilotColors.ink)
                                     TextField("3", text: $maxPositionsDraft)
-                                        .keyboardType(.numberPad)
+                                        .cpKeyboardNumberPad()
                                         .multilineTextAlignment(.trailing)
                                         .textFieldStyle(.plain)
                                         .frame(width: 106)
@@ -5622,12 +5749,12 @@ private struct CoinPilotTuningEditor: View {
             }
             .background(CoinPilotColors.paper.ignoresSafeArea())
             .navigationTitle("튜닝값 설정")
-            .navigationBarTitleDisplayMode(.inline)
+            .cpInlineTitle()
             .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
+                ToolbarItem(placement: .cpLeading) {
                     Button("닫기") { dismiss() }
                 }
-                ToolbarItem(placement: .navigationBarTrailing) {
+                ToolbarItem(placement: .cpTrailing) {
                     Button(store.isSavingTuning ? "저장 중" : "저장") {
                         save()
                     }
@@ -5635,7 +5762,7 @@ private struct CoinPilotTuningEditor: View {
                 }
             }
         }
-        .navigationViewStyle(StackNavigationViewStyle())
+        .cpStackNavigation()
         .task {
             if await store.loadTuning() { hydrateDrafts() }
         }
@@ -5661,7 +5788,7 @@ private struct CoinPilotTuningEditor: View {
                         .foregroundColor(CoinPilotColors.ink)
                     Spacer(minLength: 4)
                     TextField("값", text: numericBinding(for: field))
-                        .keyboardType(.decimalPad)
+                        .cpKeyboardDecimalPad()
                         .multilineTextAlignment(.trailing)
                         .textFieldStyle(.plain)
                         .frame(width: 106)
@@ -5857,13 +5984,34 @@ private struct CoinPilotServerEditor: View {
             Form {
                 Section {
                         TextField("https://example.com", text: $address)
-                        .keyboardType(.URL)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled(true)
+                        .cpKeyboardURL()
+                        .cpNoAutocapitalization()
+                        .cpNoAutocorrection()
                 } header: {
                     Text("서버 주소")
                 } footer: {
                     Text("같은 Wi-Fi의 서버는 내부 주소로, 외부 서버는 HTTPS 주소로 연결해 주세요.")
+                }
+                if !store.bundledServerPresets.isEmpty {
+                    Section {
+                        ForEach(store.bundledServerPresets, id: \.url.absoluteString) { preset in
+                            Button {
+                                address = preset.url.absoluteString
+                            } label: {
+                                HStack {
+                                    Text(preset.label).foregroundColor(CoinPilotColors.ink)
+                                    Spacer()
+                                    Text(preset.url.absoluteString)
+                                        .font(.caption)
+                                        .foregroundColor(CoinPilotColors.secondaryInk)
+                                }
+                            }
+                        }
+                    } header: {
+                        Text("등록된 서버")
+                    } footer: {
+                        Text("탭해서 주소를 채웁니다. 거래소는 서버의 EXCHANGE 설정이 결정하며, 앱이 자동으로 표시합니다.")
+                    }
                 }
                 if let message {
                     Text(message).foregroundColor(CoinPilotColors.red)
@@ -5889,14 +6037,14 @@ private struct CoinPilotServerEditor: View {
             }
             .background(CoinPilotColors.paper)
             .navigationTitle("서버 주소")
-            .navigationBarTitleDisplayMode(.inline)
+            .cpInlineTitle()
             .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
+                ToolbarItem(placement: .cpLeading) {
                     Button("취소") { dismiss() }
                 }
             }
         }
-        .navigationViewStyle(StackNavigationViewStyle())
+        .cpStackNavigation()
     }
 }
 
@@ -5911,8 +6059,8 @@ private struct CoinPilotTokenEditor: View {
             Form {
                 Section {
                     SecureField("서버 토큰 입력", text: $token)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled(true)
+                        .cpNoAutocapitalization()
+                        .cpNoAutocorrection()
                 } header: {
                     Text("서버 토큰")
                 } footer: {
@@ -5945,9 +6093,9 @@ private struct CoinPilotTokenEditor: View {
             }
             .background(CoinPilotColors.paper)
             .navigationTitle("서버 토큰 입력")
-            .navigationBarTitleDisplayMode(.inline)
+            .cpInlineTitle()
             .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
+                ToolbarItem(placement: .cpLeading) {
                     Button("취소") {
                         token = ""
                         dismiss()
@@ -5955,7 +6103,7 @@ private struct CoinPilotTokenEditor: View {
                 }
             }
         }
-        .navigationViewStyle(StackNavigationViewStyle())
+        .cpStackNavigation()
     }
 }
 
@@ -5988,7 +6136,41 @@ private struct PositionRow: View {
     @ObservedObject var store: CoinPilotStore
     @State private var showingSellConfirmation = false
 
+    private var marketDetailCoin: String? {
+        guard !store.isBundledPreview, !store.isBundledLocalMarketData,
+              let coin = position.coin,
+              coin.range(of: "^KRW-[A-Z0-9]{2,15}$", options: .regularExpression) != nil
+        else { return nil }
+        return coin
+    }
+
     var body: some View {
+        Group {
+            if let coin = marketDetailCoin {
+                NavigationLink(destination: CoinPilotMarketDetailView(store: store, coin: coin)) {
+                    rowInner(showsChevron: true)
+                }
+                .buttonStyle(PlainButtonStyle())
+            } else {
+                rowInner(showsChevron: false)
+            }
+        }
+        .confirmationDialog(
+            "\(CoinPilotFormatting.ticker(position.coin)) 전체 매도",
+            isPresented: $showingSellConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button(store.activeWorkspace == .live ? "실거래 전체 매도" : "모의 전체 매도", role: store.activeWorkspace == .live ? .destructive : nil) {
+                guard let coin = position.coin, let amount = position.amount else { return }
+                Task { _ = await store.submitManualSell(coin: coin, quantity: amount) }
+            }
+            Button("취소", role: .cancel) {}
+        } message: {
+            Text("\(CoinPilotFormatting.quantity(position.amount))개를 시장가로 매도합니다. \(store.activeWorkspace == .live ? "Upbit 실계정 주문입니다." : "모의 서버 가상 계좌에만 적용됩니다.")")
+        }
+    }
+
+    private func rowInner(showsChevron: Bool) -> some View {
         HStack(alignment: .center, spacing: 12) {
             VStack(alignment: .leading, spacing: 5) {
                 Text(CoinPilotFormatting.symbol(position.coin))
@@ -6049,21 +6231,14 @@ private struct PositionRow: View {
                         .clipShape(Capsule())
                 }
             }
+            if showsChevron {
+                Image(systemName: "chevron.right")
+                    .font(.caption2.weight(.bold))
+                    .foregroundColor(CoinPilotColors.secondaryInk)
+                    .accessibilityHidden(true)
+            }
         }
         .padding(.vertical, 14)
-        .confirmationDialog(
-            "\(CoinPilotFormatting.ticker(position.coin)) 전체 매도",
-            isPresented: $showingSellConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button(store.activeWorkspace == .live ? "실거래 전체 매도" : "모의 전체 매도", role: store.activeWorkspace == .live ? .destructive : nil) {
-                guard let coin = position.coin, let amount = position.amount else { return }
-                Task { _ = await store.submitManualSell(coin: coin, quantity: amount) }
-            }
-            Button("취소", role: .cancel) {}
-        } message: {
-            Text("\(CoinPilotFormatting.quantity(position.amount))개를 시장가로 매도합니다. \(store.activeWorkspace == .live ? "Upbit 실계정 주문입니다." : "모의 서버 가상 계좌에만 적용됩니다.")")
-        }
     }
 }
 

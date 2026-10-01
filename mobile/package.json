@@ -14,6 +14,9 @@
     "test:offline-replay-persistence": "swiftc ios/App/App/CoinPilotOfflineReplay.swift ios/App/App/CoinPilotOfflineReplayPersistence.swift tests/CoinPilotOfflineReplayPersistenceTests.swift -o /tmp/coinpilot-ios-offline-replay-persistence-tests && /tmp/coinpilot-ios-offline-replay-persistence-tests",
     "test:store": "swiftc -D COINPILOT_TEST_SIMULATOR_TOKEN_STORE ios/App/App/ServerAddressPolicy.swift ios/App/App/CoinPilotStore.swift ios/App/App/CoinPilotBundledPreview.swift ios/App/App/CoinPilotBundledMarketData.swift ios/App/App/CoinPilotOfflineReplay.swift ios/App/App/CoinPilotOfflineReplayPersistence.swift tests/CoinPilotStoreTests.swift -o /tmp/coinpilot-ios-store-tests && /tmp/coinpilot-ios-store-tests",
     "ios:build:sim": "xcodebuild -project ios/App/App.xcodeproj -scheme App -sdk iphonesimulator -configuration Debug -destination 'generic/platform=iOS Simulator' COINPILOT_DATA_MODE=server CODE_SIGNING_ALLOWED=NO build",
-    "ios:build:preview": "xcodebuild -project ios/App/App.xcodeproj -scheme App -sdk iphonesimulator -configuration Debug -destination 'generic/platform=iOS Simulator' COINPILOT_DATA_MODE=bundled-preview CODE_SIGNING_ALLOWED=NO build"
+    "ios:build:preview": "xcodebuild -project ios/App/App.xcodeproj -scheme App -sdk iphonesimulator -configuration Debug -destination 'generic/platform=iOS Simulator' COINPILOT_DATA_MODE=bundled-preview CODE_SIGNING_ALLOWED=NO build",
+    "ios:build:mac": "xcodebuild -project ios/App/App.xcodeproj -scheme App -destination 'platform=macOS' -configuration Debug CODE_SIGN_IDENTITY=\"-\" CODE_SIGNING_ALLOWED=YES build",
+    "ios:testflight": "bash scripts/testflight-upload.sh",
+    "asc:build-status": "node scripts/asc-build-status.mjs"
   }
 }

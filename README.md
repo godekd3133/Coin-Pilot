@@ -205,6 +205,24 @@ DOGE 제외 후보의 trailing-window 재현도 별도 report로 보존합니다
 
 기본 대시보드는 http://localhost:3000 에서 확인할 수 있습니다. `DASHBOARD_TLS_CERT_FILE`과 `DASHBOARD_TLS_KEY_FILE`을 함께 설정하면 시작 로그에 HTTPS 주소가 표시되고, LAN 모바일/PWA 접속은 그 HTTPS 주소를 사용해야 합니다.
 
+### 바이낸스 인스턴스 (선택적 거래소)
+
+`EXCHANGE`로 프로세스당 거래소를 고릅니다. 하나의 프로세스는 하나의 거래소만 담당하므로 두 거래소를 동시에 운영하려면 인스턴스를 하나 더 띄웁니다.
+
+```bash
+# 예: 바이낸스 모의매매 인스턴스 (업비트 인스턴스와 병렬)
+EXCHANGE=binance DRY_RUN=true \
+DASHBOARD_PORT=3002 COINPILOT_STATE_DIR=data/binance-paper \
+BINANCE_API_KEY=... BINANCE_API_SECRET=... \
+npm start
+```
+
+- 마켓 코드는 `QUOTE-BASE` 규칙을 유지합니다 — 바이낸스 현물은 기본 `USDT-BTC`(`BINANCE_QUOTE_ASSET`로 `USDC` 등 변경 가능).
+- 상태 디렉터리(`COINPILOT_STATE_DIR`)는 인스턴스별로 반드시 분리하세요. 가상 지갑·주문 인덱스가 공유되면 충돌합니다.
+- 최소 주문 금액·수수료·필터(LOT_SIZE/MIN_NOTIONAL)는 각 거래소 실제 규칙을 따릅니다. `INVESTMENT_AMOUNT`는 기준통화 단위이므로 바이낸스에서는 USDT 단위입니다(기본 50).
+- 앱에서는 서버가 `/api/auth/status`로 거래소를 보고하고 Settings의 "등록된 서버" 프리셋으로 어느 인스턴스든 한 탭으로 전환할 수 있습니다.
+- 바이낸스 LIVE 키는 env(`BINANCE_API_KEY`/`BINANCE_API_SECRET`) 또는 앱의 실거래 키 등록(setup 모드) 경로로 들어가며, 저장소에 커밋하지 마세요.
+
 ### 대시보드 접근 보안
 
 대시보드의 `/api/*`와 Socket.io 데이터 평면은 `DASHBOARD_TOKEN`으로 보호됩니다.

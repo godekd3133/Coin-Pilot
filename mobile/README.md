@@ -254,6 +254,19 @@ Open ios/App/App.xcodeproj, choose the App scheme, and run it on an iOS
 Simulator or a connected iPhone. The native target no longer needs the web
 asset staging step.
 
+The same target also builds a native macOS app on Apple Silicon with identical
+features (server-mode screens, bundled server/token, SSE updates). Build and
+run it without an Apple developer profile:
+
+```sh
+npm --prefix mobile run ios:build:mac
+open ~/Library/Developer/Xcode/DerivedData/App-*/Build/Products/Debug/App.app
+```
+
+The macOS product is ad-hoc signed for local use. The iOS destination picker in
+Xcode also lists "My Mac (Designed for iPad)", but that variant needs the Mac
+registered to the development team — the native macOS build above does not.
+
 `COINPILOT_DATA_MODE=server` is the default build mode and omits the sample
 dataset from the installed app. Three additional build settings bake a
 single-owner server profile into the bundle so the app connects with zero
@@ -264,12 +277,45 @@ an optional token tried automatically when the bundled server asks for sign-in.
 A saved server address or token always wins over the bundled default. Leaving
 these values empty keeps the manual Settings flow.
 
+For a private single-owner build, `ios/App/LocalSecrets.json` (gitignored) is
+the preferred way to ship a real credential inside the app: when the file
+exists, the build phase copies it into the bundle as
+`CoinPilotLocalSecrets.json`, and its `paper`, `live`, and `token` fields take
+precedence over the build settings while still falling back to them when a
+field is missing or invalid. The installed app itself becomes the credential —
+a server that only defines `DASHBOARD_MOBILE_TOKEN` rejects every request that
+does not carry it, so control is limited to devices running this build. Keep
+the file out of version control; it ships inside every built `.app`.
+
 The bundled default points at `http://<mac>.local:3000`; for a private LAN
 setup the server can run with **no dashboard tokens at all** by starting it
 with `DASHBOARD_HOST=0.0.0.0` and `DASHBOARD_ALLOW_INSECURE=true`. In that mode
 any device on the network can read and mutate the dashboard, so use it only on
 a trusted home network; the app treats an unauthenticated server as fully
 operable and skips the token prompt entirely.
+
+`LocalSecrets.json` may also declare `paperServers`/`liveServers` — arrays of
+`{"label": "...", "url": "..."}` that appear in the server-address editor as
+one-tap presets. This is the supported way to switch between exchanges: each
+server process is pinned to one exchange via `EXCHANGE`, and the app shows the
+connected exchange (Upbit `KRW-*` or Binance `USDT-*` codes, ₩/$ formatting)
+automatically from `/api/auth/status` and `/api/status`. Example:
+
+```json
+{
+  "paper": "http://mac.local:3000",
+  "live": "http://mac.local:3001",
+  "token": "...",
+  "paperServers": [
+    { "label": "업비트 모의", "url": "http://mac.local:3000" },
+    { "label": "바이낸스 모의", "url": "http://mac.local:3002" }
+  ],
+  "liveServers": [
+    { "label": "업비트 실전", "url": "http://mac.local:3001" },
+    { "label": "바이낸스 실전", "url": "http://mac.local:3003" }
+  ]
+}
+```
 
 To make a local preview build, set
 `COINPILOT_DATA_MODE=bundled-preview` in the Xcode build settings or the

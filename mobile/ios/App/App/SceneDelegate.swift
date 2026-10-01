@@ -1,3 +1,4 @@
+#if canImport(UIKit)
 import SwiftUI
 import UIKit
 
@@ -13,3 +14,4 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         window.makeKeyAndVisible()
     }
 }
+#endif

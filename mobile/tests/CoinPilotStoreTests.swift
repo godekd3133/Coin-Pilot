@@ -2574,6 +2574,51 @@ struct CoinPilotStoreTests {
         for key in keys { defaults.removeObject(forKey: key) }
         defaults.set("paper", forKey: "coinpilot.native.activeWorkspace")
 
+        // LocalSecrets.json 값이 plist 기본값보다 우선하고, 무효한 항목은 plist로 폴백한다.
+        let merged = CoinPilotBundledServerConfig.resolve(
+            secrets: ["paper": "http://192.168.0.10:3000", "token": " secrets-token "],
+            plist: ["paper": "http://192.168.0.20:3000", "live": "https://live.example.com", "token": "plist-token"]
+        )
+        precondition(merged.paper?.absoluteString == "http://192.168.0.10:3000",
+                     "secrets paper address should win over the plist default.")
+        precondition(merged.live?.absoluteString == "https://live.example.com",
+                     "plist live address should be used when secrets omit it.")
+        precondition(merged.token == "secrets-token",
+                     "secrets token should win and be trimmed.")
+        let fallback = CoinPilotBundledServerConfig.resolve(
+            secrets: ["paper": "not-a-url"],
+            plist: ["paper": "http://192.168.0.20:3000"]
+        )
+        precondition(fallback.paper?.absoluteString == "http://192.168.0.20:3000",
+                     "An invalid secrets address should fall back to the plist value.")
+        precondition(CoinPilotBundledServerConfig.resolve(secrets: nil, plist: nil).token == nil,
+                     "Empty sources should produce no bundled token.")
+
+        // paperServers/liveServers 프리셋 목록 — 거래소별 서버 선택 UI용.
+        let withPresets = CoinPilotBundledServerConfig.resolve(
+            secrets: [
+                "paper": "http://192.168.0.10:3000",
+                "paperServers": [
+                    ["label": "업비트 모의", "url": "http://192.168.0.10:3000"],
+                    ["label": "바이낸스 모의", "url": "http://192.168.0.10:3002"],
+                    ["label": "잘못된 주소", "url": "not-a-url"]
+                ],
+                "liveServers": [["label": "업비트 실전", "url": "http://192.168.0.10:3001"]]
+            ],
+            plist: nil
+        )
+        precondition(withPresets.paperPresets.count == 2 &&
+                     withPresets.paperPresets[1].label == "바이낸스 모의" &&
+                     withPresets.paperPresets[1].url.absoluteString == "http://192.168.0.10:3002",
+                     "Preset list should keep valid label/url pairs and drop invalid URLs.")
+        precondition(withPresets.livePresets.first?.label == "업비트 실전",
+                     "Live presets should parse independently.")
+        let presetFallback = CoinPilotBundledServerConfig.resolve(
+            secrets: ["live": "https://live.example.com"], plist: nil
+        )
+        precondition(presetFallback.livePresets.first?.url.absoluteString == "https://live.example.com",
+                     "A bundled address with no preset list should synthesize a one-item preset.")
+
         // Bundled address + bundled token must connect and sign in with no manual entry.
         let bundledURL = URL(string: "https://bundled-paper.example")!
         let bundledAPI = DeferredCoinPilotAPI(
