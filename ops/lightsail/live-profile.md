@@ -213,14 +213,32 @@ deployed (revision `de34760`):
   `/etc/systemd/system/coinpilot.service.bak-precoord` /
   `/etc/coinpilot.env.bak-precoord` for rollback.
 
-One real blocker found during deployment:
+Resolved after deployment:
 
-- **`no_authorization_ip`**: the Upbit API key's IP allowlist does not
-  include `52.78.156.161` — private calls from the host return
-  `401 {"error":{"name":"no_authorization_ip"}}`. Credential registration
-  returns `credential_validation_unavailable` until the owner adds the
-  Lightsail static IP in Upbit's Open API key settings. The same keys work
-  from the development machine's IP.
+- **`no_authorization_ip` — RESOLVED**: after the owner added
+  `52.78.156.161` to the Upbit key allowlist, `POST /api/live/credentials`
+  validated, encrypted, and stored the keys; on boot the service synced the
+  account (`불일치 없음`), reached `liveManualPrepared`, and armed the
+  manual risk watch (`manualProtectionActive=true`).
+- **Rejected-order wedge — RESOLVED in `29d7bc9`**: a real
+  `insufficient_funds_bid` refusal left the request's idempotency key
+  permanently `unknown` (identifier 404 readbacks were always treated as
+  ambiguous). Definitive `ORDER_REJECTED` evidence is now indexed per
+  intent; a 404 plus durable rejection resolves the record as a terminal
+  400, while a bare 404 still stays unknown. Verified on the live host —
+  the wedged key now replays as completed/400.
+- **Round trip — PROVEN 2026-10-01**: `POST /api/trade/buy` 5,000 KRW filled
+  2.47524752 XRP @2020 (+2.5 fee); after a SIGKILL restart the boot sync
+  recovered the holding into the strategy and re-armed the risk watch;
+  `POST /api/trade/sell` filled @2025 (+2.506 fee) with settlement readback
+  observed; KRW wallet went 10,000.83 -> 10,008.20 (+7.37 net).
+- **Upbit order-state semantics learned from real fills**: market `price`
+  bids terminate as `state=cancel` (residual is sub-unit `locked` KRW dust)
+  with no `remaining_volume`/`avg_price`; `market` asks end `done` but also
+  leave `avg_price` empty. Both are normalized from `trades[]` sums. An
+  `incomplete fill records` startup reason previously poisoned the evidence
+  writer and made the protective drain non-terminating — recoverable
+  reconciliation states now block the affected market only.
 
 Still requires operator action — do not claim done:
 
