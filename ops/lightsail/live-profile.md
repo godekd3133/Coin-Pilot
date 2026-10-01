@@ -181,41 +181,66 @@ Proven by code + tests at this revision:
   `DASHBOARD_LIVE_MANUAL_RISK_PROTECTION=true` (this revision's change).
 
 Verified on the real host (`coinpilot-paper-seoul`, 52.78.156.161) on
-2026-10-01 via `ops/lightsail/verify-live-host.sh`:
+2026-10-01 via `ops/lightsail/verify-live-host.sh`, and LIVE was then
+deployed (revision `de34760`):
 
-- `nano_3_0` bundle confirmed: **412 MB** total RAM, **136 MB** available.
-  Paper node RSS ≈ 55 MB. LIVE + coordinator add roughly 70-100 MB — thin.
-- **FAIL — `/usr/bin/node` does not exist.** Only `/usr/local/bin/node`
-  v22.23.3 is installed; the LIVE unit's `ExecStart`/`ExecStartPre` paths and
-  the repo's `^24.21.0` engine floor both fail as-shipped. Provision Node
-  24.21+ at `/usr/bin/node` before `systemctl enable`.
-- Paper process was SIGKILLed (status=9/KILL) and restarted by systemd on
-  2026-10-01 — memory pressure already kills the single running process.
-  Adding LIVE on this bundle without a resize or aggressive heap caps is
-  not supported.
-- `coinpilot.service` (Paper): `TimeoutStopSec=60`, no
-  `UPBIT_RATE_COORDINATOR_*` env — the shared public-IP quota is not yet
-  coordinated between Paper and any future LIVE process.
-- `coinpilot-live` and `coinpilot-upbit-rate` units are not installed; the
-  Nginx `/live/` location is not configured; `/etc/coinpilot.env` correctly
-  contains no plaintext Upbit keys.
-- Upbit keys are valid and IP-allowlisted (read + order scopes confirmed via
-  `GET /accounts`/`GET /orders`); the account currently holds ~0.83 KRW and
-  dust GAS, so a round-trip proof first needs a small KRW deposit.
+- `nano_3_0` bundle confirmed: **412 MB** total RAM. A 1 GB swapfile was added
+  (`/swapfile`, fstab-persisted) after the Paper process was found SIGKILLed
+  once (status=9/KILL) the same day. After deployment `available` sits near
+  160-210 MB; a Micro-bundle resize is still the clean fix.
+- Node **24.21.0** is provisioned at `/usr/bin/node`; Paper keeps its
+  `/usr/local/bin/node` v22 runtime untouched.
+- `coinpilot-upbit-rate` and `coinpilot-live` are installed, enabled, and
+  `active`; the coordinator socket is live at
+  `/var/lib/coinpilot-rate/upbit-rate-coordinator/coordinator.sock`, and the
+  LIVE unit `Requires=` it.
+- Nginx serves `https://52.78.156.161/live/` → `127.0.0.1:3101`;
+  `/live/health` returns 200 and `/live/service-ready` reports `ready:true`.
+- LIVE boots in credential-setup mode (`LIVE 키 등록 대기`), with
+  `liveManualPrepareOnBoot` and `liveManualRiskProtection` enabled and
+  automatic trading disabled. `NODE_OPTIONS=--max-old-space-size=128` caps
+  the LIVE heap for the nano bundle.
+- `/etc/coinpilot.env` and `/etc/coinpilot/coinpilot-live.env` contain no
+  plaintext Upbit keys.
+- **Paper now shares the coordinator contract**: `coinpilot.service` was
+  redeployed on revision `de34760` running as `ubuntu` (the coordinator
+  socket is owner-only `0700`/`0600` by design), on `/usr/bin/node` 24.21,
+  with `Requires=coinpilot-upbit-rate.service` and
+  `UPBIT_RATE_COORDINATOR_REQUIRED=true`. `/service-ready` reports
+  `marketDataCoordinator.available=true`; both services now share the host's
+  public-IP quota. The previous tree is retained at
+  `/opt/coinpilot/app.old-de34760` and the previous unit/env at
+  `/etc/systemd/system/coinpilot.service.bak-precoord` /
+  `/etc/coinpilot.env.bak-precoord` for rollback.
+
+One real blocker found during deployment:
+
+- **`no_authorization_ip`**: the Upbit API key's IP allowlist does not
+  include `52.78.156.161` — private calls from the host return
+  `401 {"error":{"name":"no_authorization_ip"}}`. Credential registration
+  returns `credential_validation_unavailable` until the owner adds the
+  Lightsail static IP in Upbit's Open API key settings. The same keys work
+  from the development machine's IP.
 
 Still requires operator action — do not claim done:
 
-- A real-money order → fill → wallet settlement → realized P&L round trip.
-  Run it with `npm run verify:live-settlement -- --coin KRW-XRP --amount 5100
-  --confirm-real-money` after depositing ≥5,000 KRW; default invocation is a
-  read-only probe. The only recorded live intent (2026-09-28) ended
-  unfilled/cancelled.
-- `systemctl stop`/restart drain behavior on this host after LIVE is
-  installed (script above re-checks `Requires`, `TimeoutStopSec`, and OOM
-  history).
-- Paper process adoption of the shared rate coordinator contract.
+- Add `52.78.156.161` to the Upbit key IP allowlist, then register keys via
+  `POST /live/api/live/credentials` (or the app's LIVE workspace). On success
+  the service validates the keys, stores them encrypted under
+  `/var/lib/coinpilot-live/secrets/`, and runs manual-prepare (account/order
+  reconciliation + protective monitor arm).
+- A real-money order → fill → wallet settlement → realized P&L round trip
+  after depositing ≥5,000 KRW:
+  `npm run verify:live-settlement -- --coin KRW-XRP --amount 5100
+  --confirm-real-money`; default invocation is a read-only probe. The only
+  recorded live intent (2026-09-28) ended unfilled/cancelled.
+- `systemctl stop`/restart drain behavior after keys/positions exist
+  (script above re-checks `Requires`, `TimeoutStopSec`, and OOM history).
 - Multi-process write contention on the portfolio and evidence stores beyond
   the same-host writer-lock tests.
+- Optional but recommended: resize to the Micro bundle (1 GB). Swap now
+  covers the gap, but real RAM headroom is ~160-210 MB with all three
+  services up.
 
 ## Register Upbit keys in the app
 

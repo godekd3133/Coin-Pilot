@@ -92,7 +92,7 @@ if systemctl cat coinpilot.service >/dev/null 2>&1; then
 fi
 
 # 7. nginx /live/ 위치 블록
-if sudo nginx -T 2>/dev/null | grep -q "location /live/"; then
+if sudo nginx -T 2>/dev/null | grep -qE "location( \S+)? /live/"; then
   pass "nginx에 /live/ 위치 블록 존재"
 else
   warn "nginx에 /live/ 위치 블록 없음 — LIVE 대시보드 외부 경로 미구성"

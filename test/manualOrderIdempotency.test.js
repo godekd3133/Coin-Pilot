@@ -42,7 +42,6 @@ function makeTemporaryDashboard(trader, root, port = 0, options = {}) {
     env: {
       ...process.env,
       DASHBOARD_TOKEN: '', DASHBOARD_READ_ONLY_TOKEN: '', DASHBOARD_MOBILE_TOKEN: '',
-      DASHBOARD_READ_ONLY_TOKEN: '',
       DASHBOARD_HOST: '127.0.0.1',
       DASHBOARD_ALLOW_INSECURE: '',
       DASHBOARD_TLS_CERT_FILE: '',
@@ -128,7 +127,8 @@ function makeLiveTrader(root, {
   const recordLiveExecutionEvidence = event => {
     fs.mkdirSync(path.dirname(liveExecutionEvidenceFile), { recursive: true });
     fs.appendFileSync(liveExecutionEvidenceFile, `${JSON.stringify(event)}\n`, 'utf8');
-    if (event.eventType === 'ORDER_INTENT' && !addLiveOrderIntentEvidence(liveOrderIntentEvidenceIndex, event)) {
+    if ((event.eventType === 'ORDER_INTENT' || event.eventType === 'ORDER_REJECTED') &&
+      !addLiveOrderIntentEvidence(liveOrderIntentEvidenceIndex, event)) {
       return false;
     }
     return true;
@@ -1571,6 +1571,146 @@ test('nonterminal, mismatched, incomplete, missing, or unreadable LIVE evidence 
       assert.equal(firstLive.counts.submits + restartedLive.counts.submits, 1);
     });
   }
+});
+
+test('a definitively rejected LIVE order completes terminally and replays instead of wedging the key', async t => {
+  const root = makeRoot(t);
+  const live = makeLiveTrader(root, {
+    onSubmit: async () => ({
+      success: false,
+      error: { code: 'insufficient_funds_bid', message: '매수 자금 부족' }
+    })
+  });
+  const server = makeServer(live.trader, root);
+  const ctx = await startRoutes(t, server);
+  const key = 'live-rejected-bid-key';
+  const first = await postJson(ctx, '/api/trade/buy', { coin: 'KRW-BTC', amount: 5000 }, key);
+
+  // The exchange refused dispatch: the rejection evidence plus the refusal
+  // response carry no ambiguous fill marker, so the request completes as a
+  // terminal rejection the same key can replay.
+  assert.equal(first.status, 409);
+  assert.equal(first.idempotencyStatus, 'completed');
+  assert.equal(first.body.success, false);
+  assert.equal(first.body.reason, '매수 자금 부족');
+  assert.equal(live.counts.submits, 1);
+  assert.equal(live.counts.strategyMutations, 0);
+
+  const replay = await postJson(ctx, '/api/trade/buy', { coin: 'KRW-BTC', amount: 5000 }, key);
+  assert.equal(replay.status, 409);
+  assert.equal(replay.idempotencyStatus, 'completed');
+  assert.equal(live.counts.submits, 1, 'same-key replay returns the rejection without another POST');
+});
+
+test('a wedged LIVE record resolves terminally from definitive rejection evidence plus a 404 readback', async t => {
+  const root = makeRoot(t);
+  const firstLive = makeLiveTrader(root, {
+    onSubmit: async () => ({
+      success: false,
+      error: { code: 'insufficient_funds_bid', message: '매수 자금 부족' }
+    })
+  });
+  const server = makeServer(firstLive.trader, root);
+  const clientIntentId = '66666666-7777-4888-8999-000000000000';
+
+  // Simulate a crash between the durable ORDER_INTENT + ORDER_REJECTED
+  // appends and the response commit: the journal stays unknown while the
+  // evidence ledger still proves the exchange refused dispatch.
+  const reservation = await server.manualOrderIdempotencyStore.reserve({
+    profileId: 'operator',
+    idempotencyKey: 'live-wedged-rejection-key',
+    method: 'POST',
+    endpoint: '/api/trade/buy',
+    body: { coin: 'KRW-BTC', amount: 5000 },
+    mode: 'LIVE',
+    clientIntentId
+  });
+  assert.equal(reservation.kind, 'reserved');
+  firstLive.trader.recordLiveExecutionEvidence(firstLive.trader.createLiveExecutionEvidence({
+    eventType: 'ORDER_INTENT',
+    clientIntentId,
+    market: 'KRW-BTC',
+    side: 'bid',
+    orderType: 'price',
+    requested: { amount: 5000 }
+  }));
+  firstLive.trader.recordLiveExecutionEvidence(firstLive.trader.createLiveExecutionEvidence({
+    eventType: 'ORDER_REJECTED',
+    clientIntentId,
+    market: 'KRW-BTC',
+    side: 'bid',
+    orderType: 'price',
+    requested: { amount: 5000 },
+    error: '매수 자금 부족',
+    errorCode: 'insufficient_funds_bid'
+  }));
+  await server.manualOrderIdempotencyStore.markUnknown(
+    reservation.record.recordId,
+    'simulated_interrupted_rejection'
+  );
+  server.manualOrderIdempotencyStore.releaseWriterLock();
+
+  let readCount = 0;
+  const restartedLive = makeLiveTrader(root, {
+    onSubmit: async () => { throw new Error('retry must never POST'); },
+    getOrder: async () => {
+      readCount += 1;
+      throw Object.assign(new Error('order_not_found'), { response: { status: 404 } });
+    }
+  });
+  const restartedServer = makeServer(restartedLive.trader, root, {
+    storePath: server.manualOrderIdempotencyStore.filePath
+  });
+  const restartedCtx = await startRoutes(t, restartedServer);
+  const recovered = await postJson(restartedCtx, '/api/trade/buy',
+    { coin: 'KRW-BTC', amount: 5000 }, 'live-wedged-rejection-key');
+
+  assert.equal(recovered.status, 400);
+  assert.equal(recovered.idempotencyStatus, 'completed');
+  assert.equal(recovered.body.success, false);
+  assert.equal(recovered.body.recovered, true);
+  assert.equal(recovered.body.error.code, 'insufficient_funds_bid');
+  assert.equal(recovered.body.fill.status, 'not_observed');
+  assert.equal(recovered.body.settlement.status, 'not_observed');
+  assert.equal(readCount, 1);
+  assert.equal(restartedLive.counts.submits, 0);
+  assert.equal(restartedLive.counts.strategyMutations, 0);
+
+  const replay = await postJson(restartedCtx, '/api/trade/buy',
+    { coin: 'KRW-BTC', amount: 5000 }, 'live-wedged-rejection-key');
+  assert.equal(replay.status, 400);
+  assert.equal(replay.idempotencyStatus, 'completed');
+  assert.equal(readCount, 1, 'completed replay does not re-query the exchange');
+});
+
+test('a bare 404 readback without rejection evidence still stays unknown (identifier-index lag)', async t => {
+  const root = makeRoot(t);
+  const firstLive = makeLiveTrader(root, {
+    onSubmit: async () => { throw new Error('fake accepted POST with lost response'); }
+  });
+  const server = makeServer(firstLive.trader, root);
+  const ctx = await startRoutes(t, server);
+  const key = 'live-bare-404-key';
+  const first = await postJson(ctx, '/api/trade/buy', { coin: 'KRW-BTC', amount: 5000 }, key);
+  assert.equal(first.status, 202);
+  await ctx.close();
+
+  const restartedLive = makeLiveTrader(root, {
+    onSubmit: async () => { throw new Error('retry must never POST'); },
+    getOrder: async () => {
+      throw Object.assign(new Error('order_not_found'), { response: { status: 404 } });
+    }
+  });
+  const restartedServer = makeServer(restartedLive.trader, root, {
+    storePath: server.manualOrderIdempotencyStore.filePath
+  });
+  const restartedCtx = await startRoutes(t, restartedServer);
+  const retry = await postJson(restartedCtx, '/api/trade/buy',
+    { coin: 'KRW-BTC', amount: 5000 }, key);
+  assert.equal(retry.status, 202);
+  assert.equal(retry.body.idempotency.status, 'unknown');
+  assert.equal(restartedLive.counts.submits, 0);
+  assert.equal(restartedLive.counts.orderReadbacks, 1);
 });
 
 test('smart sell rechecks the shared holding after awaited analysis and serializes automatic DRY_RUN order work', async t => {

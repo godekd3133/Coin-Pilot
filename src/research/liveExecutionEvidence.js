@@ -104,22 +104,30 @@ export function createLiveOrderIntentEvidenceIndex(events = [], { streamValid = 
     schema: LIVE_ORDER_INTENT_INDEX_SCHEMA,
     available: streamValid === true,
     reason: streamValid === true ? null : (reason || 'live_order_intent_index_unavailable'),
-    intents: new Map()
+    intents: new Map(),
+    rejections: new Map()
   };
   if (!index.available) return index;
 
   for (const event of events) {
+    if (event?.eventType === 'ORDER_REJECTED' && isDefinitiveLiveOrderRejection(event) &&
+      typeof event.clientIntentId === 'string' && !index.rejections.has(event.clientIntentId)) {
+      index.rejections.set(event.clientIntentId, event);
+      continue;
+    }
     if (event?.eventType !== 'ORDER_INTENT') continue;
     if (!isVerifiedLiveOrderIntent(event)) {
       index.available = false;
       index.reason = 'live_order_intent_invalid';
       index.intents.clear();
+      index.rejections.clear();
       return index;
     }
     if (index.intents.has(event.clientIntentId)) {
       index.available = false;
       index.reason = 'live_order_intent_ambiguous';
       index.intents.clear();
+      index.rejections.clear();
       return index;
     }
     index.intents.set(event.clientIntentId, cloneLiveOrderIntent(event));
@@ -136,6 +144,13 @@ export function canAddLiveOrderIntentEvidence(index, event) {
 
 /** Update the verified in-memory lookup after a durable ORDER_INTENT append. */
 export function addLiveOrderIntentEvidence(index, event) {
+  if (event?.eventType === 'ORDER_REJECTED') {
+    if (index?.rejections instanceof Map && isDefinitiveLiveOrderRejection(event) &&
+      typeof event.clientIntentId === 'string' && !index.rejections.has(event.clientIntentId)) {
+      index.rejections.set(event.clientIntentId, event);
+    }
+    return true;
+  }
   if (event?.eventType !== 'ORDER_INTENT') return true;
   if (!canAddLiveOrderIntentEvidence(index, event)) {
     if (index && index.schema === LIVE_ORDER_INTENT_INDEX_SCHEMA) {
@@ -144,6 +159,7 @@ export function addLiveOrderIntentEvidence(index, event) {
         ? 'live_order_intent_ambiguous'
         : 'live_order_intent_invalid';
       index.intents?.clear?.();
+      index.rejections?.clear?.();
     }
     return false;
   }
@@ -174,6 +190,32 @@ export function readLiveOrderIntentEvidence(index, clientIntentId) {
     return { available: false, reason: 'live_order_intent_invalid', intent: null };
   }
   return { available: true, reason: null, intent: cloneLiveOrderIntent(intent) };
+}
+
+/**
+ * Read the durable definitive ORDER_REJECTED for a client intent from the
+ * in-memory index. An ORDER_REJECTED event only exists when the exchange
+ * actually answered the POST with a refusal, so it proves the order never
+ * existed — unlike a bare 404, which can also mean an identifier-index lag.
+ */
+export function readLiveOrderRejectionEvidence(index, clientIntentId) {
+  if (typeof clientIntentId !== 'string' || !UUID_PATTERN.test(clientIntentId)) {
+    return { available: false, reason: 'client_intent_id_invalid', rejection: null };
+  }
+  if (!index || index.schema !== LIVE_ORDER_INTENT_INDEX_SCHEMA || index.available !== true ||
+    !(index.rejections instanceof Map)) {
+    return {
+      available: false,
+      reason: typeof index?.reason === 'string' ? index.reason : 'live_order_intent_index_unavailable',
+      rejection: null
+    };
+  }
+  const rejection = index.rejections.get(clientIntentId);
+  if (!rejection) return { available: false, reason: 'live_order_rejection_missing', rejection: null };
+  if (rejection.clientIntentId !== clientIntentId || !isDefinitiveLiveOrderRejection(rejection)) {
+    return { available: false, reason: 'live_order_rejection_invalid', rejection: null };
+  }
+  return { available: true, reason: null, rejection };
 }
 
 /**

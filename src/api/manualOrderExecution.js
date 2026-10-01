@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import {
   projectLiveAccountReadback,
   readLiveOrderIntentEvidence,
+  readLiveOrderRejectionEvidence,
   resolveTerminalLiveOrderReadback
 } from '../research/liveExecutionEvidence.js';
 
@@ -222,7 +223,8 @@ export async function executeLiveOrderWithEvidence(tradingSystem, {
     const submissionEvidenceRecorded = tradingSystem.recordLiveExecutionEvidence(tradingSystem.createLiveExecutionEvidence({
       ...evidenceOptions,
       eventType: orderResult?.success === true ? 'ORDER_SUBMITTED' : 'ORDER_REJECTED',
-      error: orderResult?.success === true ? null : orderResult?.error?.message
+      error: orderResult?.success === true ? null : orderResult?.error?.message,
+      errorCode: orderResult?.success === true ? null : orderResult?.error?.code || null
     }));
     if (!submissionEvidenceRecorded && orderResult?.success === true) {
       markLiveMarketOrderUnresolved(tradingSystem, market);
@@ -237,7 +239,7 @@ export async function executeLiveOrderWithEvidence(tradingSystem, {
         blockedMessage: submissionEvidenceRecorded ? null : 'LIVE 주문 기록을 저장하지 못해 거래소 상태를 다시 확인해야 합니다.',
         orderResult,
         fillResult: { filled: false, error: orderResult?.error?.message || 'order_uuid_missing' },
-        fill: projectLiveFillResult(null, orderId)
+        fill: projectLiveFillResult({ filled: false, error: orderResult?.error?.message }, orderId)
       };
     }
 
@@ -347,7 +349,67 @@ export async function recoverSingleManualLiveOrder({ req, record, tradingSystem 
 
   // A same-key retry may only query the persisted identifier. It never calls
   // the route again or submits another order.
-  const order = await tradingSystem.upbit.getOrder(clientIntentId, { identifier: true });
+  let order = null;
+  let orderAbsent = false;
+  try {
+    order = await tradingSystem.upbit.getOrder(clientIntentId, { identifier: true });
+  } catch (error) {
+    if (Number(error?.response?.status) === 404 || Number(error?.status) === 404) {
+      orderAbsent = true;
+    } else {
+      throw error;
+    }
+  }
+
+  // A 404 readback alone is ambiguous: the exchange identifier index can lag
+  // behind a just-accepted order. But a durable definitive ORDER_REJECTED
+  // proves the exchange answered the dispatch with a refusal, so an absent
+  // order is conclusive rather than a lag — the request resolves to the
+  // recorded rejection instead of staying unknown forever.
+  if (orderAbsent || !order) {
+    const rejectionRead = readLiveOrderRejectionEvidence(
+      tradingSystem?.liveOrderIntentEvidenceIndex,
+      clientIntentId
+    );
+    if (!rejectionRead.available || !rejectionRead.rejection) return null;
+    const rejection = rejectionRead.rejection;
+    return {
+      status: 400,
+      body: {
+        success: false,
+        mode: 'LIVE',
+        recovered: true,
+        market: expected.market,
+        side: expected.side,
+        message: '거래소가 이 주문을 거부해 실제 주문이 생성되지 않았습니다. 같은 요청 키로 이 결과를 다시 받게 됩니다.',
+        order: null,
+        fill: {
+          status: 'not_observed',
+          orderId: null,
+          exchangeState: null,
+          executedVolume: null,
+          remainingVolume: null,
+          averagePrice: null,
+          paidFee: null,
+          error: rejection.fill?.error || rejection.errorCode || 'order_rejected'
+        },
+        settlement: {
+          status: 'not_observed',
+          reason: 'wallet_readback_not_performed',
+          observedAt: null
+        },
+        strategyState: {
+          status: 'not_mutated',
+          reason: 'request_recovery_does_not_replay_route'
+        },
+        error: {
+          code: rejection.errorCode || 'order_rejected',
+          message: rejection.fill?.error || '거래소가 주문을 거부했습니다.'
+        }
+      }
+    };
+  }
+
   const resolution = resolveTerminalLiveOrderReadback(order, {
     clientIntentId,
     market: expected.market,

@@ -104,8 +104,10 @@ async function main() {
   if (!Number.isFinite(args.amount) || args.amount < MIN_ORDER_KRW || args.amount > MAX_PROOF_AMOUNT_KRW) {
     throw new Error(`--amount는 ${MIN_ORDER_KRW}~${MAX_PROOF_AMOUNT_KRW} KRW 범위여야 합니다.`);
   }
-  if (before.krwBalance === null || before.krwBalance < args.amount * 1.01) {
-    throw new Error(`KRW 잔액(${before.krwBalance})이 증명 금액(${args.amount})보다 부족합니다.`);
+  // 업비트 시장가 매수(price)는 주문액 + 0.05% 수수료를 별도로 차감한다.
+  const requiredKrw = args.amount * 1.0005;
+  if (before.krwBalance === null || before.krwBalance < requiredKrw) {
+    throw new Error(`KRW 잔액(${before.krwBalance})이 증명 금액+수수료(${requiredKrw})보다 부족합니다.`);
   }
 
   // 3. 매수 → 체결 확인 → 정산 readback
