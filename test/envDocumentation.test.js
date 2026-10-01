@@ -28,7 +28,7 @@ const ACCESS_PATTERNS = [
   // parameter are environment reads.
   /\benv\.([A-Z_][A-Z0-9_]*)/g,
   // Env helper calls that receive the variable name as a string literal.
-  /(?:numericEnv|listEnv|envNumber|envFlag|booleanEnv|stringEnv|csvEnv)\(\s*(?:env\s*,\s*)?['"]([A-Z_][A-Z0-9_]*)['"]/g
+  /(?:numericEnv|listEnv|envNumber|envFlag|booleanEnv|stringEnv|csvEnv|envBool|envInt|envString|envList)\(\s*(?:env\s*,\s*)?['"]([A-Z_][A-Z0-9_]*)['"]/g
 ];
 
 function collectSourceFiles(dir) {
@@ -99,6 +99,24 @@ test('.env.example의 모든 할당 키는 ENV_SCHEMA에 선언되어 있다', (
     .filter(key => !(key in ENV_SCHEMA))
     .sort();
   assert.deepEqual(missing, []);
+});
+
+// envConfig로 이전이 끝난 파일은 직접 `process.env.KEY` 읽기가 금지된다.
+// 재발하면 여기서 실패한다 — 새 파일을 이전할 때마다 목록에 추가한다.
+const TYPED_ENV_MIGRATED_FILES = [
+  'src/config/envConfig.js',
+  'src/research/paperRunnerConfig.js'
+];
+
+test('envConfig로 이전된 파일은 직접 env 접근이 없다', () => {
+  for (const file of TYPED_ENV_MIGRATED_FILES) {
+    const source = fs.readFileSync(file, 'utf8');
+    const directReads = [
+      ...source.matchAll(/process\.env\.([A-Z_][A-Z0-9_]*)/g),
+      ...source.matchAll(/process\.env\[['"]([A-Z_][A-Z0-9_]*)['"]\]/g)
+    ].map(match => match[1]);
+    assert.deepEqual(directReads, [], `${file} must read env through envConfig accessors`);
+  }
 });
 
 test('ENV_SCHEMA의 모든 키는 .env.example 또는 src 소비처에 존재한다', () => {
