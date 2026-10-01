@@ -9,7 +9,7 @@ import {
   assertNoConcurrentPaperSessions
 } from '../research/paperSessionConcurrency.js';
 import { createPaperAiMonitor } from '../ai/paperAiMonitoring.js';
-import { envBool, envNumber, envString } from '../config/envConfig.js';
+import { envBool, envList, envNumber, envString } from '../config/envConfig.js';
 
 dotenv.config();
 
@@ -173,7 +173,9 @@ function buildConfig(portfolioFile, paperFile, markets) {
 }
 
 async function resolveMarkets() {
-  const requested = envString('PAPER_SMOKE_MARKETS', '').trim().toUpperCase();
+  // schema는 list 타입 — sentinel(FRESH_FROM_LEDGER/FRESH_COHORT/ALL)과
+  // 콤마 마켓 목록을 같은 문자열 계약으로 다시 합친다.
+  const requested = envList('PAPER_SMOKE_MARKETS', []).join(',').toUpperCase();
   if (requested === 'FRESH_FROM_LEDGER' || requested === 'FRESH_COHORT') {
     const sourceFile = envString('PAPER_SMOKE_FRESHNESS_LEDGER', null);
     if (!sourceFile) {

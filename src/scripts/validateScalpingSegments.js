@@ -9,12 +9,14 @@ import {
   mergePaperValidationConfig
 } from '../research/scalpingValidationConfig.js';
 
+import { envBool, envList, envNumber, envString } from '../config/envConfig.js';
+
 dotenv.config();
 
 const number = (value, fallback) => Number.isFinite(Number(value)) ? Number(value) : fallback;
 
 function resolveInputFile() {
-  const explicit = process.env.SCALP_SEGMENT_CANDLES_FILE || process.argv[2];
+  const explicit = envString('SCALP_SEGMENT_CANDLES_FILE', null) || process.argv[2];
   if (!explicit) {
     throw new Error(
       'segmented diagnostic은 혼합 window 방지를 위해 candle cache가 필요합니다. ' +
@@ -41,10 +43,8 @@ function loadCandleCache(filePath) {
 }
 
 function resolveMarkets(cache) {
-  const requested = (process.env.SCALP_SEGMENT_MARKETS || '')
-    .split(',')
-    .map(market => market.trim().toUpperCase())
-    .filter(Boolean);
+  const requested = envList('SCALP_SEGMENT_MARKETS', [])
+    .map(market => market.toUpperCase());
   const markets = requested.length > 0 ? requested : Object.keys(cache);
   if (markets.length === 0) throw new Error('segmented diagnostic 대상 market이 없습니다.');
   for (const market of markets) {
@@ -56,61 +56,61 @@ function resolveMarkets(cache) {
 }
 
 function baseConfig(snapshot) {
-  const requestedUnit = process.env.SCALP_SEGMENT_CANDLE_UNIT;
+  const requestedUnit = envString('SCALP_SEGMENT_CANDLE_UNIT', undefined);
   const unit = requestedUnit === undefined || requestedUnit === ''
-    ? number(snapshot?.config?.candleUnit, number(process.env.SCALP_CANDLE_UNIT, 1))
+    ? number(snapshot?.config?.candleUnit, envNumber('SCALP_CANDLE_UNIT', 1))
     : number(requestedUnit, 1);
   const envConfig = {
-    initialBalance: number(process.env.SCALP_VALIDATION_INITIAL_BALANCE, DEFAULT_CONFIG.initialBalance),
-    tradingFee: number(process.env.SCALP_VALIDATION_FEE, DEFAULT_CONFIG.tradingFee),
-    slippage: number(process.env.SCALP_VALIDATION_SLIPPAGE, DEFAULT_CONFIG.slippage),
-    investmentRatio: number(process.env.SCALP_INVESTMENT_RATIO, DEFAULT_CONFIG.investmentRatio),
-    rsiPeriod: number(process.env.SCALP_RSI_PERIOD, DEFAULT_CONFIG.rsiPeriod),
-    rsiOversold: number(process.env.SCALP_RSI_OVERSOLD, DEFAULT_CONFIG.rsiOversold),
-    rsiOverbought: number(process.env.SCALP_RSI_OVERBOUGHT, DEFAULT_CONFIG.rsiOverbought),
-    oversoldLookback: number(process.env.SCALP_OVERSOLD_LOOKBACK, DEFAULT_CONFIG.oversoldLookback),
-    minReboundPercent: number(process.env.SCALP_MIN_REBOUND_PERCENT, DEFAULT_CONFIG.minReboundPercent),
-    minRsiRecovery: number(process.env.SCALP_MIN_RSI_RECOVERY, DEFAULT_CONFIG.minRsiRecovery),
-    minVolumeRatio: number(process.env.SCALP_MIN_VOLUME_RATIO, DEFAULT_CONFIG.minVolumeRatio),
-    volumeLookback: number(process.env.SCALP_VOLUME_LOOKBACK, DEFAULT_CONFIG.volumeLookback),
-    minCloseStrength: number(process.env.SCALP_MIN_CLOSE_STRENGTH, DEFAULT_CONFIG.minCloseStrength),
-    trendPeriod: number(process.env.SCALP_TREND_PERIOD, DEFAULT_CONFIG.trendPeriod),
-    trendSlopeLookback: number(process.env.SCALP_TREND_SLOPE_LOOKBACK, DEFAULT_CONFIG.trendSlopeLookback),
-    minTrendSlopePercent: number(process.env.SCALP_MIN_TREND_SLOPE_PERCENT, DEFAULT_CONFIG.minTrendSlopePercent),
-    requirePreviousHighBreak: process.env.SCALP_REQUIRE_PREVIOUS_HIGH_BREAK !== 'false',
-    maxSignalRangePercent: number(process.env.SCALP_MAX_SIGNAL_RANGE_PERCENT, DEFAULT_CONFIG.maxSignalRangePercent),
-    minSignalRangePercent: number(process.env.SCALP_MIN_SIGNAL_RANGE_PERCENT, DEFAULT_CONFIG.minSignalRangePercent),
-    maxReboundPercent: number(process.env.SCALP_MAX_REBOUND_PERCENT, DEFAULT_CONFIG.maxReboundPercent),
-    requireReboundBelowOverbought: process.env.SCALP_REQUIRE_REBOUND_BELOW_OVERBOUGHT === 'true',
-    signalProfile: process.env.SCALP_SIGNAL_PROFILE || DEFAULT_CONFIG.signalProfile,
-    bbPeriod: number(process.env.BB_PERIOD, DEFAULT_CONFIG.bbPeriod),
-    bbStdDev: number(process.env.BB_STD_DEV, DEFAULT_CONFIG.bbStdDev),
-    emaPeriod: number(process.env.EMA_LONG, 60),
-    maxEntryRetracePercent: number(process.env.SCALP_MAX_ENTRY_RETRACE_PERCENT, DEFAULT_CONFIG.maxEntryRetracePercent),
-    maxEntryChasePercent: number(process.env.SCALP_MAX_ENTRY_CHASE_PERCENT, DEFAULT_CONFIG.maxEntryChasePercent),
-    requireNextCandleBullish: process.env.SCALP_PORTFOLIO_REQUIRE_NEXT_CANDLE_BULLISH === 'true',
-    breakEvenTriggerPercent: number(process.env.SCALP_BREAK_EVEN_TRIGGER_PERCENT, DEFAULT_CONFIG.breakEvenTriggerPercent),
-    breakEvenOffsetPercent: number(process.env.SCALP_BREAK_EVEN_OFFSET_PERCENT, DEFAULT_CONFIG.breakEvenOffsetPercent),
-    trailingActivationPercent: number(process.env.SCALP_TRAILING_ACTIVATION_PERCENT, DEFAULT_CONFIG.trailingActivationPercent),
-    trailingStopPercent: number(process.env.SCALP_TRAILING_STOP_PERCENT, DEFAULT_CONFIG.trailingStopPercent),
-    stopLossPercent: number(process.env.SCALP_STOP_LOSS_PERCENT, DEFAULT_CONFIG.stopLossPercent),
-    takeProfitPercent: number(process.env.SCALP_TAKE_PROFIT_PERCENT, DEFAULT_CONFIG.takeProfitPercent),
-    maxHoldMinutes: number(process.env.SCALP_MAX_HOLD_MINUTES, DEFAULT_CONFIG.maxHoldMinutes),
-    maxLosingHoldMinutes: number(process.env.SCALP_MAX_LOSING_HOLD_MINUTES, DEFAULT_CONFIG.maxLosingHoldMinutes),
-    winnerExtendMinutes: number(process.env.SCALP_WINNER_EXTEND_MINUTES, DEFAULT_CONFIG.winnerExtendMinutes),
-    winnerExtendMinProfitPercent: number(process.env.SCALP_WINNER_EXTEND_MIN_PROFIT_PERCENT, DEFAULT_CONFIG.winnerExtendMinProfitPercent),
-    maxEntriesPerSignalWindow: number(process.env.SCALP_MAX_ENTRIES_PER_SIGNAL_WINDOW, DEFAULT_CONFIG.maxEntriesPerSignalWindow),
-    cooldownAfterLossMinutes: number(process.env.SCALP_COOLDOWN_AFTER_LOSS_MINUTES, DEFAULT_CONFIG.cooldownAfterLossMinutes),
-    maxConsecutiveLosses: number(process.env.SCALP_MAX_CONSECUTIVE_LOSSES, DEFAULT_CONFIG.maxConsecutiveLosses),
-    lossCircuitBreakerCount: number(process.env.SCALP_LOSS_CIRCUIT_BREAKER_COUNT, DEFAULT_CONFIG.lossCircuitBreakerCount),
-    lossCircuitBreakerWindowMinutes: number(process.env.SCALP_LOSS_CIRCUIT_BREAKER_WINDOW_MINUTES, DEFAULT_CONFIG.lossCircuitBreakerWindowMinutes),
-    lossCircuitBreakerCooldownMinutes: number(process.env.SCALP_LOSS_CIRCUIT_BREAKER_COOLDOWN_MINUTES, DEFAULT_CONFIG.lossCircuitBreakerCooldownMinutes),
-    marketRegimeEnabled: process.env.SCALP_MARKET_REGIME_ENABLED === 'true',
-    marketRegimeLookback: number(process.env.SCALP_MARKET_REGIME_LOOKBACK, DEFAULT_CONFIG.marketRegimeLookback),
-    marketRegimeMinBreadth: number(process.env.SCALP_MARKET_REGIME_MIN_BREADTH, DEFAULT_CONFIG.marketRegimeMinBreadth),
-    marketRegimeMinReturnPercent: number(process.env.SCALP_MARKET_REGIME_MIN_RETURN_PERCENT, DEFAULT_CONFIG.marketRegimeMinReturnPercent),
-    maxPositions: number(process.env.SCALP_MAX_POSITIONS, DEFAULT_CONFIG.maxPositions),
-    portfolioAllocation: number(process.env.SCALP_PORTFOLIO_ALLOCATION, DEFAULT_CONFIG.portfolioAllocation)
+    initialBalance: envNumber('SCALP_VALIDATION_INITIAL_BALANCE', DEFAULT_CONFIG.initialBalance),
+    tradingFee: envNumber('SCALP_VALIDATION_FEE', DEFAULT_CONFIG.tradingFee),
+    slippage: envNumber('SCALP_VALIDATION_SLIPPAGE', DEFAULT_CONFIG.slippage),
+    investmentRatio: envNumber('SCALP_INVESTMENT_RATIO', DEFAULT_CONFIG.investmentRatio),
+    rsiPeriod: envNumber('SCALP_RSI_PERIOD', DEFAULT_CONFIG.rsiPeriod),
+    rsiOversold: envNumber('SCALP_RSI_OVERSOLD', DEFAULT_CONFIG.rsiOversold),
+    rsiOverbought: envNumber('SCALP_RSI_OVERBOUGHT', DEFAULT_CONFIG.rsiOverbought),
+    oversoldLookback: envNumber('SCALP_OVERSOLD_LOOKBACK', DEFAULT_CONFIG.oversoldLookback),
+    minReboundPercent: envNumber('SCALP_MIN_REBOUND_PERCENT', DEFAULT_CONFIG.minReboundPercent),
+    minRsiRecovery: envNumber('SCALP_MIN_RSI_RECOVERY', DEFAULT_CONFIG.minRsiRecovery),
+    minVolumeRatio: envNumber('SCALP_MIN_VOLUME_RATIO', DEFAULT_CONFIG.minVolumeRatio),
+    volumeLookback: envNumber('SCALP_VOLUME_LOOKBACK', DEFAULT_CONFIG.volumeLookback),
+    minCloseStrength: envNumber('SCALP_MIN_CLOSE_STRENGTH', DEFAULT_CONFIG.minCloseStrength),
+    trendPeriod: envNumber('SCALP_TREND_PERIOD', DEFAULT_CONFIG.trendPeriod),
+    trendSlopeLookback: envNumber('SCALP_TREND_SLOPE_LOOKBACK', DEFAULT_CONFIG.trendSlopeLookback),
+    minTrendSlopePercent: envNumber('SCALP_MIN_TREND_SLOPE_PERCENT', DEFAULT_CONFIG.minTrendSlopePercent),
+    requirePreviousHighBreak: envBool('SCALP_REQUIRE_PREVIOUS_HIGH_BREAK', true),
+    maxSignalRangePercent: envNumber('SCALP_MAX_SIGNAL_RANGE_PERCENT', DEFAULT_CONFIG.maxSignalRangePercent),
+    minSignalRangePercent: envNumber('SCALP_MIN_SIGNAL_RANGE_PERCENT', DEFAULT_CONFIG.minSignalRangePercent),
+    maxReboundPercent: envNumber('SCALP_MAX_REBOUND_PERCENT', DEFAULT_CONFIG.maxReboundPercent),
+    requireReboundBelowOverbought: envBool('SCALP_REQUIRE_REBOUND_BELOW_OVERBOUGHT', false),
+    signalProfile: envString('SCALP_SIGNAL_PROFILE', DEFAULT_CONFIG.signalProfile),
+    bbPeriod: envNumber('BB_PERIOD', DEFAULT_CONFIG.bbPeriod),
+    bbStdDev: envNumber('BB_STD_DEV', DEFAULT_CONFIG.bbStdDev),
+    emaPeriod: envNumber('EMA_LONG', 60),
+    maxEntryRetracePercent: envNumber('SCALP_MAX_ENTRY_RETRACE_PERCENT', DEFAULT_CONFIG.maxEntryRetracePercent),
+    maxEntryChasePercent: envNumber('SCALP_MAX_ENTRY_CHASE_PERCENT', DEFAULT_CONFIG.maxEntryChasePercent),
+    requireNextCandleBullish: envBool('SCALP_PORTFOLIO_REQUIRE_NEXT_CANDLE_BULLISH', false),
+    breakEvenTriggerPercent: envNumber('SCALP_BREAK_EVEN_TRIGGER_PERCENT', DEFAULT_CONFIG.breakEvenTriggerPercent),
+    breakEvenOffsetPercent: envNumber('SCALP_BREAK_EVEN_OFFSET_PERCENT', DEFAULT_CONFIG.breakEvenOffsetPercent),
+    trailingActivationPercent: envNumber('SCALP_TRAILING_ACTIVATION_PERCENT', DEFAULT_CONFIG.trailingActivationPercent),
+    trailingStopPercent: envNumber('SCALP_TRAILING_STOP_PERCENT', DEFAULT_CONFIG.trailingStopPercent),
+    stopLossPercent: envNumber('SCALP_STOP_LOSS_PERCENT', DEFAULT_CONFIG.stopLossPercent),
+    takeProfitPercent: envNumber('SCALP_TAKE_PROFIT_PERCENT', DEFAULT_CONFIG.takeProfitPercent),
+    maxHoldMinutes: envNumber('SCALP_MAX_HOLD_MINUTES', DEFAULT_CONFIG.maxHoldMinutes),
+    maxLosingHoldMinutes: envNumber('SCALP_MAX_LOSING_HOLD_MINUTES', DEFAULT_CONFIG.maxLosingHoldMinutes),
+    winnerExtendMinutes: envNumber('SCALP_WINNER_EXTEND_MINUTES', DEFAULT_CONFIG.winnerExtendMinutes),
+    winnerExtendMinProfitPercent: envNumber('SCALP_WINNER_EXTEND_MIN_PROFIT_PERCENT', DEFAULT_CONFIG.winnerExtendMinProfitPercent),
+    maxEntriesPerSignalWindow: envNumber('SCALP_MAX_ENTRIES_PER_SIGNAL_WINDOW', DEFAULT_CONFIG.maxEntriesPerSignalWindow),
+    cooldownAfterLossMinutes: envNumber('SCALP_COOLDOWN_AFTER_LOSS_MINUTES', DEFAULT_CONFIG.cooldownAfterLossMinutes),
+    maxConsecutiveLosses: envNumber('SCALP_MAX_CONSECUTIVE_LOSSES', DEFAULT_CONFIG.maxConsecutiveLosses),
+    lossCircuitBreakerCount: envNumber('SCALP_LOSS_CIRCUIT_BREAKER_COUNT', DEFAULT_CONFIG.lossCircuitBreakerCount),
+    lossCircuitBreakerWindowMinutes: envNumber('SCALP_LOSS_CIRCUIT_BREAKER_WINDOW_MINUTES', DEFAULT_CONFIG.lossCircuitBreakerWindowMinutes),
+    lossCircuitBreakerCooldownMinutes: envNumber('SCALP_LOSS_CIRCUIT_BREAKER_COOLDOWN_MINUTES', DEFAULT_CONFIG.lossCircuitBreakerCooldownMinutes),
+    marketRegimeEnabled: envBool('SCALP_MARKET_REGIME_ENABLED', false),
+    marketRegimeLookback: envNumber('SCALP_MARKET_REGIME_LOOKBACK', DEFAULT_CONFIG.marketRegimeLookback),
+    marketRegimeMinBreadth: envNumber('SCALP_MARKET_REGIME_MIN_BREADTH', DEFAULT_CONFIG.marketRegimeMinBreadth),
+    marketRegimeMinReturnPercent: envNumber('SCALP_MARKET_REGIME_MIN_RETURN_PERCENT', DEFAULT_CONFIG.marketRegimeMinReturnPercent),
+    maxPositions: envNumber('SCALP_MAX_POSITIONS', DEFAULT_CONFIG.maxPositions),
+    portfolioAllocation: envNumber('SCALP_PORTFOLIO_ALLOCATION', DEFAULT_CONFIG.portfolioAllocation)
   };
   return mergePaperValidationConfig(
     { ...DEFAULT_CONFIG, ...envConfig, candleUnit: unit },
@@ -150,10 +150,10 @@ function summarizeResult(market, result) {
 
 export function runSegmentedValidation({
   cacheFile = resolveInputFile(),
-  snapshotFile = process.env.SCALP_VALIDATION_CONFIG_SNAPSHOT_FILE || '',
-  outputFile = process.env.SCALP_SEGMENT_OUTPUT_FILE || 'scalping_validation_segments.json',
-  minimumSegmentCandles = Math.max(1, Math.floor(number(process.env.SCALP_SEGMENT_MIN_CANDLES, 200))),
-  maxHistoricalCandleGapSeconds = number(process.env.SCALP_SEGMENT_MAX_GAP_SECONDS, 0)
+  snapshotFile = envString('SCALP_VALIDATION_CONFIG_SNAPSHOT_FILE', ''),
+  outputFile = envString('SCALP_SEGMENT_OUTPUT_FILE', 'scalping_validation_segments.json'),
+  minimumSegmentCandles = Math.max(1, Math.floor(envNumber('SCALP_SEGMENT_MIN_CANDLES', 200))),
+  maxHistoricalCandleGapSeconds = envNumber('SCALP_SEGMENT_MAX_GAP_SECONDS', 0)
 } = {}) {
   const cache = loadCandleCache(cacheFile);
   const markets = resolveMarkets(cache);
@@ -206,7 +206,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     console.log(`cache: ${report.candleCacheFile}`);
     console.log(`market: ${report.markets.length}개 · candle: ${report.candleUnit}분봉 · minimum segment: ${report.minimumSegmentCandles}개`);
     console.log(`청산: ${closed}건 · unknown boundary: ${unknown}건`);
-    console.log(`report: ${process.env.SCALP_SEGMENT_OUTPUT_FILE || 'scalping_validation_segments.json'}`);
+    console.log(`report: ${envString('SCALP_SEGMENT_OUTPUT_FILE', 'scalping_validation_segments.json')}`);
     console.log('판정: 진단 전용 · historical/live promotion 불가');
   } catch (error) {
     console.error('❌ segmented scalping diagnostic 오류:', error.message);

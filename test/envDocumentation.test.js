@@ -107,7 +107,11 @@ const TYPED_ENV_MIGRATED_FILES = [
   'src/config/envConfig.js',
   'src/research/paperRunnerConfig.js',
   'src/scripts/runPaperSmoke.js',
-  'src/scripts/validateScalping.js'
+  'src/scripts/validateScalping.js',
+  'src/scripts/validatePortfolio.js',
+  'src/scripts/compareScalpingVariants.js',
+  'src/scripts/validateScalpingSegments.js',
+  'src/scripts/validateShadowCandidate.js'
 ];
 
 test('envConfig로 이전된 파일은 직접 env 접근이 없다', () => {

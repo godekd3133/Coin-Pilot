@@ -4,11 +4,11 @@ import UpbitAPI from '../api/upbit.js';
 import { walkForwardValidate } from '../backtest/scalpingBacktest.js';
 import { resolveMaxCandleAgeSeconds } from '../risk/candleFreshness.js';
 import { pathToFileURL } from 'node:url';
+import { envBool, envNumber, envString } from '../config/envConfig.js';
 
 dotenv.config();
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-const number = (value, fallback) => Number.isFinite(Number(value)) ? Number(value) : fallback;
 
 export async function getHistoricalCandles(upbit, market, unit, totalCount) {
   const candles = [];
@@ -48,70 +48,70 @@ export async function getHistoricalCandles(upbit, market, unit, totalCount) {
 
 function shadowConfig() {
   return {
-    initialBalance: number(process.env.SCALP_VALIDATION_INITIAL_BALANCE, 1_000_000),
-    tradingFee: number(process.env.SCALP_VALIDATION_FEE, 0.0005),
-    slippage: number(process.env.SCALP_VALIDATION_SLIPPAGE, 0.001),
-    investmentRatio: number(process.env.SCALP_INVESTMENT_RATIO, 0.02),
+    initialBalance: envNumber('SCALP_VALIDATION_INITIAL_BALANCE', 1_000_000),
+    tradingFee: envNumber('SCALP_VALIDATION_FEE', 0.0005),
+    slippage: envNumber('SCALP_VALIDATION_SLIPPAGE', 0.001),
+    investmentRatio: envNumber('SCALP_INVESTMENT_RATIO', 0.02),
     maxCandleAgeSeconds: resolveMaxCandleAgeSeconds(
-      number(process.env.SCALP_MAX_CANDLE_AGE_SECONDS, 0),
-      number(process.env.SCALP_VALIDATION_CANDLE_UNIT, 1)
+      envNumber('SCALP_MAX_CANDLE_AGE_SECONDS', 0),
+      envNumber('SCALP_VALIDATION_CANDLE_UNIT', 1)
     ),
-    rsiPeriod: number(process.env.SCALP_RSI_PERIOD, number(process.env.RSI_PERIOD, 14)),
-    rsiOversold: number(process.env.SCALP_RSI_OVERSOLD, number(process.env.RSI_OVERSOLD, 30)),
-    rsiOverbought: number(process.env.SCALP_RSI_OVERBOUGHT, number(process.env.RSI_OVERBOUGHT, 70)),
-    oversoldLookback: number(process.env.SCALP_OVERSOLD_LOOKBACK, 1),
+    rsiPeriod: envNumber('SCALP_RSI_PERIOD', envNumber('RSI_PERIOD', 14)),
+    rsiOversold: envNumber('SCALP_RSI_OVERSOLD', envNumber('RSI_OVERSOLD', 30)),
+    rsiOverbought: envNumber('SCALP_RSI_OVERBOUGHT', envNumber('RSI_OVERBOUGHT', 70)),
+    oversoldLookback: envNumber('SCALP_OVERSOLD_LOOKBACK', 1),
     minReboundPercent: 0.1,
     minRsiRecovery: 1,
     minVolumeRatio: 0,
-    volumeLookback: number(process.env.SCALP_VOLUME_LOOKBACK, 20),
+    volumeLookback: envNumber('SCALP_VOLUME_LOOKBACK', 20),
     minCloseStrength: 0,
-    trendPeriod: number(process.env.SCALP_TREND_PERIOD, 30),
-    trendSlopeLookback: number(process.env.SCALP_TREND_SLOPE_LOOKBACK, 3),
+    trendPeriod: envNumber('SCALP_TREND_PERIOD', 30),
+    trendSlopeLookback: envNumber('SCALP_TREND_SLOPE_LOOKBACK', 3),
     minTrendSlopePercent: -100,
     requirePreviousHighBreak: false,
-    maxSignalRangePercent: number(process.env.SCALP_MAX_SIGNAL_RANGE_PERCENT, 0),
-    minSignalRangePercent: number(process.env.SCALP_MIN_SIGNAL_RANGE_PERCENT, 0),
-    maxReboundPercent: number(process.env.SCALP_MAX_REBOUND_PERCENT, 0),
-    marketRegimeEnabled: process.env.SCALP_MARKET_REGIME_ENABLED === 'true',
-    marketRegimeLookback: number(process.env.SCALP_MARKET_REGIME_LOOKBACK, 5),
-    marketRegimeMinBreadth: number(process.env.SCALP_MARKET_REGIME_MIN_BREADTH, 0.5),
-    marketRegimeMinReturnPercent: number(process.env.SCALP_MARKET_REGIME_MIN_RETURN_PERCENT, -0.2),
-    requireReboundBelowOverbought: process.env.SCALP_REQUIRE_REBOUND_BELOW_OVERBOUGHT === 'true',
+    maxSignalRangePercent: envNumber('SCALP_MAX_SIGNAL_RANGE_PERCENT', 0),
+    minSignalRangePercent: envNumber('SCALP_MIN_SIGNAL_RANGE_PERCENT', 0),
+    maxReboundPercent: envNumber('SCALP_MAX_REBOUND_PERCENT', 0),
+    marketRegimeEnabled: envBool('SCALP_MARKET_REGIME_ENABLED', false),
+    marketRegimeLookback: envNumber('SCALP_MARKET_REGIME_LOOKBACK', 5),
+    marketRegimeMinBreadth: envNumber('SCALP_MARKET_REGIME_MIN_BREADTH', 0.5),
+    marketRegimeMinReturnPercent: envNumber('SCALP_MARKET_REGIME_MIN_RETURN_PERCENT', -0.2),
+    requireReboundBelowOverbought: envBool('SCALP_REQUIRE_REBOUND_BELOW_OVERBOUGHT', false),
     signalProfile: 'rsi_rebound',
     bbPeriod: 20,
     bbStdDev: 2,
     emaPeriod: 20,
     maxEntryRetracePercent: 0.25,
     maxEntryChasePercent: 0.35,
-    breakEvenTriggerPercent: number(process.env.SCALP_BREAK_EVEN_TRIGGER_PERCENT, 0),
-    breakEvenOffsetPercent: number(process.env.SCALP_BREAK_EVEN_OFFSET_PERCENT, 0.05),
-    trailingActivationPercent: number(process.env.SCALP_TRAILING_ACTIVATION_PERCENT, 0),
-    trailingStopPercent: number(process.env.SCALP_TRAILING_STOP_PERCENT, 0),
+    breakEvenTriggerPercent: envNumber('SCALP_BREAK_EVEN_TRIGGER_PERCENT', 0),
+    breakEvenOffsetPercent: envNumber('SCALP_BREAK_EVEN_OFFSET_PERCENT', 0.05),
+    trailingActivationPercent: envNumber('SCALP_TRAILING_ACTIVATION_PERCENT', 0),
+    trailingStopPercent: envNumber('SCALP_TRAILING_STOP_PERCENT', 0),
     stopLossPercent: 1.2,
     takeProfitPercent: 1.8,
     maxHoldMinutes: 30,
-    maxLosingHoldMinutes: number(process.env.SCALP_MAX_LOSING_HOLD_MINUTES, 0),
-    winnerExtendMinutes: number(process.env.SCALP_WINNER_EXTEND_MINUTES, 0),
-    winnerExtendMinProfitPercent: number(process.env.SCALP_WINNER_EXTEND_MIN_PROFIT_PERCENT, 0),
-    maxEntriesPerSignalWindow: number(process.env.SCALP_MAX_ENTRIES_PER_SIGNAL_WINDOW, 0),
-    maxRiskDataGapSeconds: number(process.env.SCALP_MAX_RISK_DATA_GAP_SECONDS, 30),
-    maxAnalysisDataGapSeconds: number(process.env.SCALP_MAX_ANALYSIS_DATA_GAP_SECONDS, 60),
+    maxLosingHoldMinutes: envNumber('SCALP_MAX_LOSING_HOLD_MINUTES', 0),
+    winnerExtendMinutes: envNumber('SCALP_WINNER_EXTEND_MINUTES', 0),
+    winnerExtendMinProfitPercent: envNumber('SCALP_WINNER_EXTEND_MIN_PROFIT_PERCENT', 0),
+    maxEntriesPerSignalWindow: envNumber('SCALP_MAX_ENTRIES_PER_SIGNAL_WINDOW', 0),
+    maxRiskDataGapSeconds: envNumber('SCALP_MAX_RISK_DATA_GAP_SECONDS', 30),
+    maxAnalysisDataGapSeconds: envNumber('SCALP_MAX_ANALYSIS_DATA_GAP_SECONDS', 60),
     cooldownAfterLossMinutes: 15,
     maxConsecutiveLosses: 3,
-    lossCircuitBreakerCount: number(process.env.SCALP_LOSS_CIRCUIT_BREAKER_COUNT, 0),
-    lossCircuitBreakerWindowMinutes: number(process.env.SCALP_LOSS_CIRCUIT_BREAKER_WINDOW_MINUTES, 30),
-    lossCircuitBreakerCooldownMinutes: number(process.env.SCALP_LOSS_CIRCUIT_BREAKER_COOLDOWN_MINUTES, 60),
+    lossCircuitBreakerCount: envNumber('SCALP_LOSS_CIRCUIT_BREAKER_COUNT', 0),
+    lossCircuitBreakerWindowMinutes: envNumber('SCALP_LOSS_CIRCUIT_BREAKER_WINDOW_MINUTES', 30),
+    lossCircuitBreakerCooldownMinutes: envNumber('SCALP_LOSS_CIRCUIT_BREAKER_COOLDOWN_MINUTES', 60),
     candleUnit: 1
   };
 }
 
 async function main() {
-  const market = (process.env.SHADOW_VALIDATION_MARKET || 'KRW-KAT').trim().toUpperCase();
-  const unit = number(process.env.SCALP_VALIDATION_CANDLE_UNIT, 1);
-  const candleCount = number(process.env.SCALP_VALIDATION_CANDLE_COUNT, 10080);
+  const market = (envString('SHADOW_VALIDATION_MARKET', 'KRW-KAT')).trim().toUpperCase();
+  const unit = envNumber('SCALP_VALIDATION_CANDLE_UNIT', 1);
+  const candleCount = envNumber('SCALP_VALIDATION_CANDLE_COUNT', 10080);
   const config = shadowConfig();
   const upbit = new UpbitAPI('', '');
-  const candleCacheFile = process.env.SHADOW_VALIDATION_CANDLES_FILE || null;
+  const candleCacheFile = envString('SHADOW_VALIDATION_CANDLES_FILE', null);
   let cachedCandles = null;
   if (candleCacheFile && fs.existsSync(candleCacheFile)) {
     try {
@@ -135,15 +135,15 @@ async function main() {
 
   const validation = walkForwardValidate(candles, config, {
     grid: {},
-    trainRatio: number(process.env.SCALP_VALIDATION_TRAIN_RATIO, 0.7),
-    minimumCandles: number(process.env.SCALP_VALIDATION_MIN_CANDLES, 2000),
-    minimumTrainingTrades: number(process.env.SCALP_VALIDATION_MIN_TRAINING_TRADES, 3),
-    minimumTrainingProfitFactor: number(process.env.SCALP_VALIDATION_MIN_TRAINING_PROFIT_FACTOR, 1),
-    minimumTrainingReturnPercent: number(process.env.SCALP_VALIDATION_MIN_TRAINING_RETURN_PERCENT, 0),
-    minimumValidationTrades: number(process.env.SCALP_VALIDATION_MIN_TRADES, 3),
-    minimumProfitFactor: number(process.env.SCALP_VALIDATION_MIN_PROFIT_FACTOR, 1.05),
-    minimumReturnPercent: number(process.env.SCALP_VALIDATION_MIN_RETURN_PERCENT, 0.1),
-    maximumDrawdownPercent: number(process.env.SCALP_VALIDATION_MAX_DRAWDOWN, 15)
+    trainRatio: envNumber('SCALP_VALIDATION_TRAIN_RATIO', 0.7),
+    minimumCandles: envNumber('SCALP_VALIDATION_MIN_CANDLES', 2000),
+    minimumTrainingTrades: envNumber('SCALP_VALIDATION_MIN_TRAINING_TRADES', 3),
+    minimumTrainingProfitFactor: envNumber('SCALP_VALIDATION_MIN_TRAINING_PROFIT_FACTOR', 1),
+    minimumTrainingReturnPercent: envNumber('SCALP_VALIDATION_MIN_TRAINING_RETURN_PERCENT', 0),
+    minimumValidationTrades: envNumber('SCALP_VALIDATION_MIN_TRADES', 3),
+    minimumProfitFactor: envNumber('SCALP_VALIDATION_MIN_PROFIT_FACTOR', 1.05),
+    minimumReturnPercent: envNumber('SCALP_VALIDATION_MIN_RETURN_PERCENT', 0.1),
+    maximumDrawdownPercent: envNumber('SCALP_VALIDATION_MAX_DRAWDOWN', 15)
   });
 
   const report = {
@@ -164,7 +164,7 @@ async function main() {
     note: 'This report evaluates the relaxed shadow cohort only. It never changes runtime filters or live-order eligibility.'
   };
 
-  const outputFile = process.env.SHADOW_VALIDATION_OUTPUT_FILE || 'scalping_validation_shadow.json';
+  const outputFile = envString('SHADOW_VALIDATION_OUTPUT_FILE', 'scalping_validation_shadow.json');
   fs.writeFileSync(outputFile, JSON.stringify(report, null, 2), 'utf8');
   console.log(`\n💾 shadow 검증 리포트 저장: ${outputFile}`);
   console.log(`검증 수익률: ${validation.validation?.totalReturnPercent?.toFixed(4) ?? 'n/a'}%`);
