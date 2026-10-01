@@ -6,87 +6,45 @@ import {
   evaluateDailyMomentumRobustness
 } from '../research/dailyMomentumRobustnessStudy.js';
 
+import { envList, envNumber, envNumberList, envString } from '../config/envConfig.js';
+
 dotenv.config();
 
 const number = (value, fallback) => Number.isFinite(Number(value)) ? Number(value) : fallback;
-const numberAxis = value => value.split(',').map(Number).filter(Number.isFinite);
-const inputFile = process.env.DAILY_MOMENTUM_CANDLES_FILE || process.argv[2];
-const outputFile = process.env.DAILY_MOMENTUM_ROBUSTNESS_REPORT_FILE ||
+const inputFile = envString('DAILY_MOMENTUM_CANDLES_FILE', null) || process.argv[2];
+const outputFile = envString('DAILY_MOMENTUM_ROBUSTNESS_REPORT_FILE', null) ||
   process.argv[3] || '/private/tmp/coinpilot-daily-momentum-robustness-report.json';
-const benchmarkThresholds = process.env.DAILY_MOMENTUM_ROBUSTNESS_BENCHMARK_THRESHOLDS
-  ? process.env.DAILY_MOMENTUM_ROBUSTNESS_BENCHMARK_THRESHOLDS
-    .split(',').map(Number).filter(Number.isFinite)
-  : null;
-const minUpBars = process.env.DAILY_MOMENTUM_ROBUSTNESS_MIN_UP_BARS
-  ? process.env.DAILY_MOMENTUM_ROBUSTNESS_MIN_UP_BARS.split(',').map(Number).filter(Number.isFinite)
-  : null;
-const trendMinPercent = process.env.DAILY_MOMENTUM_ROBUSTNESS_TREND_MIN_PERCENT
-  ? numberAxis(process.env.DAILY_MOMENTUM_ROBUSTNESS_TREND_MIN_PERCENT)
-  : null;
-const breadthMin = process.env.DAILY_MOMENTUM_ROBUSTNESS_BREADTH_MIN
-  ? numberAxis(process.env.DAILY_MOMENTUM_ROBUSTNESS_BREADTH_MIN)
-  : null;
-const positionFraction = process.env.DAILY_MOMENTUM_ROBUSTNESS_POSITION_FRACTION
-  ? numberAxis(process.env.DAILY_MOMENTUM_ROBUSTNESS_POSITION_FRACTION)
-  : null;
-const maxPositions = process.env.DAILY_MOMENTUM_ROBUSTNESS_MAX_POSITIONS
-  ? numberAxis(process.env.DAILY_MOMENTUM_ROBUSTNESS_MAX_POSITIONS)
-  : null;
-const cooldownAfterLossDays = process.env.DAILY_MOMENTUM_ROBUSTNESS_COOLDOWN_AFTER_LOSS_DAYS
-  ? numberAxis(process.env.DAILY_MOMENTUM_ROBUSTNESS_COOLDOWN_AFTER_LOSS_DAYS)
-  : null;
-const maxPortfolioDrawdownPercent = process.env.DAILY_MOMENTUM_ROBUSTNESS_MAX_PORTFOLIO_DRAWDOWN_PERCENT
-  ? numberAxis(process.env.DAILY_MOMENTUM_ROBUSTNESS_MAX_PORTFOLIO_DRAWDOWN_PERCENT)
-  : null;
-const benchmarkExitConfirmationBars = process.env.DAILY_MOMENTUM_ROBUSTNESS_BENCHMARK_EXIT_CONFIRMATION_BARS
-  ? process.env.DAILY_MOMENTUM_ROBUSTNESS_BENCHMARK_EXIT_CONFIRMATION_BARS
-    .split(',').map(Number).filter(Number.isFinite)
-  : null;
-const regimeExitConfirmationBars = process.env.DAILY_MOMENTUM_ROBUSTNESS_REGIME_EXIT_CONFIRMATION_BARS
-  ? process.env.DAILY_MOMENTUM_ROBUSTNESS_REGIME_EXIT_CONFIRMATION_BARS
-    .split(',').map(Number).filter(Number.isFinite)
-  : null;
-const relativeTrendMinPercent = process.env.DAILY_MOMENTUM_ROBUSTNESS_RELATIVE_TREND_MIN_PERCENT
-  ? process.env.DAILY_MOMENTUM_ROBUSTNESS_RELATIVE_TREND_MIN_PERCENT
-    .split(',').map(Number).filter(Number.isFinite)
-  : null;
-const volatilityLookbackDays = process.env.DAILY_MOMENTUM_ROBUSTNESS_VOLATILITY_LOOKBACK_DAYS
-  ? process.env.DAILY_MOMENTUM_ROBUSTNESS_VOLATILITY_LOOKBACK_DAYS
-    .split(',').map(Number).filter(Number.isFinite)
-  : null;
-const volatilityTargetPercent = process.env.DAILY_MOMENTUM_ROBUSTNESS_VOLATILITY_TARGET_PERCENT
-  ? process.env.DAILY_MOMENTUM_ROBUSTNESS_VOLATILITY_TARGET_PERCENT
-    .split(',').map(Number).filter(Number.isFinite)
-  : null;
-const stopLossPercent = process.env.DAILY_MOMENTUM_ROBUSTNESS_STOP_LOSS_PERCENT
-  ? process.env.DAILY_MOMENTUM_ROBUSTNESS_STOP_LOSS_PERCENT
-    .split(',').map(Number).filter(Number.isFinite)
-  : null;
-const maxEntryGapPercent = process.env.DAILY_MOMENTUM_ROBUSTNESS_MAX_ENTRY_GAP_PERCENT
-  ? numberAxis(process.env.DAILY_MOMENTUM_ROBUSTNESS_MAX_ENTRY_GAP_PERCENT)
-  : null;
-const entryExecution = process.env.DAILY_MOMENTUM_ROBUSTNESS_ENTRY_EXECUTION === 'next_open'
+const benchmarkThresholds = envNumberList('DAILY_MOMENTUM_ROBUSTNESS_BENCHMARK_THRESHOLDS', null);
+const minUpBars = envNumberList('DAILY_MOMENTUM_ROBUSTNESS_MIN_UP_BARS', null);
+const trendMinPercent = envNumberList('DAILY_MOMENTUM_ROBUSTNESS_TREND_MIN_PERCENT', null);
+const breadthMin = envNumberList('DAILY_MOMENTUM_ROBUSTNESS_BREADTH_MIN', null);
+const positionFraction = envNumberList('DAILY_MOMENTUM_ROBUSTNESS_POSITION_FRACTION', null);
+const maxPositions = envNumberList('DAILY_MOMENTUM_ROBUSTNESS_MAX_POSITIONS', null);
+const cooldownAfterLossDays = envNumberList('DAILY_MOMENTUM_ROBUSTNESS_COOLDOWN_AFTER_LOSS_DAYS', null);
+const maxPortfolioDrawdownPercent = envNumberList('DAILY_MOMENTUM_ROBUSTNESS_MAX_PORTFOLIO_DRAWDOWN_PERCENT', null);
+const benchmarkExitConfirmationBars = envNumberList('DAILY_MOMENTUM_ROBUSTNESS_BENCHMARK_EXIT_CONFIRMATION_BARS', null);
+const regimeExitConfirmationBars = envNumberList('DAILY_MOMENTUM_ROBUSTNESS_REGIME_EXIT_CONFIRMATION_BARS', null);
+const relativeTrendMinPercent = envNumberList('DAILY_MOMENTUM_ROBUSTNESS_RELATIVE_TREND_MIN_PERCENT', null);
+const volatilityLookbackDays = envNumberList('DAILY_MOMENTUM_ROBUSTNESS_VOLATILITY_LOOKBACK_DAYS', null);
+const volatilityTargetPercent = envNumberList('DAILY_MOMENTUM_ROBUSTNESS_VOLATILITY_TARGET_PERCENT', null);
+const stopLossPercent = envNumberList('DAILY_MOMENTUM_ROBUSTNESS_STOP_LOSS_PERCENT', null);
+const maxEntryGapPercent = envNumberList('DAILY_MOMENTUM_ROBUSTNESS_MAX_ENTRY_GAP_PERCENT', null);
+const entryExecution = envString('DAILY_MOMENTUM_ROBUSTNESS_ENTRY_EXECUTION', null) === 'next_open'
   ? 'next_open'
   : null;
-const entryWindowEndTimestamp = process.env.DAILY_MOMENTUM_ENTRY_WINDOW_END_TIMESTAMP?.trim() || null;
-const exitExecution = process.env.DAILY_MOMENTUM_ROBUSTNESS_EXIT_EXECUTION === 'next_open'
+const entryWindowEndTimestamp = envString('DAILY_MOMENTUM_ENTRY_WINDOW_END_TIMESTAMP', null)?.trim() || null;
+const exitExecution = envString('DAILY_MOMENTUM_ROBUSTNESS_EXIT_EXECUTION', null) === 'next_open'
   ? 'next_open'
   : null;
-const costPercent = process.env.DAILY_MOMENTUM_ROBUSTNESS_COST_PERCENT === undefined
-  ? null
-  : number(process.env.DAILY_MOMENTUM_ROBUSTNESS_COST_PERCENT, 0.2);
-const costPercentGridInput = process.env.DAILY_MOMENTUM_ROBUSTNESS_COST_PERCENT_GRID;
+const costPercent = envNumber('DAILY_MOMENTUM_ROBUSTNESS_COST_PERCENT', null);
+const costPercentGridInput = envString('DAILY_MOMENTUM_ROBUSTNESS_COST_PERCENT_GRID', undefined);
 const costPercentGrid = costPercentGridInput === undefined
   ? null
   : costPercentGridInput.split(',').map(value => value.trim());
-const modes = process.env.DAILY_MOMENTUM_ROBUSTNESS_MODES
-  ? process.env.DAILY_MOMENTUM_ROBUSTNESS_MODES
-    .split(',').map(value => value.trim()).filter(value => value === 'fixed' || value === 'regime')
-  : null;
-const maxHoldDays = process.env.DAILY_MOMENTUM_ROBUSTNESS_MAX_HOLD_DAYS
-  ? numberAxis(process.env.DAILY_MOMENTUM_ROBUSTNESS_MAX_HOLD_DAYS)
-    .map(value => Math.max(1, Math.floor(value)))
-  : null;
+const modes = envList('DAILY_MOMENTUM_ROBUSTNESS_MODES', null)
+    ?.filter(value => value === 'fixed' || value === 'regime') ?? null;
+const maxHoldDays = envNumberList('DAILY_MOMENTUM_ROBUSTNESS_MAX_HOLD_DAYS', null)
+    ?.map(value => Math.max(1, Math.floor(value))) ?? null;
 
 function loadCandles(file) {
   if (!file || !fs.existsSync(file)) {
@@ -97,8 +55,8 @@ function loadCandles(file) {
   if (!candles || typeof candles !== 'object' || Array.isArray(candles)) {
     throw new Error('FAIL_CLOSED: daily candle cache 형식이 잘못되었습니다.');
   }
-  const requestedMarkets = (process.env.DAILY_MOMENTUM_MARKETS || Object.keys(candles).join(','))
-    .split(',').map(market => market.trim().toUpperCase()).filter(Boolean);
+  const requestedMarkets = (envList('DAILY_MOMENTUM_MARKETS', null) ?? Object.keys(candles))
+    .map(market => market.toUpperCase());
   const markets = [...new Set(requestedMarkets)];
   const missing = markets.filter(market => !Array.isArray(candles[market]));
   if (missing.length) throw new Error(`FAIL_CLOSED: cache에 시장 데이터가 없습니다: ${missing.join(', ')}`);
@@ -123,27 +81,22 @@ function main() {
   }
   const { candles, markets } = loadCandles(inputFile);
   const report = evaluateDailyMomentumRobustness(candles, {
-    segmentCount: Math.max(2, Math.floor(number(
-      process.env.DAILY_MOMENTUM_ROBUSTNESS_SEGMENTS,
+    segmentCount: Math.max(2, Math.floor(envNumber('DAILY_MOMENTUM_ROBUSTNESS_SEGMENTS',
       DEFAULT_DAILY_MOMENTUM_ROBUSTNESS_CONFIG.segmentCount
     ))),
-    minimumFullReturnPercent: number(
-      process.env.DAILY_MOMENTUM_ROBUSTNESS_MIN_RETURN_PERCENT,
+    minimumFullReturnPercent: envNumber('DAILY_MOMENTUM_ROBUSTNESS_MIN_RETURN_PERCENT',
       DEFAULT_DAILY_MOMENTUM_ROBUSTNESS_CONFIG.minimumFullReturnPercent
     ),
-    maximumDrawdownPercent: number(
-      process.env.DAILY_MOMENTUM_ROBUSTNESS_MAX_DRAWDOWN_PERCENT,
+    maximumDrawdownPercent: envNumber('DAILY_MOMENTUM_ROBUSTNESS_MAX_DRAWDOWN_PERCENT',
       DEFAULT_DAILY_MOMENTUM_ROBUSTNESS_CONFIG.maximumDrawdownPercent
     ),
-    minimumWorstSegmentReturnPercent: number(
-      process.env.DAILY_MOMENTUM_ROBUSTNESS_MIN_WORST_SEGMENT_PERCENT,
+    minimumWorstSegmentReturnPercent: envNumber('DAILY_MOMENTUM_ROBUSTNESS_MIN_WORST_SEGMENT_PERCENT',
       DEFAULT_DAILY_MOMENTUM_ROBUSTNESS_CONFIG.minimumWorstSegmentReturnPercent
     ),
-    minimumTradeCount: Math.max(1, Math.floor(number(
-      process.env.DAILY_MOMENTUM_ROBUSTNESS_MIN_TRADES,
+    minimumTradeCount: Math.max(1, Math.floor(envNumber('DAILY_MOMENTUM_ROBUSTNESS_MIN_TRADES',
       DEFAULT_DAILY_MOMENTUM_ROBUSTNESS_CONFIG.minimumTradeCount
     ))),
-    segmentMode: process.env.DAILY_MOMENTUM_ROBUSTNESS_SEGMENT_MODE === 'independent'
+    segmentMode: envString('DAILY_MOMENTUM_ROBUSTNESS_SEGMENT_MODE', null) === 'independent'
       ? 'independent'
       : DEFAULT_DAILY_MOMENTUM_ROBUSTNESS_CONFIG.segmentMode,
     ...((entryExecution || entryWindowEndTimestamp || exitExecution || costPercent !== null) ? {

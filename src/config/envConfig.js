@@ -111,3 +111,15 @@ export function envList(key, fallback, { source = process.env } = {}) {
   if (raw === undefined) return fallback;
   return raw.split(',').map(part => part.trim()).filter(part => part.length > 0);
 }
+
+/**
+ * 수치 축(axis) 설정 — 스칼라 선언이지만 스윕용으로 '0.1,0.2' 목록을 담는
+ * 리서치 키용. 비수치 항목은 기존 numberAxis처럼 조용히 걸러낸다.
+ * (fail-fast는 스칼라 envNumber에만 두고, 축 파싱은 기존 필터 계약을 유지)
+ */
+export function envNumberList(key, fallback, { source = process.env } = {}) {
+  specFor(key, ['list', 'number', 'int', 'string']);
+  const raw = rawValue(key, source);
+  if (raw === undefined) return fallback;
+  return raw.split(',').map(Number).filter(Number.isFinite);
+}

@@ -28,7 +28,7 @@ const ACCESS_PATTERNS = [
   // parameter are environment reads.
   /\benv\.([A-Z_][A-Z0-9_]*)/g,
   // Env helper calls that receive the variable name as a string literal.
-  /(?:numericEnv|listEnv|envNumber|envFlag|booleanEnv|stringEnv|csvEnv|envBool|envInt|envString|envList)\(\s*(?:env\s*,\s*)?['"]([A-Z_][A-Z0-9_]*)['"]/g
+  /(?:numericEnv|listEnv|envNumber|envFlag|booleanEnv|stringEnv|csvEnv|envBool|envInt|envString|envList|envNumberList)\(\s*(?:env\s*,\s*)?['"]([A-Z_][A-Z0-9_]*)['"]/g
 ];
 
 function collectSourceFiles(dir) {
@@ -112,7 +112,8 @@ const TYPED_ENV_MIGRATED_FILES = [
   'src/scripts/compareScalpingVariants.js',
   'src/scripts/validateScalpingSegments.js',
   'src/scripts/validateShadowCandidate.js',
-  'src/api/routes/research.js'
+  'src/api/routes/research.js',
+  'src/scripts/validateDailyMomentumRobustness.js'
 ];
 
 test('envConfig로 이전된 파일은 직접 env 접근이 없다', () => {
