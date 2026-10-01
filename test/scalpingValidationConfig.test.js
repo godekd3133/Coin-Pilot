@@ -82,8 +82,11 @@ test('live entry와 forward-paper entry는 동일한 SCALP_* env 계약을 해�
         .map(match => match[1])
         .filter(name => name.startsWith('SCALP_'))
     );
+  // createConfig moved to config/runtimeConfig.js when the boot file was
+  // split — the env-contract surface follows the code, not the filename.
   const live = envNames([
     fs.readFileSync('src/index.js', 'utf8'),
+    fs.readFileSync('src/config/runtimeConfig.js', 'utf8'),
     fs.readFileSync('src/config/tradingLimits.js', 'utf8')
   ].join('\n'));
   const paper = envNames(fs.readFileSync('src/scripts/runPaperSmoke.js', 'utf8'));

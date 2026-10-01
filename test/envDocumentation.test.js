@@ -110,6 +110,7 @@ const TYPED_ENV_MIGRATED_FILES = [
   'src/api/routes/research.js',
   'src/api/upbit.js',
   'src/api/upbitRateCoordinator.js',
+  'src/index.js',
   'src/optimization/parameterOptimizer.js',
   'src/research/paperRunnerConfig.js',
   'src/scripts/analyzePaperExitEvidence.js',
@@ -150,6 +151,7 @@ const TYPED_ENV_MIGRATED_FILES = [
   'src/scripts/validateScalpingNoTradeFill.js',
   'src/scripts/validateScalpingSegments.js',
   'src/scripts/validateShadowCandidate.js',
+  'src/runtime/researchLoops.js',
   'src/scripts/verifyMomentumShadowEvidenceSnapshot.js',
   'src/trader/autoTrader.js',
   'src/utils/logger.js'

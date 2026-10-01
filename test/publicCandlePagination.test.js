@@ -50,7 +50,9 @@ test('optimizer paginates through the shared Upbit minute-candle method with the
 });
 
 test('primary runtime pagination no longer calls the Upbit HTTP endpoint directly', () => {
-  const source = fs.readFileSync(path.join(projectRoot, 'src/index.js'), 'utf8');
+  // getMultipleMinuteCandles lives in researchLoops.js after the boot/config split;
+  // the guard follows the code, not the filename.
+  const source = fs.readFileSync(path.join(projectRoot, 'src/runtime/researchLoops.js'), 'utf8');
   const collector = source.split('async function getMultipleMinuteCandles(')[1]
     ?.split('\n}\n')[0] || '';
 
