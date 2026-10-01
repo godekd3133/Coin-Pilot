@@ -22,7 +22,12 @@ const manifestSource = fs.readFileSync(path.join(projectRoot, 'public/manifest.w
 const redesignScriptAsset = indexSource.match(/<script\s+src=["'](\/pilot-redesign\.js\?v=[^"']+)["']/)?.[1];
 const redesignStylesheetAsset = indexSource.match(/<link\s+rel=["']stylesheet["']\s+href=["'](\/pilot-redesign\.css\?v=[^"']+)["']/)?.[1];
 const serviceWorkerCacheName = serviceWorkerSource.match(/const CACHE_NAME = ["']([^"']+)["']/)?.[1];
-const manualOrderServiceSource = fs.readFileSync(path.join(projectRoot, 'src/api/manualOrderService.js'), 'utf8');
+// 수동 주문 use-case는 manualOrder*.js 모듈로 분리됐다 — 스캔은 실제 코드 경계를 따라간다.
+const manualOrderServiceSource = [
+  'src/api/manualOrderService.js',
+  'src/api/manualOrderSmartBuy.js',
+  'src/api/manualOrderSmartSell.js'
+].map(f => fs.readFileSync(path.join(projectRoot, f), 'utf8')).join('\n');
 const coreReadinessFunctionSource = redesignSource.match(
   /function isCoreTradingSnapshotReady\(\{[\s\S]*?\n {4}\}/
 )?.[0];

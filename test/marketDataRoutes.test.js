@@ -117,6 +117,8 @@ test('route ticker and candle reads all go through the market-data provider seam
     new URL('../src/api/routes/config.js', import.meta.url),
     new URL('../src/api/routes/market.js', import.meta.url),
     new URL('../src/api/manualOrderService.js', import.meta.url),
+    new URL('../src/api/manualOrderSmartBuy.js', import.meta.url),
+    new URL('../src/api/manualOrderSmartSell.js', import.meta.url),
     new URL('../src/api/marketAnalysisQueries.js', import.meta.url)
   ];
   const routeSources = await Promise.all(routeUrls.map(url => readFile(url, 'utf8')));
@@ -135,7 +137,7 @@ test('dashboard market-list and ticker reads stay behind the selected market-dat
     new URL('../src/api/routes/market.js', import.meta.url),
     new URL('../src/api/routes/trading.js', import.meta.url),
     new URL('../src/api/dashboardServer.js', import.meta.url),
-    new URL('../src/api/manualOrderService.js', import.meta.url),
+    new URL('../src/api/manualOrderSmartBuy.js', import.meta.url),
     new URL('../src/api/marketAnalysisQueries.js', import.meta.url),
     new URL('../src/api/dashboardReadCache.js', import.meta.url),
     new URL('../src/api/notificationMonitor.js', import.meta.url),
