@@ -138,7 +138,7 @@ test('dashboard market-list and ticker reads stay behind the selected market-dat
     new URL('../src/api/routes/trading.js', import.meta.url),
     new URL('../src/api/dashboardServer.js', import.meta.url),
     new URL('../src/api/manualOrderSmartBuy.js', import.meta.url),
-    new URL('../src/api/marketAnalysisQueries.js', import.meta.url),
+    new URL('../src/api/marketAnalysisCoin.js', import.meta.url),
     new URL('../src/api/dashboardReadCache.js', import.meta.url),
     new URL('../src/api/notificationMonitor.js', import.meta.url),
     new URL('../src/api/routes/status.js', import.meta.url)
