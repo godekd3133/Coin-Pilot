@@ -20,10 +20,12 @@ import {
 } from '../src/research/liveExecutionEvidence.js';
 import {
   ManualOrderIdempotencyStore,
-  createDefaultManualOrderIdempotencyStore,
+  createDefaultManualOrderIdempotencyStore
+} from '../src/api/manualOrderIdempotencyStore.js';
+import {
   canonicalManualRequestEndpoint,
   createManualOrderIdempotencyMiddleware
-} from '../src/api/manualOrderIdempotencyStore.js';
+} from '../src/api/manualOrderIdempotencyMiddleware.js';
 
 function makeRoot(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'coinpilot-manual-idempotency-'));

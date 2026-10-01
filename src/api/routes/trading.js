@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'node:path';
 import { assessScalpingValidationReportFreshness } from '../../research/scalpingValidationFreshness.js';
 import { getStrategyReadiness } from '../../research/strategyReadiness.js';
-import { createManualOrderIdempotencyMiddleware } from '../manualOrderIdempotencyStore.js';
+import { createManualOrderIdempotencyMiddleware } from '../manualOrderIdempotencyMiddleware.js';
 import { getMarketDataProvider } from '../marketDataProvider.js';
 import { envString } from '../../config/envConfig.js';
 import { createManualOrderService } from '../manualOrderService.js';

@@ -2,7 +2,7 @@ import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { accountValuationMarkets, readCurrentMarketPrices } from '../marketValuation.js';
-import { createManualOrderIdempotencyMiddleware } from '../manualOrderIdempotencyStore.js';
+import { createManualOrderIdempotencyMiddleware } from '../manualOrderIdempotencyMiddleware.js';
 import PortfolioHistoryStore, { PortfolioHistoryFormatError } from '../portfolioHistoryStore.js';
 import PortfolioSnapshotService from '../portfolioSnapshotService.js';
 import { projectPaperValidationMobileSummary } from '../paperValidationMobileSummary.js';
