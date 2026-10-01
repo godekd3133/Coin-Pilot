@@ -124,7 +124,8 @@ const TYPED_ENV_MIGRATED_FILES = [
   'src/scripts/preflightMomentumShadowCandidate.js',
   'src/ai/aiAdvisorService.js',
   'src/scripts/validateDailyMarketNeutral.js',
-  'src/scripts/runBacktest.js'
+  'src/scripts/runBacktest.js',
+  'src/scripts/validateScalpingNoTradeFill.js'
 ];
 
 test('envConfig로 이전된 파일은 직접 env 접근이 없다', () => {
