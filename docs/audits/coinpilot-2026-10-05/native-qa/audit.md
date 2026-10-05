@@ -44,7 +44,7 @@
 
 iOS의 자동 갱신 중단은 시세 서버가 아니라 앱 생명주기 전달 문제였다. UIKit의 `UIHostingController`로 열린 화면에서 UIKit은 전경 활성(`activationState = 0`)이었지만 SwiftUI의 `scenePhase`는 `background`로 남아 있었다. `SceneDelegate`의 활성·비활성·배경 콜백을 ObservableObject로 전달하고 SwiftUI 환경에 명시적으로 주입했다. 원인 진단용 NSLog는 소스에서 제거했다.
 
-수정 후의 [runtime-proof.json](runtime-proof.json), [수정 전 로그](ios-lifecycle-before.stderr.log), [수정 후 로그](ios-lifecycle-after.stderr.log), [QA HTTP 기록](qa-http.jsonl)에서 다음을 확인했다.
+수정 후의 [runtime-proof.json](runtime-proof.json), [수정 전 로그](ios-lifecycle-before.stderr.log), [수정 후 로그](ios-lifecycle-after.stderr.log), [QA HTTP 기록](qa-http-audit-snapshot.jsonl)에서 다음을 확인했다.
 
 - 전경에서 계좌를 약 30초마다 다시 조회했다. 수동 동작에 따른 짧은 간격도 기록되어 있으므로 모든 요청 간격이 30초라는 뜻은 아니다.
 - 한국 시간 18:20:12부터 18:22:49까지 배경 상태에서 계좌 요청이 **0건**이었다.

@@ -1,0 +1,26 @@
+{
+  "snapshotMatchesManifest": true,
+  "currentWorkspaceDifferences": [
+    "mobile/ios/App/App/CoinPilotStore.swift"
+  ],
+  "bundles": {
+    "mac": {
+      "buildExit": 0,
+      "bundleIdentifier": "com.godekd3133.coinpilot.qa",
+      "dataMode": "server",
+      "paperServer": "http://gimmingyuui-MacBookPro.local:39471",
+      "liveServer": "http://gimmingyuui-MacBookPro.local:39471",
+      "tokenIsSynthetic": true,
+      "developerSecretsIncluded": false
+    },
+    "ios": {
+      "buildExit": 0,
+      "bundleIdentifier": "com.godekd3133.coinpilot.qa",
+      "dataMode": "server",
+      "paperServer": "http://gimmingyuui-MacBookPro.local:39471",
+      "liveServer": "http://gimmingyuui-MacBookPro.local:39471",
+      "tokenIsSynthetic": true,
+      "developerSecretsIncluded": false
+    }
+  }
+}

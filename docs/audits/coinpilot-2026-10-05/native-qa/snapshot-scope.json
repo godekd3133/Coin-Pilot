@@ -1,0 +1,7 @@
+{
+  "capturedAt": "2026-10-05T10:32:18.245848+00:00",
+  "purpose": "Native QA snapshot including concurrent managed-server connection dependencies",
+  "stagedSources": "/Users/kimminkyu/Library/Caches/CoinPilotNativeQA-01a1096e/App",
+  "differencesFromCurrentWorkspaceAtCopy": [],
+  "note": "Current release work may continue changing the workspace after this snapshot. All builds refer to these staged hashes, not future edits."
+}
