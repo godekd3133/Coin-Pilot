@@ -1,0 +1,22 @@
+{
+  "checkedAt": "2026-10-05T11:05:08.809Z",
+  "appId": "6815908841",
+  "groupId": "0cce1fc8-8022-4836-a4a2-bd1fa4d681f1",
+  "groupName": "CoinPilot Internal",
+  "buildId": "0743d3e7-5f2a-4cf7-9580-3b483d0f34a8",
+  "version": "20",
+  "uploadedDate": "2026-10-05T04:02:14-07:00",
+  "processingState": "VALID",
+  "expired": false,
+  "internalBuildState": "IN_BETA_TESTING",
+  "externalBuildState": "READY_FOR_BETA_SUBMISSION",
+  "autoNotifyEnabled": true,
+  "internalGroupMember": true,
+  "internalTesterCount": 1,
+  "readbackEndpoints": [
+    "/v1/builds?filter[app]=6815908841&filter[version]=20",
+    "/v1/builds/0743d3e7-5f2a-4cf7-9580-3b483d0f34a8/buildBetaDetail",
+    "/v1/betaGroups/0cce1fc8-8022-4836-a4a2-bd1fa4d681f1/builds",
+    "/v1/betaGroups/0cce1fc8-8022-4836-a4a2-bd1fa4d681f1/betaTesters"
+  ]
+}

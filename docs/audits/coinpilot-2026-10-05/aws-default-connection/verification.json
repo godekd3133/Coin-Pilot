@@ -1,0 +1,64 @@
+{
+  "releaseSourceCommit": "0f9ddccece439033fb6e0588cb31ce468797a5a1",
+  "version": "1.0",
+  "build": "20",
+  "servers": {
+    "paper": "https://52.78.156.161",
+    "live": "https://52.78.156.161/live"
+  },
+  "releaseArchive": {
+    "path": "/tmp/coinpilot-testflight-20/App.xcarchive",
+    "archiveSucceeded": true,
+    "exportUploadSucceeded": true,
+    "actualEndpointsVerified": true,
+    "versionVerified": true,
+    "developerCredentialsExcluded": true
+  },
+  "tests": {
+    "node": {
+      "passed": 1292,
+      "failed": 0,
+      "runtime": "24.21.0",
+      "concurrency": 1
+    },
+    "storeScenariosPassed": 60,
+    "autoConnectPassed": 5,
+    "serverPolicyPassed": 20,
+    "offlineReplayPassed": 12,
+    "offlineReplayParityPassed": 4,
+    "offlineReplayPersistencePassed": 15,
+    "usefulnessPassed": 3,
+    "lintPassed": true,
+    "pwaVerificationPassed": true,
+    "ascFakeScenariosPassed": 11
+  },
+  "awsApiSmoke": {
+    "paperMode": "DRY_RUN",
+    "liveMode": "LIVE",
+    "nativeCoreReadsCompatible": true,
+    "productionMutationsPerformed": false
+  },
+  "simulator": {
+    "releaseBuildSucceeded": true,
+    "migrationConfirmed": true,
+    "previousAddresses": "private development server addresses",
+    "currentSavedPaperAddress": "https://52.78.156.161",
+    "currentSavedLiveAddress": "https://52.78.156.161/live",
+    "currentDataMode": "server",
+    "screenshotsShowAppForeground": false,
+    "appWindowVisualReview": "unverified; own fresh Simulator launch bridge delayed, captured SpringBoard instead",
+    "physicalDeviceInstalledOrLaunched": false,
+    "temporaryDeviceRemoved": true,
+    "diagnosticScreenshot": "01-simulator-home-diagnostic.png"
+  },
+  "authentication": "Saved Keychain tokens are verified and reused for the same HTTPS origin. A new installation requires token authentication only; no server-address entry.",
+  "sourceSha256": {
+    "mobile/ios/App/App/CoinPilotStore.swift": "cdf5e6533de64a66ab31f3f16ce93cc2ce5001c54d58d30c67886bba9a31dc7e",
+    "mobile/ios/App/App/CoinPilotViews.swift": "788f036d239058ba51b8ac319e16067e8209a3da780cab57060ef286af0205f2",
+    "mobile/ios/App/App/SceneDelegate.swift": "3deb79012ca9911786c577531d373fdb219bda6d9a6dc66572e5cf1b0de256bc",
+    "mobile/ios/App/App.xcodeproj/project.pbxproj": "7faba56bd2d95a1564442739f59c25ec37db71196b2a33d4e664d94af6e8633b",
+    "mobile/scripts/testflight-upload.sh": "e9019bae8bafd8f28f43965c753011cd0696404f81365990cdfd83f059ee8366",
+    "mobile/scripts/asc-assign-internal-group.mjs": "c9efe9fd482207b59f36ac7f53937e368b515d575c1035fb027d66bac7a90b7a"
+  },
+  "verificationScope": "The committed release snapshot; later concurrent uncommitted work is not included in build 20."
+}
