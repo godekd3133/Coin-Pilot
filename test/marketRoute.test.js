@@ -192,11 +192,61 @@ test('/api/market/candles keeps exchange rows in the existing reversed chart ord
   assert.equal(result.statusCode, 200);
   assert.deepEqual(candleArgs, ['KRW-BTC', 3, 2]);
   assert.deepEqual(result.body, [
-    { time: '2026-09-29T21:01:00', open: 100, high: 103, low: 99, close: 102, volume: 10 },
-    { time: '2026-09-29T21:02:00', open: 102, high: 104, low: 101, close: 103, volume: 12 }
+    { time: '2026-09-29T21:01:00', timeUtc: '2026-09-29T12:01:00.000Z', open: 100, high: 103, low: 99, close: 102, volume: 10 },
+    { time: '2026-09-29T21:02:00', timeUtc: '2026-09-29T12:02:00.000Z', open: 102, high: 104, low: 101, close: 103, volume: 12 }
   ]);
   assert.equal(newestFirstCandles[0].candle_date_time_kst, '2026-09-29T21:02:00');
   assert.equal(newestFirstCandles[1].candle_date_time_kst, '2026-09-29T21:01:00');
+});
+
+test('/api/market/candles supplies UTC opening times across providers without changing legacy time', async () => {
+  const fixtures = [
+    { candle_date_time_utc: '2026-09-29T12:00:00.000Z' },
+    { candle_date_time_utc: '2026-09-29T12:00:00' },
+    { candle_date_time_kst: '2026-09-29T21:00:00' },
+    { candle_date_time_kst: '2026-09-29T21:00:00+09:00' },
+    {
+      candle_date_time_utc: '2026-09-29T12:00:00',
+      candle_date_time_kst: '2026-09-29T22:00:00',
+      timestamp: Date.parse('2026-09-29T12:04:59.999Z')
+    },
+    { candle_date_time_utc: 'invalid', candle_date_time_kst: '2026-09-29T21:00:00' }
+  ];
+  const router = createMarketRoutes({
+    marketDataProvider: new MarketDataProvider({
+      async readTickers() { return []; },
+      async readCandles() {
+        return fixtures.map(row => ({
+          ...row, opening_price: 100, high_price: 102, low_price: 99,
+          trade_price: 101, candle_acc_trade_volume: 1
+        }));
+      }
+    })
+  });
+  const result = await dispatchGet(router, '/market/candles/KRW-BTC?unit=5&count=6');
+  assert.equal(result.statusCode, 200);
+  assert.equal(result.body.length, fixtures.length);
+  for (const [index, candle] of result.body.entries()) {
+    assert.equal(candle.timeUtc, '2026-09-29T12:00:00.000Z', `fixture ${fixtures.length - 1 - index}`);
+    assert.equal(candle.time, fixtures[fixtures.length - 1 - index].candle_date_time_kst);
+  }
+});
+
+test('/api/market/candles does not invent an opening time from invalid dates or a final-trade timestamp', async () => {
+  const router = createMarketRoutes({
+    marketDataProvider: new MarketDataProvider({
+      async readTickers() { return []; },
+      async readCandles() {
+        return [
+          { candle_date_time_utc: 'invalid', candle_date_time_kst: 'invalid' },
+          { timestamp: Date.parse('2026-09-29T12:04:59.999Z') }
+        ];
+      }
+    })
+  });
+  const result = await dispatchGet(router, '/market/candles/KRW-BTC?count=2');
+  assert.equal(result.statusCode, 200);
+  assert.deepEqual(result.body.map(candle => candle.timeUtc), [null, null]);
 });
 
 test('/api/market/candles coalesces identical in-flight reads and caches each market query briefly', async () => {

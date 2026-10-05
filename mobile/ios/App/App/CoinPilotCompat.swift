@@ -109,22 +109,6 @@ extension View {
         #endif
     }
 
-    /// 필드 바깥을 탭하면 키보드를 내린다. `simultaneousGesture`라 안쪽 버튼의
-    /// 탭도 그대로 동작한다.
-    @ViewBuilder
-    func cpDismissKeyboardOnTap() -> some View {
-        #if canImport(UIKit)
-        simultaneousGesture(TapGesture().onEnded {
-            UIApplication.shared.sendAction(
-                #selector(UIResponder.resignFirstResponder),
-                to: nil, from: nil, for: nil
-            )
-        })
-        #else
-        self
-        #endif
-    }
-
     /// 숫자 패드에는 리턴 키가 없으므로 상단에 "완료" 버튼을 띄운다.
     @ViewBuilder
     func cpKeyboardDoneToolbar() -> some View {

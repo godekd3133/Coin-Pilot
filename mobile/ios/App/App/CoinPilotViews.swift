@@ -196,7 +196,7 @@ private struct CoinPilotConnectionView: View {
                 }
 
                 VStack(alignment: .leading, spacing: 9) {
-                    Text("1. 사용할 계좌를 선택하세요")
+                    Text(store.usesManagedServerConnection ? "사용할 계좌" : "1. 사용할 계좌를 선택하세요")
                         .font(.subheadline.weight(.semibold))
                         .foregroundColor(CoinPilotColors.ink)
                     CoinPilotWorkspaceSelector(store: store)
@@ -208,28 +208,30 @@ private struct CoinPilotConnectionView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
-                VStack(alignment: .leading, spacing: 10) {
-                    FieldTitle(title: "2. 계좌를 관리하는 서버 주소")
-                    TextField("https://example.com", text: $store.serverDraft)
-                        .cpKeyboardURL()
-                        .cpNoAutocapitalization()
-                        .cpNoAutocorrection()
-                        .textFieldStyle(.plain)
-                        .font(.body)
-                        .padding(.horizontal, 15)
-                        .frame(minHeight: 54)
-                        .background(CoinPilotColors.surface)
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                        .overlay(RoundedRectangle(cornerRadius: 12).stroke(CoinPilotColors.line, lineWidth: 1))
-                        .accessibilityLabel("서버 주소")
-                    Text(serverAddressHelp)
-                        .font(.footnote)
-                        .foregroundColor(CoinPilotColors.secondaryInk)
+                if !store.usesManagedServerConnection {
+                    VStack(alignment: .leading, spacing: 10) {
+                        FieldTitle(title: "2. 계좌를 관리하는 서버 주소")
+                        TextField("https://example.com", text: $store.serverDraft)
+                            .cpKeyboardURL()
+                            .cpNoAutocapitalization()
+                            .cpNoAutocorrection()
+                            .textFieldStyle(.plain)
+                            .font(.body)
+                            .padding(.horizontal, 15)
+                            .frame(minHeight: 54)
+                            .background(CoinPilotColors.surface)
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                            .overlay(RoundedRectangle(cornerRadius: 12).stroke(CoinPilotColors.line, lineWidth: 1))
+                            .accessibilityLabel("서버 주소")
+                        Text(serverAddressHelp)
+                            .font(.footnote)
+                            .foregroundColor(CoinPilotColors.secondaryInk)
+                    }
                 }
 
                 if store.phase == .login {
                     VStack(alignment: .leading, spacing: 10) {
-                        FieldTitle(title: "3. 서버 토큰으로 로그인")
+                        FieldTitle(title: store.usesManagedServerConnection ? "서버 토큰으로 로그인" : "3. 서버 토큰으로 로그인")
                         SecureField("토큰 입력", text: $store.tokenDraft)
                             .cpNoAutocapitalization()
                             .cpNoAutocorrection()
@@ -265,7 +267,7 @@ private struct CoinPilotConnectionView: View {
                 } label: {
                     HStack(spacing: 9) {
                         if store.isWorking { ProgressView().tint(.white) }
-                        Text(store.isWorking ? "연결 중" : store.phase == .login ? "로그인" : store.phase == .setup ? "서버 확인" : "다시 연결")
+                        Text(store.isWorking ? "연결 중" : store.phase == .login ? "로그인" : store.usesManagedServerConnection ? "다시 연결" : store.phase == .setup ? "서버 확인" : "다시 연결")
                             .font(.headline.weight(.semibold))
                     }
                     .frame(maxWidth: .infinity)
@@ -292,7 +294,9 @@ private struct CoinPilotConnectionView: View {
                     }
                 }
 
-                Label("거래소 API 키는 서버에만 보관합니다. 모드에 맞는 서버를 연결하세요.", systemImage: "lock.shield")
+                Label(store.usesManagedServerConnection
+                      ? "계좌에 맞는 서버로 자동 연결됩니다. 거래소 API 키는 서버에만 보관합니다."
+                      : "거래소 API 키는 서버에만 보관합니다. 모드에 맞는 서버를 연결하세요.", systemImage: "lock.shield")
                     .font(.footnote)
                     .foregroundColor(CoinPilotColors.secondaryInk)
                     .fixedSize(horizontal: false, vertical: true)
@@ -333,7 +337,10 @@ private struct CoinPilotConnectionView: View {
     private var connectionTitle: String {
         if store.workspaceModeMismatchMessage != nil { return "다른 모드의 서버가 연결됐어요" }
         if store.phase == .dashboard && !store.serverModeMatchesWorkspace { return "서버 모드를 확인할 수 없어요" }
-        if store.phase == .login { return "서버에 로그인하세요" }
+        if store.phase == .login { return "내 계좌에 로그인하세요" }
+        if store.usesManagedServerConnection {
+            return store.isWorking ? "내 계좌에 연결하고 있어요" : "계좌 연결을 확인해 주세요"
+        }
         return "내 자산과 거래를\n한눈에 확인하세요"
     }
 
@@ -346,6 +353,9 @@ private struct CoinPilotConnectionView: View {
         }
         if store.phase == .login {
             return "서버 토큰 권한에 따라 조회 또는 주문·설정 기능을 사용할 수 있습니다. 거래소 API 키는 서버에 보관합니다."
+        }
+        if store.usesManagedServerConnection {
+            return "\(store.activeWorkspace.title) 계좌에 자동으로 연결합니다. 연결이 끊기면 다시 연결해 주세요."
         }
         return "계좌를 관리하는 CoinPilot 서버를 연결하면 자산 변화와 거래 기록을 바로 볼 수 있어요."
     }
@@ -566,6 +576,12 @@ private struct CoinPilotTradingView: View {
         store.quoteCurrency == "KRW" ? String(format: "%.0f", amount.rounded(.down)) : String(amount)
     }
 
+    private func confirmationQuoteAmountText(_ amount: Double?, unavailable: String = "금액 미제공") -> String {
+        guard let amount, amount.isFinite else { return unavailable }
+        let submittedAmount = store.quoteCurrency == "KRW" ? amount.rounded(.down) : amount
+        return CoinPilotFormatting.won(submittedAmount, unavailable: unavailable)
+    }
+
     private func resetCurrencyDrafts() {
         buyAmount = ""
         walletAmount = ""
@@ -581,6 +597,65 @@ private struct CoinPilotTradingView: View {
               let count = Int(smartMaximumCoins), (1...30).contains(count),
               let balance = store.account?.krwBalance, balance.isFinite, amount <= balance else { return false }
         return true
+    }
+
+    private var conditionalOrderConfirmationMessage: String {
+        let requestedSide = requestedSmartSide ?? smartSide
+        let amount = confirmationQuoteAmountText(Double(smartAmount))
+        var lines = ["\(store.activeWorkspace.title) · \(requestedSide.title)"]
+        if requestedSide == .buy {
+            lines.append("총 투자 금액 \(amount)")
+            lines.append("최소 신호 점수 \(smartMinimumScore)점 · 최대 \(smartMaximumCoins)종목")
+        } else {
+            let priority: String
+            switch smartSellStrategy {
+            case "worst": priority = "손실이 큰 순서"
+            case "best": priority = "수익이 큰 순서"
+            case "overbought": priority = "과매수 신호 우선"
+            default: priority = "선택한 우선순위"
+            }
+            lines.append("목표 매도 금액 \(amount)")
+            lines.append("매도 우선순위: \(priority)")
+        }
+        if store.activeWorkspace == .live {
+            lines.append("여러 종목에 실제 주문이 전송될 수 있습니다. 응답이 끊기면 새 주문은 잠기며, 같은 요청으로만 결과를 확인할 수 있습니다.")
+        } else {
+            lines.append("모의 계좌에만 반영되며 실제 자금은 이동하지 않습니다.")
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    private var conditionalOrderValidationMessages: [String] {
+        var messages: [String] = []
+        if !smartAmount.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            let minimum = smartSide == .buy ? store.minimumOrderAmount : store.minimumSmartSellAmount
+            if let amount = Double(smartAmount), amount.isFinite {
+                if amount < minimum {
+                    messages.append("\(smartSide == .buy ? "총 투자 금액" : "목표 매도 금액")은 \(CoinPilotFormatting.won(minimum)) 이상 입력해 주세요.")
+                } else if smartSide == .buy {
+                    if let balance = store.account?.krwBalance, balance.isFinite {
+                        if amount > balance {
+                            messages.append("총 투자 금액이 주문 가능 잔액 \(CoinPilotFormatting.won(balance))을 넘었습니다.")
+                        }
+                    } else {
+                        messages.append("주문 가능 잔액을 확인하지 못했습니다. 계좌 정보를 새로고침해 주세요.")
+                    }
+                }
+            } else {
+                messages.append("금액을 올바른 숫자로 입력해 주세요.")
+            }
+        }
+        if smartSide == .buy {
+            if !smartMinimumScore.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+               Int(smartMinimumScore).map({ !(0...100).contains($0) }) ?? true {
+                messages.append("최소 신호 점수는 0~100 사이의 정수로 입력해 주세요.")
+            }
+            if !smartMaximumCoins.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+               Int(smartMaximumCoins).map({ !(1...30).contains($0) }) ?? true {
+                messages.append("최대 매수 종목 수는 1~30 사이의 정수로 입력해 주세요.")
+            }
+        }
+        return messages
     }
 
     private var walletDraftIsValid: Bool {
@@ -632,7 +707,7 @@ private struct CoinPilotTradingView: View {
 
     private var confirmationDetail: String {
         let amount = side == .buy
-            ? (parsedBuyAmount.map { CoinPilotFormatting.won($0) } ?? "금액 확인 필요")
+            ? confirmationQuoteAmountText(parsedBuyAmount, unavailable: "금액 확인 필요")
             : "\(sellQuantity)개 · 예상 \(CoinPilotFormatting.won(currentPrice.map { $0 * (parsedSellQuantity ?? 0) }, unavailable: "평가 불가"))"
         if store.activeWorkspace == .live {
             return "\(store.exchangeDisplayName) 실계정으로 시장가 주문을 보냅니다.\n\(amount)\n서버의 계좌 동기화·주문 안전 검사가 통과해야 접수됩니다."
@@ -673,7 +748,6 @@ private struct CoinPilotTradingView: View {
         .background(CoinPilotColors.paper.ignoresSafeArea())
         .refreshable { await store.refresh() }
         .cpScrollDismissesKeyboard()
-        .cpDismissKeyboardOnTap()
         .cpKeyboardDoneToolbar()
         .onChange(of: side) { _ in
             market = availableMarkets.first ?? ""
@@ -733,8 +807,8 @@ private struct CoinPilotTradingView: View {
             Button("취소", role: .cancel) { walletAction = nil }
         } message: {
             Text(walletAction == .reset
-                 ? "가상 잔액을 \(CoinPilotFormatting.won(Double(resetSeedMoney)))으로 바꿉니다. 현재 모의 보유량과 매매 기록이 삭제됩니다."
-                 : "\(CoinPilotFormatting.won(Double(walletAmount)))을 모의 계좌에서 \(walletAction == .deposit ? "입금" : "출금")합니다. 실제 자금은 이동하지 않습니다.")
+                 ? "가상 잔액을 \(confirmationQuoteAmountText(Double(resetSeedMoney)))으로 바꿉니다. 현재 모의 보유량과 매매 기록이 삭제됩니다."
+                 : "\(confirmationQuoteAmountText(Double(walletAmount)))을 모의 계좌에서 \(walletAction == .deposit ? "입금" : "출금")합니다. 실제 자금은 이동하지 않습니다.")
         }
         .confirmationDialog(
             requestedSmartSide?.title ?? "조건 주문",
@@ -763,7 +837,7 @@ private struct CoinPilotTradingView: View {
             }
             Button("취소", role: .cancel) { requestedSmartSide = nil }
         } message: {
-            Text("여러 종목에 주문할 수 있습니다. 실거래 응답이 끊기면 새 주문은 잠기며, 같은 요청으로만 결과를 확인할 수 있습니다.")
+            Text(conditionalOrderConfirmationMessage)
         }
         .confirmationDialog(
             "추천 주문을 확인해 주세요",
@@ -779,8 +853,11 @@ private struct CoinPilotTradingView: View {
             }
             Button("취소", role: .cancel) { requestedRecommendation = nil }
         } message: {
-            Text(requestedRecommendation.map {
-                "\(CoinPilotFormatting.ticker($0.coin)) \($0.action == "BUY" ? "매수" : "보유량 전체 매도") · \($0.suggestedAmount.map { CoinPilotFormatting.won($0) } ?? "금액은 서버 추천값")\n분석 결과는 참고 정보이며, 주문 전 서버의 거래 안전 검사를 다시 확인합니다."
+            Text(requestedRecommendation.map { recommendation in
+                let detail = recommendation.action == "BUY"
+                    ? "매수 · \(confirmationQuoteAmountText(recommendation.suggestedAmount ?? store.buyAmountPresets[1]))"
+                    : "보유량 전체 매도"
+                return "\(CoinPilotFormatting.ticker(recommendation.coin)) \(detail)\n분석 결과는 참고 정보이며, 주문 전 서버의 거래 안전 검사를 다시 확인합니다."
             } ?? "")
         }
         .confirmationDialog(
@@ -866,6 +943,9 @@ private struct CoinPilotTradingView: View {
                         Text("과매수 신호 우선").tag("overbought")
                     }
                     .pickerStyle(MenuPickerStyle())
+                }
+                if !conditionalOrderValidationMessages.isEmpty {
+                    InlineNotice(text: conditionalOrderValidationMessages.joined(separator: "\n"), color: CoinPilotColors.amber)
                 }
                 Button(smartSide.title) { requestedSmartSide = smartSide }
                     .buttonStyle(CoinPilotSecondaryButtonStyle())
@@ -1132,7 +1212,7 @@ private struct CoinPilotTradingView: View {
 
                     if store.isBundledPreview {
                         InlineNotice(
-                            text: "이 예시 계좌는 주문을 저장하지 않습니다. 실제 모의주문은 DRY_RUN 서버에 연결하세요.",
+                            text: "이 예시 계좌는 주문을 저장하지 않습니다. 모의 주문을 하려면 모의투자 서버에 연결하세요.",
                             color: CoinPilotColors.amber
                         )
                     } else if let blockReason = store.manualOrderBlockReason(for: market) {
@@ -1162,7 +1242,7 @@ private struct CoinPilotTradingView: View {
                          ? "앱에 포함된 예시 계좌는 화면 표시용이며 주문·입금·출금되지 않습니다."
                          : store.activeWorkspace == .live
                          ? "주문 전 종목·금액을 다시 확인합니다. 거래소 API 키는 서버에만 보관됩니다."
-                         : "모의 주문은 선택한 DRY_RUN 서버의 가상 자산만 바꿉니다.")
+                         : "모의 주문은 선택한 모의투자 서버의 가상 자산만 바꿉니다.")
                         .font(.footnote)
                         .foregroundColor(CoinPilotColors.secondaryInk)
                         .fixedSize(horizontal: false, vertical: true)
@@ -2267,21 +2347,16 @@ private struct CoinPilotHistoryCard: View {
                 CoinPilotHistoryChart(
                     points: store.history,
                     reference: store.account?.initialSeedMoney,
-                    period: store.historyPeriod
+                    period: store.historyPeriod,
+                    emptyMessage: store.history.isEmpty
+                        ? store.emptyResourceMessage(for: "portfolio-history", whenLoadedEmpty: "이 기간에 저장된 자산 기록이 없습니다.")
+                        : "저장된 기록의 평가액을 확인할 수 없습니다."
                 )
-                    .frame(height: 152)
                 if store.history.contains(where: { $0.valuationStatus == "unknown_legacy" }) {
                     Text("일부 이전 기록은 당시 시세 평가 근거를 확인할 수 없어요.")
                         .font(.footnote)
                         .foregroundColor(CoinPilotColors.amber)
                         .fixedSize(horizontal: false, vertical: true)
-                }
-                if store.history.compactMap(\.totalAssets).count < 2 {
-                    Text(store.history.isEmpty
-                         ? store.emptyResourceMessage(for: "portfolio-history", whenLoadedEmpty: "표시할 자산 기록이 없습니다.")
-                         : "그래프로 보려면 자산 기록이 더 필요합니다.")
-                        .font(.footnote)
-                        .foregroundColor(CoinPilotColors.secondaryInk)
                 }
             }
         }
@@ -2292,6 +2367,7 @@ private struct CoinPilotHistoryChart: View {
     let points: [CoinPilotHistoryPoint]
     var reference: Double? = nil
     var period: CoinPilotHistoryPeriod = .day
+    var emptyMessage: String = "이 기간에 저장된 자산 기록이 없습니다."
 
     @State private var inspectedIndex: Int?
 
@@ -2319,6 +2395,46 @@ private struct CoinPilotHistoryChart: View {
     private var values: [Double] { valuedPoints.map(\.value) }
 
     var body: some View {
+        Group {
+            if valuedPoints.count >= 2 {
+                graph
+                    .frame(height: 152)
+            } else if let record = valuedPoints.first {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("이 기간의 자산 기록 1개")
+                        .font(.footnote)
+                        .foregroundColor(CoinPilotColors.secondaryInk)
+                    Text(CoinPilotFormatting.won(record.value))
+                        .font(.title2.weight(.bold).monospacedDigit())
+                        .foregroundColor(CoinPilotColors.ink)
+                    Text(CoinPilotFormatting.dateTime(record.point.timestamp))
+                        .font(.footnote)
+                        .foregroundColor(CoinPilotColors.secondaryInk)
+                    Text("기록이 더 쌓이면 자산 변화를 그래프로 볼 수 있어요.")
+                        .font(.footnote)
+                        .foregroundColor(CoinPilotColors.secondaryInk)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 4)
+            } else {
+                Label(emptyMessage, systemImage: "chart.line.uptrend.xyaxis")
+                    .font(.footnote)
+                    .foregroundColor(CoinPilotColors.secondaryInk)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 8)
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(valuedPoints.count >= 2 ? "자산 기록 그래프" : "자산 기록")
+        .accessibilityValue(accessibilitySummary)
+        .accessibilityHint(valuedPoints.count >= 2
+            ? "길게 누른 뒤 좌우로 움직이면 각 시점의 총자산을 확인할 수 있습니다."
+            : "")
+    }
+
+    private var graph: some View {
         VStack(spacing: 6) {
             GeometryReader { geometry in
                 if values.count >= 2 {
@@ -2419,10 +2535,6 @@ private struct CoinPilotHistoryChart: View {
                             }
                             .onEnded { _ in inspectedIndex = nil }
                     )
-                } else {
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(CoinPilotColors.surface)
-                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(CoinPilotColors.line, lineWidth: 1))
                 }
             }
             if valuedPoints.count >= 2 {
@@ -2435,10 +2547,6 @@ private struct CoinPilotHistoryChart: View {
                 .foregroundColor(CoinPilotColors.secondaryInk)
             }
         }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("자산 기록 그래프")
-        .accessibilityValue(accessibilitySummary)
-        .accessibilityHint("길게 누른 뒤 좌우로 움직이면 각 시점의 총자산을 확인할 수 있습니다.")
     }
 
     private func nearestValuedIndex(x: CGFloat, width: CGFloat) -> Int? {
@@ -2450,7 +2558,10 @@ private struct CoinPilotHistoryChart: View {
 
     private var accessibilitySummary: String {
         guard let first = values.first, let last = values.last else {
-            return "표시할 자산 기록이 없습니다."
+            return emptyMessage
+        }
+        if valuedPoints.count == 1, let record = valuedPoints.first {
+            return "이 기간의 자산 기록 1개. 총자산 \(CoinPilotFormatting.won(record.value)), \(CoinPilotFormatting.dateTime(record.point.timestamp)). 기록이 더 쌓이면 자산 변화를 그래프로 볼 수 있어요."
         }
         var summary = "첫 기록 총자산 \(CoinPilotFormatting.won(first)), 최근 기록 총자산 \(CoinPilotFormatting.won(last))"
         if let minimum = values.min(), let maximum = values.max() {
@@ -3027,18 +3138,30 @@ private struct CoinPilotSettingsView: View {
                                 .foregroundColor(CoinPilotColors.blue)
                                 .padding(.top, 2)
                         } else {
-                            SettingsRow(
-                                title: "서버 주소",
-                                value: store.serverAddress.isEmpty ? "설정되지 않음" : store.serverAddress,
-                                symbol: "network"
-                            )
-                            Button("서버 주소 변경") { showingServerEditor = true }
+                            if store.usesManagedServerConnection {
+                                SettingsRow(title: "계좌 연결", value: "\(store.activeWorkspace.title) 서버 자동 연결", symbol: "network")
+                                Button("연결 다시 확인") {
+                                    Task { await store.primaryConnectionAction() }
+                                }
                                 .font(.body.weight(.semibold))
                                 .foregroundColor(CoinPilotColors.blue)
-                                .padding(.top, 2)
-                            Button("서버 토큰 입력 또는 변경") { showingTokenEditor = true }
-                                .font(.body.weight(.semibold))
-                                .foregroundColor(CoinPilotColors.blue)
+                                .disabled(store.isWorking)
+                            } else {
+                                SettingsRow(
+                                    title: "서버 주소",
+                                    value: store.serverAddress.isEmpty ? "설정되지 않음" : store.serverAddress,
+                                    symbol: "network"
+                                )
+                                Button("서버 주소 변경") { showingServerEditor = true }
+                                    .font(.body.weight(.semibold))
+                                    .foregroundColor(CoinPilotColors.blue)
+                                    .padding(.top, 2)
+                            }
+                            if store.authenticationRequired {
+                                Button("서버 토큰 입력 또는 변경") { showingTokenEditor = true }
+                                    .font(.body.weight(.semibold))
+                                    .foregroundColor(CoinPilotColors.blue)
+                            }
                             if store.canUseBundledPreview {
                                 Button("예시 데이터로 보기") { store.useBundledPreview() }
                                     .font(.body.weight(.semibold))
@@ -3155,7 +3278,7 @@ private struct CoinPilotSettingsView: View {
                     }
                 }
 
-                if store.authenticationRequired {
+                if store.authenticationRequired && !store.usesManagedServerConnection {
                     Button(role: .destructive) {
                         showingLogoutConfirmation = true
                     } label: {
@@ -5155,7 +5278,7 @@ private struct CoinPilotAIDeskView: View {
                             error: store.featureMessages["ai"]
                         )
                         providerStatus
-                        Text("AI 의견은 참고 정보입니다. 주문은 이 화면에서 따로 확인해야 하며 자동으로 실행되지 않습니다.")
+                        Text("AI 의견은 참고 정보이며 자동 주문에 사용하지 않습니다. 주문 화면에서 직접 확인해 주세요.")
                             .font(.caption).foregroundColor(CoinPilotColors.secondaryInk)
                     }
                 }
@@ -5387,7 +5510,7 @@ private struct CoinPilotAIDeskView: View {
                 let provider = item.element
                 let ready = provider["ready"] as? Bool ?? provider["available"] as? Bool ?? false
                 HStack {
-                    Text(provider["name"] as? String ?? provider["provider"] as? String ?? "AI 서비스")
+                    Text(provider["label"] as? String ?? provider["name"] as? String ?? provider["provider"] as? String ?? provider["id"] as? String ?? "AI 서비스")
                     Spacer()
                     Text(providerState(provider["status"] as? String, ready: ready))
                         .font(.caption.weight(.semibold))
@@ -5541,7 +5664,7 @@ private struct CoinPilotAccountAnalyticsView: View {
                                 MetricTile(title: "매입 원가", value: CoinPilotFormatting.won(number(summary["totalCost"])))
                                 MetricTile(title: "현금 잔액", value: CoinPilotFormatting.won(number(summary["krwBalance"])))
                                 MetricTile(
-                                    title: "누적 손익",
+                                    title: "보유 코인 평가손익",
                                     value: CoinPilotFormatting.signedWon(number(summary["totalProfit"])),
                                     detail: number(summary["totalProfitPercent"]).map { CoinPilotFormatting.percent($0) },
                                     tint: profitColor(number(summary["totalProfit"]))
@@ -5568,7 +5691,7 @@ private struct CoinPilotAccountAnalyticsView: View {
                             HStack {
                                 VStack(alignment: .leading, spacing: 4) {
                                     Text(CoinPilotFormatting.ticker(coin)).font(.subheadline.weight(.semibold))
-                                    Text("비중 \(CoinPilotFormatting.percent(weight))")
+                                    Text("비중 \(CoinPilotFormatting.percent(weight, signed: false))")
                                         .font(.caption2).foregroundColor(CoinPilotColors.secondaryInk)
                                 }
                                 Spacer()
@@ -5710,6 +5833,14 @@ private struct CoinPilotResearchDeskView: View {
     @ObservedObject var store: CoinPilotStore
     @State private var requestedPaperAction: Bool?
 
+    private var readinessStatusText: String {
+        switch store.strategyReadiness["status"] as? String {
+        case "READY": return "검증 자료 준비됨"
+        case "BLOCKED": return "자료 확인 필요"
+        default: return "상태 확인 필요"
+        }
+    }
+
     private var paperIsActive: Bool {
         (store.paperValidationState["active"] as? Bool) ??
         ((store.paperValidationState["status"] as? [String: Any])?["active"] as? Bool) ?? false
@@ -5737,8 +5868,8 @@ private struct CoinPilotResearchDeskView: View {
                             EmptyMessage(text: store.featureMessages["strategy-readiness"] ?? "서버의 검증 자료를 불러오지 않았습니다.")
                         } else {
                             let gate = store.strategyReadiness["liveGate"] as? [String: Any] ?? [:]
-                            AnalyticsMetric(title: "준비 상태", value: store.strategyReadiness["status"] as? String ?? "확인 필요")
-                            AnalyticsMetric(title: "현재 근거", value: store.strategyReadiness["currentEvidence"] as? Bool == true ? "현재 자료" : "확인 필요")
+                            AnalyticsMetric(title: "준비 상태", value: readinessStatusText)
+                            AnalyticsMetric(title: "자료 확인", value: store.strategyReadiness["currentEvidence"] as? Bool == true ? "확인 완료" : "확인 필요")
                             AnalyticsMetric(title: "실거래 진입", value: gate["passed"] as? Bool == true ? "서버 조건 통과" : "잠금")
                             Text("검증 자료가 있다고 실거래 주문이 자동 승인되지는 않습니다. 실제 주문은 서버의 계좌 동기화와 안전 조건을 별도로 통과해야 합니다.")
                                 .font(.caption).foregroundColor(CoinPilotColors.secondaryInk)
@@ -6013,6 +6144,11 @@ private struct CoinPilotOptimizationView: View {
 private struct CoinPilotPresetView: View {
     @ObservedObject var store: CoinPilotStore
     @State private var requestedPreset: [String: Any]?
+    @State private var appliedPresetID: String?
+    @State private var applyingPresetID: String?
+    @State private var applicationRequestID: UUID?
+    @State private var applicationMessage: String?
+    @State private var applicationFailed = false
 
     var body: some View {
         ScrollView {
@@ -6024,7 +6160,12 @@ private struct CoinPilotPresetView: View {
                     lastSuccessfulAt: store.featureLastSuccessfulAt["optimization"],
                     error: store.featureMessages["optimization"]
                 )
-                if let message = store.tuningMessage { InlineNotice(text: message, color: CoinPilotColors.blue) }
+                if let applicationMessage {
+                    InlineNotice(text: applicationMessage, color: applicationFailed ? CoinPilotColors.amber : CoinPilotColors.green)
+                }
+                if applyingPresetID == nil, let message = store.tuningMessage, message != applicationMessage {
+                    InlineNotice(text: message, color: CoinPilotColors.amber)
+                }
                 if store.investmentPresets.isEmpty {
                     NativeCard {
                         EmptyMessage(text: store.featureMessages["investment-presets"] ?? "서버 프리셋을 불러오는 중입니다.")
@@ -6032,7 +6173,13 @@ private struct CoinPilotPresetView: View {
                 }
                 ForEach(Array(store.investmentPresets.enumerated()), id: \.offset) { item in
                     let preset = item.element
-                    CoinPilotPresetCard(preset: preset, store: store) {
+                    CoinPilotPresetCard(
+                        preset: preset,
+                        store: store,
+                        isApplied: appliedPresetID != nil && appliedPresetID == (preset["id"] as? String),
+                        isApplying: applyingPresetID != nil && applyingPresetID == (preset["id"] as? String),
+                        isApplicationPending: applyingPresetID != nil
+                    ) {
                         requestedPreset = preset
                     }
                 }
@@ -6051,22 +6198,57 @@ private struct CoinPilotPresetView: View {
             titleVisibility: .visible
         ) {
             if let preset = requestedPreset, let id = preset["id"] as? String {
-                Button("현재 전략 설정 바꾸기", role: .destructive) {
-                    requestedPreset = nil
-                    Task { _ = await store.applyInvestmentPreset(id: id) }
+                Button("\(store.activeWorkspace.title) 전략 설정 바꾸기", role: .destructive) {
+                    let requestID = UUID()
+                    let workspace = store.activeWorkspace
+                    let serverAddress = store.serverAddress
+                    let name = preset["name"] as? String ?? "전략 프리셋"
+                    resetApplicationFeedback()
+                    applicationRequestID = requestID
+                    applyingPresetID = id
+                    Task {
+                        let succeeded = await store.applyInvestmentPreset(id: id)
+                        guard applicationRequestID == requestID,
+                              store.activeWorkspace == workspace,
+                              store.serverAddress == serverAddress else { return }
+                        applicationRequestID = nil
+                        applyingPresetID = nil
+                        applicationFailed = !succeeded
+                        if succeeded {
+                            appliedPresetID = id
+                            applicationMessage = "\(name) 설정을 \(workspace.title) 서버에 적용했습니다.\n\(serverAddress)"
+                        } else {
+                            applicationMessage = store.featureMessages["preset"] ?? store.tuningMessage
+                                ?? "설정을 적용하지 못했습니다. 다시 시도해 주세요."
+                        }
+                    }
                 }
             }
             Button("취소", role: .cancel) { requestedPreset = nil }
         } message: {
-            Text("프리셋은 선택한 모의투자 또는 실거래 서버의 전략 설정을 덮어씁니다. 현재 보유 자산이나 주문 기록은 변경하지 않습니다.")
+            Text("\(store.activeWorkspace.title) 서버(\(store.serverAddress))의 전략 설정을 이 프리셋으로 바꿉니다. 현재 보유 자산이나 주문 기록은 변경하지 않습니다.")
         }
+        .onChange(of: store.activeWorkspace) { _ in resetApplicationFeedback() }
+        .onChange(of: store.serverAddress) { _ in resetApplicationFeedback() }
         .refreshFeatureWhenVisible(enabled: store.canOperate) { _ = await store.loadOptimizationIfStale() }
+    }
+
+    private func resetApplicationFeedback() {
+        requestedPreset = nil
+        appliedPresetID = nil
+        applyingPresetID = nil
+        applicationRequestID = nil
+        applicationMessage = nil
+        applicationFailed = false
     }
 }
 
 private struct CoinPilotPresetCard: View {
     let preset: [String: Any]
     @ObservedObject var store: CoinPilotStore
+    let isApplied: Bool
+    let isApplying: Bool
+    let isApplicationPending: Bool
     let onApply: () -> Void
 
     private var name: String { preset["name"] as? String ?? "전략 프리셋" }
@@ -6077,7 +6259,7 @@ private struct CoinPilotPresetCard: View {
         guard let config = preset["config"] as? [String: Any],
               let value = (config["investmentRatio"] as? NSNumber)?.doubleValue,
               value.isFinite else { return nil }
-        return "1회 투자 비율 \(CoinPilotFormatting.percent(value * 100))"
+        return "1회 투자 비율 \(CoinPilotFormatting.percent(value * 100, signed: false))"
     }
 
     var body: some View {
@@ -6101,9 +6283,19 @@ private struct CoinPilotPresetCard: View {
                         .font(.caption2)
                         .foregroundColor(CoinPilotColors.secondaryInk)
                 }
-                Button("이 설정 적용", action: onApply)
-                    .buttonStyle(CoinPilotSecondaryButtonStyle())
-                    .disabled(!store.canOperate || store.tuningBlockReason != nil || store.isRunningFeatureAction)
+                if isApplied {
+                    Label("적용 완료", systemImage: "checkmark.circle.fill")
+                        .font(.caption.weight(.semibold))
+                        .foregroundColor(CoinPilotColors.green)
+                }
+                Button(action: onApply) {
+                    HStack(spacing: 8) {
+                        if isApplying { ProgressView().controlSize(.small) }
+                        Text(isApplying ? "적용 중…" : isApplied ? "다시 적용" : "이 설정 적용")
+                    }
+                }
+                .buttonStyle(CoinPilotSecondaryButtonStyle())
+                .disabled(!store.canOperate || store.tuningBlockReason != nil || store.isRunningFeatureAction || isApplicationPending)
             }
         }
     }
@@ -6563,7 +6755,7 @@ private struct CoinPilotServerEditor: View {
         CoinPilotNavigationHost {
             Form {
                 Section {
-                        TextField("https://example.com", text: $address)
+                        TextField("서버 주소", text: $address, prompt: Text("https://example.com"))
                         .cpKeyboardURL()
                         .cpNoAutocapitalization()
                         .cpNoAutocorrection()
@@ -6590,7 +6782,7 @@ private struct CoinPilotServerEditor: View {
                     } header: {
                         Text("등록된 서버")
                     } footer: {
-                        Text("탭해서 주소를 채웁니다. 거래소는 서버의 EXCHANGE 설정이 결정하며, 앱이 자동으로 표시합니다.")
+                        Text("서버를 선택하면 주소가 채워집니다. 연결 후 거래소를 확인할 수 있어요.")
                     }
                 }
                 if let message {

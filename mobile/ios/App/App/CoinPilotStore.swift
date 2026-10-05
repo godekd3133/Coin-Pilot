@@ -32,15 +32,14 @@ enum CoinPilotWorkspaceMode: String, CaseIterable, Identifiable, Equatable, Hash
     var addressDefaultsKey: String { "coinpilot.dashboardUrl.\(rawValue)" }
 }
 
-/// Info.plist에 빌드 타임으로 박는 선택적 서버 기본값. 개인용 앱이 주소/토큰
-/// 입력 없이 바로 서버에 붙도록 한다. 비어 있으면 기존 수동 입력 흐름이며,
-/// 저장된 주소/토큰이 있으면 그쪽이 항상 우선한다.
 /// Settings에서 한 탭으로 선택할 수 있는 미리 등록된 서버(거래소별 인스턴스 등).
 struct CoinPilotServerPreset: Equatable {
     let label: String
     let url: URL
 }
 
+/// 두 작업공간 주소를 포함한 서버 빌드는 이 연결을 고정 사용한다.
+/// 주소가 없는 개발 빌드는 기존 수동 연결을 지원한다.
 struct CoinPilotBundledServerConfig {
     let paper: URL?
     let live: URL?
@@ -1407,13 +1406,32 @@ struct CoinPilotCandle: Identifiable {
     let volume: Double?
 
     init(_ object: [String: Any], index: Int) {
-        time = object["time"] as? String
+        time = Self.utcOpeningTime(object["timeUtc"] as? String, allowsLegacyKST: false)
+            ?? Self.utcOpeningTime(object["time"] as? String, allowsLegacyKST: true)
         open = Self.number(object["open"])
         high = Self.number(object["high"])
         low = Self.number(object["low"])
         close = Self.number(object["close"])
         volume = Self.number(object["volume"])
         id = time ?? "candle-\(index)"
+    }
+
+    private static func utcOpeningTime(_ value: String?, allowsLegacyKST: Bool) -> String? {
+        guard let value,
+              value.range(of: #"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?$"#,
+                          options: .regularExpression) != nil else { return nil }
+        let hasZone = value.range(of: #"(?:Z|[+-]\d{2}:\d{2})$"#, options: .regularExpression) != nil
+        guard hasZone || allowsLegacyKST else { return nil }
+        // The legacy API time field is Upbit's KST candle opening time. This
+        // assumption is limited to candles so unrelated timestamps stay strict.
+        let zonedValue = hasZone ? value : "\(value)+09:00"
+        guard let date = CoinPilotMarketSnapshotMetadata.parseDate(zonedValue) else { return nil }
+        // Retain existing UTC fractional precision, including bundled datasets.
+        if zonedValue.hasSuffix("Z") { return zonedValue }
+        let formatter = ISO8601DateFormatter()
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter.string(from: date)
     }
 
     private static func number(_ value: Any?) -> Double? {
@@ -1982,6 +2000,7 @@ final class CoinPilotStore: ObservableObject {
     private var liveStream: CoinPilotLiveEventStream?
     private var liveEventRefreshTask: Task<Void, Never>?
     private let bundledServers: CoinPilotBundledServerConfig
+    private let hasManagedServerConfiguration: Bool
 
     init(
         api: CoinPilotAPIProviding = CoinPilotAPIClient(),
@@ -2015,15 +2034,25 @@ final class CoinPilotStore: ObservableObject {
         let savedProfileAddress = UserDefaults.standard.string(forKey: workspace.addressDefaultsKey)
         let legacyAddress = UserDefaults.standard.string(forKey: Self.serverDefaultsKey)
         let storedAddress = savedProfileAddress ?? (savedWorkspaceName == nil ? legacyAddress : nil)
-        let url = storedAddress.flatMap(URL.init(string:)).flatMap { ServerAddressPolicy.allows($0) ? $0 : nil }
-            ?? bundledServers.url(for: workspace)
-        shouldInferWorkspaceFromLegacyURL = savedWorkspaceName == nil && savedProfileAddress == nil && legacyAddress != nil
         let requestedMode = configuredDataMode ??
             (Bundle.main.object(forInfoDictionaryKey: "CoinPilotDataMode") as? String ?? "server")
         let configuredMode: String
         switch requestedMode {
         case "bundled-preview", "bundled-local": configuredMode = requestedMode
         default: configuredMode = "server"
+        }
+        let managesServers = configuredMode == "server" && bundledServers.paper != nil && bundledServers.live != nil
+        hasManagedServerConfiguration = managesServers
+        let storedURL = storedAddress.flatMap(URL.init(string:)).flatMap { ServerAddressPolicy.allows($0) ? $0 : nil }
+        let url = managesServers
+            ? bundledServers.url(for: workspace)
+            : storedURL ?? bundledServers.url(for: workspace)
+        shouldInferWorkspaceFromLegacyURL = !managesServers && savedWorkspaceName == nil && savedProfileAddress == nil && legacyAddress != nil
+        if managesServers {
+            for mode in CoinPilotWorkspaceMode.allCases {
+                UserDefaults.standard.set(bundledServers.url(for: mode)?.absoluteString, forKey: mode.addressDefaultsKey)
+            }
+            UserDefaults.standard.set(url?.absoluteString, forKey: Self.serverDefaultsKey)
         }
         let profileDefaultsKey = "\(Self.dataModeDefaultsKeyPrefix)\(configuredMode)"
         dataModeDefaultsKey = profileDefaultsKey
@@ -2032,10 +2061,11 @@ final class CoinPilotStore: ObservableObject {
         if savedMode == nil, legacyMode == configuredMode {
             UserDefaults.standard.set(legacyMode, forKey: profileDefaultsKey)
         }
-        let selectedMode = savedMode ?? (legacyMode == configuredMode ? legacyMode : configuredMode)
+        let selectedMode = managesServers ? "server" : savedMode ?? (legacyMode == configuredMode ? legacyMode : configuredMode)
+        if managesServers { UserDefaults.standard.set("server", forKey: profileDefaultsKey) }
         let bundledPreviewAvailable = bundledPreview.isAvailable
         let usesBundledPreview = selectedMode == "bundled-preview"
-        canUseBundledPreview = bundledPreviewAvailable
+        canUseBundledPreview = bundledPreviewAvailable && !managesServers
         isBundledPreview = usesBundledPreview
         activeWorkspace = usesBundledPreview ? .paper : workspace
         let usesBundledLocalMarketData = configuredMode == "bundled-local"
@@ -2464,9 +2494,33 @@ final class CoinPilotStore: ObservableObject {
         didFinishInitialConnect = true
     }
 
+    /// 개인 서버 빌드는 주소 입력 없이 현재 계좌의 연결을 다시 확인한다.
+    var usesManagedServerConnection: Bool {
+        hasManagedServerConfiguration && !isBundledPreview && !isBundledLocalMarketData
+    }
+
+    private func sharedManagedToken(for url: URL) -> String? {
+        guard usesManagedServerConnection,
+              let paper = bundledServers.paper, let live = bundledServers.live,
+              url == paper || url == live,
+              paper.scheme?.lowercased() == live.scheme?.lowercased(),
+              paper.host?.lowercased() == live.host?.lowercased(),
+              (paper.port ?? (paper.scheme == "https" ? 443 : 80)) ==
+                (live.port ?? (live.scheme == "https" ? 443 : 80)) else { return nil }
+        return tokens.token(for: url == paper ? live : paper)
+    }
+
+    private var authenticationFailureMessage: String {
+        usesManagedServerConnection
+            ? "계좌 연결 인증을 확인하지 못했어요. 서버 토큰으로 다시 로그인해 주세요."
+            : "서버 인증을 확인할 수 없습니다. 서버 토큰을 다시 입력해 주세요."
+    }
+
     func primaryConnectionAction() async {
         if phase == .login {
             _ = await signIn()
+        } else if usesManagedServerConnection {
+            _ = await connect(using: bundledServers.url(for: activeWorkspace)?.absoluteString ?? "")
         } else {
             _ = await connect(using: serverDraft)
         }
@@ -2509,7 +2563,10 @@ final class CoinPilotStore: ObservableObject {
         let storedURL = UserDefaults.standard.string(forKey: workspace.addressDefaultsKey)
             .flatMap(URL.init(string:))
             .flatMap { ServerAddressPolicy.allows($0) ? $0 : nil }
-        guard let url = storedURL ?? bundledServers.url(for: workspace) else {
+        let selectedURL = usesManagedServerConnection
+            ? bundledServers.url(for: workspace)
+            : storedURL ?? bundledServers.url(for: workspace)
+        guard let url = selectedURL else {
             currentServerURL = nil
             serverAddress = ""
             serverDraft = ""
@@ -2524,10 +2581,15 @@ final class CoinPilotStore: ObservableObject {
         restorePendingManualOrder(for: url)
         serverModeMatchesWorkspace = false
         phase = .connecting
-        Task { _ = await connect(using: url.absoluteString) }
+        let generation = requestGeneration
+        Task {
+            guard generation == requestGeneration, activeWorkspace == workspace, currentServerURL == url else { return }
+            _ = await connect(using: url.absoluteString)
+        }
     }
 
     func useBundledPreview() {
+        guard !hasManagedServerConfiguration else { return }
         guard !isBundledLocalMarketData else {
             connectionMessage = "이 빌드는 앱에 저장된 고정 시세만 표시하며 계좌 연결이나 주문은 제공하지 않습니다."
             return
@@ -2574,7 +2636,10 @@ final class CoinPilotStore: ObservableObject {
     func connect(using rawAddress: String) async -> Bool {
         guard !isBundledLocalMarketData else { return false }
         guard !isSubmittingLiveCredentials else { return false }
-        guard let url = validatedServerURL(rawAddress) else {
+        let address = usesManagedServerConnection
+            ? bundledServers.url(for: activeWorkspace)?.absoluteString ?? ""
+            : rawAddress
+        guard let url = validatedServerURL(address) else {
             phase = .setup
             connectionMessage = "같은 Wi-Fi의 서버는 내부 주소로 연결하고, 외부 서버는 HTTPS 주소를 입력해 주세요."
             return false
@@ -2622,37 +2687,52 @@ final class CoinPilotStore: ObservableObject {
 
             let savedToken = tokens.token(for: url)
             let isBundledAddress = bundledServers.url(for: .paper) == url || bundledServers.url(for: .live) == url
-            guard let token = savedToken ?? (isBundledAddress ? bundledServers.token : nil) else {
+            var candidates: [String] = []
+            if let savedToken { candidates.append(savedToken) }
+            if let sharedToken = sharedManagedToken(for: url), !candidates.contains(sharedToken) {
+                candidates.append(sharedToken)
+            }
+            if isBundledAddress, let configuredToken = bundledServers.token, !candidates.contains(configuredToken) {
+                candidates.append(configuredToken)
+            }
+            guard !candidates.isEmpty else {
                 authenticationScope = .unauthenticated
                 phase = .login
                 return false
             }
-            let loginResponse = try await api.login(token: token, at: url)
-            guard generation == requestGeneration, currentServerURL == url else { return false }
-            guard (200..<300).contains(loginResponse.statusCode),
-                  (try? Self.jsonObject(loginResponse.body) as? [String: Any])?["success"] as? Bool == true else {
+            var acceptedToken: String?
+            for token in candidates {
+                let loginResponse = try await api.login(token: token, at: url)
+                guard generation == requestGeneration, currentServerURL == url else { return false }
                 if loginResponse.statusCode == 401 {
-                    tokens.delete(for: url)
-                    authenticationScope = .unauthenticated
-                    phase = .login
-                    connectionMessage = "서버 인증을 확인할 수 없습니다. 서버 토큰을 다시 입력해 주세요."
-                    return false
+                    if token == savedToken { tokens.delete(for: url) }
+                    continue
                 }
-                throw CoinPilotAPIError.forStatusCode(loginResponse.statusCode)
-            }
-            authenticationScope = Self.authScope(from: loginResponse)
-            if savedToken == nil { _ = tokens.save(token, for: url) }
-            let protectedResponse = try await api.read(path: "/api/status", at: url, token: token)
-            guard generation == requestGeneration, currentServerURL == url else { return false }
-            guard (200..<300).contains(protectedResponse.statusCode) else {
+                guard (200..<300).contains(loginResponse.statusCode),
+                      (try? Self.jsonObject(loginResponse.body) as? [String: Any])?["success"] as? Bool == true else {
+                    throw CoinPilotAPIError.forStatusCode(loginResponse.statusCode)
+                }
+                let protectedResponse = try await api.read(path: "/api/status", at: url, token: token)
+                guard generation == requestGeneration, currentServerURL == url else { return false }
                 if protectedResponse.statusCode == 401 {
-                    tokens.delete(for: url)
-                    authenticationScope = .unauthenticated
-                    phase = .login
-                    connectionMessage = "서버 인증을 확인할 수 없습니다. 서버 토큰을 다시 입력해 주세요."
-                    return false
+                    if token == savedToken { tokens.delete(for: url) }
+                    continue
                 }
-                throw CoinPilotAPIError.forStatusCode(protectedResponse.statusCode)
+                guard (200..<300).contains(protectedResponse.statusCode) else {
+                    throw CoinPilotAPIError.forStatusCode(protectedResponse.statusCode)
+                }
+                authenticationScope = Self.authScope(from: loginResponse)
+                acceptedToken = token
+                break
+            }
+            guard let token = acceptedToken else {
+                authenticationScope = .unauthenticated
+                phase = .login
+                connectionMessage = authenticationFailureMessage
+                return false
+            }
+            if tokens.token(for: url) != token {
+                guard tokens.save(token, for: url) else { throw CoinPilotAPIError.keychain }
             }
             phase = .dashboard
             await refresh()
@@ -2679,7 +2759,10 @@ final class CoinPilotStore: ObservableObject {
             if generation == requestGeneration { isWorking = false }
         }
         connectionMessage = nil
-        guard let url = validatedServerURL(serverDraft) else {
+        let address = usesManagedServerConnection
+            ? bundledServers.url(for: activeWorkspace)?.absoluteString ?? ""
+            : serverDraft
+        guard let url = validatedServerURL(address) else {
             connectionMessage = "같은 Wi-Fi의 서버는 내부 주소로 연결하고, 외부 서버는 HTTPS 주소를 입력해 주세요."
             phase = .setup
             return false
@@ -2913,7 +2996,21 @@ final class CoinPilotStore: ObservableObject {
         }
     }
 
+    private func expireAuthentication(for serverURL: URL) {
+        tokens.delete(for: serverURL)
+        _ = beginRequestGeneration()
+        stopLiveStream()
+        clearLoadedData()
+        isRefreshing = false
+        isWorking = false
+        authenticationScope = .unauthenticated
+        serverModeMatchesWorkspace = false
+        phase = .login
+        connectionMessage = authenticationFailureMessage
+    }
+
     func logOut() {
+        guard !usesManagedServerConnection else { return }
         _ = beginRequestGeneration()
         stopLiveStream()
         if let currentServerURL { tokens.delete(for: currentServerURL) }
@@ -3023,13 +3120,7 @@ final class CoinPilotStore: ObservableObject {
            response.statusCode == 401,
            authenticationRequired,
            let serverURL {
-            tokens.delete(for: serverURL)
-            _ = beginRequestGeneration()
-            clearLoadedData()
-            isRefreshing = false
-            authenticationScope = .unauthenticated
-            phase = .login
-            connectionMessage = "서버 인증을 확인할 수 없습니다. 서버 토큰을 다시 입력해 주세요."
+            expireAuthentication(for: serverURL)
             return
         }
 
@@ -3122,12 +3213,7 @@ final class CoinPilotStore: ObservableObject {
             return false
         }) {
             if authenticationRequired, let serverURL {
-                tokens.delete(for: serverURL)
-                _ = beginRequestGeneration()
-                clearLoadedData()
-                authenticationScope = .unauthenticated
-                phase = .login
-                connectionMessage = "서버 인증을 확인할 수 없습니다. 서버 토큰을 다시 입력해 주세요."
+                expireAuthentication(for: serverURL)
                 return
             }
         }

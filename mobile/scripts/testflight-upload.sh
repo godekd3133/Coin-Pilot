@@ -12,8 +12,10 @@
 #   COINPILOT_DATA_MODE      build-time data mode (default: server)
 #   COINPILOT_PAPER_SERVER   bundled Paper dashboard URL (default: https://52.78.156.161)
 #   COINPILOT_LIVE_SERVER    bundled LIVE dashboard URL (default: https://52.78.156.161/live)
-#   COINPILOT_DEFAULT_TOKEN  bundled dashboard token; empty means the app asks
-#                            for a token at first launch (default: unset)
+#   COINPILOT_BUILD_NUMBER   use an explicitly prepared build number instead
+#                            of incrementing it (for a committed release)
+#   Server-profile releases reuse Keychain authentication. Production tokens
+#   and the developer's LocalSecrets.json are never packaged in TestFlight.
 #   KEEP_IPA=1               keep the exported IPA in ./artifacts/testflight
 set -euo pipefail
 
@@ -40,9 +42,42 @@ COINPILOT_DATA_MODE="${COINPILOT_DATA_MODE:-server}"
 COINPILOT_PAPER_SERVER="${COINPILOT_PAPER_SERVER:-https://52.78.156.161}"
 COINPILOT_LIVE_SERVER="${COINPILOT_LIVE_SERVER:-https://52.78.156.161/live}"
 
+# Validate the release endpoints before changing the build number. Local
+# development credentials must not override the public release configuration.
+if [[ "$COINPILOT_DATA_MODE" == "server" ]]; then
+  python3 - "$COINPILOT_PAPER_SERVER" "$COINPILOT_LIVE_SERVER" <<'PY'
+import ipaddress, sys, urllib.parse
+identities = []
+for address in sys.argv[1:]:
+    url = urllib.parse.urlsplit(address)
+    if (url.scheme != 'https' or not url.hostname or url.username or url.password
+            or url.query or url.fragment or url.path not in ('', '/', '/live', '/live/')):
+        raise SystemExit('Release server addresses must be public HTTPS dashboard URLs.')
+    host = url.hostname.lower().rstrip('.')
+    try:
+        port = url.port if url.port is not None else 443
+    except ValueError:
+        raise SystemExit('Release server port must be an integer from 1 to 65535.')
+    if port < 1 or host == 'localhost' or host.endswith(('.local', '.localhost')):
+        raise SystemExit('A TestFlight release cannot use a local development server.')
+    try:
+        if not ipaddress.ip_address(host).is_global:
+            raise SystemExit('A TestFlight release cannot use a private IP address.')
+    except ValueError:
+        pass
+    identities.append((host, port, url.path.rstrip('/')))
+if identities[0] == identities[1]:
+    raise SystemExit('Paper and LIVE must use separate endpoints.')
+PY
+fi
+
 # --- Bump CURRENT_PROJECT_VERSION for both configurations -------------------
 CURRENT=$(grep -o 'CURRENT_PROJECT_VERSION = [0-9]*;' "$PBXPROJ" | head -1 | grep -o '[0-9]*')
-NEXT=$((CURRENT + 1))
+NEXT="${COINPILOT_BUILD_NUMBER:-$((CURRENT + 1))}"
+if [[ ! "$NEXT" =~ ^[1-9][0-9]*$ ]] || [[ "$NEXT" -lt "$CURRENT" ]]; then
+  echo "Build number must be a positive integer at least $CURRENT." >&2
+  exit 1
+fi
 sed -i '' "s/CURRENT_PROJECT_VERSION = [0-9]*;/CURRENT_PROJECT_VERSION = $NEXT;/g" "$PBXPROJ"
 echo "==> Build number $CURRENT -> $NEXT"
 
@@ -79,10 +114,9 @@ BUILD_SETTINGS=(
   "COINPILOT_DATA_MODE=$COINPILOT_DATA_MODE"
   "COINPILOT_PAPER_SERVER=$COINPILOT_PAPER_SERVER"
   "COINPILOT_LIVE_SERVER=$COINPILOT_LIVE_SERVER"
+  "COINPILOT_SECRETS_FILE="
+  "COINPILOT_DEFAULT_TOKEN="
 )
-if [[ -n "${COINPILOT_DEFAULT_TOKEN:-}" ]]; then
-  BUILD_SETTINGS+=("COINPILOT_DEFAULT_TOKEN=$COINPILOT_DEFAULT_TOKEN")
-fi
 
 echo "==> Archiving CoinPilot $MARKETING ($NEXT) — mode=$COINPILOT_DATA_MODE"
 xcodebuild -project "$IOS_DIR/App.xcodeproj" -scheme "$SCHEME" \
@@ -90,10 +124,34 @@ xcodebuild -project "$IOS_DIR/App.xcodeproj" -scheme "$SCHEME" \
   -destination 'generic/platform=iOS' \
   -archivePath "$ARCHIVE" \
   -allowProvisioningUpdates \
+  -authenticationKeyPath "$ASC_KEY_PATH" \
+  -authenticationKeyID "$ASC_KEY_ID" \
+  -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
   "${BUILD_SETTINGS[@]}" \
   archive 2>&1 | tee "$WORK/archive.log" | tail -5
 
 test -d "$ARCHIVE/Products/Applications/App.app" || { echo "Archive output missing" >&2; exit 1; }
+
+# Check the actual artifact, since a successful archive alone cannot prove
+# that the server profile points at the intended public endpoints.
+python3 - "$ARCHIVE/Products/Applications/App.app" "$COINPILOT_DATA_MODE" "$COINPILOT_PAPER_SERVER" "$COINPILOT_LIVE_SERVER" "$NEXT" "$MARKETING" <<'PY'
+import pathlib, plistlib, sys
+app = pathlib.Path(sys.argv[1])
+info = plistlib.loads((app / 'Info.plist').read_bytes())
+if info.get('CFBundleVersion') != sys.argv[5] or info.get('CFBundleShortVersionString') != sys.argv[6]:
+    raise SystemExit('Release archive version does not match the prepared release.')
+if (app / 'CoinPilotLocalSecrets.json').exists() or info.get('CoinPilotDefaultToken'):
+    raise SystemExit('Release archive unexpectedly contains developer credentials.')
+if info.get('CoinPilotDataMode') != sys.argv[2]:
+    raise SystemExit('Release archive data mode does not match the requested mode.')
+if sys.argv[2] == 'server':
+    expected = {'CoinPilotPaperServerAddress': sys.argv[3], 'CoinPilotLiveServerAddress': sys.argv[4]}
+    for key, value in expected.items():
+        if info.get(key) != value:
+            raise SystemExit('Release archive server configuration does not match: ' + key)
+    print('Verified release endpoints: Paper ' + sys.argv[3] + ', LIVE ' + sys.argv[4])
+print('Verified release archive excludes developer credentials.')
+PY
 
 # --- Export + upload to App Store Connect -----------------------------------
 echo "==> Uploading to App Store Connect (TestFlight)"
@@ -116,4 +174,4 @@ echo "    Processing takes a few minutes; internal testers can install without r
 
 # 업로드만으로는 테스터에게 안 보인다 — internal 베타 그룹에 배정해야 한다.
 # 방금 올린 빌드가 ASC에 등록될 때까지 스크립트가 폴링한다.
-node scripts/asc-assign-internal-group.mjs "$NEXT" || echo "!! Beta group assignment failed — assign manually in App Store Connect"
+node scripts/asc-assign-internal-group.mjs "$NEXT"

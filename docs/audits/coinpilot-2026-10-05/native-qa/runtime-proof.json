@@ -1,0 +1,82 @@
+{
+  "scope": "synthetic QA only, iPhone 17 iOS 27 Simulator and native macOS",
+  "iosClient": "App/19 CFNetwork/3886.100.1 Darwin/27.0.0",
+  "before": "UIKit foreground activation 0 while SwiftUI phase was background; before log retained",
+  "after": "SwiftUI becomes active from explicit UIKit scene lifecycle; foreground polling resumed",
+  "steadyForegroundAccountReadIntervalsSeconds": [
+    30.446,
+    30.292,
+    30.327,
+    30.562,
+    30.215,
+    30.512,
+    30.582,
+    30.179,
+    30.514,
+    30.448,
+    30.766,
+    30.565,
+    29.575,
+    0.162,
+    0.765,
+    30.772,
+    30.461,
+    30.462,
+    30.377,
+    30.41,
+    30.646,
+    30.195,
+    30.452,
+    31.152,
+    30.507,
+    30.505,
+    30.646,
+    30.325,
+    30.5,
+    30.503,
+    30.311,
+    30.462,
+    30.536,
+    30.272,
+    30.464,
+    30.533
+  ],
+  "backgroundAt": "2026-10-05T09:20:12.374000+00:00",
+  "foregroundAt": "2026-10-05T09:22:49.283000+00:00",
+  "accountRequestsWhileBackgrounded": 0,
+  "firstAccountReadAfterForeground": {
+    "at": "2026-10-05T09:22:49.340Z",
+    "method": "GET",
+    "path": "/account",
+    "status": 200,
+    "client": "App/19 CFNetwork/3886.100.1 Darwin/27.0.0"
+  },
+  "foregroundReadDelaySeconds": 0.057,
+  "crossClientDeposit": {
+    "macRequest": {
+      "at": "2026-10-05T09:03:17.816Z",
+      "method": "POST",
+      "path": "/virtual/deposit",
+      "status": 200,
+      "client": "App/19 CFNetwork/3896.100.1.1.1 Darwin/27.0.0"
+    },
+    "nextIosAccountRead": {
+      "at": "2026-10-05T09:03:26.856Z",
+      "method": "GET",
+      "path": "/account",
+      "status": 200,
+      "client": "App/19 CFNetwork/3886.100.1 Darwin/27.0.0"
+    },
+    "delaySeconds": 9.04,
+    "observedBalance": 1001000,
+    "screenshot": "34-ios-auto-refresh-after-mac-deposit.png"
+  },
+  "keyboard": {
+    "enteredAmount": 12000,
+    "beforeRetapDismisses": "24-ios-order-field-retap.png",
+    "afterRetapPreservesKeyboard": "36-ios-retap-keeps-keyboard.png",
+    "orderReview": "37-ios-paper-order-review.png",
+    "paperBuyResult": "38-ios-paper-buy-result.png"
+  },
+  "candleTimeScreenshot": "40-ios-candle-time-fixed.png"
+}

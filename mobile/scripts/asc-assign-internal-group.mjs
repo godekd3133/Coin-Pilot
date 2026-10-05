@@ -1,21 +1,27 @@
 #!/usr/bin/env node
 // Assign the latest uploaded CoinPilot build to the internal TestFlight group.
 // Uploads alone never reach testers — a build must be added to a beta group.
-// Safe to re-run: assigning an already-assigned build is a no-op on ASC's side
-// (POST to the relationship is idempotent; a 409-style error is tolerated).
+// Success requires a VALID build, exact group membership, and IN_BETA_TESTING.
+// Already-assigned builds are confirmed through GET readback without another POST.
 import { readFileSync } from 'node:fs';
 import { createSign } from 'node:crypto';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
 const BUNDLE_ID = 'com.godekd3133.coinpilot';
+const INTERNAL_GROUP_NAME = 'CoinPilot Internal';
+const POLL_INTERVAL_MS = 15_000;
+const deadline = Date.now() + 10 * 60_000;
 const envPath = join(homedir(), '.config/kbo-fans/secrets/appstoreconnect/kbo-fans-testflight.env');
 const env = Object.fromEntries(
   readFileSync(envPath, 'utf8')
     .split('\n')
     .map((line) => line.trim())
     .filter((line) => line && !line.startsWith('#') && line.includes('='))
-    .map((line) => line.split('=', 2).map((s) => s.trim()))
+    .map((line) => {
+      const separator = line.indexOf('=');
+      return [line.slice(0, separator).trim(), line.slice(separator + 1).trim()];
+    })
 );
 const { ASC_ISSUER_ID, ASC_KEY_ID, ASC_KEY_PATH } = env;
 if (!ASC_ISSUER_ID || !ASC_KEY_ID || !ASC_KEY_PATH) {
@@ -35,50 +41,121 @@ function jwt() {
 }
 
 async function asc(path, method = 'GET', body = null) {
+  const remaining = deadline - Date.now();
+  if (remaining <= 0) throw new Error('App Store Connect verification exceeded the 10-minute wait window');
   const res = await fetch(`https://api.appstoreconnect.apple.com/v1${path}`, {
     method,
     headers: { Authorization: `Bearer ${jwt()}`, 'Content-Type': 'application/json' },
-    body: body ? JSON.stringify(body) : undefined
+    body: body ? JSON.stringify(body) : undefined,
+    signal: AbortSignal.timeout(Math.min(30_000, remaining))
   });
-  if (!res.ok) throw new Error(`ASC ${method} ${path} -> ${res.status} ${await res.text()}`);
+  if (!res.ok) {
+    // Log only endpoint/status metadata, never API response bodies or credentials.
+    const error = new Error(`ASC ${method} ${path} -> HTTP ${res.status}`);
+    error.status = res.status;
+    throw error;
+  }
   return res.status === 204 ? null : res.json();
 }
 
-// 특정 빌드 번호가 주어지면 그 빌드를 배정한다 — 방금 업로드한 빌드가 ASC에
-// 등록되기까지 수 분 걸리므로 나타날 때까지 폴링한다.
-const targetVersion = process.argv.find((arg) => /^\d+$/.test(arg)) || null;
-const POLL_LIMIT = 40; // ~10분
+async function allRows(path) {
+  const rows = [];
+  while (path) {
+    const page = await asc(path);
+    rows.push(...(page.data ?? []));
+    if (!page.links?.next) break;
+    const next = new URL(page.links.next, 'https://api.appstoreconnect.apple.com');
+    if (next.origin !== 'https://api.appstoreconnect.apple.com' || !next.pathname.startsWith('/v1/')) {
+      throw new Error('Unexpected App Store Connect pagination URL');
+    }
+    path = `${next.pathname.slice(3)}${next.search}`;
+  }
+  return rows;
+}
+
+async function pollDelay() {
+  const remaining = deadline - Date.now();
+  if (remaining <= 0) throw new Error('App Store Connect verification exceeded the 10-minute wait window');
+  await new Promise((resolve) => setTimeout(resolve, Math.min(POLL_INTERVAL_MS, remaining)));
+}
+
+const args = process.argv.slice(2);
+if (args.length > 1 || (args[0] && !/^\d+$/.test(args[0]))) {
+  throw new Error('Usage: node asc-assign-internal-group.mjs [build-number]');
+}
+const targetVersion = args[0] || null;
 
 const apps = await asc(`/apps?filter[bundleId]=${BUNDLE_ID}`);
 const app = apps.data?.[0];
 if (!app) throw new Error(`No ASC app for ${BUNDLE_ID}`);
 
-const groups = await asc(`/betaGroups?filter[app]=${app.id}`);
-const internal = groups.data?.find((g) => g.attributes?.isInternalGroup);
-if (!internal) throw new Error('No internal beta group found for app');
+const groups = await allRows(`/betaGroups?filter[app]=${app.id}&limit=200`);
+const matchingGroups = groups.filter((group) => group.attributes?.isInternalGroup && group.attributes.name === INTERNAL_GROUP_NAME);
+if (matchingGroups.length !== 1) throw new Error(`Expected exactly one internal group named ${INTERNAL_GROUP_NAME}`);
+const internal = matchingGroups[0];
 
 let build = null;
-for (let attempt = 0; attempt < POLL_LIMIT; attempt += 1) {
-  const builds = await asc(`/builds?filter[app]=${app.id}&sort=-uploadedDate&limit=5`);
-  build = targetVersion
-    ? builds.data?.find((candidate) => candidate.attributes?.version === targetVersion)
-    : builds.data?.[0];
-  if (build) break;
-  await new Promise((resolve) => setTimeout(resolve, 15000));
+let waitingState = null;
+while (Date.now() < deadline) {
+  if (build) {
+    build = (await asc(`/builds/${build.id}`)).data;
+  } else {
+    const versionFilter = targetVersion ? `&filter[version]=${targetVersion}` : '';
+    const builds = await asc(`/builds?filter[app]=${app.id}${versionFilter}&sort=-uploadedDate&limit=5`);
+    build = targetVersion
+      ? builds.data?.find((candidate) => candidate.attributes?.version === targetVersion)
+      : builds.data?.[0];
+  }
+  const state = build?.attributes?.processingState ?? 'NOT_YET_VISIBLE';
+  if (build?.attributes?.expired) throw new Error(`Build ${build.attributes.version} has expired`);
+  if (state === 'VALID') break;
+  if (!['NOT_YET_VISIBLE', 'PROCESSING'].includes(state)) {
+    throw new Error(`Build ${build?.attributes?.version ?? targetVersion} cannot be assigned: ${state}`);
+  }
+  if (waitingState !== state) {
+    console.log(`Waiting for build ${build?.attributes?.version ?? targetVersion ?? 'latest'}: ${state}`);
+    waitingState = state;
+  }
+  await pollDelay();
 }
-if (!build) {
-  throw new Error(targetVersion
-    ? `Build ${targetVersion} did not appear on App Store Connect within the wait window`
-    : 'No builds found for app');
+if (build?.attributes?.processingState !== 'VALID') throw new Error(`Build ${targetVersion ?? 'latest'} did not reach VALID within the wait window`);
+
+async function isAssigned() {
+  const assigned = await allRows(`/betaGroups/${internal.id}/builds?limit=200`);
+  return assigned.some((candidate) => candidate.id === build.id);
 }
 
-console.log(`Assigning build ${build.attributes.version} (${build.attributes.processingState}) -> ${internal.attributes.name}`);
-try {
-  await asc(`/builds/${build.id}/relationships/betaGroups`, 'POST', {
-    data: [{ type: 'betaGroups', id: internal.id }]
-  });
-  console.log(`Assigned. Testers in "${internal.attributes.name}" can install build ${build.attributes.version} once it is VALID.`);
-} catch (error) {
-  // ASC rejects re-adding an already-assigned group; that is fine.
-  console.log(`Assignment returned an error (likely already assigned): ${error.message}`);
+const alreadyAssigned = await isAssigned();
+console.log(`${alreadyAssigned ? 'Verifying' : 'Assigning'} build ${build.attributes.version} (VALID) -> ${internal.attributes.name}`);
+if (!alreadyAssigned) {
+  try {
+    await asc(`/builds/${build.id}/relationships/betaGroups`, 'POST', {
+      data: [{ type: 'betaGroups', id: internal.id }]
+    });
+  } catch (error) {
+    // A duplicate race is acceptable only after exact membership is confirmed.
+    if (![400, 409].includes(error.status) || !(await isAssigned())) throw error;
+    console.log(`Assignment HTTP ${error.status}; exact existing membership confirmed`);
+  }
 }
+
+waitingState = null;
+while (Date.now() < deadline) {
+  const assigned = await isAssigned();
+  const details = await asc(`/builds/${build.id}/buildBetaDetail`);
+  const state = details.data?.attributes?.internalBuildState ?? 'UNAVAILABLE';
+  if (['EXPIRED', 'PROCESSING_EXCEPTION', 'MISSING_EXPORT_COMPLIANCE', 'IN_EXPORT_COMPLIANCE_REVIEW'].includes(state)) {
+    throw new Error(`Build ${build.attributes.version} is unavailable for internal testing: ${state}`);
+  }
+  if (assigned && state === 'IN_BETA_TESTING') {
+    console.log(`Verified: build ${build.attributes.version} VALID, group "${internal.attributes.name}", internal state ${state}`);
+    process.exit(0);
+  }
+  const observation = `${assigned ? 'MEMBER' : 'NOT_YET_MEMBER'} / ${state}`;
+  if (waitingState !== observation) {
+    console.log(`Waiting for build ${build.attributes.version} testing availability: ${observation}`);
+    waitingState = observation;
+  }
+  await pollDelay();
+}
+throw new Error(`Build ${build.attributes.version} group membership and IN_BETA_TESTING were not verified within the wait window`);

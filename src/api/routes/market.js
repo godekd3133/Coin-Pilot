@@ -123,6 +123,23 @@ function parseCandleOptions(query) {
   return { unit, count };
 }
 
+function candleOpeningTimeUtc(candle) {
+  // Upbit's zone-less fields identify their zone by name. Binance's adapter
+  // already includes an offset. Keep the opening time separate from timestamp,
+  // which exchanges may use for the final trade or candle close instead.
+  for (const [value, defaultZone] of [
+    [candle.candle_date_time_utc, 'Z'],
+    [candle.candle_date_time_kst, '+09:00']
+  ]) {
+    if (typeof value !== 'string' ||
+        !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?$/.test(value)) continue;
+    const zonedValue = /(?:Z|[+-]\d{2}:\d{2})$/.test(value) ? value : `${value}${defaultZone}`;
+    const milliseconds = Date.parse(zonedValue);
+    if (Number.isFinite(milliseconds)) return new Date(milliseconds).toISOString();
+  }
+  return null;
+}
+
 /**
  * Market and price routes. The verified market list cache belongs to this
  * router instance so separate server instances cannot share market state.
@@ -289,6 +306,7 @@ export default function createMarketRoutes(server) {
 
       const chartData = [...candles].reverse().map(candle => ({
         time: candle.candle_date_time_kst,
+        timeUtc: candleOpeningTimeUtc(candle),
         open: candle.opening_price,
         high: candle.high_price,
         low: candle.low_price,

@@ -348,10 +348,14 @@ test('abort, absolute deadline, and client disconnect remove waiting tickets wit
   assert.deepEqual(abortResult, { event: 'error', code: 'UPBIT_REQUEST_ABORTED' });
   await waitForStatus(server, status => status.queued.normal === 0);
 
-  const expired = spawnClient(stateDir, { deadlineAt: Date.now() + 400, queueWaitTimeoutMs: 2000 });
-  t.after(() => stopChild(expired.child));
-  await waitForStatus(server, status => status.queued.normal === 1, 3000, [expired]);
-  const deadlineResult = await expired.output.next();
+  // Observe expiry after admission, without spending the 400ms request
+  // deadline on a new child's module startup. Abort/disconnect above and
+  // below still exercise independent processes.
+  const expired = holderClient.acquireTurn({
+    group: 'ticker', deadlineAt: Date.now() + 400, queueWaitTimeoutMs: 2000
+  }).then(lease => ({ event: 'acquired', lease }), error => ({ event: 'error', code: error.code }));
+  await waitForStatus(server, status => status.queued.normal === 1);
+  const deadlineResult = await expired;
   assert.deepEqual(deadlineResult, { event: 'error', code: 'UPBIT_REQUEST_DEADLINE' });
   assert.equal(server.getStatus().queued.normal, 0);
 
@@ -391,10 +395,12 @@ test('group and IP-wide backoffs survive daemon restart; Remaining-Req stays gro
 test('dispatch and Remaining-Req cooldowns use monotonic time across wall-clock jumps', async t => {
   const stateDir = createStateRoot(t);
   let wallNow = Date.now();
+  let monoNow = process.hrtime.bigint();
   const server = await startUpbitRateCoordinatorServer({
     stateDir,
     allowTemporaryStateDir: true,
-    now: () => wallNow
+    now: () => wallNow,
+    monotonicNow: () => monoNow
   });
   const client = new UpbitRateCoordinatorClient({ socketPath: server.socketPath });
   t.after(async () => {
@@ -404,20 +410,28 @@ test('dispatch and Remaining-Req cooldowns use monotonic time across wall-clock 
 
   await client.observeRemaining('ticker', 0);
   const beforeJump = server.getStatus().backoffRemainingMsByScopeAndGroup['ip:ticker'];
-  assert.ok(beforeJump > 900 && beforeJump <= 1000);
+  // Durable state writes can take longer than 100ms. Advance the injected
+  // monotonic clock explicitly so persistence latency is not the assertion.
+  assert.equal(beforeJump, 1000);
   wallNow += 120_000;
-  await delay(30);
+  monoNow += 30_000_000n;
   const afterJump = server.getStatus().backoffRemainingMsByScopeAndGroup['ip:ticker'];
-  assert.ok(afterJump > 850 && afterJump <= beforeJump);
+  assert.equal(afterJump, 970);
 
-  const queued = spawnClient(stateDir, { group: 'ticker', queueWaitTimeoutMs: 2500 });
-  t.after(() => stopChild(queued.child));
-  await waitForStatus(server, status => status.queued.normal === 1, 1000, [queued]);
-  await delay(100);
+  const controller = new AbortController();
+  t.after(() => controller.abort());
+  const queuedOutcome = client.acquireTurn({
+    group: 'ticker', queueWaitTimeoutMs: 2500, signal: controller.signal
+  }).then(lease => ({ lease }), error => ({ error }));
+  await waitForStatus(server, status => status.queued.normal === 1);
+  monoNow += 100_000_000n;
   const blocked = server.getStatus();
   assert.equal(blocked.queued.normal, 1);
   assert.equal(blocked.inFlightTotal, 0);
-  assert.ok(blocked.backoffRemainingMsByScopeAndGroup['ip:ticker'] > 0);
+  assert.equal(blocked.backoffRemainingMsByScopeAndGroup['ip:ticker'], 870);
+  controller.abort();
+  assert.equal((await queuedOutcome).error?.code, 'UPBIT_REQUEST_ABORTED');
+  await waitForStatus(server, status => status.queued.normal === 0);
 });
 
 test('an OS boot identity change restarts the full bounded cooldown and exposes it in status', async t => {

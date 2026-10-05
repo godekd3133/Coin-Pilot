@@ -24,6 +24,11 @@ private actor DeferredCoinPilotAPI: CoinPilotAPIProviding {
     private var readRequests = 0
     private var networkCalls = 0
     private var loginTokens: [String] = []
+    private var authenticationURLs: [String] = []
+    private var loginURLs: [String] = []
+    private var rejectedLoginTokens: Set<String> = []
+    private var authenticationUnavailable = false
+    private let serverModesByAddress: [String: String]
     private var readTokens: [String?] = []
     private var readPaths: [String] = []
     private var mutationPaths: [String] = []
@@ -45,7 +50,8 @@ private actor DeferredCoinPilotAPI: CoinPilotAPIProviding {
         statusOverride: [String: Any] = [:],
         loginTokenScope: String? = nil,
         isReadOnlyObserver: Bool = true,
-        credentialRegistrationStatusCode: Int = 200
+        credentialRegistrationStatusCode: Int = 200,
+        serverModesByAddress: [String: String] = [:]
     ) {
         heldHosts = heldAccountHosts
         self.heldMarketPaths = heldMarketPaths
@@ -57,16 +63,21 @@ private actor DeferredCoinPilotAPI: CoinPilotAPIProviding {
         self.isReadOnlyObserver = isReadOnlyObserver
         upbitCredentialsConfigured = statusOverride["upbitCredentialsConfigured"] as? Bool
         self.credentialRegistrationStatusCode = credentialRegistrationStatusCode
+        self.serverModesByAddress = serverModesByAddress
     }
 
     func authenticationStatus(at serverURL: URL) async throws -> CoinPilotHTTPResponse {
         networkCalls += 1
+        authenticationURLs.append(serverURL.absoluteString)
+        if authenticationUnavailable { throw CoinPilotAPIError.connection }
         return Self.response(["success": true, "authRequired": requiresAuth])
     }
 
     func login(token: String, at serverURL: URL) async throws -> CoinPilotHTTPResponse {
         networkCalls += 1
         loginTokens.append(token)
+        loginURLs.append(serverURL.absoluteString)
+        if rejectedLoginTokens.contains(token) { return Self.response(["success": false], statusCode: 401) }
         var body: [String: Any] = ["success": true]
         if let loginTokenScope { body["tokenScope"] = loginTokenScope }
         return Self.response(body)
@@ -102,7 +113,7 @@ private actor DeferredCoinPilotAPI: CoinPilotAPIProviding {
         return Self.readResponse(
             path: path,
             totalAssets: host == "first.example" ? 1111 : 2222,
-            serverMode: statusOverride["mode"] as? String ?? "DRY_RUN",
+            serverMode: serverModesByAddress[serverURL.absoluteString] ?? statusOverride["mode"] as? String ?? "DRY_RUN",
             statusOverride: statusOverride,
             isReadOnlyObserver: isReadOnlyObserver,
             upbitCredentialsConfigured: upbitCredentialsConfigured,
@@ -209,6 +220,11 @@ private actor DeferredCoinPilotAPI: CoinPilotAPIProviding {
     func readRequestCount() -> Int { readRequests }
     func networkCallCount() -> Int { networkCalls }
     func recordedLoginTokens() -> [String] { loginTokens }
+    func recordedAuthenticationURLs() -> [String] { authenticationURLs }
+    func recordedLoginURLs() -> [String] { loginURLs }
+    func setRejectedLoginTokens(_ tokens: Set<String>) { rejectedLoginTokens = tokens }
+    func setAuthenticationUnavailable(_ unavailable: Bool) { authenticationUnavailable = unavailable }
+    func clearReadResponse(path: String) { readResponseOverrides.removeValue(forKey: path) }
     func recordedReadTokens() -> [String?] { readTokens }
     func recordedReadPaths() -> [String] { readPaths }
     func recordedMutationPaths() -> [String] { mutationPaths }
@@ -494,6 +510,7 @@ struct CoinPilotStoreTests {
         try await unknownExchangeStateBlocksTheServerTradingStatus()
         try optionalMarketTimestampsDecodeWithoutChangingExistingModelFields()
         try marketTimestampFormattingKeepsSourceAndFetchTimesDistinct()
+        try candleTimestampsNormalizeAtTheMarketBoundary()
         try await completeMarketSnapshotUsesServerFetchedAt()
         try await lastGoodMarketSnapshotRemainsStaleAndBlocksOrders()
         try await staleMarketSourceCannotEnableManualOrder()
@@ -502,7 +519,15 @@ struct CoinPilotStoreTests {
         try chartAxisAndPositionFormattingStayNullSafe()
         try percentFormattingPreservesSmallChanges()
         try await bundledServerDefaultsConnectAndOperateWithoutAuth()
-        print("CoinPilotStore: 51 scenarios passed")
+        try await managedServersOpenBothWorkspacesWithoutAddressEntry()
+        try await managedServerMigrationKeepsBuildProfilesIsolated()
+        try await managedLoginVerifiesSameOriginWorkspaceToken()
+        try await managedTokenReuseNeverLeaksAcrossOrigins()
+        try await managedServerMismatchKeepsPrivateDataAndOrdersLocked()
+        try await managedServerRetryPreservesAuthenticationAndPendingOrders()
+        try await managedWorkspaceSwitchDiscardsQueuedConnections()
+        try await managedAccountAuthenticationExpiryAllowsRelogin()
+        print("CoinPilotStore: 60 scenarios passed")
     }
 
     private static func coinDetailPreservesUnknownValuationAndFiniteLosses() throws {
@@ -1823,6 +1848,44 @@ struct CoinPilotStoreTests {
                      "Nonzero fractional source precision must remain visible.")
     }
 
+    private static func candleTimestampsNormalizeAtTheMarketBoundary() throws {
+        let expected = "2026-09-29T12:00:00.000Z"
+        let fixtures: [[String: Any]] = [
+            ["timeUtc": expected],
+            ["timeUtc": expected, "time": "2026-09-29T22:00:00"],
+            ["time": "2026-09-29T21:00:00"],
+            ["time": "2026-09-29T21:00:00+09:00"],
+            ["time": expected],
+            ["timeUtc": "invalid", "time": "2026-09-29T21:00:00"]
+        ]
+        for (index, fixture) in fixtures.enumerated() {
+            var row = fixture
+            row["open"] = 100.0
+            row["high"] = 102.0
+            row["low"] = 99.0
+            row["close"] = 101.0
+            row["volume"] = 1.25
+            let candle = CoinPilotCandle(row, index: index)
+            precondition(candle.time == expected && candle.id == expected,
+                         "UTC-only, legacy Upbit KST, and Binance offset times must represent the same candle opening instant.")
+            precondition(CoinPilotFormatting.dateTime(candle.time) == CoinPilotFormatting.dateTime(expected),
+                         "Every provider's candle must produce the same chart-axis label.")
+            precondition(candle.time.map(CoinPilotFormatting.utcMarketTimestamp) == "2026. 09. 29. 12:00:00 UTC",
+                         "The OHLCV disclosure must display UTC instead of a missing-time or invalid-format label.")
+            precondition(candle.open == 100 && candle.high == 102 && candle.low == 99 &&
+                         candle.close == 101 && candle.volume == 1.25,
+                         "Timestamp normalization must preserve the source OHLCV values.")
+        }
+        for invalid: [String: Any] in [[:], ["time": "invalid"], ["timeUtc": NSNull()],
+                                       ["timeUtc": "2026-09-29T12:00:00"]] {
+            let candle = CoinPilotCandle(invalid, index: 7)
+            precondition(candle.time == nil && candle.id == "candle-7",
+                         "Missing or malformed times cannot invent a candle opening instant; timeUtc requires its declared zone.")
+        }
+        precondition(CoinPilotFormatting.dateTime("2026-09-29T21:00:00") == "시각 미제공",
+                     "Only the candle legacy boundary may assume KST; unrelated timestamps remain strict.")
+    }
+
     private static func completeMarketSnapshotUsesServerFetchedAt() async throws {
         let now = Date()
         let formatter = ISO8601DateFormatter()
@@ -2962,6 +3025,262 @@ struct CoinPilotStoreTests {
                      CoinPilotFormatting.percent(.nan) == "변동률 미제공" &&
                      CoinPilotFormatting.percent(.infinity, unavailable: "비중 미제공") == "비중 미제공",
                      "Unavailable and nonfinite values must not become zero or a tiny-change label.")
+    }
+
+    private static func withCleanConnectionDefaults(_ operation: () async throws -> Void) async rethrows {
+        let defaults = UserDefaults.standard
+        let keys = [
+            "coinpilot.dashboardUrl", "coinpilot.dashboardUrl.paper", "coinpilot.dashboardUrl.live",
+            "coinpilot.native.activeWorkspace", "coinpilot.native.dataMode",
+            "coinpilot.native.dataMode.profile.server", "coinpilot.native.dataMode.profile.bundled-preview",
+            "coinpilot.native.dataMode.profile.bundled-local"
+        ]
+        let previousValues = keys.map { ($0, defaults.object(forKey: $0)) }
+        defer {
+            for (key, value) in previousValues {
+                if let value { defaults.set(value, forKey: key) }
+                else { defaults.removeObject(forKey: key) }
+            }
+        }
+        for key in keys { defaults.removeObject(forKey: key) }
+        try await operation()
+    }
+
+    private static func waitForWorkspaceConnection(_ store: CoinPilotStore) async {
+        for _ in 0..<2_000 {
+            if !store.isWorking && store.phase != .connecting { return }
+            try? await Task.sleep(nanoseconds: 1_000_000)
+        }
+        preconditionFailure("The fixture workspace connection did not finish.")
+    }
+
+    private static func managedServersOpenBothWorkspacesWithoutAddressEntry() async throws {
+        await withCleanConnectionDefaults {
+            let paper = URL(string: "https://managed.example")!
+            let live = URL(string: "https://managed.example/live")!
+            let config = CoinPilotBundledServerConfig(paper: paper, live: live)
+            for mode in CoinPilotWorkspaceMode.allCases {
+                UserDefaults.standard.set(mode.rawValue, forKey: "coinpilot.native.activeWorkspace")
+                let api = DeferredCoinPilotAPI(isReadOnlyObserver: false, serverModesByAddress: [
+                    paper.absoluteString: "DRY_RUN", live.absoluteString: "LIVE"
+                ])
+                let store = CoinPilotStore(api: api, tokens: MemoryCoinPilotTokens(), configuredDataMode: "server", bundledServers: config)
+                await store.bootstrap()
+                precondition(store.usesManagedServerConnection && store.phase == .dashboard && store.serverModeMatchesWorkspace && store.canOperate,
+                             "A fresh managed install must automatically open its matching Paper or LIVE account.")
+                let urls = await api.recordedAuthenticationURLs()
+                precondition(urls == [config.url(for: mode)!.absoluteString] && store.serverDraft == urls.first,
+                             "Bootstrap must route to the configured URL for the selected account.")
+                let ignoredCustomAddress = await store.connect(using: "https://untrusted.example")
+                precondition(ignoredCustomAddress && store.serverDraft == config.url(for: mode)!.absoluteString,
+                             "Managed reconnect must remain on the fixed endpoint even if an old custom draft survives.")
+            }
+            for key in ["coinpilot.dashboardUrl", "coinpilot.dashboardUrl.paper", "coinpilot.dashboardUrl.live", "coinpilot.native.activeWorkspace"] {
+                UserDefaults.standard.removeObject(forKey: key)
+            }
+            let generic = CoinPilotStore(api: DeferredCoinPilotAPI(), tokens: MemoryCoinPilotTokens(), configuredDataMode: "server", bundledServers: .none)
+            await generic.bootstrap()
+            precondition(!generic.usesManagedServerConnection && generic.phase == .setup,
+                         "A generic developer build without configured endpoints must retain manual setup.")
+        }
+    }
+
+    private static func managedServerMigrationKeepsBuildProfilesIsolated() async throws {
+        try await withCleanConnectionDefaults {
+            let paper = URL(string: "https://migration.example")!
+            let live = URL(string: "https://migration.example/live")!
+            let config = CoinPilotBundledServerConfig(paper: paper, live: live)
+            let defaults = UserDefaults.standard
+            defaults.set("https://old-live.example", forKey: "coinpilot.dashboardUrl")
+            defaults.set("https://old-paper.example", forKey: "coinpilot.dashboardUrl.paper")
+            defaults.set("https://old-live.example", forKey: "coinpilot.dashboardUrl.live")
+            defaults.set("bundled-preview", forKey: "coinpilot.native.dataMode.profile.server")
+            let api = DeferredCoinPilotAPI(isReadOnlyObserver: false)
+            let store = CoinPilotStore(api: api, tokens: MemoryCoinPilotTokens(), configuredDataMode: "server", bundledServers: config)
+            await store.bootstrap()
+            precondition(store.activeWorkspace == .paper && store.serverDraft == paper.absoluteString && !store.isBundledPreview && !store.canUseBundledPreview,
+                         "Old legacy addresses and preview preferences must not redirect a managed server build.")
+            precondition(defaults.string(forKey: "coinpilot.dashboardUrl.paper") == paper.absoluteString &&
+                         defaults.string(forKey: "coinpilot.dashboardUrl.live") == live.absoluteString,
+                         "Both stale workspace addresses must migrate to the configured endpoints.")
+            store.useBundledPreview()
+            precondition(!store.isBundledPreview, "A managed account build must keep its account connection after a stale preview action.")
+            let previewAPI = DeferredCoinPilotAPI()
+            let preview = CoinPilotStore(api: previewAPI, tokens: MemoryCoinPilotTokens(), bundledPreview: CoinPilotBundledPreviewDataSource(data: try Data(contentsOf: URL(fileURLWithPath: "ios/App/App/CoinPilotBundledPreview.json"))), configuredDataMode: "bundled-preview", bundledServers: config)
+            await preview.bootstrap()
+            let previewCalls = await previewAPI.networkCallCount()
+            precondition(preview.isBundledPreview && !preview.usesManagedServerConnection && previewCalls == 0,
+                         "A separate preview build must remain offline even when server defaults are present.")
+            let localAPI = DeferredCoinPilotAPI()
+            let local = CoinPilotStore(api: localAPI, tokens: MemoryCoinPilotTokens(), configuredDataMode: "bundled-local", bundledServers: config)
+            await local.bootstrap()
+            let localCalls = await localAPI.networkCallCount()
+            precondition(local.isBundledLocalMarketData && !local.usesManagedServerConnection && localCalls == 0,
+                         "A local market-data build must never bootstrap a managed account connection.")
+        }
+    }
+
+    private static func managedLoginVerifiesSameOriginWorkspaceToken() async throws {
+        await withCleanConnectionDefaults {
+            let paper = URL(string: "https://shared-auth.example")!
+            let live = URL(string: "https://shared-auth.example/live")!
+            let config = CoinPilotBundledServerConfig(paper: paper, live: live)
+            let tokens = MemoryCoinPilotTokens()
+            let api = DeferredCoinPilotAPI(requiresAuth: true, loginTokenScope: "mobile_operator", isReadOnlyObserver: false,
+                serverModesByAddress: [paper.absoluteString: "DRY_RUN", live.absoluteString: "LIVE"])
+            let store = CoinPilotStore(api: api, tokens: tokens, configuredDataMode: "server", bundledServers: config)
+            await store.bootstrap()
+            precondition(store.usesManagedServerConnection && store.phase == .login && !store.canOperate && store.account == nil,
+                         "Fresh protected installs must require token login while using their configured server automatically.")
+            store.serverDraft = "https://untrusted.example"
+            store.tokenDraft = "shared-mobile-test-token"
+            let signedIn = await store.signIn()
+            precondition(signedIn && tokens.token(for: paper) == "shared-mobile-test-token" && store.serverDraft == paper.absoluteString,
+                         "A managed login must use the bundled endpoint and save only the verified server token.")
+            await api.setLoginTokenScope("read_only")
+            store.selectWorkspace(.live)
+            await waitForWorkspaceConnection(store)
+            precondition(store.phase == .dashboard && store.activeWorkspace == .live && store.serverModeMatchesWorkspace && !store.canOperate,
+                         "Automatic LIVE auth must respect the scope returned by that server rather than copying Paper privileges.")
+            let loginURLs = await api.recordedLoginURLs()
+            precondition(loginURLs == [paper.absoluteString, live.absoluteString] && tokens.token(for: live) == "shared-mobile-test-token",
+                         "A same-origin peer token must be validated with LIVE login before it is stored for that endpoint.")
+            let mutations = await api.recordedMutationPaths()
+            precondition(mutations.isEmpty, "Automatic account connection must never send an order or start trading.")
+        }
+    }
+
+    private static func managedTokenReuseNeverLeaksAcrossOrigins() async throws {
+        await withCleanConnectionDefaults {
+            let paper = URL(string: "https://private-auth.example")!
+            for live in [URL(string: "https://other-auth.example/live")!, URL(string: "https://private-auth.example:8443/live")!] {
+                let tokens = MemoryCoinPilotTokens()
+                precondition(tokens.save("private-mobile-test-token", for: paper))
+                UserDefaults.standard.set("live", forKey: "coinpilot.native.activeWorkspace")
+                let api = DeferredCoinPilotAPI(requiresAuth: true, loginTokenScope: "mobile_operator", isReadOnlyObserver: false)
+                let store = CoinPilotStore(api: api, tokens: tokens, configuredDataMode: "server",
+                    bundledServers: CoinPilotBundledServerConfig(paper: paper, live: live))
+                await store.bootstrap()
+                let attemptedTokens = await api.recordedLoginTokens()
+                precondition(store.phase == .login && attemptedTokens.isEmpty && tokens.token(for: live) == nil,
+                             "Peer token reuse must never send credentials to a different managed host or port.")
+            }
+        }
+    }
+
+    private static func managedServerMismatchKeepsPrivateDataAndOrdersLocked() async throws {
+        await withCleanConnectionDefaults {
+            let paper = URL(string: "https://mismatch.example")!
+            let live = URL(string: "https://mismatch.example/live")!
+            UserDefaults.standard.set("live", forKey: "coinpilot.native.activeWorkspace")
+            let api = DeferredCoinPilotAPI(isReadOnlyObserver: false)
+            let store = CoinPilotStore(api: api, tokens: MemoryCoinPilotTokens(), configuredDataMode: "server",
+                bundledServers: CoinPilotBundledServerConfig(paper: paper, live: live))
+            await store.bootstrap()
+            let paths = await api.recordedReadPaths()
+            precondition(!store.serverModeMatchesWorkspace && store.account == nil && !store.canOperate &&
+                         !paths.contains("/api/account") && store.workspaceModeMismatchMessage != nil,
+                         "A fixed LIVE endpoint reporting DRY_RUN must stay locked before any private account data is loaded.")
+            let ordered = await store.submitManualBuy(coin: "KRW-BTC", amount: 10_000)
+            let mutations = await api.recordedMutationPaths()
+            precondition(!ordered && mutations.isEmpty, "Automatic routing must not weaken the server-mode order gate.")
+        }
+    }
+
+    private static func managedServerRetryPreservesAuthenticationAndPendingOrders() async throws {
+        try await withCleanConnectionDefaults {
+            let paper = URL(string: "https://retry.example")!
+            let live = URL(string: "https://retry.example/live")!
+            let tokens = MemoryCoinPilotTokens()
+            precondition(tokens.save("expired-test-token", for: paper))
+            let pending = CoinPilotMemoryPendingOrderStore()
+            let order = CoinPilotPendingManualOrder(idempotencyKey: UUID().uuidString, endpoint: "/api/trade/buy", requestBody: Data("{}".utf8),
+                market: "KRW-BTC", side: "BUY", displayAmount: "10,000원", mode: "DRY_RUN", createdAt: Date())
+            let encodedOrder = try JSONEncoder().encode(order)
+            precondition(pending.save(encodedOrder, for: paper))
+            let api = DeferredCoinPilotAPI(requiresAuth: true, loginTokenScope: "mobile_operator", isReadOnlyObserver: false)
+            await api.setRejectedLoginTokens(["expired-test-token"])
+            await api.setAuthenticationUnavailable(true)
+            let store = CoinPilotStore(api: api, tokens: tokens, configuredDataMode: "server", pendingOrderStore: pending,
+                bundledServers: CoinPilotBundledServerConfig(paper: paper, live: live, token: "personal-bundled-test-token"))
+            await store.bootstrap()
+            precondition(store.phase == .connecting && !store.isWorking && store.connectionMessage != nil && store.pendingManualOrder == order && store.pendingManualOrderLocked,
+                         "An unavailable managed server must expose retry without losing pending order recovery.")
+            precondition(tokens.token(for: paper) == "expired-test-token", "A network failure must not erase saved authentication.")
+            await api.setAuthenticationUnavailable(false)
+            store.serverDraft = "https://untrusted.example"
+            await store.primaryConnectionAction()
+            let attemptedTokens = await api.recordedLoginTokens()
+            precondition(store.phase == .dashboard && !store.isWorking && attemptedTokens == ["expired-test-token", "personal-bundled-test-token"] &&
+                         tokens.token(for: paper) == "personal-bundled-test-token" && store.pendingManualOrder == order && store.pendingManualOrderLocked,
+                         "Retry must stay on the configured endpoint, validate a fallback token, and retain pending order locks.")
+            store.logOut()
+            precondition(store.phase == .dashboard && tokens.token(for: paper) == "personal-bundled-test-token" && store.pendingManualOrder == order,
+                         "A stale logout action must not drop a managed install into manual setup or clear its journal.")
+            await api.setReadResponse(path: "/api/status", body: ["error": "expired token"], statusCode: 401)
+            await store.refresh()
+            precondition(store.phase == .login && !store.isWorking && !store.canOperate && store.pendingManualOrder == order && store.pendingManualOrderLocked,
+                         "Expired authentication must safely permit a new token login without losing the pending order record.")
+            await api.clearReadResponse(path: "/api/status")
+            store.tokenDraft = "replacement-mobile-test-token"
+            await store.primaryConnectionAction()
+            precondition(store.phase == .dashboard && store.pendingManualOrder == order && store.pendingManualOrderLocked &&
+                         tokens.token(for: paper) == "replacement-mobile-test-token",
+                         "A replacement login must reconnect automatically while unresolved orders remain locked.")
+            let mutations = await api.recordedMutationPaths()
+            precondition(mutations.isEmpty, "Connection recovery must not resubmit an unresolved order.")
+        }
+    }
+
+    private static func managedAccountAuthenticationExpiryAllowsRelogin() async throws {
+        try await withCleanConnectionDefaults {
+            let paper = URL(string: "https://account-expiry.example")!
+            let live = URL(string: "https://account-expiry.example/live")!
+            let tokens = MemoryCoinPilotTokens()
+            precondition(tokens.save("account-expired-test-token", for: paper))
+            let pending = CoinPilotMemoryPendingOrderStore()
+            let order = CoinPilotPendingManualOrder(idempotencyKey: UUID().uuidString, endpoint: "/api/trade/buy", requestBody: Data("{}".utf8),
+                market: "KRW-BTC", side: "BUY", displayAmount: "10,000원", mode: "DRY_RUN", createdAt: Date())
+            let encodedOrder = try JSONEncoder().encode(order)
+            precondition(pending.save(encodedOrder, for: paper))
+            let api = DeferredCoinPilotAPI(requiresAuth: true, loginTokenScope: "mobile_operator", isReadOnlyObserver: false)
+            await api.setReadResponse(path: "/api/account", body: ["error": "expired token"], statusCode: 401)
+            let store = CoinPilotStore(api: api, tokens: tokens, configuredDataMode: "server", pendingOrderStore: pending,
+                bundledServers: CoinPilotBundledServerConfig(paper: paper, live: live))
+            await store.bootstrap()
+            let paths = await api.recordedReadPaths()
+            precondition(paths.contains("/api/status") && paths.contains("/api/account") && store.phase == .login &&
+                         !store.isWorking && !store.isRefreshing && !store.canOperate && store.account == nil &&
+                         store.pendingManualOrder == order && store.pendingManualOrderLocked,
+                         "An account 401 after successful status must unlock login controls and preserve pending order recovery.")
+            await api.clearReadResponse(path: "/api/account")
+            store.tokenDraft = "account-replacement-test-token"
+            await store.primaryConnectionAction()
+            precondition(store.phase == .dashboard && !store.isWorking && !store.isRefreshing && store.account != nil &&
+                         tokens.token(for: paper) == "account-replacement-test-token" && store.pendingManualOrder == order && store.pendingManualOrderLocked,
+                         "Token-only relogin must recover from a post-status 401 without resubmitting or clearing unresolved orders.")
+            let mutations = await api.recordedMutationPaths()
+            precondition(mutations.isEmpty, "Authentication recovery must not execute a pending order.")
+        }
+    }
+
+    private static func managedWorkspaceSwitchDiscardsQueuedConnections() async throws {
+        await withCleanConnectionDefaults {
+            let paper = URL(string: "https://queued.example")!
+            let live = URL(string: "https://queued.example/live")!
+            let api = DeferredCoinPilotAPI(isReadOnlyObserver: false, serverModesByAddress: [paper.absoluteString: "DRY_RUN", live.absoluteString: "LIVE"])
+            let store = CoinPilotStore(api: api, tokens: MemoryCoinPilotTokens(), configuredDataMode: "server",
+                bundledServers: CoinPilotBundledServerConfig(paper: paper, live: live))
+            await store.bootstrap()
+            store.selectWorkspace(.live)
+            store.selectWorkspace(.paper)
+            await store.primaryConnectionAction()
+            await Task.yield()
+            let urls = await api.recordedAuthenticationURLs()
+            precondition(store.activeWorkspace == .paper && store.phase == .dashboard && store.serverModeMatchesWorkspace && store.serverDraft == paper.absoluteString &&
+                         urls.allSatisfy { $0 == paper.absoluteString },
+                         "Rapid account switches must discard obsolete queued connections before they contact another workspace.")
+        }
     }
 
     private static func bundledServerDefaultsConnectAndOperateWithoutAuth() async throws {
