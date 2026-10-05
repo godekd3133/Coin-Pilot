@@ -452,7 +452,10 @@ export class TradingLifecycle {
       manualProtectionActive: this._manualRiskProtection === true && this.owner.positionRiskTimer !== null,
       protectiveMonitorActive: this.owner._riskMonitorProtectiveOnly && this.owner.positionRiskTimer !== null,
       stopReason: this.stopReason || (!this.owner.dryRun && !this.owner._liveExchangeStateKnown ? 'exchange_state_unverified' : null),
-      exchangeStateKnown: this.owner.dryRun ? null : this.owner._liveExchangeStateKnown
+      exchangeStateKnown: this.owner.dryRun ? null : this.owner._liveExchangeStateKnown,
+      autoRecovery: typeof this.owner.autoRecovery?.getStatus === 'function'
+        ? this.owner.autoRecovery.getStatus()
+        : null
     };
   }
 

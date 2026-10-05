@@ -1,0 +1,47 @@
+{
+  "reviewDate": "2026-10-05",
+  "timezone": "Asia/Seoul",
+  "scope": "CoinPilot user-value flows, presentation, trade-history ordering and fixture consistency",
+  "focusedNode": { "passed": 144, "failed": 0, "log": "/tmp/coinpilot-usefulness-qa/final-focused.log" },
+  "nativePreviewFixture": { "passed": 2, "failed": 0, "test": "test/nativePreviewFixture.test.js" },
+  "nativeStore": { "passed": 47, "failed": 0, "log": "/tmp/coinpilot-usefulness-qa/native-store-final.log" },
+  "nativeUsefulness": { "passed": 3, "failed": 0, "log": "/tmp/coinpilot-usefulness-qa/native-usefulness.log" },
+  "fullNodeCompletedRun": {
+    "total": 1284,
+    "passed": 1282,
+    "failed": 2,
+    "log": "/tmp/coinpilot-usefulness-qa/node-tests-final.log",
+    "failures": [
+      "USDT account, holding analysis and asset snapshots preserve fractional valuation",
+      "LIVE position reads exclude the configured quote balance"
+    ],
+    "note": "Concurrent quote-currency work was changing while tests ran. Full integration was not green."
+  },
+  "fullNodeLaterRun": {
+    "status": "stalled_after_failures_then_terminated",
+    "log": "/tmp/coinpilot-usefulness-qa/node-tests-latest.log",
+    "observedFailures": [
+      "USDT account, holding analysis and asset snapshots preserve fractional valuation",
+      "cross-process normal waiters retain FIFO order",
+      "abort, absolute deadline, and client disconnect remove waiting tickets without late grants",
+      "group and IP-wide backoffs survive daemon restart; Remaining-Req stays group-scoped",
+      "dispatch and Remaining-Req cooldowns use monotonic time across wall-clock jumps",
+      "quota groups and persisted cooldown state are bounded; excessive backoff persistently blocks dispatch",
+      "SIGKILL during stale-lock recovery leaves a marker that the next owner can safely reclaim"
+    ],
+    "total": null
+  },
+  "checks": { "eslint": "passed", "pwaShell": "passed", "diffWhitespace": "passed", "syntax": "passed" },
+  "builds": { "iosSimulatorServer": "passed", "iosSimulatorPreview": "passed", "macPreview": "passed", "previewFixtureFinalUpdate": "resource_only_update_and_Mac_adhoc_resign" },
+  "visual": {
+    "web": ["390x844", "1280x800", "320x740 overflow check"],
+    "native": "Mac bundled-preview with synthetic data and no credentials",
+    "verifiedFlows": ["connection error", "home", "trade filters and reset", "analysis modal to market", "partial refresh failure", "market selection", "settings summary", "native home to assets", "native records period and reset"],
+    "screenshots": 15,
+    "iphone": "not_verified",
+    "voiceOver": "not_verified",
+    "lastNativeRecapture": "Mac locked; assets recapture after fixture correction succeeded, records screenshot retains earlier fixture price"
+  },
+  "deployment": "not_performed",
+  "realMoneyActions": "none"
+}

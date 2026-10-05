@@ -66,9 +66,12 @@ test('native and PWA semantic surface/status colors remain aligned', () => {
 });
 
 test('native status-text colors meet WCAG AA contrast on the shared surface', () => {
-  const surface = cssColor('surface');
-  for (const tokenName of ['ink', 'muted', 'blue', 'green', 'red', 'amber']) {
-    const ratio = contrastRatio(cssColor(tokenName), surface);
-    assert.ok(ratio >= 4.5, `--sl-${tokenName} contrast is ${ratio.toFixed(2)}:1, expected at least 4.5:1`);
+  for (const [nativeToken, webToken] of [['ink', 'ink'], ['secondaryInk', 'muted'], ['blue', 'blue'], ['green', 'green'], ['red', 'red'], ['amber', 'amber']]) {
+    for (const background of ['surface', 'paper']) {
+      const nativeRatio = contrastRatio(swiftColor(nativeToken), swiftColor(background));
+      const webRatio = contrastRatio(cssColor(webToken), cssColor(background));
+      assert.ok(nativeRatio >= 4.5, `native ${nativeToken} on ${background} contrast is ${nativeRatio.toFixed(2)}:1, expected at least 4.5:1`);
+      assert.ok(webRatio >= 4.5, `--sl-${webToken} on ${background} contrast is ${webRatio.toFixed(2)}:1, expected at least 4.5:1`);
+    }
   }
 });

@@ -3,7 +3,10 @@
 import {
   DUST_AMOUNT_THRESHOLD,
   MANUAL_ORDER_FEE_RATE,
-  MIN_BUY_KRW,
+  quoteAmountLimits,
+  floorQuoteAmount,
+  roundQuoteAmount,
+  formatQuoteAmount,
   applyDryBuy,
   applyDrySell,
   getStrategyFor,
@@ -20,8 +23,9 @@ export function createQuickUseCase(ctx) {
     if (!coin || !action || !amount) {
       return { status: 400, body: { error: 'coin, action, amount 필수', success: false } };
     }
-    if (action === 'BUY' && amount < MIN_BUY_KRW) {
-      return { status: 400, body: { error: '최소 매수 금액은 5,000원입니다', success: false } };
+    const { minimumBuy } = quoteAmountLimits(tradingSystem);
+    if (!Number.isFinite(amount) || (action === 'BUY' && amount < minimumBuy)) {
+      return { status: 400, body: { error: `최소 매수 금액은 ${formatQuoteAmount(tradingSystem, minimumBuy)}입니다`, success: false } };
     }
 
     const { ticker, block } = await requireFreshQuote(coin);
@@ -37,15 +41,15 @@ export function createQuickUseCase(ctx) {
 
       // 금액이 보유 현금을 초과하면 최대 가용 금액으로 자동 조절
       if (buyAmount > availableBalance * 0.98) {
-        buyAmount = Math.floor(availableBalance * 0.95);
+        buyAmount = floorQuoteAmount(tradingSystem, availableBalance * 0.95);
         buyWasAdjusted = true;
-        console.log(`⚠️ 빠른 매수 금액 자동 조절: ${amount.toLocaleString()}원 → ${buyAmount.toLocaleString()}원`);
+        console.log(`⚠️ 빠른 매수 금액 자동 조절: ${formatQuoteAmount(tradingSystem, amount)} → ${formatQuoteAmount(tradingSystem, buyAmount)}`);
       }
-      if (buyAmount < MIN_BUY_KRW) {
+      if (buyAmount < minimumBuy) {
         return {
           status: 400,
           body: {
-            error: `보유 현금 부족 (${availableBalance.toLocaleString()}원). 최소 5,000원 이상 필요합니다.`,
+            error: `보유 현금 부족 (${formatQuoteAmount(tradingSystem, availableBalance)}). 최소 ${formatQuoteAmount(tradingSystem, minimumBuy)} 이상 필요합니다.`,
             success: false,
             availableBalance
           }
@@ -66,7 +70,7 @@ export function createQuickUseCase(ctx) {
           return {
             status: 400,
             body: {
-              error: `잔액 부족 (보유: ${applied.availableBalance.toLocaleString()}원, 요청: ${buyAmount.toLocaleString()}원)`,
+              error: `잔액 부족 (보유: ${formatQuoteAmount(tradingSystem, applied.availableBalance)}, 요청: ${formatQuoteAmount(tradingSystem, buyAmount)})`,
               success: false,
               availableBalance: applied.availableBalance
             }
@@ -107,8 +111,8 @@ export function createQuickUseCase(ctx) {
           fee: responseFee,
           fill: liveFill,
           message: buyWasAdjusted
-            ? `매수 완료 (금액 자동 조절: ${amount.toLocaleString()}원 → ${buyAmount.toLocaleString()}원, 수수료 ${(isDryRun ? fee : responseFee || 0).toFixed(0)}원)`
-            : `매수 완료 (수수료 ${(isDryRun ? fee : responseFee || 0).toFixed(0)}원)`
+            ? `매수 완료 (금액 자동 조절: ${formatQuoteAmount(tradingSystem, amount)} → ${formatQuoteAmount(tradingSystem, buyAmount)}, 수수료 ${formatQuoteAmount(tradingSystem, responseFee || 0)})`
+            : `매수 완료 (수수료 ${formatQuoteAmount(tradingSystem, responseFee || 0)})`
         }
       };
     }
@@ -192,10 +196,10 @@ export function createQuickUseCase(ctx) {
         originalAmount: amount,
         amountWasAdjusted: sellWasAdjusted,
         fill: liveFill,
-        maxHoldingValue: Math.round(maxHoldingValue),
+        maxHoldingValue: roundQuoteAmount(tradingSystem, maxHoldingValue),
         message: sellWasAdjusted
-          ? `매도 완료 (최대 보유액 ${Math.round(maxHoldingValue).toLocaleString()}원으로 조절, 수수료 ${(isDryRun ? responseFee : responseFee || 0).toFixed(0)}원)`
-          : `매도 완료 (수수료 ${(isDryRun ? responseFee : responseFee || 0).toFixed(0)}원)`
+          ? `매도 완료 (최대 보유액 ${formatQuoteAmount(tradingSystem, maxHoldingValue)}으로 조절, 수수료 ${formatQuoteAmount(tradingSystem, responseFee || 0)})`
+          : `매도 완료 (수수료 ${formatQuoteAmount(tradingSystem, responseFee || 0)})`
       }
     };
   }

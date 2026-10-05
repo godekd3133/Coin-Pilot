@@ -3,6 +3,7 @@
 import {
   DUST_AMOUNT_THRESHOLD,
   MANUAL_ORDER_FEE_RATE,
+  roundQuoteAmount,
   applyDrySell,
   getStrategyFor,
   readLiveHolding
@@ -81,9 +82,9 @@ export function createSellUseCase(ctx) {
         coin,
         quantity: responseVolume,
         price: responsePrice,
-        grossAmount: Math.round(responseGrossAmount),
-        fee: Math.round(responseFee),
-        receivedAmount: Math.round(responseReceivedAmount),
+        grossAmount: roundQuoteAmount(tradingSystem, responseGrossAmount),
+        fee: roundQuoteAmount(tradingSystem, responseFee),
+        receivedAmount: roundQuoteAmount(tradingSystem, responseReceivedAmount),
         fill: liveFill
       }
     };

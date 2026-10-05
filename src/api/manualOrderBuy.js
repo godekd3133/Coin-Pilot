@@ -2,7 +2,8 @@
 // 공유 의존(ctx)은 createManualOrderContext가 조립하고, leg 프리미티브는 manualOrderLegs에서 온다.
 import {
   MANUAL_ORDER_FEE_RATE,
-  MIN_BUY_KRW,
+  quoteAmountLimits,
+  formatQuoteAmount,
   applyDryBuy,
   getStrategyFor,
   reflectStrategyBuyFill
@@ -15,8 +16,9 @@ export function createBuyUseCase(ctx) {
     if (!coin || !amount) {
       return { status: 400, body: { error: 'coin과 amount는 필수입니다', success: false } };
     }
-    if (amount < MIN_BUY_KRW) {
-      return { status: 400, body: { error: '최소 매수 금액은 5,000원입니다', success: false } };
+    const { minimumBuy } = quoteAmountLimits(tradingSystem);
+    if (!Number.isFinite(amount) || amount < minimumBuy) {
+      return { status: 400, body: { error: `최소 매수 금액은 ${formatQuoteAmount(tradingSystem, minimumBuy)}입니다`, success: false } };
     }
 
     const { ticker, block } = await requireFreshQuote(coin);
@@ -34,7 +36,7 @@ export function createBuyUseCase(ctx) {
         return {
           status: 400,
           body: {
-            error: `잔액 부족 (보유: ${applied.availableBalance.toLocaleString()}원)`,
+            error: `잔액 부족 (보유: ${formatQuoteAmount(tradingSystem, applied.availableBalance)})`,
             success: false
           }
         };

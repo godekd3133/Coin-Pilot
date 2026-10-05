@@ -2,7 +2,9 @@
 // 공유 의존(ctx)은 createManualOrderContext가 조립하고, leg 프리미티브는 manualOrderLegs에서 온다.
 import {
   MANUAL_ORDER_FEE_RATE,
-  MIN_BUY_KRW,
+  quoteAmountLimits,
+  floorQuoteAmount,
+  formatQuoteAmount,
   getStrategyFor,
   readKrwBalance,
   reflectStrategyBuyFill
@@ -18,8 +20,9 @@ export function createSmartBuyUseCase(ctx) {
   const { tradingSystem, marketDataProvider, inspectMarketQuote, marketQuoteBlockResult, readFreshTickers, readMinuteCandles } = ctx;
 
   async function smartBuy({ totalAmount, minScore = 60, maxCoins = 10 }, { attachLegIntent = null } = {}) {
-    if (!totalAmount || totalAmount < MIN_BUY_KRW) {
-      return { status: 400, body: { error: '최소 금액은 5,000원입니다', success: false } };
+    const { minimumBuy } = quoteAmountLimits(tradingSystem);
+    if (!Number.isFinite(totalAmount) || totalAmount < minimumBuy) {
+      return { status: 400, body: { error: `최소 금액은 ${formatQuoteAmount(tradingSystem, minimumBuy)}입니다`, success: false } };
     }
     if (!tradingSystem.upbit) {
       return { status: 400, body: { error: '거래 시스템 미초기화', success: false } };
@@ -32,15 +35,15 @@ export function createSmartBuyUseCase(ctx) {
     const originalAmount = totalAmount;
     let amountWasAdjusted = false;
     if (totalAmount > availableBalance * 0.98) { // 2% 여유분 확보
-      totalAmount = Math.floor(availableBalance * 0.95); // 95%까지만 사용
+      totalAmount = floorQuoteAmount(tradingSystem, availableBalance * 0.95); // 95%까지만 사용
       amountWasAdjusted = true;
-      console.log(`⚠️ 스마트 매수 금액 자동 조절: ${originalAmount.toLocaleString()}원 → ${totalAmount.toLocaleString()}원 (보유: ${availableBalance.toLocaleString()}원)`);
+      console.log(`⚠️ 스마트 매수 금액 자동 조절: ${formatQuoteAmount(tradingSystem, originalAmount)} → ${formatQuoteAmount(tradingSystem, totalAmount)} (보유: ${formatQuoteAmount(tradingSystem, availableBalance)})`);
     }
-    if (totalAmount < MIN_BUY_KRW) {
+    if (totalAmount < minimumBuy) {
       return {
         status: 400,
         body: {
-          error: `보유 현금 부족 (${availableBalance.toLocaleString()}원). 최소 5,000원 이상 필요합니다.`,
+          error: `보유 현금 부족 (${formatQuoteAmount(tradingSystem, availableBalance)}). 최소 ${formatQuoteAmount(tradingSystem, minimumBuy)} 이상 필요합니다.`,
           success: false,
           availableBalance
         }
@@ -136,8 +139,8 @@ export function createSmartBuyUseCase(ctx) {
     if (maxCoins > 0 && selectedCoins.length > maxCoins) {
       selectedCoins = selectedCoins.slice(0, maxCoins);
     }
-    // 코인당 최소 5000원 이상 투자할 수 있는 개수로 제한
-    const maxAffordable = Math.floor(totalAmount / MIN_BUY_KRW);
+    // 종목마다 기준통화의 최소 주문 금액 이상을 배분한다.
+    const maxAffordable = Math.floor(totalAmount / minimumBuy);
     if (selectedCoins.length > maxAffordable) {
       selectedCoins = selectedCoins.slice(0, maxAffordable);
     }
@@ -157,14 +160,14 @@ export function createSmartBuyUseCase(ctx) {
       };
     }
 
-    const amountPerCoin = Math.floor(totalAmount / selectedCoins.length);
+    const amountPerCoin = floorQuoteAmount(tradingSystem, totalAmount / selectedCoins.length);
     const orders = [];
     const liveFailures = [];
     const isDryRun = tradingSystem.dryRun;
     let runningBalance = availableBalance; // 실행 중 잔액 추적
 
     for (const coinData of selectedCoins) {
-      if (amountPerCoin < MIN_BUY_KRW) continue;
+      if (amountPerCoin < minimumBuy) continue;
 
       const dispatchQuoteCheck = inspectMarketQuote(tickerByMarket.get(coinData.coin), coinData.coin);
       if (!dispatchQuoteCheck.fresh) {
@@ -287,7 +290,7 @@ export function createSmartBuyUseCase(ctx) {
         message: liveFailures.length > 0
           ? `${orders.length}개 체결 · ${liveFailures.length}개 미체결/실패. 체결되지 않은 주문은 전략 포지션에 반영하지 않았습니다.`
           : amountWasAdjusted
-          ? `${orders.length}개 코인에 자동 매수 완료 (금액 자동 조절: ${originalAmount.toLocaleString()}원 → ${totalAmount.toLocaleString()}원)`
+          ? `${orders.length}개 코인에 자동 매수 완료 (금액 자동 조절: ${formatQuoteAmount(tradingSystem, originalAmount)} → ${formatQuoteAmount(tradingSystem, totalAmount)})`
           : `${orders.length}개 코인에 자동 매수 완료 (점수 ${minScore}점 이상)`
       }
     };

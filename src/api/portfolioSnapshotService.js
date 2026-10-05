@@ -1,4 +1,5 @@
 import { accountValuationMarkets, readCurrentMarketPrices } from './marketValuation.js';
+import { roundQuoteAmount } from './manualOrderLegs.js';
 import { PortfolioHistoryFormatError } from './portfolioHistoryStore.js';
 
 const SNAPSHOT_IN_PROGRESS_RESPONSE = {
@@ -174,8 +175,8 @@ export default class PortfolioSnapshotService {
         valuationStatus: 'available',
         valuationSource: tradingSystem.dryRun ? 'paper_virtual_portfolio' : 'exchange_account',
         mode: tradingSystem.dryRun ? 'DRY_RUN' : 'LIVE',
-        totalAssets: Math.round(totalAssets),
-        krwBalance: Math.round(krwBalance),
+        totalAssets: roundQuoteAmount(tradingSystem, totalAssets),
+        krwBalance: roundQuoteAmount(tradingSystem, krwBalance),
         positionCount: valuationMarkets.length
       });
 

@@ -8,6 +8,8 @@ import { LiveCredentialStore } from './api/liveCredentialStore.js';
 import Logger from './utils/logger.js';
 import { loadEnv, formatEnvErrors, formatEnvWarnings } from './config/envLoader.js';
 import { acquireHeadlessRuntimeWriterLock, setupExitHandlers } from './runtime/exitHandlers.js';
+import { createAutoRecoverySupervisor } from './runtime/autoRecoverySupervisor.js';
+import { createLiveValidationReportRefresher } from './runtime/liveValidationReportRefresher.js';
 import { runAfterDashboardReady } from './runtime/dashboardStartup.js';
 import { createProfileWriterStartup } from './runtime/profileWriterStartup.js';
 import { derivePublicMarketSnapshotFilePath } from './runtime/profileStoragePlan.js';
@@ -267,6 +269,19 @@ async function main() {
         }
       }
 
+      // 안전 중지(fail-closed) 후 자동 재개 감시를 항상 켠다. 트레이더가
+      // 스스로 멈추지 않고, 복구 가능한 중지 사유에만 start()를 재호출한다.
+      // LIVE 스캘핑에서는 검증 리포트도 함께 갱신해 24h 신선도 게이트가
+      // 자동 복구를 영구 차단하지 않게 한다.
+      const validationRefresher = createLiveValidationReportRefresher(trader, config);
+      trader.liveValidationRefresher = validationRefresher;
+      validationRefresher.start();
+      const autoRecovery = createAutoRecoverySupervisor(trader, config, {
+        onStartFailure: () => validationRefresher.requestRefresh('auto_start_failure')
+      });
+      trader.autoRecovery = autoRecovery;
+      autoRecovery.start();
+
       const startTraderOnBoot = config.dashboardStartTraderOnBoot;
       if (startTraderOnBoot) {
         // 카운트다운
@@ -279,6 +294,7 @@ async function main() {
 
         // 자동매매 시작
         try {
+          autoRecovery.noteDesiredRunning(true, 'boot_start');
           await trader.start();
         } catch (error) {
           console.error('\n❌ 치명적 오류:', error);

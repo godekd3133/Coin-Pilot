@@ -251,3 +251,28 @@ test('new login preserves the tokenScope returned by the login endpoint', async 
   assert.equal(client.tokenScope(), 'read_only');
   assert.equal(client.authState().authenticated, true);
 });
+
+test('login server errors preserve input and do not blame or store the token', async () => {
+  const client = await loadAuthClient({ loginResponse: { status: 503, body: { success: false } } });
+  const gate = client.gate();
+  gate.querySelector('input').value = 'retryable-token';
+  await gate.querySelector('form').listener('submit')({ preventDefault() {} });
+
+  assert.match(client.error(), /서버가 접속 요청을 처리하지 못했습니다/);
+  assert.equal(gate.querySelector('input').value, 'retryable-token');
+  assert.equal(gate.querySelector('button').disabled, false);
+  assert.equal(client.token(), '');
+  assert.equal(client.window.coinPilotAuth.canMutate, false);
+});
+
+test('rejected and rate-limited login attempts explain different recovery actions', async () => {
+  for (const [status, expected] of [[401, /토큰이 맞지 않거나 권한이 없습니다/], [429, /잠시 후 다시 시도/]]) {
+    const client = await loadAuthClient({ loginResponse: { status, body: { success: false } } });
+    const gate = client.gate();
+    gate.querySelector('input').value = 'not-accepted';
+    await gate.querySelector('form').listener('submit')({ preventDefault() {} });
+    assert.match(client.error(), expected);
+    assert.equal(client.token(), '');
+    assert.equal(client.window.coinPilotAuth.canMutate, false);
+  }
+});

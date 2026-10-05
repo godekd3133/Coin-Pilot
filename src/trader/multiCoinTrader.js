@@ -251,6 +251,10 @@ class MultiCoinTrader {
     this.stopReason = null;
     this.cycleRequestStats = null;
     this.runtimeSignalWindowEntryCounts = new Map();
+    // index.js가 부착하는 자동 복구 감시자와 LIVE 검증 리포트 리프레셔.
+    // 테스트/스크립트에서는 null이다.
+    this.autoRecovery = null;
+    this.liveValidationRefresher = null;
 
     // 드라이 모드 가상 포트폴리오
     this.virtualPortfolio = {

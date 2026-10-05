@@ -35,6 +35,8 @@ const PROJECT_PREFIXES = [
   'TARGET_',
   'TRADING_',
   'DRY_RUN_',
+  'AUTO_RECOVERY_',
+  'LIVE_',
   'ENABLE_DASHBOARD_'
 ];
 

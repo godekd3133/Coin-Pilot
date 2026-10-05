@@ -260,6 +260,17 @@ export function createConfig(env) {
     liveManualPrepareOnBoot,
     liveManualRiskProtection,
     dashboardStartTraderOnBoot,
+    // 안전 중지 후 자동 재개 감시 (fail-closed 경계는 유지, 복구만 자동화)
+    autoRecoveryEnabled: env.AUTO_RECOVERY_ENABLED !== false,
+    autoRecoveryProbeIntervalMs: env.AUTO_RECOVERY_PROBE_INTERVAL_MS || 15000,
+    autoRecoveryMinDownMs: env.AUTO_RECOVERY_MIN_DOWN_MS ?? 30000,
+    autoRecoveryHealthyProbes: env.AUTO_RECOVERY_HEALTHY_PROBES || 2,
+    autoRecoveryStateFile: env.AUTO_RECOVERY_STATE_FILE || null,
+    // LIVE fixed-config 검증 리포트 자동 갱신 (24h 신선도 게이트용 증거 보강)
+    liveValidationRefreshEnabled: env.LIVE_VALIDATION_REFRESH_ENABLED !== false,
+    liveValidationRefreshIntervalMs: env.LIVE_VALIDATION_REFRESH_INTERVAL_MS || 43200000,
+    liveValidationRefreshMinGapMs: env.LIVE_VALIDATION_REFRESH_MIN_GAP_MS || 1800000,
+    liveValidationRefreshTimeoutMs: env.LIVE_VALIDATION_REFRESH_TIMEOUT_MS || 900000,
     logLevel: env.LOG_LEVEL || 'info',
     enableDashboard: env.ENABLE_DASHBOARD !== false,
     dashboardPort: env.DASHBOARD_PORT || 3000

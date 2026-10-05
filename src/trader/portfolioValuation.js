@@ -1,3 +1,5 @@
+import { quoteOfSystem } from '../exchange/marketCodes.js';
+
 // PortfolioValuation — 계좌/평가 읽기 모델.
 //
 // MultiCoinTrader에서 추출 — 상태 없음, owner를 통해 포트폴리오·시세·계좌를 읽는다.
@@ -237,10 +239,11 @@ export class PortfolioValuation {
   async calculateCumulativePnL(options = {}) {
     const totalAssets = await this.owner.calculateTotalAssets(options.priceMapOverride ?? null, options);
     const valuationAvailable = Number.isFinite(totalAssets);
+    const quoteAmount = value => quoteOfSystem(this.owner) === 'KRW' ? Math.round(value) : value;
     const result = {
       initialSeedMoney: this.owner.initialSeedMoney,
-      totalAssets: valuationAvailable ? Math.round(totalAssets) : null,
-      profit: valuationAvailable ? Math.round(totalAssets - this.owner.initialSeedMoney) : null,
+      totalAssets: valuationAvailable ? quoteAmount(totalAssets) : null,
+      profit: valuationAvailable ? quoteAmount(totalAssets - this.owner.initialSeedMoney) : null,
       profitPercent: valuationAvailable && this.owner.initialSeedMoney > 0
         ? ((totalAssets / this.owner.initialSeedMoney) - 1) * 100
         : valuationAvailable ? 0 : null,

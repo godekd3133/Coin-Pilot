@@ -113,4 +113,7 @@ fi
 
 echo "==> Done. CoinPilot $MARKETING ($NEXT) submitted to TestFlight."
 echo "    Processing takes a few minutes; internal testers can install without review once VALID."
-echo "    Check status: App Store Connect → TestFlight, or run scripts/asc-build-status.mjs"
+
+# 업로드만으로는 테스터에게 안 보인다 — internal 베타 그룹에 배정해야 한다.
+# 방금 올린 빌드가 ASC에 등록될 때까지 스크립트가 폴링한다.
+node scripts/asc-assign-internal-group.mjs "$NEXT" || echo "!! Beta group assignment failed — assign manually in App Store Connect"

@@ -8,9 +8,9 @@ import { fileURLToPath } from 'node:url';
 
 import {
   historicalTimestampForCandle,
-  normalizeHistoricalCandles,
-  simulateScalping
-} from '../../src/backtest/scalpingBacktest.js';
+  normalizeHistoricalCandles
+} from '../../src/backtest/historicalCandleIntegrity.js';
+import { simulateScalping } from '../../src/backtest/scalpingBacktest.js';
 
 const ABSOLUTE_TOLERANCE = 1e-8;
 const RELATIVE_TOLERANCE = 1e-12;

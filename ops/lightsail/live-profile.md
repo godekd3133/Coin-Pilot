@@ -105,6 +105,24 @@ Two protection limits remain structural:
   forced power loss still abandons open positions until the next boot
   re-synchronizes them.
 
+Auto-recovery (`AUTO_RECOVERY_*`, enabled by default) supervises the trading
+loop: after a fail-closed safety stop (`risk_data_gap`,
+`analysis_data_gap`, `exchange_state_unverified`) it probes the ticker/candle
+data paths every `AUTO_RECOVERY_PROBE_INTERVAL_MS` (15s), waits
+`AUTO_RECOVERY_MIN_DOWN_MS` (30s), requires `AUTO_RECOVERY_HEALTHY_PROBES`
+(2) consecutive healthy checks, and re-invokes `trader.start()` — so the LIVE
+validation gate and startup exchange reconciliation still apply. It stays
+inert during protective-only drains. Operator intent persists in
+`/var/lib/coinpilot-live/dry_portfolio.json.automation_intent.json`, so a
+process restart resumes automation only when it was last running; an explicit
+dashboard stop is never auto-resumed.
+
+`LIVE_VALIDATION_REFRESH_*` (enabled by default on live scalping) re-runs the
+fixed validation as a child process every 12h and whenever a start attempt is
+rejected by the gate, keeping `scalping_validation.json` inside its 24h
+freshness window. If a refreshed report fails the promoted/confidence gates,
+the gate stays closed — the refresh renews evidence, it does not bypass it.
+
 ## Add the HTTPS path without replacing Paper
 
 Install `ops/nginx/coinpilot-live-location.conf` as an Nginx snippet and add

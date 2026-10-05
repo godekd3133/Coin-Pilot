@@ -1127,7 +1127,7 @@ test('PWA shell은 redesign asset version과 service worker cache version을 함
   assert.match(redesignScriptAsset || '', /^\/pilot-redesign\.js\?v=\d{8}-\d+$/);
   assert.match(redesignStylesheetAsset || '', /^\/pilot-redesign\.css\?v=\d{8}-\d+$/);
   assert.match(serviceWorkerCacheName || '', /^coinpilot-shell-v\d+$/);
-  assert.equal(serviceWorkerCacheName, 'coinpilot-shell-v205');
+  assert.equal(serviceWorkerCacheName, 'coinpilot-shell-v206');
   assert.ok(serviceWorkerAppShell);
   assert.match(serviceWorkerAppShell, new RegExp(`['"]${redesignScriptAsset.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}['"]`));
   assert.match(serviceWorkerAppShell, new RegExp(`['"]${redesignStylesheetAsset.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}['"]`));
@@ -1348,7 +1348,7 @@ test('selected-market UI binds exchange source time and server fetch time separa
   assert.match(renderMarketHeader, /updateMarketAnnouncement\('pilot-market-status-announcement'/);
   assert.match(redesignSource, /if \(action === 'refresh-market'\) \{ await loadCore\(\); announceManualMarketRefresh\(\); return; \}/);
   assert.doesNotMatch(renderMarketHeader, /setText\('pilot-market-name', marketPresentation\.pageDetail\)/);
-  assert.match(renderMarketHeader, /marketName\.textContent !== '업비트 원화 시장'/);
+  assert.match(renderMarketHeader, /marketName\.textContent !== marketNameLabel/);
   assert.match(renderMarketHeader, /marketStatus\.textContent !== marketStatusLabel/);
   const selectedMarketHeader = redesignSource.split('function renderMarketHeader() {')[1]?.split('function sortedMarketPrices()')[0] || '';
   assert.match(selectedMarketHeader, /selectedMarketQuotePresentation\(\s*marketData,\s*marketPresentation,\s*state\.marketPricesLoaded\s*\)/);
@@ -1718,7 +1718,7 @@ test('overview data status warns for partial, stale, and unknown market snapshot
   });
 
   const completeView = renderFreshnessGate(complete, true, rows);
-  assert.equal(completeView.detail, '데이터 정상');
+  assert.equal(completeView.detail, '시세 정상');
   assert.doesNotMatch(completeView.iconClass, /is-blocked/);
 
   for (const [snapshot, expected] of [
@@ -2376,7 +2376,7 @@ test('mobile menu opens modally, closes on Escape or outside tap, and restores f
   assert.match(mountMenu, /menu\.addEventListener\(['"]cancel['"], event => \{\s*event\.preventDefault\(\);\s*closeMobileNavigationMenu\(\);/);
   assert.match(mountMenu, /if \(event\.target === menu\) closeMobileNavigationMenu\(\)/);
   assert.match(mountMenu, /menu\.addEventListener\(['"]close['"],[\s\S]*moreButton\.setAttribute\(['"]aria-expanded['"], ['"]false['"]\)[\s\S]*moreButton\.focus\(\{ preventScroll: true \}\)/);
-  assert.match(redesignSource, /function showView\(view\) \{\s*if \(!view\) return; closeMobileNavigationMenu\(\);/);
+  assert.match(redesignSource, /function showView\(view\) \{\s*if \(!view\) return;[\s\S]*?closeMobileNavigationMenu\(\);/);
   assert.match(redesignSource, /syncViewNavigation\(view\)[\s\S]*aria-current/);
 });
 
@@ -2413,7 +2413,7 @@ test('뉴스 모달은 키보드 초점을 가두고 닫은 뒤 연 뉴스 항�
 
   const closeClickHandler = delegatedClick.split("const close = event.target.closest('[data-pilot-modal-close]');")[1]?.split("const viewButton")[0];
   assert.match(closeClickHandler || '', /close\.matches\('\.pilot-modal-backdrop'\)/);
-  assert.match(closeClickHandler || '', /event\.target\.closest\('\.pilot-modal'\)/);
+  assert.match(closeClickHandler || '', /event\.target === close/);
   assert.equal(newsFocusKey({ id: 'article-id', link: '/article' }, 4), 'article:article-id');
   assert.equal(newsFocusKey({ guid: 'article-guid', url: '/article' }, 4), 'article:article-guid');
   assert.equal(newsFocusKey({ link: '/article?id=2' }, 4), 'article:/article?id=2');

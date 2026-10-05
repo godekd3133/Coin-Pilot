@@ -38,7 +38,8 @@
     /* Status/text colors are tuned so 10-12px labels still clear WCAG AA 4.5:1
        on the paper and tinted surfaces they sit on. --sl-faint stays below AA
        and is reserved for placeholders, icon glyphs, and decorative dots. */
-    --sl-muted: var(--tds-color-grey-600);
+    /* Slightly darker than grey-600 so small captions clear AA on paper too. */
+    --sl-muted: #66707f;
     --sl-faint: var(--tds-color-grey-500);
     --sl-line: var(--tds-color-grey-200);
     --sl-line-strong: var(--tds-color-grey-300);
@@ -914,6 +915,73 @@ body.pilot-redesign-shell .pilot-mobile-nav {
     color: var(--sl-muted);
     font-size: 12px;
     line-height: 1.5;
+}
+
+.pilot-page-description {
+    margin: 7px 0 0;
+    color: var(--sl-muted);
+    font-size: 13px;
+    line-height: 1.6;
+}
+
+.pilot-data-freshness {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 16px 18px;
+    margin-bottom: 18px;
+    background: #fff9e7;
+    border-radius: 12px;
+    color: var(--sl-ink);
+    font-size: 13px;
+}
+
+.pilot-data-freshness p,
+.pilot-data-note,
+.pilot-analysis-asof {
+    color: var(--sl-muted);
+    font-size: 12px;
+    line-height: 1.6;
+    overflow-wrap: anywhere;
+}
+
+.pilot-data-freshness p { margin: 5px 0 0; }
+.pilot-data-note:empty { display: none; }
+.pilot-record-note, .pilot-analysis-asof { margin: 0; padding: 12px 20px; }
+.pilot-record-filters { display: flex; gap: 8px; align-items: center; }
+.pilot-record-filters .pilot-input { width: 180px; }
+.pilot-record-row { padding: 20px; border-top: 1px solid var(--sl-line); }
+.pilot-record-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.pilot-record-heading strong { display: flex; align-items: center; gap: 10px; }
+.pilot-record-heading time, .pilot-record-details { color: var(--sl-muted); font-size: 12px; line-height: 1.6; }
+.pilot-record-details { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 16px; margin-top: 10px; }
+.pilot-record-values { display: flex; justify-content: space-between; gap: 12px; margin-top: 12px; font-size: 12px; color: var(--sl-muted); }
+.pilot-record-values strong { margin-left: 8px; color: var(--sl-ink); font-size: 15px; }
+.pilot-record-values small { margin-left: 6px; font-size: 11px; }
+.pilot-list-more { text-align: center; padding: 12px 16px; }
+.pilot-market-row-symbol small { color: var(--sl-muted); font-size: 11px; font-weight: 500; }
+.pilot-analysis-reason { display: block; max-width: 210px; margin-top: 5px; color: var(--sl-muted); font-size: 11px; line-height: 1.5; white-space: normal; }
+.pilot-analysis-reasons { padding-left: 20px; line-height: 1.8; font-size: 14px; }
+.pilot-settings-summary { margin-bottom: 22px; padding: 20px; background: var(--sl-surface); border-bottom: 1px solid var(--sl-line); }
+.pilot-settings-summary-heading { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 16px; }
+.pilot-settings-summary-heading strong { color: var(--sl-ink); font-size: 16px; }
+.pilot-settings-summary-heading span, .pilot-settings-summary p { color: var(--sl-muted); font-size: 12px; line-height: 1.6; }
+.pilot-settings-summary dl { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; margin: 20px 0; }
+.pilot-settings-summary dt { color: var(--sl-muted); font-size: 12px; }
+.pilot-settings-summary dd { margin: 6px 0 0; color: var(--sl-ink); font-size: 18px; font-weight: 700; }
+.pilot-settings-summary p { margin: 0; }
+
+@media (max-width: 760px) {
+    .pilot-data-freshness { align-items: flex-start; flex-direction: column; }
+    .pilot-record-filters { width: 100%; }
+    .pilot-record-filters label:first-child { flex: 1; min-width: 0; }
+    .pilot-record-filters .pilot-input { width: 100%; }
+    .pilot-record-heading { align-items: flex-start; flex-direction: column; gap: 6px; }
+    .pilot-record-values { flex-wrap: wrap; }
+    .pilot-record-values small { display: block; margin: 3px 0 0; }
+    .pilot-settings-summary dl { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .pilot-settings-summary { padding: 18px 0; }
 }
 
 .pilot-overview-next-action {
@@ -2135,6 +2203,8 @@ body.pilot-redesign-shell .pilot-mobile-nav {
     max-height: 650px;
     overflow-y: auto;
 }
+
+.pilot-market-return { display: none; }
 
 .pilot-market-row {
     display: grid;
@@ -5293,6 +5363,48 @@ body.pilot-redesign-shell .pilot-mobile-nav {
         overflow: visible;
         overscroll-behavior-y: auto;
     }
+}
+
+/* Keep current mode and its restriction visible without making install help
+   take the first phone screen. Installation remains in the More menu. */
+@media (max-width: 760px) {
+    .pilot-topbar {
+        flex-direction: row;
+        align-items: center;
+        gap: 10px;
+        padding: calc(8px + env(safe-area-inset-top, 0px)) 14px 8px;
+    }
+
+    .pilot-mode-switch { width: auto; flex: 1; max-width: 220px; }
+    .pilot-mode-button { min-height: 44px; padding: 0 8px; font-size: 12px; }
+    .pilot-top-meta { flex: 0 1 auto; min-width: 0; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
+    #pilot-clock { display: none; }
+    .pilot-connection { font-size: 11px; white-space: normal; }
+    .pilot-mode-banner { display: block; min-height: 0; padding: 10px 14px 8px; }
+    .pilot-mode-banner-copy { gap: 8px; align-items: flex-start; }
+    .pilot-mode-banner-copy i { font-size: 20px; }
+    .pilot-mode-banner strong { font-size: 12px; }
+    .pilot-mode-banner-copy span { line-height: 1.45; font-size: 11px; opacity: 1; }
+    .pilot-mode-banner-actions { width: auto; display: flex; justify-content: flex-end; margin-top: 3px; }
+    .pilot-mode-banner-actions .pilot-pwa-state,
+    .pilot-mode-banner-actions .pilot-pwa-install { display: none; }
+    .pilot-mode-banner-actions .pilot-button { min-height: 44px; border: 0; background: transparent; padding: 0 2px; }
+    .pilot-content { padding-top: 16px; }
+    .pilot-page-heading { margin-bottom: 16px; }
+    .pilot-page-description { font-size: 12px; margin-top: 4px; }
+    .pilot-heading-actions { margin-top: 8px; gap: 8px; }
+    .pilot-overview-balance { padding: 16px; }
+    .pilot-overview-balance-title { margin-top: 4px; }
+    .pilot-overview-balance-value { margin-top: 7px; }
+    .pilot-overview-supporting-stats { margin-top: 12px; padding-top: 10px; }
+    .pilot-overview-next { padding: 15px 16px; }
+    .pilot-overview-next-copy { margin-bottom: 10px; }
+    [data-pilot-page="overview"] > .pilot-page-heading .pilot-page-description { display: none; }
+    .pilot-overview-balance-eyebrow { display: none; }
+    .pilot-market-discovery { margin-bottom: 18px; }
+    .pilot-market-discovery .pilot-market-list { max-height: 360px; overflow-y: auto; }
+    .pilot-market-return { display: block; padding: 12px 16px 0; }
+    .pilot-market-return .pilot-link-button { min-height: 44px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

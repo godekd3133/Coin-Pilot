@@ -285,6 +285,95 @@ test('모바일 운영 토큰은 공개 시세 snapshot 읽기를 허용한다',
   assert.deepEqual(invoke('/api/market/prices/snapshot?extra=1'), { status: 403, nextCalled: false });
 });
 
+test('모바일 운영 토큰은 네이티브 조회 쿼리를 허용하고 범위·중복·추가 쿼리는 거부한다', () => {
+  const auth = createDashboardAuth({ DASHBOARD_TOKEN: 'full-token', DASHBOARD_MOBILE_TOKEN: 'mobile-token' });
+  const invoke = url => {
+    let status;
+    let nextCalled = false;
+    const response = {
+      status(value) { status = value; return this; },
+      json() { return this; }
+    };
+    auth.middleware({ method: 'GET', originalUrl: url, headers: { authorization: 'Bearer mobile-token' } }, response, () => {
+      nextCalled = true;
+    });
+    return { status, nextCalled };
+  };
+
+  for (const url of [
+    '/api/all-coin-scores?limit=60',
+    '/api/news?limit=80',
+    '/api/news?limit=80&source=general',
+    '/api/news/KRW-BTC?limit=50',
+    '/api/ai/providers?refresh=true',
+    '/api/ai/monitoring?limit=40',
+    '/api/ai/events?limit=40&sessionId=native-session_1',
+    '/api/ai/consultations?sessionId=native-session_1',
+    '/api/ai/effectiveness?sessionId=native-session_1',
+    '/api/ai/sessions/native-session_1?limit=60',
+    '/api/logs?type=error&lines=50',
+    '/api/logs?lines=500',
+    '/api/market/candles/KRW-BTC?unit=1&count=100'
+  ]) {
+    assert.equal(invoke(url).nextCalled, true, `${url} should be allowed`);
+  }
+
+  for (const url of [
+    '/api/all-coin-scores?limit=0',
+    '/api/all-coin-scores?limit=101',
+    '/api/all-coin-scores?limit=60&limit=60',
+    '/api/all-coin-scores?limit=60&extra=1',
+    '/api/news?source=general',
+    '/api/news?limit=201',
+    '/api/news?limit=80&source=unknown',
+    '/api/news?limit=80&limit=80',
+    '/api/news/KRW-BTC?limit=101',
+    '/api/ai/providers?refresh=false',
+    '/api/ai/providers?refresh=true&refresh=true',
+    '/api/ai/providers?extra=1',
+    '/api/ai/monitoring?limit=101',
+    '/api/ai/monitoring?limit=40&limit=40',
+    '/api/ai/events?sessionId=invalid%2Fsession',
+    '/api/ai/consultations?sessionId=session&extra=1',
+    '/api/ai/effectiveness?sessionId=session&sessionId=session',
+    '/api/ai/sessions/native-session_1?limit=101',
+    '/api/logs?type=unknown&lines=50',
+    '/api/logs?lines=501',
+    '/api/logs?lines=50&lines=50',
+    '/api/logs?type=error&extra=1',
+    '/api/market/candles/KRW-BTC?unit=2&count=100',
+    '/api/market/candles/KRW-BTC?unit=1&count=200',
+    '/api/market/candles/KRW-BTC?unit=1&unit=1&count=100',
+    '/api/system-status?extra=1'
+  ]) {
+    assert.deepEqual(invoke(url), { status: 403, nextCalled: false }, `${url} should be forbidden`);
+  }
+});
+
+test('모바일 운영 토큰은 초기화 없는 모의투자 시작 본문을 허용한다', () => {
+  const auth = createDashboardAuth({ DASHBOARD_TOKEN: 'full-token', DASHBOARD_MOBILE_TOKEN: 'mobile-token' });
+  const invoke = body => {
+    let status;
+    let nextCalled = false;
+    const response = {
+      status(value) { status = value; return this; },
+      json() { return this; }
+    };
+    auth.middleware({
+      method: 'POST', originalUrl: '/api/paper-validation/start',
+      headers: { authorization: 'Bearer mobile-token' }, body
+    }, response, () => { nextCalled = true; });
+    return { status, nextCalled };
+  };
+
+  for (const body of [undefined, {}, { reset: false }, { reset: true }]) {
+    assert.equal(invoke(body).nextCalled, true, `${JSON.stringify(body)} should be allowed`);
+  }
+  for (const body of [null, [], { reset: 'false' }, { reset: false, extra: true }, { extra: true }]) {
+    assert.deepEqual(invoke(body), { status: 403, nextCalled: false }, `${JSON.stringify(body)} should be forbidden`);
+  }
+});
+
 test('모바일 운영 토큰은 대상 마켓·포지션 상한 설정 변경을 허용한다', () => {
   const auth = createDashboardAuth({ DASHBOARD_TOKEN: 'full-token', DASHBOARD_MOBILE_TOKEN: 'mobile-token' });
   const invoke = body => {
@@ -381,6 +470,47 @@ test('모바일 토큰은 /api/stream SSE를 열고 유니버스 설정을 런�
     }
     assert.ok(received.includes('event: connected'));
     controller.abort();
+  } finally {
+    await stopDashboard(ctx);
+  }
+});
+
+test('모바일 네이티브 분석·뉴스·AI 조회와 초기화 없는 모의투자 시작이 HTTP 라우트에 도달한다', async () => {
+  const ctx = await startDashboard({
+    DASHBOARD_TOKEN: 'full-secret',
+    DASHBOARD_MOBILE_TOKEN: 'mobile-secret'
+  });
+  ctx.trader.newsMonitor = null;
+  ctx.dashboard.aiAdvisor.getProviderStatus = async () => ({ enabled: false, providers: [] });
+  let startOptions;
+  ctx.trader.startPaperValidationSession = async options => {
+    startOptions = options;
+    return { active: true, sessionId: 'native-http-test' };
+  };
+  const headers = { Authorization: 'Bearer mobile-secret' };
+
+  try {
+    for (const path of [
+      '/api/all-coin-scores?limit=60',
+      '/api/news?limit=80',
+      '/api/ai/monitoring?limit=40',
+      '/api/ai/providers?refresh=true'
+    ]) {
+      const response = await fetch(`${ctx.baseUrl}${path}`, { headers });
+      assert.equal(response.status, 200, `${path} should reach the route`);
+      await response.json();
+    }
+
+    const start = await fetch(`${ctx.baseUrl}/api/paper-validation/start`, {
+      method: 'POST',
+      headers: { ...headers, 'content-type': 'application/json' },
+      body: '{}'
+    });
+    assert.equal(start.status, 200);
+    const result = await start.json();
+    assert.equal(result.success, true);
+    assert.equal(result.status.sessionId, 'native-http-test');
+    assert.deepEqual(startOptions, {});
   } finally {
     await stopDashboard(ctx);
   }

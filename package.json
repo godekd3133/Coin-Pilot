@@ -56,7 +56,7 @@
     "ai:smoke": "node src/scripts/runAiAdvisorSmoke.js",
     "ai:replay": "node src/scripts/runAiHistoricalReplay.js",
     "ai:robustness": "node src/scripts/runAiReplayRobustness.js",
-    "test": "NODE_ENV=test node --test && npm --prefix mobile run test:auto-connect && npm --prefix mobile run test:server-policy && npm --prefix mobile run test:offline-replay && npm --prefix mobile run verify:offline-replay-parity && npm --prefix mobile run test:offline-replay-persistence && npm --prefix mobile run test:store",
+    "test": "NODE_ENV=test node --test && npm --prefix mobile run test:auto-connect && npm --prefix mobile run test:server-policy && npm --prefix mobile run test:offline-replay && npm --prefix mobile run verify:offline-replay-parity && npm --prefix mobile run test:offline-replay-persistence && npm --prefix mobile run test:store && npm --prefix mobile run test:usefulness",
     "lint": "eslint ."
   },
   "keywords": [

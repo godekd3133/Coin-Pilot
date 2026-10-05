@@ -65,6 +65,7 @@
         coreReady: false,
         online: typeof navigator === 'undefined' || navigator.onLine !== false,
         lastSync: null,
+        coreReadStatus: {},
         status: null,
         account: null,
         pnl: null,
@@ -87,9 +88,12 @@
         pendingMutation: { intent: null, sending: false, storageError: null, locked: false },
         trades: [],
         tradesLoaded: false,
+        recordsFilter: 'all',
+        recordsSearch: '',
         marketPrices: [],
         marketPricesLoaded: false,
         marketSnapshot: null,
+        marketVisibleCount: 40,
         targetCoins: [],
         selectedCoin: localStorage.getItem('selectedCoin') || 'KRW-BTC',
         candles: [],
@@ -1327,6 +1331,7 @@
     }
 
     function clearUnavailablePwaData() {
+        state.coreReadStatus = {};
         state.status = null;
         state.account = null;
         state.pnl = null;
@@ -2026,6 +2031,7 @@
             menuItem.classList.add('pilot-mobile-menu-item');
             menuNav.append(menuItem);
         });
+        menuNav.insertAdjacentHTML('beforeend', '<button type="button" class="pilot-nav-button pilot-mobile-menu-item" data-pilot-action="show-install"><i class="ph ph-download-simple" aria-hidden="true"></i><span>앱 설치 안내</span></button>');
 
         moreButton.addEventListener('click', () => {
             if (menu.open) return;
@@ -2361,15 +2367,6 @@
 
     function bindAiDesk() {
         root.addEventListener('click', event => {
-            const viewButton = event.target.closest('[data-pilot-view], [data-pilot-go]');
-            if (viewButton && root.contains(viewButton)) {
-                const view = viewButton.dataset.pilotView || viewButton.dataset.pilotGo;
-                if (view) {
-                    event.preventDefault();
-                    activateView(view);
-                    return;
-                }
-            }
             const refresh = event.target.closest('[data-pilot-ai-refresh]');
             if (refresh) {
                 event.preventDefault();
@@ -2551,6 +2548,137 @@
         });
     }
 
+    function nextStepPresentation({ online, coreReady, status, paper, positionCount, readOnly, marketIssue, pending }) {
+        if (online === false) return { title: '연결을 다시 확인해 주세요', copy: '최신 자산과 시세를 확인할 수 없어요. 연결되면 현재 상태를 다시 불러옵니다.', label: '다시 연결', action: 'refresh-core' };
+        if (!coreReady) return { title: '계좌와 시세를 확인하고 있어요', copy: '연결 상태를 확인한 뒤 자산 변화와 가능한 작업을 안내할게요.', label: '연결 상태 다시 확인', action: 'refresh-core' };
+        if (pending) return { title: '이전 요청의 결과를 확인해 주세요', copy: '주문이 처리됐을 수 있어요. 위의 요청 안내에서 결과를 확인한 뒤 다음 주문을 진행해 주세요.', label: '최근 거래 기록 보기', view: 'records' };
+        if (status?.runtimeState === 'PROTECTIVE_ONLY' || status?.runtimeState === 'SYNC_REQUIRED' || status?.exchangeStateKnown === false) return { title: '주문을 멈추고 계좌를 확인 중이에요', copy: '보유 자산과 거래소 상태를 먼저 확인해야 해요. 현재 주문 제한 이유를 살펴보세요.', label: readOnly ? '보유 자산 확인' : '주문 제한 이유 보기', view: readOnly ? 'portfolio' : 'history' };
+        if (marketIssue) return { title: '시세를 다시 확인해 주세요', copy: '일부 가격이 오래됐거나 누락됐어요. 현재 시세를 확인한 뒤 투자 판단을 이어가세요.', label: '시세 다시 불러오기', action: 'refresh-market' };
+        if (paper?.orphaned || paper?.analysisDataHealth?.failClosed || paper?.riskMonitor?.failClosed || paper?.continuityEligible === false) return { title: '모의투자가 중단된 이유를 확인하세요', copy: '중단 전 기록이 남아 있어요. 실행 상태와 보유 자산을 확인한 뒤 다음 단계를 결정하세요.', label: readOnly ? '보유 자산 확인' : '실행 상태 보기', view: readOnly ? 'portfolio' : 'history' };
+        if (positionCount > 0) return { title: `보유한 ${positionCount}개 자산을 살펴보세요`, copy: '각 자산의 평가손익과 현금 비중을 확인하고, 이전 거래와 비교할 수 있어요.', label: '보유 자산 보기', view: 'portfolio' };
+        if (paper?.active || paper?.state === 'RUNNING' || status?.isRunning === true) return { title: '조건에 맞는 기회를 살펴보고 있어요', copy: '조건이 맞지 않으면 매수하지 않아요. 거래가 생기면 최근 기록에서 결과를 확인할 수 있어요.', label: '최근 거래 기록 보기', view: 'records' };
+        if (readOnly) return { title: '계좌와 시장을 함께 살펴보세요', copy: '이 접속에서는 조회만 할 수 있어요. 관심 있는 자산의 가격과 보유 자산을 확인해 보세요.', label: '시장 둘러보기', view: 'market' };
+        if (status?.mode === 'DRY_RUN' && paper?.available === false && paper?.reason === 'paper_validation_session_not_started') return { title: '모의투자로 먼저 경험해 보세요', copy: '가상 자금으로 매매 과정을 확인해 보세요. 시작 전에 사용할 금액과 매매 조건을 살펴볼 수 있어요.', label: '모의투자 시작 안내', view: 'history' };
+        if (status?.mode === 'DRY_RUN' && paper?.available !== true) return { title: '모의투자 상태를 확인해 주세요', copy: '계좌는 연결됐지만 모의투자 실행 상태를 확인하지 못했어요. 상태를 다시 불러와 주세요.', label: '실행 상태 다시 확인', action: 'refresh-core' };
+        if (status?.mode === 'DRY_RUN') return { title: '지난 모의투자부터 살펴보세요', copy: '실행은 멈춰 있어요. 이전 기록과 현재 설정을 확인하고 다시 시작할 수 있어요.', label: '모의투자 상태 보기', view: 'history' };
+        return { title: '현재 자산과 거래를 확인하세요', copy: '실제 주문 전에 계좌 상태와 주문 제한 이유를 확인해 주세요.', label: '주문 전 점검 보기', view: 'history' };
+    }
+
+    function renderNextStep() {
+        const presentation = nextStepPresentation({
+            online: state.online, coreReady: state.coreReady, status: state.status, paper: state.paper,
+            positionCount: positions().length, readOnly: isReadOnlyObserver() || isReadOnlyPwaScope(),
+            marketIssue: state.coreReady && marketSnapshotPresentation(state.marketSnapshot, state.marketPricesLoaded, state.marketPrices).state !== 'complete',
+            pending: state.pendingMutation?.locked
+        });
+        setText('pilot-overview-next-title', presentation.title);
+        setText('pilot-overview-next-copy', presentation.copy);
+        const action = byId('pilot-overview-next-action');
+        if (action) {
+            action.removeAttribute('data-pilot-go');
+            action.removeAttribute('data-pilot-action');
+            action.setAttribute(presentation.view ? 'data-pilot-go' : 'data-pilot-action', presentation.view || presentation.action);
+            action.innerHTML = `${escapeHtml(presentation.label)} <i class="ph ph-arrow-right" aria-hidden="true"></i>`;
+        }
+    }
+
+    function coreReadPresentation(previous, succeeded, now, denied = false) {
+        return { ok: succeeded, lastSuccess: succeeded ? now : denied ? null : previous?.lastSuccess || null };
+    }
+
+    function coreReadNote(key) {
+        const read = state.coreReadStatus?.[key];
+        if (!read || read.ok) return '';
+        return read.lastSuccess ? `이전 자료 · ${formatTime(read.lastSuccess, true)} 확인 · 갱신 실패` : '자료를 불러오지 못했어요';
+    }
+
+    function renderDataFreshness() {
+        const names = { status: '실행 상태', account: '계좌', pnl: '누적 손익', today: '오늘 손익', statistics: '거래 통계', portfolioAnalysis: '자산 구성', trades: '거래 기록' };
+        const failed = Object.entries(names).filter(([key]) => state.coreReadStatus?.[key]?.ok === false);
+        const banner = byId('pilot-data-freshness');
+        if (banner) {
+            banner.hidden = failed.length === 0 || state.online === false;
+            setText('pilot-data-freshness-copy', failed.map(([key, label]) => `${label}: ${coreReadNote(key)}`).join(' / '));
+        }
+        [['pilot-total-assets-caption', 'account'], ['pilot-today-profit-caption', 'today'], ['pilot-cumulative-profit-caption', 'pnl'], ['pilot-trade-count-caption', 'statistics']].forEach(([id, key]) => {
+            const element = byId(id);
+            const note = coreReadNote(key);
+            if (element && note) element.textContent = `${element.textContent} · ${note}`;
+        });
+        setText('pilot-portfolio-freshness', ['account', 'pnl', 'portfolioAnalysis'].map(key => coreReadNote(key) ? `${names[key]}: ${coreReadNote(key)}` : '').filter(Boolean).join(' / '));
+    }
+
+    function tradeRecordPresentation(trade) {
+        if (trade?.type === 'BUNDLE_TRADE') {
+            const legs = ['sell', 'buy'].filter(side => trade[side]?.coin).map(side => tradeRecordPresentation({
+                ...trade[side], type: side.toUpperCase(), volume: trade[side].amount,
+                grossAmount: trade[side].grossValue, timestamp: trade.timestamp, source: 'bundle'
+            }));
+            const eventTime = Number.isFinite(Date.parse(trade.timestamp || '')) ? trade.timestamp : null;
+            return {
+                coin: legs.map(leg => leg.coin).join(' '), marketLabel: legs.map(leg => leg.coin.replace(/^KRW-/, '')).join(' → '),
+                side: 'bundle', label: '묶음 매매', time: eventTime, legs,
+                quantity: null, price: null, amount: null, profit: null, source: '묶음 주문 기록', reason: ''
+            };
+        }
+        const reasonLabels = { TAKE_PROFIT: '목표 수익 도달', STOP_LOSS: '손절 기준 도달', MAX_HOLD: '보유 시간 종료', MAX_HOLD_TIME: '보유 시간 종료', MAX_LOSING_HOLD_TIME: '손실 상태의 보유 시간 종료', TRAILING_STOP: '고점 대비 하락 기준 도달', BREAK_EVEN_STOP: '손익 보호 기준 도달', MANUAL_SELL: '직접 매도', BACKTEST_END: '과거 데이터 점검 종료' };
+        const rawAction = String(trade.action || trade.type || '').toUpperCase();
+        const side = ['CLOSE', 'PARTIAL_CLOSE', 'SELL'].includes(rawAction) ? 'sell' : ['OPEN', 'BUY'].includes(rawAction) ? 'buy' : 'other';
+        const finite = value => value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value));
+        const strategy = trade.source === 'strategy' || ['OPEN', 'CLOSE', 'PARTIAL_CLOSE'].includes(rawAction);
+        const price = side === 'sell' ? trade.exitPrice ?? trade.price : trade.entryPrice ?? trade.price;
+        const quantity = strategy ? trade.amount : trade.volume ?? trade.quantity;
+        const amount = finite(trade.grossAmount) ? Number(trade.grossAmount)
+            : finite(price) && finite(quantity) ? Number(price) * Number(quantity) : null;
+        const eventTime = trade.timestamp || (side === 'sell' ? trade.exitTime || trade.entryTime : trade.entryTime || trade.exitTime);
+        return {
+            coin: String(trade.coin || trade.market || ''), side,
+            label: rawAction === 'PARTIAL_CLOSE' ? '부분 매도' : side === 'sell' ? '매도' : side === 'buy' ? '매수' : '거래 기록',
+            time: Number.isFinite(Date.parse(eventTime || '')) ? eventTime : null,
+            quantity: finite(quantity) ? Number(quantity) : null, price: finite(price) ? Number(price) : null, amount,
+            profit: finite(trade.profit) ? Number(trade.profit) : null,
+            source: strategy ? '전략 기록' : String(trade.source || '').startsWith('smart') ? '조건 주문 기록' : '주문 기록',
+            reason: typeof trade.reason === 'string' ? reasonLabels[trade.reason] || trade.reason : ''
+        };
+    }
+
+    function filteredTradeRecords(trades, filter, query) {
+        const search = String(query || '').trim().toUpperCase();
+        return (Array.isArray(trades) ? trades : []).map(tradeRecordPresentation)
+            .filter(item => (filter === 'all' || item.side === filter || item.legs?.some(leg => leg.side === filter)) && (!search || (item.legs || [item]).some(leg => marketSearchText({ coin: leg.coin }).includes(search))))
+            .sort((a, b) => (Date.parse(b.time) || 0) - (Date.parse(a.time) || 0));
+    }
+
+    function renderRecords() {
+        const target = byId('pilot-records-list');
+        if (!target) return;
+        const rows = filteredTradeRecords(state.trades, state.recordsFilter, state.recordsSearch);
+        const count = Array.isArray(state.trades) ? state.trades.length : 0;
+        setText('pilot-records-count', `${count}개 기록 중 ${rows.length}개 표시 · 최근 최대 50개`);
+        setText('pilot-records-freshness', coreReadNote('trades') || (state.coreReadStatus?.trades?.lastSuccess ? `${formatDateTime(state.coreReadStatus.trades.lastSuccess)} 확인` : '거래 기록 확인 중'));
+        if (!rows.length) {
+            const filtered = state.recordsFilter !== 'all' || String(state.recordsSearch).trim();
+            target.innerHTML = `<div class="pilot-empty-panel"><strong>${!state.tradesLoaded ? '거래 기록을 불러오지 못했어요' : filtered ? '조건에 맞는 기록이 없어요' : '아직 거래 기록이 없어요'}</strong><p>${!state.tradesLoaded ? '연결 상태를 확인하고 다시 불러와 주세요.' : filtered ? '종목이나 거래 유형을 바꿔서 찾아보세요.' : '조건에 맞는 거래가 생기면 이곳에 기록됩니다.'}</p><button type="button" class="pilot-button" data-pilot-action="${filtered ? 'reset-record-filters' : 'refresh-core'}">${filtered ? '필터 초기화' : '다시 불러오기'}</button></div>`;
+            return;
+        }
+        target.innerHTML = rows.map(item => {
+            const quantityText = item.legs
+                ? item.legs.map(leg => `${symbolOf(leg.coin)} ${leg.label} ${leg.quantity === null ? '수량 미기록' : formatQuantity(leg.quantity)} · ${leg.amount === null ? '금액 미기록' : formatWon(leg.amount)}`).join(' → ')
+                : `${item.quantity === null ? '수량 미기록' : `${formatQuantity(item.quantity)} ${symbolOf(item.coin)}`}${item.price === null ? '' : ` · 단가 ${formatPrice(item.price)}원`}`;
+            return `<article class="pilot-record-row"><div class="pilot-record-heading"><strong>${escapeHtml(item.marketLabel || symbolOf(item.coin))} <span class="pilot-status-pill ${item.side === 'sell' ? 'is-danger' : ''}">${escapeHtml(item.label)}</span></strong><time>${escapeHtml(item.time ? formatDateTime(item.time) : '시각 미기록')}</time></div><div class="pilot-record-details"><span>${escapeHtml(item.source)}${item.reason ? ` · ${escapeHtml(toUserText(item.reason))}` : ''}</span><span>${escapeHtml(quantityText)}</span></div>${item.legs ? '<p class="pilot-data-note">각 거래금액은 수수료 전 기준이에요.</p>' : `<div class="pilot-record-values"><span>거래금액 <strong>${item.amount === null ? '미기록' : formatWon(item.amount)}</strong><small>수수료 전</small></span><span>기록 손익 <strong class="${item.profit === null ? '' : classForValue(item.profit)}">${item.profit === null ? '미기록' : formatSignedWon(item.profit)}</strong></span></div>`}</article>`;
+        }).join('');
+    }
+
+    function marketDisplayName(market) {
+        const aliases = { 'KRW-BTC': '비트코인', 'KRW-ETH': '이더리움', 'KRW-XRP': '엑스알피', 'KRW-SOL': '솔라나', 'KRW-DOGE': '도지코인', 'KRW-ADA': '에이다', 'KRW-AVAX': '아발란체', 'KRW-DOT': '폴카닷', 'KRW-LINK': '체인링크', 'KRW-BCH': '비트코인캐시', 'KRW-ETC': '이더리움클래식' };
+        return market?.koreanName || market?.korean_name || market?.name || aliases[market?.coin] || symbolOf(market?.coin);
+    }
+
+    function marketSearchText(market) {
+        const extra = { 'KRW-BTC': 'BITCOIN', 'KRW-ETH': 'ETHEREUM', 'KRW-XRP': 'RIPPLE 리플', 'KRW-SOL': 'SOLANA', 'KRW-DOGE': 'DOGECOIN' };
+        return `${market?.coin || ''} ${marketDisplayName(market)} ${market?.englishName || market?.english_name || ''} ${extra[market?.coin] || ''}`.toUpperCase();
+    }
+
     function renderShell() {
         root.innerHTML = `
             <div class="pilot-app">
@@ -2560,10 +2688,11 @@
                     </div>
                     <nav class="pilot-sidebar-nav" aria-label="주 메뉴">
                         <div class="pilot-nav-label">메뉴</div>
-                        <button type="button" class="pilot-nav-button is-active" data-pilot-view="overview" aria-current="page"><i class="ph ph-chart-line-up" aria-hidden="true"></i><span>대시보드</span></button>
+                        <button type="button" class="pilot-nav-button is-active" data-pilot-view="overview" aria-current="page"><i class="ph ph-chart-line-up" aria-hidden="true"></i><span>홈</span></button>
                         <button type="button" class="pilot-nav-button" data-pilot-view="trade"><i class="ph ph-hand-coins" aria-hidden="true"></i><span>거래</span></button>
                         <button type="button" class="pilot-nav-button" data-pilot-view="portfolio"><i class="ph ph-wallet" aria-hidden="true"></i><span>포트폴리오</span></button>
                         <button type="button" class="pilot-nav-button" data-pilot-view="market"><i class="ph ph-binoculars" aria-hidden="true"></i><span>시장 현황</span></button>
+                        <button type="button" class="pilot-nav-button" data-pilot-view="records"><i class="ph ph-receipt" aria-hidden="true"></i><span>거래 기록</span></button>
                         <button type="button" class="pilot-nav-button" data-pilot-view="analysis"><i class="ph ph-function" aria-hidden="true"></i><span>전략 분석</span></button>
                         <button type="button" class="pilot-nav-button" data-pilot-view="news"><i class="ph ph-newspaper" aria-hidden="true"></i><span>뉴스</span></button>
                         <div class="pilot-nav-label">관리</div>
@@ -2601,8 +2730,9 @@
                         <section class="pilot-pending-mutation" id="pilot-pending-mutation" role="status" aria-live="polite" hidden><i class="ph ph-clock-countdown" aria-hidden="true"></i><div><strong id="pilot-pending-mutation-title">요청 결과 확인 필요</strong><span id="pilot-pending-mutation-copy">요청이 처리됐을 수 있어 새 주문과 가상 지갑 변경을 잠갔습니다.</span></div><button type="button" class="pilot-button is-small" id="pilot-pending-mutation-retry" data-pilot-action="retry-pending-mutation" hidden>같은 요청 결과 다시 확인</button></section>
 
                     <main class="pilot-content">
+                        <section class="pilot-data-freshness" id="pilot-data-freshness" role="status" hidden><div><strong>일부 자료를 새로 불러오지 못했어요</strong><p id="pilot-data-freshness-copy"></p></div><button type="button" class="pilot-button is-small" data-pilot-action="refresh-core">다시 확인</button></section>
                         <section class="pilot-page is-active" data-pilot-page="overview">
-                            <div class="pilot-page-heading"><div><h1 class="pilot-page-title">대시보드</h1></div><div class="pilot-heading-actions"><span class="pilot-sync-note" id="pilot-overview-sync">마지막 동기화 -</span><button type="button" class="pilot-button" data-pilot-action="refresh-core"><i class="ph ph-arrows-clockwise" aria-hidden="true"></i> 새로고침</button></div></div>
+                            <div class="pilot-page-heading"><div><h1 class="pilot-page-title">내 투자 현황</h1><p class="pilot-page-description">자산이 어떻게 달라졌는지, 지금 무엇을 확인할지 살펴보세요.</p></div><div class="pilot-heading-actions"><span class="pilot-sync-note" id="pilot-overview-sync">마지막 동기화 -</span><button type="button" class="pilot-button" data-pilot-action="refresh-core"><i class="ph ph-arrows-clockwise" aria-hidden="true"></i> 새로고침</button></div></div>
                             <div class="pilot-overview-lead">
                                 <section class="pilot-overview-balance" aria-labelledby="pilot-overview-assets-title">
                                     <span class="pilot-overview-balance-eyebrow">계좌 가치</span>
@@ -2616,14 +2746,14 @@
                                     </div>
                                 </section>
                                 <aside class="pilot-overview-next" aria-labelledby="pilot-overview-next-title">
-                                    <span class="pilot-overview-next-eyebrow">다음 단계</span>
+                                    <span class="pilot-overview-next-eyebrow">지금 확인할 일</span>
                                     <h2 class="pilot-overview-next-title" id="pilot-overview-next-title">주문 전 점검</h2>
-                                    <p class="pilot-overview-next-copy">주문 조건과 모의투자·시세 상태를 한 곳에서 확인합니다.</p>
-                                    <button type="button" class="pilot-button is-primary pilot-overview-next-action" data-pilot-go="history">점검 상태 살펴보기 <i class="ph ph-arrow-right" aria-hidden="true"></i></button>
+                                    <p class="pilot-overview-next-copy" id="pilot-overview-next-copy">현재 계좌와 실행 상태에 맞는 다음 단계를 안내합니다.</p>
+                                    <button type="button" class="pilot-button is-primary pilot-overview-next-action" id="pilot-overview-next-action" data-pilot-go="history">점검 상태 살펴보기 <i class="ph ph-arrow-right" aria-hidden="true"></i></button>
                                     <ul class="pilot-overview-readiness" aria-label="현재 상태">
                                         <li class="pilot-overview-readiness-row"><span class="pilot-gate-icon" id="pilot-gate-validation-icon"><i class="ph ph-check" aria-hidden="true"></i></span><span><strong class="pilot-gate-title">주문 전 점검</strong><span class="pilot-gate-detail" id="pilot-gate-validation-detail">확인 중</span></span></li>
                                         <li class="pilot-overview-readiness-row"><span class="pilot-gate-icon is-pending" id="pilot-gate-paper-icon"><i class="ph ph-hourglass-medium" aria-hidden="true"></i></span><span><strong class="pilot-gate-title">모의투자</strong><span class="pilot-gate-detail" id="pilot-gate-paper-detail">실행 상태 확인 중</span></span></li>
-                                        <li class="pilot-overview-readiness-row"><span class="pilot-gate-icon is-pending" id="pilot-gate-freshness-icon"><i class="ph ph-database" aria-hidden="true"></i></span><span><strong class="pilot-gate-title">데이터 최신성</strong><span class="pilot-gate-detail" id="pilot-gate-freshness-detail">수집 상태 확인 중</span></span></li>
+                                        <li class="pilot-overview-readiness-row"><span class="pilot-gate-icon is-pending" id="pilot-gate-freshness-icon"><i class="ph ph-database" aria-hidden="true"></i></span><span><strong class="pilot-gate-title">시세 최신성</strong><span class="pilot-gate-detail" id="pilot-gate-freshness-detail">수집 상태 확인 중</span></span></li>
                                     </ul>
                                 </aside>
                             </div>
@@ -2631,20 +2761,30 @@
                             <div class="pilot-section-spacer"></div>
                             <section class="pilot-panel"><div class="pilot-panel-header"><div><h2 class="pilot-panel-title">보유 포지션</h2></div><button type="button" class="pilot-link-button" data-pilot-view="portfolio">전체 포트폴리오 보기 <i class="ph ph-arrow-right" aria-hidden="true"></i></button></div><div class="pilot-table-wrap"><table class="pilot-table"><thead><tr><th>자산</th><th class="pilot-table-number">수량</th><th class="pilot-table-number">평균 진입가</th><th class="pilot-table-number">현재가</th><th class="pilot-table-number">평가액</th><th class="pilot-table-number">평가손익</th><th>상태</th></tr></thead><tbody id="pilot-overview-positions"></tbody></table></div></section>
                             <div class="pilot-section-spacer"></div>
-                            <div class="pilot-split-grid"><section class="pilot-panel"><div class="pilot-panel-header"><div><h2 class="pilot-panel-title">최근 거래</h2><p class="pilot-panel-subtitle">서버에 저장된 거래 기록</p></div><button type="button" class="pilot-link-button" data-pilot-view="history">전체 기록 <i class="ph ph-arrow-right" aria-hidden="true"></i></button></div><div class="pilot-panel-body"><div class="pilot-evidence-list" id="pilot-activity-list"></div></div></section><section class="pilot-panel"><div class="pilot-panel-header"><div><h2 class="pilot-panel-title">리스크 상태</h2></div><i class="ph ph-shield-check" style="color: var(--sl-green); font-size: 21px;" aria-hidden="true"></i></div><div class="pilot-panel-body" id="pilot-risk-summary"></div></section></div>
+                            <div class="pilot-split-grid"><section class="pilot-panel"><div class="pilot-panel-header"><div><h2 class="pilot-panel-title">최근 거래</h2><p class="pilot-panel-subtitle">서버에 저장된 거래 기록</p></div><button type="button" class="pilot-link-button" data-pilot-view="records">최근 기록 보기 <i class="ph ph-arrow-right" aria-hidden="true"></i></button></div><div class="pilot-panel-body"><div class="pilot-evidence-list" id="pilot-activity-list"></div></div></section><section class="pilot-panel"><div class="pilot-panel-header"><div><h2 class="pilot-panel-title">리스크 상태</h2></div><i class="ph ph-shield-check" style="color: var(--sl-green); font-size: 21px;" aria-hidden="true"></i></div><div class="pilot-panel-body" id="pilot-risk-summary"></div></section></div>
                         </section>
 
                         <section class="pilot-page" data-pilot-page="trade"><div class="pilot-page-heading"><div><h1 class="pilot-page-title">거래</h1></div><div class="pilot-heading-actions"><span class="pilot-sync-note" id="pilot-trade-sync">-</span><button type="button" class="pilot-button" data-pilot-action="refresh-core"><i class="ph ph-arrows-clockwise" aria-hidden="true"></i> 잔액 새로고침</button></div></div><div class="pilot-split-grid">${tradePanelMarkup('trade')}<section class="pilot-panel"><div class="pilot-panel-header"><div><h2 class="pilot-panel-title">조건에 따른 매매</h2></div><span class="pilot-status-pill">모의투자 전용</span></div><div class="pilot-panel-body"><div class="pilot-inline-note"><i class="ph ph-info" aria-hidden="true"></i><span>거래대금이 많은 시장에서 매수 점수가 높은 자산부터 매수합니다.</span></div><div class="pilot-section-spacer"></div><div class="pilot-wallet-action"><h3>조건 매수</h3><label class="pilot-field"><span class="pilot-field-label">총 투자금액 <span class="pilot-field-hint" id="pilot-smart-buy-balance">사용 가능 잔액 -</span></span><input class="pilot-input" type="number" id="pilot-smart-buy-amount" min="5000" step="1000" value="100000"></label><div class="pilot-field-row" style="margin-top:9px"><label class="pilot-field"><span class="pilot-field-label">최소 점수</span><input class="pilot-input" type="number" id="pilot-smart-buy-score" min="0" max="100" value="60"></label><label class="pilot-field"><span class="pilot-field-label">최대 종목</span><input class="pilot-input" type="number" id="pilot-smart-buy-max" min="1" max="30" value="10"></label></div><button type="button" class="pilot-button is-success" style="width:100%; margin-top:12px" data-pilot-action="smart-buy"><i class="ph ph-stack" aria-hidden="true"></i> 조건 매수 실행</button></div><div class="pilot-section-spacer"></div><div class="pilot-wallet-action"><h3>정해진 기준으로 매도</h3><label class="pilot-field"><span class="pilot-field-label">목표 매도금액 <span class="pilot-field-hint" id="pilot-smart-sell-holding">보유 평가액 -</span></span><input class="pilot-input" type="number" id="pilot-smart-sell-amount" min="1000" step="1000" value="100000"></label><label class="pilot-field" style="margin-top:9px"><span class="pilot-field-label">매도 우선순위</span><select class="pilot-select" id="pilot-smart-sell-strategy"><option value="worst">손실 큰 자산부터</option><option value="best">수익 큰 자산부터</option><option value="overbought">RSI 과매수 자산부터</option></select></label><button type="button" class="pilot-button is-danger" style="width:100%; margin-top:12px" data-pilot-action="smart-sell"><i class="ph ph-arrow-circle-down" aria-hidden="true"></i> 우선순위 매도 실행</button></div></div></section></div><div class="pilot-section-spacer"></div><div class="pilot-split-grid"><section class="pilot-panel"><div class="pilot-panel-header"><div><h2 class="pilot-panel-title">매수 검토</h2></div><button type="button" class="pilot-button is-small" data-pilot-action="load-recommendations">분석 새로고침</button></div><div class="pilot-panel-body"><div id="pilot-buy-recommendations" class="pilot-evidence-list"><div class="pilot-inline-empty">분석을 새로고침하면 매수 검토 결과가 표시됩니다.</div></div></div></section><section class="pilot-panel"><div class="pilot-panel-header"><div><h2 class="pilot-panel-title">매도 검토</h2></div><div class="pilot-panel-body"><div id="pilot-sell-recommendations" class="pilot-evidence-list"><div class="pilot-inline-empty">분석을 새로고침하면 매도 검토 결과가 표시됩니다.</div></div></div></section></div></section>
 
-                        <section class="pilot-page" data-pilot-page="portfolio"><div class="pilot-page-heading"><div><h1 class="pilot-page-title">포트폴리오</h1></div><div class="pilot-heading-actions"><button type="button" class="pilot-button" data-pilot-action="refresh-core"><i class="ph ph-arrows-clockwise" aria-hidden="true"></i> 새로고침</button></div></div><div class="pilot-history-summary"><div class="pilot-history-metric"><span>총 자산 평가액</span><strong id="pilot-portfolio-assets">-</strong></div><div class="pilot-history-metric"><span>누적 손익</span><strong id="pilot-portfolio-profit">-</strong></div><div class="pilot-history-metric"><span>현금 잔액</span><strong id="pilot-portfolio-cash">-</strong></div><div class="pilot-history-metric"><span>보유 종목</span><strong id="pilot-portfolio-count">-</strong></div></div><div class="pilot-split-grid" id="pilot-portfolio-allocation-grid"><section class="pilot-panel"><div class="pilot-panel-header"><div><h2 class="pilot-panel-title">자산 구성</h2></div></div><div class="pilot-panel-body" style="display:grid; grid-template-columns:170px minmax(0,1fr); gap:22px; align-items:center"><canvas id="pilot-allocation-chart" style="width:170px;height:170px" aria-label="자산 구성 차트"></canvas><div id="pilot-allocation-legend"></div></div></section><section class="pilot-panel"><div class="pilot-panel-header"><div><h2 class="pilot-panel-title">계좌 요약</h2></div></div><div class="pilot-panel-body" id="pilot-account-summary"></div></section></div><div class="pilot-section-spacer"></div><section class="pilot-panel"><div class="pilot-panel-header"><div><h2 class="pilot-panel-title">자산 추이</h2></div><div class="pilot-range-tabs"><button type="button" class="pilot-tab-button" data-pilot-portfolio-period="1h">1시간</button><button type="button" class="pilot-tab-button is-active" data-pilot-portfolio-period="24h">1일</button><button type="button" class="pilot-tab-button" data-pilot-portfolio-period="7d">1주</button><button type="button" class="pilot-tab-button" data-pilot-portfolio-period="30d">1개월</button></div></div><div class="pilot-chart-wrap"><canvas id="pilot-portfolio-chart" class="pilot-chart-canvas" aria-label="포트폴리오 자산 추이"></canvas><div class="pilot-chart-empty" id="pilot-portfolio-empty" hidden>자산 추이를 수집 중입니다.</div></div><div class="pilot-chart-footnote"><span id="pilot-portfolio-history-source-label">-</span></div></section><div class="pilot-section-spacer"></div><section class="pilot-panel"><div class="pilot-panel-header"><div><h2 class="pilot-panel-title">보유 포지션 상세</h2></div></div><div class="pilot-table-wrap"><table class="pilot-table"><thead><tr><th>자산</th><th class="pilot-table-number">수량</th><th class="pilot-table-number">평단</th><th class="pilot-table-number">현재가</th><th class="pilot-table-number">평가액</th><th class="pilot-table-number">평가손익</th><th>관리</th></tr></thead><tbody id="pilot-portfolio-positions"></tbody></table></div></section><div class="pilot-section-spacer"></div><section class="pilot-panel"><div class="pilot-panel-header"><div><h2 class="pilot-panel-title">모의투자 지갑</h2></div><span class="pilot-status-pill" id="pilot-wallet-mode">모의투자 전용</span></div><div class="pilot-panel-body"><div class="pilot-wallet"><div class="pilot-wallet-action"><h3>입금</h3><div class="pilot-wallet-action-row"><input class="pilot-input" type="number" id="pilot-deposit-amount" min="1000" step="1000" placeholder="금액 (원)"><button type="button" class="pilot-button is-success" data-pilot-action="deposit">입금</button></div><div class="pilot-wallet-presets"><button type="button" class="pilot-filter-chip" data-pilot-deposit="100000">+10만</button><button type="button" class="pilot-filter-chip" data-pilot-deposit="500000">+50만</button><button type="button" class="pilot-filter-chip" data-pilot-deposit="1000000">+100만</button></div></div><div class="pilot-wallet-action"><h3>출금</h3><div class="pilot-wallet-action-row"><input class="pilot-input" type="number" id="pilot-withdraw-amount" min="1000" step="1000" placeholder="금액 (원)"><button type="button" class="pilot-button is-danger" data-pilot-action="withdraw">출금</button></div><div class="pilot-wallet-presets"><button type="button" class="pilot-filter-chip" data-pilot-withdraw="100000">-10만</button><button type="button" class="pilot-filter-chip" data-pilot-withdraw="500000">-50만</button></div></div></div><div class="pilot-inline-note" style="margin-top:10px"><i class="ph ph-warning" aria-hidden="true"></i><span>초기화하면 보유 코인과 전략별 포지션·매매 기록이 사라집니다.</span><button type="button" class="pilot-button is-small" data-pilot-action="reset-wallet">모의 계좌 초기화</button></div></div></section></section>
+                        <section class="pilot-page" data-pilot-page="portfolio"><div class="pilot-page-heading"><div><h1 class="pilot-page-title">포트폴리오</h1></div><div class="pilot-heading-actions"><button type="button" class="pilot-button" data-pilot-action="refresh-core"><i class="ph ph-arrows-clockwise" aria-hidden="true"></i> 새로고침</button></div></div><p class="pilot-data-note" id="pilot-portfolio-freshness"></p><div class="pilot-history-summary"><div class="pilot-history-metric"><span>총 자산 평가액</span><strong id="pilot-portfolio-assets">-</strong></div><div class="pilot-history-metric"><span>누적 손익</span><strong id="pilot-portfolio-profit">-</strong></div><div class="pilot-history-metric"><span>현금 잔액</span><strong id="pilot-portfolio-cash">-</strong></div><div class="pilot-history-metric"><span>보유 종목</span><strong id="pilot-portfolio-count">-</strong></div></div><div class="pilot-split-grid" id="pilot-portfolio-allocation-grid"><section class="pilot-panel"><div class="pilot-panel-header"><div><h2 class="pilot-panel-title">자산 구성</h2></div></div><div class="pilot-panel-body" style="display:grid; grid-template-columns:170px minmax(0,1fr); gap:22px; align-items:center"><canvas id="pilot-allocation-chart" style="width:170px;height:170px" aria-label="자산 구성 차트"></canvas><div id="pilot-allocation-legend"></div></div></section><section class="pilot-panel"><div class="pilot-panel-header"><div><h2 class="pilot-panel-title">계좌 요약</h2></div></div><div class="pilot-panel-body" id="pilot-account-summary"></div></section></div><div class="pilot-section-spacer"></div><section class="pilot-panel"><div class="pilot-panel-header"><div><h2 class="pilot-panel-title">자산 추이</h2></div><div class="pilot-range-tabs"><button type="button" class="pilot-tab-button" data-pilot-portfolio-period="1h">1시간</button><button type="button" class="pilot-tab-button is-active" data-pilot-portfolio-period="24h">1일</button><button type="button" class="pilot-tab-button" data-pilot-portfolio-period="7d">1주</button><button type="button" class="pilot-tab-button" data-pilot-portfolio-period="30d">1개월</button></div></div><div class="pilot-chart-wrap"><canvas id="pilot-portfolio-chart" class="pilot-chart-canvas" aria-label="포트폴리오 자산 추이"></canvas><div class="pilot-chart-empty" id="pilot-portfolio-empty" hidden>자산 추이를 수집 중입니다.</div></div><div class="pilot-chart-footnote"><span id="pilot-portfolio-history-source-label">-</span></div></section><div class="pilot-section-spacer"></div><section class="pilot-panel"><div class="pilot-panel-header"><div><h2 class="pilot-panel-title">보유 포지션 상세</h2></div></div><div class="pilot-table-wrap"><table class="pilot-table"><thead><tr><th>자산</th><th class="pilot-table-number">수량</th><th class="pilot-table-number">평단</th><th class="pilot-table-number">현재가</th><th class="pilot-table-number">평가액</th><th class="pilot-table-number">평가손익</th><th>관리</th></tr></thead><tbody id="pilot-portfolio-positions"></tbody></table></div></section><div class="pilot-section-spacer"></div><section class="pilot-panel"><div class="pilot-panel-header"><div><h2 class="pilot-panel-title">모의투자 지갑</h2></div><span class="pilot-status-pill" id="pilot-wallet-mode">모의투자 전용</span></div><div class="pilot-panel-body"><div class="pilot-wallet"><div class="pilot-wallet-action"><h3>입금</h3><div class="pilot-wallet-action-row"><input class="pilot-input" type="number" id="pilot-deposit-amount" min="1000" step="1000" placeholder="금액 (원)"><button type="button" class="pilot-button is-success" data-pilot-action="deposit">입금</button></div><div class="pilot-wallet-presets"><button type="button" class="pilot-filter-chip" data-pilot-deposit="100000">+10만</button><button type="button" class="pilot-filter-chip" data-pilot-deposit="500000">+50만</button><button type="button" class="pilot-filter-chip" data-pilot-deposit="1000000">+100만</button></div></div><div class="pilot-wallet-action"><h3>출금</h3><div class="pilot-wallet-action-row"><input class="pilot-input" type="number" id="pilot-withdraw-amount" min="1000" step="1000" placeholder="금액 (원)"><button type="button" class="pilot-button is-danger" data-pilot-action="withdraw">출금</button></div><div class="pilot-wallet-presets"><button type="button" class="pilot-filter-chip" data-pilot-withdraw="100000">-10만</button><button type="button" class="pilot-filter-chip" data-pilot-withdraw="500000">-50만</button></div></div></div><div class="pilot-inline-note" style="margin-top:10px"><i class="ph ph-warning" aria-hidden="true"></i><span>초기화하면 보유 코인과 전략별 포지션·매매 기록이 사라집니다.</span><button type="button" class="pilot-button is-small" data-pilot-action="reset-wallet">모의 계좌 초기화</button></div></div></section></section>
 
-                        <section class="pilot-page" data-pilot-page="market"><div class="pilot-page-heading"><div><h1 class="pilot-page-title">시장 현황</h1></div><div class="pilot-heading-actions"><label class="pilot-field" style="min-width:200px"><span class="pilot-visually-hidden">시장 검색</span><input class="pilot-input pilot-market-search" id="pilot-market-search" type="search" placeholder="시장 검색 (BTC, ETH)"></label><button type="button" class="pilot-button" data-pilot-action="refresh-market"><i class="ph ph-arrows-clockwise" aria-hidden="true"></i> 시세 새로고침</button></div></div><div class="pilot-market-layout"><section class="pilot-panel"><div class="pilot-market-quote"><div><span class="pilot-market-symbol" id="pilot-market-symbol">BTC/KRW</span><span class="pilot-market-name" id="pilot-market-name">업비트 원화 시장</span><span class="pilot-market-status" id="pilot-market-status">시세 확인 중</span><span class="pilot-visually-hidden" id="pilot-market-status-announcement" role="status" aria-live="polite" aria-atomic="true"></span><span class="pilot-visually-hidden" id="pilot-market-refresh-announcement" role="status" aria-live="polite" aria-atomic="true"></span></div><div><span class="pilot-market-price" id="pilot-market-price">-</span><span class="pilot-market-change" id="pilot-market-change">-</span></div></div><div class="pilot-market-time-meta"><div class="pilot-market-time-item"><span class="pilot-market-time-label">최근 체결 시각</span><span class="pilot-market-time-value" id="pilot-market-source-asof">시각 정보 미제공</span></div><div class="pilot-market-time-item"><span class="pilot-market-time-label">서버 시세 수집 시각</span><span class="pilot-market-time-value" id="pilot-market-fetched-at">시각 정보 미제공</span></div></div><div class="pilot-market-metrics"><div><span class="pilot-market-metric-label">24시간 고가</span><strong class="pilot-market-metric-value" id="pilot-market-high">-</strong></div><div><span class="pilot-market-metric-label">24시간 저가</span><strong class="pilot-market-metric-value" id="pilot-market-low">-</strong></div><div><span class="pilot-market-metric-label">거래대금</span><strong class="pilot-market-metric-value" id="pilot-market-volume">-</strong></div><div><span class="pilot-market-metric-label">보유 평가</span><strong class="pilot-market-metric-value" id="pilot-market-holding">-</strong></div></div><div class="pilot-panel-header"><div><h2 class="pilot-panel-title">가격 차트</h2></div><div class="pilot-market-toolbar"><div class="pilot-market-control-group" role="group" aria-label="캔들 간격"><button type="button" class="pilot-market-interval" data-pilot-candle-interval="1" aria-pressed="false">1분</button><button type="button" class="pilot-market-interval is-active" data-pilot-candle-interval="5" aria-pressed="true">5분</button><button type="button" class="pilot-market-interval" data-pilot-candle-interval="15" aria-pressed="false">15분</button><button type="button" class="pilot-market-interval" data-pilot-candle-interval="60" aria-pressed="false">1시간</button></div><div class="pilot-market-control-group" role="group" aria-label="표시 캔들 수"><button type="button" class="pilot-market-range" data-pilot-candle-range="30" aria-pressed="false">30개</button><button type="button" class="pilot-market-range is-active" data-pilot-candle-range="60" aria-pressed="true">60개</button><button type="button" class="pilot-market-range" data-pilot-candle-range="100" aria-pressed="false">100개</button></div></div></div><div class="pilot-market-chart-wrap"><canvas id="pilot-market-chart" class="pilot-market-chart" aria-label="선택한 시장 캔들 차트"></canvas><div class="pilot-chart-empty" id="pilot-market-empty" hidden>캔들 데이터를 불러오는 중입니다.</div></div><div class="pilot-market-candle-status" id="pilot-market-candle-status" hidden></div><details class="pilot-market-candle-data" id="pilot-market-candle-data" hidden><summary>최근 캔들 값</summary><p class="pilot-market-candle-data-note" id="pilot-market-candle-data-note"></p><div class="pilot-market-data-table-wrap" id="pilot-market-data-table"></div></details></section>${tradePanelMarkup('market')}</div><div class="pilot-section-spacer"></div><section class="pilot-panel"><div class="pilot-panel-header"><div><h2 class="pilot-panel-title">시장 목록</h2></div><div class="pilot-filter-bar"><select class="pilot-select" style="width:auto" id="pilot-market-sort"><option value="volume">거래대금순</option><option value="change_desc">상승률순</option><option value="change_asc">하락률순</option><option value="name">이름순</option></select></div></div><div class="pilot-market-list" id="pilot-market-list"></div></section></section>
+                        <section class="pilot-page" data-pilot-page="market"><div class="pilot-page-heading"><div><h1 class="pilot-page-title">시장 현황</h1></div><div class="pilot-heading-actions"><label class="pilot-field" style="min-width:200px"><span class="pilot-visually-hidden">시장 검색</span><input class="pilot-input pilot-market-search" id="pilot-market-search" type="search" placeholder="이름·심볼 검색 (비트코인, BTC)"></label><button type="button" class="pilot-button" data-pilot-action="refresh-market"><i class="ph ph-arrows-clockwise" aria-hidden="true"></i> 시세 새로고침</button></div></div><div class="pilot-market-layout"><section class="pilot-panel"><div class="pilot-market-return"><button type="button" class="pilot-link-button" data-pilot-action="market-list-top">시장 목록으로 <i class="ph ph-arrow-up" aria-hidden="true"></i></button></div><div class="pilot-market-quote"><div><span class="pilot-market-symbol" id="pilot-market-symbol">BTC/KRW</span><span class="pilot-market-name" id="pilot-market-name">업비트 원화 시장</span><span class="pilot-market-status" id="pilot-market-status">시세 확인 중</span><span class="pilot-visually-hidden" id="pilot-market-status-announcement" role="status" aria-live="polite" aria-atomic="true"></span><span class="pilot-visually-hidden" id="pilot-market-refresh-announcement" role="status" aria-live="polite" aria-atomic="true"></span></div><div><span class="pilot-market-price" id="pilot-market-price">-</span><span class="pilot-market-change" id="pilot-market-change">-</span></div></div><div class="pilot-market-time-meta"><div class="pilot-market-time-item"><span class="pilot-market-time-label">최근 체결 시각</span><span class="pilot-market-time-value" id="pilot-market-source-asof">시각 정보 미제공</span></div><div class="pilot-market-time-item"><span class="pilot-market-time-label">서버 시세 수집 시각</span><span class="pilot-market-time-value" id="pilot-market-fetched-at">시각 정보 미제공</span></div></div><div class="pilot-market-metrics"><div><span class="pilot-market-metric-label">24시간 고가</span><strong class="pilot-market-metric-value" id="pilot-market-high">-</strong></div><div><span class="pilot-market-metric-label">24시간 저가</span><strong class="pilot-market-metric-value" id="pilot-market-low">-</strong></div><div><span class="pilot-market-metric-label">거래대금</span><strong class="pilot-market-metric-value" id="pilot-market-volume">-</strong></div><div><span class="pilot-market-metric-label">보유 평가</span><strong class="pilot-market-metric-value" id="pilot-market-holding">-</strong></div></div><div class="pilot-panel-header"><div><h2 class="pilot-panel-title">가격 차트</h2></div><div class="pilot-market-toolbar"><div class="pilot-market-control-group" role="group" aria-label="캔들 간격"><button type="button" class="pilot-market-interval" data-pilot-candle-interval="1" aria-pressed="false">1분</button><button type="button" class="pilot-market-interval is-active" data-pilot-candle-interval="5" aria-pressed="true">5분</button><button type="button" class="pilot-market-interval" data-pilot-candle-interval="15" aria-pressed="false">15분</button><button type="button" class="pilot-market-interval" data-pilot-candle-interval="60" aria-pressed="false">1시간</button></div><div class="pilot-market-control-group" role="group" aria-label="표시 캔들 수"><button type="button" class="pilot-market-range" data-pilot-candle-range="30" aria-pressed="false">30개</button><button type="button" class="pilot-market-range is-active" data-pilot-candle-range="60" aria-pressed="true">60개</button><button type="button" class="pilot-market-range" data-pilot-candle-range="100" aria-pressed="false">100개</button></div></div></div><div class="pilot-market-chart-wrap"><canvas id="pilot-market-chart" class="pilot-market-chart" aria-label="선택한 시장 캔들 차트"></canvas><div class="pilot-chart-empty" id="pilot-market-empty" hidden>캔들 데이터를 불러오는 중입니다.</div></div><div class="pilot-market-candle-status" id="pilot-market-candle-status" hidden></div><details class="pilot-market-candle-data" id="pilot-market-candle-data" hidden><summary>최근 캔들 값</summary><p class="pilot-market-candle-data-note" id="pilot-market-candle-data-note"></p><div class="pilot-market-data-table-wrap" id="pilot-market-data-table"></div></details></section>${tradePanelMarkup('market')}</div><div class="pilot-section-spacer"></div><section class="pilot-panel pilot-market-discovery"><div class="pilot-panel-header"><div><h2 class="pilot-panel-title">시장 목록</h2><p class="pilot-panel-subtitle" id="pilot-market-count"></p></div><div class="pilot-filter-bar"><select class="pilot-select" style="width:auto" id="pilot-market-sort"><option value="volume">거래대금순</option><option value="change_desc">상승률순</option><option value="change_asc">하락률순</option><option value="name">이름순</option></select></div></div><div class="pilot-market-list" id="pilot-market-list"></div><div class="pilot-list-more"><button type="button" class="pilot-button" id="pilot-market-more" data-pilot-action="more-markets" hidden>시장 더 보기</button></div></section></section>
 
-                        <section class="pilot-page" data-pilot-page="analysis"><div class="pilot-page-heading"><div><h1 class="pilot-page-title">전략 분석</h1></div><div class="pilot-heading-actions"><select class="pilot-select" style="width:auto" id="pilot-analysis-filter"><option value="all">전체 결과</option><option value="BUY">매수</option><option value="SELL">매도</option><option value="HOLD">관망</option></select><select class="pilot-select" style="width:auto" id="pilot-analysis-sort"><option value="score">총점순</option><option value="buy">매수점수순</option><option value="sell">매도점수순</option><option value="volume">거래대금순</option><option value="change">변동률순</option></select><button type="button" class="pilot-button" data-pilot-action="load-analysis"><i class="ph ph-play" aria-hidden="true"></i> 분석 실행</button></div></div><section class="pilot-panel"><div class="pilot-analysis-summary"><div class="pilot-analysis-stat"><strong id="pilot-analysis-total">—</strong><span>분석한 종목</span></div><div class="pilot-analysis-stat is-buy"><strong id="pilot-analysis-buy">—</strong><span>매수 판정</span></div><div class="pilot-analysis-stat is-sell"><strong id="pilot-analysis-sell">—</strong><span>매도 판정</span></div><div class="pilot-analysis-stat is-watch"><strong id="pilot-analysis-hold">—</strong><span>관망</span></div><div class="pilot-analysis-stat"><strong id="pilot-analysis-strong">—</strong><span>강한 신호</span></div></div><div class="pilot-analysis-table pilot-table-wrap"><table class="pilot-table"><thead><tr><th>자산</th><th class="pilot-table-number">현재가</th><th class="pilot-table-number">24시간 변동</th><th class="pilot-table-number">RSI</th><th>MACD</th><th class="pilot-table-number">신호 점수 (0~100)</th><th>판정</th><th>관리</th></tr></thead><tbody id="pilot-analysis-rows"></tbody></table></div></section></section>
+                        <section class="pilot-page" data-pilot-page="analysis"><div class="pilot-page-heading"><div><h1 class="pilot-page-title">전략 분석</h1></div><div class="pilot-heading-actions"><select class="pilot-select" style="width:auto" id="pilot-analysis-filter"><option value="all">전체 결과</option><option value="BUY">매수</option><option value="SELL">매도</option><option value="HOLD">관망</option></select><select class="pilot-select" style="width:auto" id="pilot-analysis-sort"><option value="score">총점순</option><option value="buy">매수점수순</option><option value="sell">매도점수순</option><option value="volume">거래대금순</option><option value="change">변동률순</option></select><button type="button" class="pilot-button" data-pilot-action="load-analysis"><i class="ph ph-play" aria-hidden="true"></i> 분석 실행</button></div></div><section class="pilot-panel"><div class="pilot-analysis-summary"><div class="pilot-analysis-stat"><strong id="pilot-analysis-total">—</strong><span>분석한 종목</span></div><div class="pilot-analysis-stat is-buy"><strong id="pilot-analysis-buy">—</strong><span>매수 판정</span></div><div class="pilot-analysis-stat is-sell"><strong id="pilot-analysis-sell">—</strong><span>매도 판정</span></div><div class="pilot-analysis-stat is-watch"><strong id="pilot-analysis-hold">—</strong><span>관망</span></div><div class="pilot-analysis-stat"><strong id="pilot-analysis-strong">—</strong><span>강한 신호</span></div></div><p class="pilot-analysis-asof" id="pilot-analysis-asof">아직 분석한 자료가 없어요.</p><div class="pilot-analysis-table pilot-table-wrap"><table class="pilot-table"><thead><tr><th>자산</th><th class="pilot-table-number">현재가</th><th class="pilot-table-number">24시간 변동</th><th class="pilot-table-number">RSI</th><th>MACD</th><th class="pilot-table-number">신호 점수 (0~100)</th><th>판정</th><th>관리</th></tr></thead><tbody id="pilot-analysis-rows"></tbody></table></div></section></section>
 
                         <section class="pilot-page" data-pilot-page="news"><div class="pilot-page-heading"><div><h1 class="pilot-page-title">뉴스</h1></div><div class="pilot-heading-actions"><select class="pilot-select" style="width:auto" id="pilot-news-filter"><option value="all">전체 감성</option><option value="positive">긍정</option><option value="negative">부정</option><option value="neutral">중립</option></select><button type="button" class="pilot-button" data-pilot-action="load-news"><i class="ph ph-arrows-clockwise" aria-hidden="true"></i> 뉴스 새로고침</button></div></div><section class="pilot-panel"><div class="pilot-news-sentiment"><div class="pilot-sentiment-score is-neutral" id="pilot-news-score">-</div><div><div class="pilot-sentiment-title" id="pilot-news-sentiment-title">기사 분석 전</div><div class="pilot-sentiment-description" id="pilot-news-sentiment-copy">새로고침을 누르면 최신 기사를 분석합니다.</div></div><span class="pilot-status-pill is-warning">참고 정보</span></div><div class="pilot-news-list" id="pilot-news-list"><div class="pilot-inline-empty">뉴스 새로고침을 눌러 최신 기사를 확인하세요.</div></div></section></section>
 
-                        <section class="pilot-page" data-pilot-page="settings"><div class="pilot-page-heading"><div><h1 class="pilot-page-title">거래 설정</h1></div><div class="pilot-heading-actions"><button type="button" class="pilot-button" data-pilot-action="reload-settings"><i class="ph ph-arrows-clockwise" aria-hidden="true"></i> 서버에서 다시 불러오기</button><button type="button" class="pilot-button is-primary" data-pilot-action="save-settings"><i class="ph ph-check" aria-hidden="true"></i> 변경 사항 적용</button></div></div><div class="pilot-settings-grid"><div><section class="pilot-panel pilot-settings-section"><div class="pilot-panel-header"><div><h2 class="pilot-panel-title">설정 후보 비교</h2><p class="pilot-panel-subtitle">비교 결과는 현재 설정이나 실거래 조건에 반영되지 않습니다.</p></div><span class="pilot-status-pill is-warning" id="pilot-optimization-status">확인 중</span></div><div class="pilot-panel-body" id="pilot-optimization-controls"></div></section><div class="pilot-section-spacer"></div><section class="pilot-panel pilot-settings-section"><div class="pilot-panel-header"><div><h2 class="pilot-panel-title">투자 성향</h2><p class="pilot-panel-subtitle">선택하면 현재 전략 설정이 바뀝니다. 성향 단계는 현재 계좌 위험도 평가값이 아닙니다.</p></div></div><div class="pilot-panel-body"><div class="pilot-preset-grid" id="pilot-preset-grid"><div class="pilot-inline-empty">설정을 불러오는 중입니다.</div></div></div></section></div><section class="pilot-panel pilot-settings-section"><div class="pilot-panel-header"><div><h2 class="pilot-panel-title">전략과 위험 관리</h2><p class="pilot-panel-subtitle">바꾼 설정은 변경 사항 적용을 눌러 저장하세요.</p></div></div><div class="pilot-panel-body"><div class="pilot-settings-list" id="pilot-settings-list"><div class="pilot-inline-empty">설정을 불러오는 중입니다.</div></div></div></section></div></section>
+                        <section class="pilot-page" data-pilot-page="settings"><div class="pilot-page-heading"><div><h1 class="pilot-page-title">거래 설정</h1></div><div class="pilot-heading-actions"><button type="button" class="pilot-button" data-pilot-action="reload-settings"><i class="ph ph-arrows-clockwise" aria-hidden="true"></i> 서버에서 다시 불러오기</button><button type="button" class="pilot-button is-primary" data-pilot-action="save-settings"><i class="ph ph-check" aria-hidden="true"></i> 변경 사항 적용</button></div></div><section class="pilot-settings-summary" id="pilot-settings-summary" aria-label="현재 저장된 매매 조건"></section><div class="pilot-settings-grid"><div><section class="pilot-panel pilot-settings-section"><div class="pilot-panel-header"><div><h2 class="pilot-panel-title">설정 후보 비교</h2><p class="pilot-panel-subtitle">비교 결과는 현재 설정이나 실거래 조건에 반영되지 않습니다.</p></div><span class="pilot-status-pill is-warning" id="pilot-optimization-status">확인 중</span></div><div class="pilot-panel-body" id="pilot-optimization-controls"></div></section><div class="pilot-section-spacer"></div><section class="pilot-panel pilot-settings-section"><div class="pilot-panel-header"><div><h2 class="pilot-panel-title">투자 성향</h2><p class="pilot-panel-subtitle">선택하면 현재 전략 설정이 바뀝니다. 성향 단계는 현재 계좌 위험도 평가값이 아닙니다.</p></div></div><div class="pilot-panel-body"><div class="pilot-preset-grid" id="pilot-preset-grid"><div class="pilot-inline-empty">설정을 불러오는 중입니다.</div></div></div></section></div><section class="pilot-panel pilot-settings-section"><div class="pilot-panel-header"><div><h2 class="pilot-panel-title">전략과 위험 관리</h2><p class="pilot-panel-subtitle">바꾼 설정은 변경 사항 적용을 눌러 저장하세요.</p></div></div><div class="pilot-panel-body"><div class="pilot-settings-list" id="pilot-settings-list"><div class="pilot-inline-empty">설정을 불러오는 중입니다.</div></div></div></section></div></section>
+
+                        <section class="pilot-page" data-pilot-page="records">
+                            <div class="pilot-page-heading"><div><h1 class="pilot-page-title">거래 기록</h1><p class="pilot-page-description">최근 주문과 전략 기록에서 금액과 결과를 확인하세요.</p></div><button type="button" class="pilot-button" data-pilot-action="refresh-core">기록 새로고침</button></div>
+                            <section class="pilot-panel">
+                                <div class="pilot-panel-header"><div><h2 class="pilot-panel-title">최근 기록</h2><p class="pilot-panel-subtitle" id="pilot-records-count">최근 최대 50개</p></div><div class="pilot-record-filters"><label><span class="pilot-visually-hidden">거래 종목 검색</span><input class="pilot-input" type="search" id="pilot-records-search" placeholder="종목 검색"></label><label><span class="pilot-visually-hidden">거래 유형</span><select class="pilot-select" id="pilot-records-filter"><option value="all">모든 유형</option><option value="buy">매수</option><option value="sell">매도</option></select></label></div></div>
+                                <p class="pilot-data-note pilot-record-note" id="pilot-records-freshness"></p>
+                                <div id="pilot-records-list"></div>
+                                <p class="pilot-data-note pilot-record-note">서버가 보관한 최근 기록입니다. 전략 기록과 주문 기록에 같은 거래가 포함될 수 있어요. 실제 체결 여부는 거래소 기록과 함께 확인하세요.</p>
+                            </section>
+                        </section>
 
                         <section class="pilot-page" data-pilot-page="history">
                             <div class="pilot-page-heading">
@@ -2676,6 +2816,20 @@
             <div class="pilot-toast-stack" id="pilot-toast-stack" aria-live="polite" aria-atomic="true"></div>
             <div id="pilot-modal-root"></div>
         `;
+    }
+
+    function mountMarketDiscoveryLayout() {
+        const page = root.querySelector('[data-pilot-page="market"]');
+        const list = page?.querySelector('.pilot-market-discovery');
+        const detail = page?.querySelector('.pilot-market-layout');
+        const mobile = window.matchMedia?.('(max-width: 760px)');
+        if (!list || !detail || !mobile) return;
+        const arrange = () => {
+            if (mobile.matches) page.insertBefore(list, detail);
+            else page.append(list);
+        };
+        arrange();
+        mobile.addEventListener?.('change', arrange);
     }
 
     function mountPageEnhancements() {
@@ -2717,6 +2871,7 @@
     mountAiDesk();
     mountMobileNavigation();
     mountPageEnhancements();
+    mountMarketDiscoveryLayout();
     syncAuthScopeNotice();
     syncObserverControls();
     byId('pilot-auth-change-token')?.addEventListener('click', () => {
@@ -2858,7 +3013,7 @@
         setText('pilot-gate-freshness-detail', protectiveOnly
             ? '보호 감시 전용 · 신규 진입 잠금'
             : marketNeedsReview ? marketWarning
-                : paperNotStarted ? '모의투자 시작 후 확인' : !paperKnown || dataProblem ? '데이터 확인 필요' : '데이터 정상');
+                : paperNotStarted ? '모의투자 시작 후 확인' : !paperKnown || dataProblem ? '시세 확인 필요' : '시세 정상');
         renderGateIcon('pilot-gate-freshness-icon', dataProblem ? 'blocked' : !paperKnown ? 'pending' : '', dataProblem || !paperKnown ? 'warning' : 'database');
     }
 
@@ -3049,12 +3204,9 @@
             activity.push({ time: state.paper.updatedAt || state.paper.lastHeartbeat || state.paper.heartbeatAt, title: '모의투자 실행 중', detail: `청산 ${closedCount} · 중단 ${interruptionCount === null ? '미기록' : `${interruptionCount}회`}`, value: state.paper.state || 'RUNNING' });
         }
         trades.forEach(trade => {
-            const action = trade.type || trade.action || '기록';
-            const coin = symbolOf(trade.coin);
-            const value = hasFiniteValue(trade.profit) ? formatSignedWon(trade.profit)
-                : hasFiniteValue(trade.amount) ? formatWon(trade.amount)
-                    : formatWon(trade.currentValue);
-            activity.push({ time: trade.timestamp || trade.entryTime || trade.exitTime, title: `${coin} ${action === 'BUY' || action === 'OPEN' ? '매수' : action === 'SELL' || action === 'CLOSE' ? '매도' : action}`, detail: trade.source === 'strategy' ? '전략 기록' : '직접·조건 주문 기록', value });
+            const item = tradeRecordPresentation(trade);
+            const value = item.profit !== null ? formatSignedWon(item.profit) : item.amount !== null ? formatWon(item.amount) : '금액 미기록';
+            activity.push({ time: item.time, title: `${item.marketLabel || symbolOf(item.coin)} ${item.label}`, detail: `${item.source}${coreReadNote('trades') ? ' · 이전 자료' : ''}`, value });
         });
         target.innerHTML = activity.length
             ? activity.slice(0, 7).map(item => `<div class="pilot-evidence-row"><span class="pilot-evidence-time">${escapeHtml(formatTime(item.time))}</span><div><strong class="pilot-evidence-title">${escapeHtml(item.title)}</strong><div class="pilot-evidence-detail">${escapeHtml(item.detail)}</div></div><span class="pilot-evidence-value">${escapeHtml(String(item.value))}</span></div>`).join('')
@@ -3491,7 +3643,8 @@
         const marketStatus = byId('pilot-market-status');
         const marketStatusLabel = selectedMarketPresentation.label;
         setText('pilot-market-symbol', `${symbol}/KRW`);
-        if (marketName && marketName.textContent !== '업비트 원화 시장') marketName.textContent = '업비트 원화 시장';
+        const marketNameLabel = `${marketDisplayName(marketData || { coin: state.selectedCoin })} · 업비트 원화 시장`;
+        if (marketName && marketName.textContent !== marketNameLabel) marketName.textContent = marketNameLabel;
         if (marketStatus && marketStatus.textContent !== marketStatusLabel) marketStatus.textContent = marketStatusLabel;
         updateMarketAnnouncement('pilot-market-status-announcement', `${symbol}/KRW · ${marketStatusLabel}`);
         if (marketStatus) marketStatus.dataset.marketState = selectedMarketPresentation.state;
@@ -3513,7 +3666,7 @@
 
     function sortedMarketPrices() {
         const query = String(state.marketSearch || '').trim().toUpperCase();
-        let list = state.marketPrices.filter(item => !query || symbolOf(item.coin).includes(query) || item.coin.includes(query));
+        let list = state.marketPrices.filter(item => !query || marketSearchText(item).includes(query));
         const sort = state.marketSort || 'volume';
         list = [...list].sort((a, b) => sort === 'change_desc' ? number(b.change) - number(a.change) : sort === 'change_asc' ? number(a.change) - number(b.change) : sort === 'name' ? String(a.coin).localeCompare(String(b.coin)) : number(b.volumeKrw) - number(a.volumeKrw));
         return list;
@@ -3522,17 +3675,21 @@
     function renderMarketList() {
         const target = byId('pilot-market-list'); if (!target) return;
         const list = sortedMarketPrices();
+        const visibleCount = Math.max(40, state.marketVisibleCount || 40);
+        setText('pilot-market-count', `전체 ${state.marketPrices.length}개 중 ${list.length}개 검색 · ${Math.min(visibleCount, list.length)}개 표시`);
+        const more = byId('pilot-market-more');
+        if (more) { more.hidden = list.length <= visibleCount; more.textContent = `시장 더 보기 (${list.length - visibleCount}개 남음)`; }
         if (!list.length) {
             const query = String(state.marketSearch || '').trim();
             const emptyMessage = !state.marketPricesLoaded
                 ? '시세를 불러오지 못했습니다. 연결 상태를 확인한 뒤 다시 시도해 주세요.'
                 : state.marketPrices.length > 0 && query ? '검색 결과가 없습니다.' : '표시할 시세가 없습니다.';
-            target.innerHTML = `<div class="pilot-empty-panel"><i class="ph ph-chart-line" aria-hidden="true"></i>${escapeHtml(emptyMessage)}</div>`;
+            target.innerHTML = `<div class="pilot-empty-panel"><i class="ph ph-chart-line" aria-hidden="true"></i>${escapeHtml(emptyMessage)}${query ? '<button type="button" class="pilot-button" data-pilot-action="reset-market-search">검색어 지우기</button>' : '<button type="button" class="pilot-button" data-pilot-action="refresh-market">시세 다시 불러오기</button>'}</div>`;
             return;
         }
-        target.innerHTML = `<div class="pilot-market-row pilot-market-row-head" aria-hidden="true"><span class="pilot-market-row-label">시장</span><span class="pilot-market-row-label" style="text-align:right">현재가</span><span class="pilot-market-row-label" style="text-align:right">24시간</span><span class="pilot-market-row-label" style="text-align:right">거래량</span><span></span></div>${list.slice(0, 80).map(item => {
+        target.innerHTML = `<div class="pilot-market-row pilot-market-row-head" aria-hidden="true"><span class="pilot-market-row-label">시장</span><span class="pilot-market-row-label" style="text-align:right">현재가</span><span class="pilot-market-row-label" style="text-align:right">24시간</span><span class="pilot-market-row-label" style="text-align:right">거래대금</span><span></span></div>${list.slice(0, visibleCount).map(item => {
             const quote = marketRowQuotePresentation(item, state.marketPricesLoaded);
-            return `<div class="pilot-market-row ${item.coin === state.selectedCoin ? 'is-selected' : ''}" role="button" tabindex="0" aria-pressed="${item.coin === state.selectedCoin ? 'true' : 'false'}" data-pilot-market-row="${escapeHtml(item.coin)}"><span class="pilot-market-row-market"><span class="pilot-market-row-symbol">${escapeHtml(symbolOf(item.coin))}/KRW</span><span class="pilot-market-row-freshness is-${quote.state}">${escapeHtml(quote.label)}</span></span><span class="pilot-market-row-price">${formatPrice(item.price)}</span><span class="pilot-market-row-change ${classForValue(item.change)}">${formatPercent(item.change)}</span><span class="pilot-market-row-volume">${formatWon(item.volumeKrw)}</span><span><i class="ph ph-arrow-up-right" aria-hidden="true"></i></span></div>`;
+            return `<div class="pilot-market-row ${item.coin === state.selectedCoin ? 'is-selected' : ''}" role="button" tabindex="0" aria-pressed="${item.coin === state.selectedCoin ? 'true' : 'false'}" data-pilot-market-row="${escapeHtml(item.coin)}"><span class="pilot-market-row-market"><span class="pilot-market-row-symbol">${escapeHtml(marketDisplayName(item))} <small>${escapeHtml(symbolOf(item.coin))}</small></span><span class="pilot-market-row-freshness is-${quote.state}">${escapeHtml(quote.label)}</span></span><span class="pilot-market-row-price">${formatPrice(item.price)}</span><span class="pilot-market-row-change ${classForValue(item.change)}">${formatPercent(item.change)}</span><span class="pilot-market-row-volume">${formatWon(item.volumeKrw)}</span><span><i class="ph ph-arrow-up-right" aria-hidden="true"></i></span></div>`;
         }).join('')}`;
     }
 
@@ -3598,6 +3755,8 @@
 
     function renderAnalysis() {
         const result = state.analysis || {}; const loaded = state.analysis !== null && state.analysis !== undefined; const coins = Array.isArray(result.coins) ? result.coins : []; const filter = state.analysisFilter || 'all';
+        const analysisTime = Number.isFinite(Date.parse(result.timestamp || '')) ? formatDateTime(result.timestamp) : '분석 시각 미제공';
+        setText('pilot-analysis-asof', state.analysisError ? `분석을 새로 불러오지 못했어요${loaded ? ` · 이전 분석 ${analysisTime}` : ''}` : loaded ? `${analysisTime} 분석 · 기술지표 참고 자료 · 현재 시세와 다를 수 있어요` : '분석을 실행하면 종목별 판단 이유를 확인할 수 있어요.');
         let filtered = coins.filter(item => filter === 'all' || item.recommendation === filter); const sort = state.analysisSort || 'score';
         filtered = [...filtered].sort((a, b) => sort === 'buy' ? number(b.buyScore) - number(a.buyScore) : sort === 'sell' ? number(b.sellScore) - number(a.sellScore) : sort === 'volume' ? number(b.volume24h) - number(a.volume24h) : sort === 'change' ? number(b.change24h) - number(a.change24h) : number(b.totalScore) - number(a.totalScore));
         setText('pilot-analysis-total', loaded && !state.analysisError ? result.totalAnalyzed ?? coins.length : '—'); setText('pilot-analysis-buy', loaded && !state.analysisError ? coins.filter(item => item.recommendation === 'BUY').length : '—'); setText('pilot-analysis-sell', loaded && !state.analysisError ? coins.filter(item => item.recommendation === 'SELL').length : '—'); setText('pilot-analysis-hold', loaded && !state.analysisError ? coins.filter(item => item.recommendation === 'HOLD').length : '—'); setText('pilot-analysis-strong', loaded && !state.analysisError ? coins.filter(item => ['STRONG', 'VERY_STRONG'].includes(item.signalStrength)).length : '—');
@@ -3612,7 +3771,19 @@
             target.innerHTML = `<tr><td colspan="8"><div class="pilot-empty-panel"><i class="ph ph-function" aria-hidden="true"></i>${escapeHtml(emptyMessage)}</div></td></tr>`;
             return;
         }
-        target.innerHTML = filtered.slice(0, 80).map(item => { const action = item.recommendation || 'HOLD'; const tone = action === 'BUY' ? '' : action === 'SELL' ? 'is-danger' : 'is-warning'; const price = hasFiniteValue(item.currentPrice) ? `${formatPrice(item.currentPrice)}원` : '미제공'; const change = hasFiniteValue(item.change24h) ? formatPercent(item.change24h) : '미제공'; const rsi = hasFiniteValue(item.indicators?.rsi) ? Number(item.indicators.rsi).toFixed(1) : '—'; const score = hasFiniteValue(item.totalScore) ? Number(item.totalScore).toFixed(0) : '—'; return `<tr><td><span class="pilot-asset-name"><i class="pilot-asset-dot" aria-hidden="true"></i>${escapeHtml(item.symbol || symbolOf(item.coin))}</span></td><td class="pilot-table-number">${price}</td><td class="pilot-table-number ${hasFiniteValue(item.change24h) ? classForValue(item.change24h) : ''}">${change}</td><td class="pilot-table-number">${rsi}</td><td>${escapeHtml(macdSignalLabel(item.indicators?.macdSignal))}</td><td class="pilot-table-number"><strong>${score}</strong></td><td><span class="pilot-status-pill ${tone}">${escapeHtml(analysisRecommendationLabel(action))}</span></td><td><button type="button" class="pilot-table-action" data-pilot-analysis-coin="${escapeHtml(item.coin)}">거래 검토</button></td></tr>`; }).join('');
+        target.innerHTML = filtered.slice(0, 80).map(item => { const action = item.recommendation || 'HOLD'; const tone = action === 'BUY' ? '' : action === 'SELL' ? 'is-danger' : 'is-warning'; const price = hasFiniteValue(item.currentPrice) ? `${formatPrice(item.currentPrice)}원` : '미제공'; const change = hasFiniteValue(item.change24h) ? formatPercent(item.change24h) : '미제공'; const rsi = hasFiniteValue(item.indicators?.rsi) ? Number(item.indicators.rsi).toFixed(1) : '—'; const score = hasFiniteValue(item.totalScore) ? Number(item.totalScore).toFixed(0) : '—'; return `<tr><td><span class="pilot-asset-name"><i class="pilot-asset-dot" aria-hidden="true"></i>${escapeHtml(item.symbol || symbolOf(item.coin))}</span><span class="pilot-analysis-reason">${escapeHtml(toUserText(Array.isArray(item.signals) && item.signals.length ? item.signals[0] : '상세 이유 미제공'))}</span></td><td class="pilot-table-number">${price}</td><td class="pilot-table-number ${hasFiniteValue(item.change24h) ? classForValue(item.change24h) : ''}">${change}</td><td class="pilot-table-number">${rsi}</td><td>${escapeHtml(macdSignalLabel(item.indicators?.macdSignal))}</td><td class="pilot-table-number"><strong>${score}</strong></td><td><span class="pilot-status-pill ${tone}">${escapeHtml(analysisRecommendationLabel(action))}</span></td><td><button type="button" class="pilot-table-action" data-pilot-analysis-coin="${escapeHtml(item.coin)}">분석 자세히</button></td></tr>`; }).join('');
+    }
+
+    function openAnalysisDetail(coin) {
+        const item = state.analysis?.coins?.find(row => row.coin === coin);
+        if (!item) return;
+        const signals = Array.isArray(item.signals) ? item.signals.filter(value => typeof value === 'string') : [];
+        const reason = signals.length ? `<ul class="pilot-analysis-reasons">${signals.map(value => `<li>${escapeHtml(toUserText(value))}</li>`).join('')}</ul>` : '<p>이 종목의 상세 판단 이유는 제공되지 않았어요.</p>';
+        const action = item.recommendation;
+        const owned = Number(currentPosition(coin)?.amount) > 0;
+        const reviewSide = action === 'BUY' ? 'buy' : action === 'SELL' && owned ? 'sell' : null;
+        const footer = `<button type="button" class="pilot-button" data-pilot-analysis-market="${escapeHtml(coin)}">현재 시세 보기</button>${reviewSide ? `<button type="button" class="pilot-button is-primary" data-pilot-analysis-review="${reviewSide}" data-pilot-coin="${escapeHtml(coin)}">${reviewSide === 'sell' ? '보유 자산 매도 검토' : '매수 금액 검토'}</button>` : ''}<button type="button" class="pilot-button" data-pilot-modal-close>닫기</button>`;
+        showModal(`${marketDisplayName({ coin })} 분석`, `<p class="pilot-data-note">${escapeHtml(formatDateTime(state.analysis.timestamp))} 분석 · ${escapeHtml(analysisRecommendationLabel(action))}</p>${reason}<div class="pilot-inline-note"><span>기술지표를 요약한 참고 자료예요. 자동매매 조건과 다를 수 있으며 주문은 실행되지 않습니다.${action === 'SELL' && !owned ? ' 현재 확인된 보유 수량이 없어 매도 검토를 열 수 없어요.' : ''}</span></div>`, footer);
     }
 
     function sentimentInfo(sentiment) {
@@ -3905,6 +4076,21 @@
     function renderSettings() {
         const settings = state.settings; if (!settings) return;
         const ranges = settings.ranges || {}; const values = settings.values || {}; const list = byId('pilot-settings-list');
+        const summary = byId('pilot-settings-summary');
+        if (summary) {
+            summary.hidden = false;
+            const config = settings.investmentConfig || {};
+            const effective = config.scalping || values;
+            const ratio = config.investmentRatio ?? values.investmentRatio;
+            const facts = [
+                ['1회 투자 비율', hasFiniteValue(ratio) ? `${(Number(ratio) * 100).toLocaleString('ko-KR', { maximumFractionDigits: 2 })}%` : '미제공'],
+                ['동시 보유 한도', hasFiniteValue(config.maxPositions) ? `${config.maxPositions}개` : '미제공'],
+                ['손절 기준', hasFiniteValue(effective.stopLossPercent) ? `${effective.stopLossPercent}% 하락` : '미제공'],
+                ['익절 기준', hasFiniteValue(effective.takeProfitPercent) ? `${effective.takeProfitPercent}% 상승` : '미제공']
+            ];
+            summary.innerHTML = `<div class="pilot-settings-summary-heading"><strong>현재 저장된 매매 조건</strong><span>아래 변경 사항은 적용 후 반영돼요.</span></div><dl>${facts.map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`).join('')}</dl><p>손절·익절은 주문을 시도하는 기준이에요. 시세와 체결 상황에 따라 실제 손익은 달라질 수 있어요.</p>`;
+        }
+
         if (list) {
             const toggles = [
                 { key: 'marketRegimeEnabled', label: '시장 방향성 필터', description: '전체 시장 방향이 약할 때 신규 진입을 차단하는 설정입니다.', value: settings.investmentConfig?.scalping?.marketRegimeEnabled === true },
@@ -4460,7 +4646,7 @@
     }
 
     function renderAll() {
-        renderMode(); renderGateCards(); renderChartPeriodButtons(); renderCoreStats(); renderPositionRows('pilot-overview-positions'); renderPositionRows('pilot-portfolio-positions'); renderActivity(); renderRiskSummary(); renderTradePanels(); renderManualOrderCapacity(); drawEquityChart('pilot-equity-chart', 'pilot-equity-empty', state.portfolioHistory); renderPortfolio(); renderMarketHeader(); renderMarketList(); renderAnalysis(); renderNews(); renderValidationDetail(); renderPaperDetail(); renderStrategyResearch(); renderMomentumShadow(); renderQuoteExecutionEvidence(); syncObserverControls();
+        renderMode(); renderGateCards(); renderNextStep(); renderChartPeriodButtons(); renderCoreStats(); renderPositionRows('pilot-overview-positions'); renderPositionRows('pilot-portfolio-positions'); renderActivity(); renderRecords(); renderRiskSummary(); renderTradePanels(); renderManualOrderCapacity(); drawEquityChart('pilot-equity-chart', 'pilot-equity-empty', state.portfolioHistory); renderPortfolio(); renderMarketHeader(); renderMarketList(); renderAnalysis(); renderNews(); renderValidationDetail(); renderPaperDetail(); renderStrategyResearch(); renderMomentumShadow(); renderQuoteExecutionEvidence(); renderDataFreshness(); syncObserverControls();
     }
 
     async function loadCore({ quiet = false, afterNetworkRestore = false } = {}) {
@@ -4494,8 +4680,8 @@
         }
         const period = encodeURIComponent(state.chartPeriod || '24h');
         const requests = readOnlyScope
-            ? { status: '/status', account: '/account', pnl: '/cumulative-pnl', today: '/today-summary', history: `/portfolio/history?period=${period}`, trades: '/trades?limit=12', marketPrices: '/market/prices/snapshot' }
-            : { status: '/status', account: '/account', pnl: '/cumulative-pnl', today: '/today-summary', statistics: '/statistics', validation: '/scalping-validation', strategyReadiness: '/strategy-readiness', paper: '/paper-validation', momentumShadow: '/momentum-shadow', portfolioAnalysis: '/portfolio-analysis', history: `/portfolio/history?period=${period}`, trades: '/trades?limit=12', marketPrices: '/market/prices/snapshot', targetCoins: '/target-coins' };
+            ? { status: '/status', account: '/account', pnl: '/cumulative-pnl', today: '/today-summary', history: `/portfolio/history?period=${period}`, trades: '/trades?limit=50', marketPrices: '/market/prices/snapshot' }
+            : { status: '/status', account: '/account', pnl: '/cumulative-pnl', today: '/today-summary', statistics: '/statistics', validation: '/scalping-validation', strategyReadiness: '/strategy-readiness', paper: '/paper-validation', momentumShadow: '/momentum-shadow', portfolioAnalysis: '/portfolio-analysis', history: `/portfolio/history?period=${period}`, trades: '/trades?limit=50', marketPrices: '/market/prices/snapshot', targetCoins: '/target-coins' };
         const settled = await Promise.all(Object.entries(requests).map(async ([key, path]) => { try { return [key, await requestJSON(path)]; } catch (error) { return [key, null, error]; } }));
         const marketPricesIndex = settled.findIndex(([key]) => key === 'marketPrices');
         const marketPricesError = settled[marketPricesIndex]?.[2];
@@ -4522,6 +4708,12 @@
         const loaded = Object.fromEntries(Object.entries(currentSnapshot).map(([key, data]) => [key, data !== null]));
         const marketSnapshot = normalizeMarketPriceSnapshot(loaded.marketPrices ? currentSnapshot.marketPrices : null);
         const marketSnapshotLoaded = Boolean(loaded.marketPrices && marketSnapshot);
+        const checkedAt = new Date().toISOString();
+        state.coreReadStatus ||= {};
+        settled.forEach(([key, data, error]) => {
+            const succeeded = key === 'marketPrices' ? marketSnapshotLoaded : data !== null && data?.error === undefined;
+            state.coreReadStatus[key] = coreReadPresentation(state.coreReadStatus[key], succeeded, checkedAt, error?.status === 401 || error?.status === 403);
+        });
         const historyEntry = settled.find(([key]) => key === 'history');
         state.portfolioHistoryError = Boolean(historyEntry?.[2] || historyEntry?.[1]?.error);
         state.statisticsLoaded = loaded.statistics;
@@ -4567,6 +4759,7 @@
     }
 
     function clearDynamicStateForOffline() {
+        state.coreReadStatus = {};
         for (const key of [
             'status', 'account', 'pnl', 'today', 'validation', 'strategyReadiness', 'paper',
             'strategyResearch', 'momentumShadow', 'portfolioAnalysis',
@@ -4713,6 +4906,8 @@
         if (state.settingsLoaded && state.settings) { renderSettings(); return; }
         const errorNotice = byId('pilot-settings-error');
         const settingsGrid = byId('pilot-settings-grid');
+        const summary = byId('pilot-settings-summary');
+        if (summary) summary.hidden = true;
         if (errorNotice) errorNotice.hidden = true;
         if (settingsGrid) settingsGrid.hidden = false;
         try {
@@ -4736,8 +4931,11 @@
     }
 
     function showView(view) {
-        if (!view) return; closeMobileNavigationMenu(); state.view = view; localStorage.setItem('currentPilotView', view); clearToasts(); window.scrollTo({ top: 0, behavior: 'auto' }); $$('[data-pilot-page]').forEach(page => page.classList.toggle('is-active', page.dataset.pilotPage === view)); syncViewNavigation(view);
-        if (view === 'market') loadCandles(true); if (view === 'analysis') { if (!state.analysis) loadAnalysis(); if (!state.strategyResearchLoaded) void loadStrategyResearch(); } if (view === 'news' && !state.news) loadNews(); if (view === 'ai') loadAiDesk(false); if (view === 'settings') loadSettings(); if (view === 'history') { loadHistory(); loadSettings(); } renderAll();
+        if (!view) return;
+        const changed = state.view !== view;
+        closeMobileNavigationMenu(); state.view = view; localStorage.setItem('currentPilotView', view); clearToasts();
+        if (changed) { root.querySelector('.pilot-content')?.scrollTo({ top: 0, behavior: 'auto' }); window.scrollTo({ top: 0, behavior: 'auto' }); } $$('[data-pilot-page]').forEach(page => page.classList.toggle('is-active', page.dataset.pilotPage === view)); syncViewNavigation(view);
+        if (view === 'records') void loadCore({ quiet: true }); if (view === 'market') loadCandles(true); if (view === 'analysis') { if (!state.analysis) loadAnalysis(); if (!state.strategyResearchLoaded) void loadStrategyResearch(); } if (view === 'news' && !state.news) loadNews(); if (view === 'ai') loadAiDesk(false); if (view === 'settings') loadSettings(); if (view === 'history') { loadHistory(); loadSettings(); } renderAll();
     }
 
     function protectedMutationError(outcome, fallback) {
@@ -4968,12 +5166,17 @@
     }
 
     async function handleAction(action) {
+        if (action === 'market-list-top') { root.querySelector('[data-pilot-page="market"]')?.scrollIntoView({ block: 'start', behavior: 'auto' }); byId('pilot-market-search')?.focus({ preventScroll: true }); return; }
+        if (action === 'show-install') { closeMobileNavigationMenu(); const install = byId('pilot-pwa-install'); if (install?.hidden) showToast('이미 앱으로 사용 중이에요.'); else install?.click(); return; }
+        if (action === 'more-markets') { state.marketVisibleCount += 40; renderMarketList(); return; }
+        if (action === 'reset-market-search') { state.marketSearch = ''; state.marketVisibleCount = 40; const search = byId('pilot-market-search'); if (search) { search.value = ''; search.focus(); } renderMarketList(); return; }
+        if (action === 'reset-record-filters') { state.recordsSearch = ''; state.recordsFilter = 'all'; const search = byId('pilot-records-search'); const filter = byId('pilot-records-filter'); if (search) search.value = ''; if (filter) filter.value = 'all'; renderRecords(); return; }
         if (action === 'retry-pending-mutation') return retryPendingMutation(); if (action === 'refresh-core') return loadCore(); if (action === 'refresh-market') { await loadCore(); announceManualMarketRefresh(); return; } if (action === 'load-analysis') return loadAnalysis(); if (action === 'load-news') return loadNews(); if (action === 'load-recommendations') return loadRecommendations(); if (action === 'reload-strategy-research') return loadStrategyResearch({ force: true }); if (action === 'smart-buy') return executeSmart('buy'); if (action === 'smart-sell') return executeSmart('sell'); if (action === 'deposit') return walletAction('deposit'); if (action === 'withdraw') return walletAction('withdraw'); if (action === 'reset-wallet') return resetWallet(); if (action === 'start-paper') return startPaper(false); if (action === 'start-paper-reset') return startPaper(true); if (action === 'stop-paper') return stopPaper(); if (action === 'record-snapshot') return recordCurrentPortfolioSnapshot(); if (action === 'reload-settings') { state.settingsLoaded = false; return loadSettings(); } if (action === 'save-settings') return saveSettings(); if (action === 'run-optimization') return runOptimization(); if (action === 'refresh-history') { await loadCore(); return loadHistory(); }
     }
 
     root.addEventListener('click', async event => {
         const close = event.target.closest('[data-pilot-modal-close]');
-        if (close) { if (close.matches('.pilot-modal-backdrop') && event.target.closest('.pilot-modal')) return; closeModal(); return; }
+        if (close && (!close.matches('.pilot-modal-backdrop') || event.target === close)) { closeModal(); return; }
         const viewButton = event.target.closest('[data-pilot-view]');
         if (viewButton) { showView(viewButton.dataset.pilotView); return; }
         const goButton = event.target.closest('[data-pilot-go]');
@@ -5003,11 +5206,15 @@
             return;
         }
         const marketRow = event.target.closest('[data-pilot-market-row]');
-        if (marketRow) { state.selectedCoin = marketRow.dataset.pilotMarketRow; localStorage.setItem('selectedCoin', state.selectedCoin); renderMarketList(); renderTradePanels(); await loadCandles(true); return; }
+        if (marketRow) { state.selectedCoin = marketRow.dataset.pilotMarketRow; localStorage.setItem('selectedCoin', state.selectedCoin); renderMarketList(); renderTradePanels(); await loadCandles(true); if (window.matchMedia?.('(max-width: 760px)').matches) root.querySelector('.pilot-market-layout')?.scrollIntoView({ block: 'start', behavior: 'auto' }); return; }
         const positionAction = event.target.closest('[data-pilot-position-action]');
         if (positionAction) { state.selectedCoin = positionAction.dataset.pilotCoin; state.trade.trade.side = 'sell'; showView('trade'); renderTradePanels(); return; }
         const analysisCoin = event.target.closest('[data-pilot-analysis-coin]');
-        if (analysisCoin) { state.selectedCoin = analysisCoin.dataset.pilotAnalysisCoin; state.trade.trade.side = 'buy'; showView('trade'); renderTradePanels(); return; }
+        if (analysisCoin) { openAnalysisDetail(analysisCoin.dataset.pilotAnalysisCoin); return; }
+        const analysisMarket = event.target.closest('[data-pilot-analysis-market]');
+        if (analysisMarket) { state.selectedCoin = analysisMarket.dataset.pilotAnalysisMarket; closeModal(); showView('market'); return; }
+        const analysisReview = event.target.closest('[data-pilot-analysis-review]');
+        if (analysisReview) { state.selectedCoin = analysisReview.dataset.pilotCoin; state.trade.trade.side = analysisReview.dataset.pilotAnalysisReview === 'sell' ? 'sell' : 'buy'; closeModal(); showView('trade'); renderTradePanels(); return; }
         const newsRow = event.target.closest('[data-pilot-news-index]');
         if (newsRow) { openNews(number(newsRow.dataset.pilotNewsIndex), newsRow); return; }
         const deposit = event.target.closest('[data-pilot-deposit]');
@@ -5036,13 +5243,15 @@
     root.addEventListener('input', event => {
         const amount = event.target.closest('[data-pilot-trade-amount]');
         if (amount) { const prefix = amount.dataset.pilotTradeAmount; state.trade[prefix].amount = number(amount.value); renderTradePanel(prefix); return; }
-        if (event.target.id === 'pilot-market-search') { state.marketSearch = event.target.value; renderMarketList(); }
+        if (event.target.id === 'pilot-market-search') { state.marketSearch = event.target.value; state.marketVisibleCount = 40; renderMarketList(); }
+        if (event.target.id === 'pilot-records-search') { state.recordsSearch = event.target.value; renderRecords(); }
     });
 
     root.addEventListener('change', async event => {
         const coin = event.target.closest('[data-pilot-trade-coin]');
         if (coin) { const prefix = coin.dataset.pilotTradeCoin; state.trade[prefix].amount = number(root.querySelector(`[data-pilot-trade-amount="${prefix}"]`)?.value || 50000); if (prefix === 'market') { state.selectedCoin = coin.value; localStorage.setItem('selectedCoin', state.selectedCoin); state.candles = []; await loadCandles(true); } renderTradePanel(prefix); return; }
-        if (event.target.id === 'pilot-market-sort') { state.marketSort = event.target.value; renderMarketList(); return; }
+        if (event.target.id === 'pilot-market-sort') { state.marketSort = event.target.value; state.marketVisibleCount = 40; renderMarketList(); return; }
+        if (event.target.id === 'pilot-records-filter') { state.recordsFilter = event.target.value; renderRecords(); return; }
         if (event.target.id === 'pilot-analysis-filter') { state.analysisFilter = event.target.value; renderAnalysis(); return; }
         if (event.target.id === 'pilot-analysis-sort') { state.analysisSort = event.target.value; renderAnalysis(); return; }
         if (event.target.id === 'pilot-news-filter') { state.newsFilter = event.target.value; renderNews(); return; }

@@ -2,7 +2,8 @@
 // 공유 의존(ctx)은 createManualOrderContext가 조립하고, leg 프리미티브는 manualOrderLegs에서 온다.
 import {
   DUST_AMOUNT_THRESHOLD,
-  MIN_BUY_KRW,
+  quoteAmountLimits,
+  formatQuoteAmount,
   applyDryBuy,
   applyDrySell,
   getStrategyFor,
@@ -29,9 +30,10 @@ export function createExecuteUseCase(ctx) {
     const side = action.toUpperCase();
 
     if (side === 'BUY') {
-      const investmentAmount = amount || 50000;
-      if (investmentAmount < MIN_BUY_KRW) {
-        return { status: 400, body: { error: '최소 투자금액은 5000원입니다', success: false } };
+      const { minimumBuy, defaultBuy } = quoteAmountLimits(tradingSystem);
+      const investmentAmount = amount ?? defaultBuy;
+      if (!Number.isFinite(investmentAmount) || investmentAmount < minimumBuy) {
+        return { status: 400, body: { error: `최소 투자금액은 ${formatQuoteAmount(tradingSystem, minimumBuy)}입니다`, success: false } };
       }
       const { ticker, block } = await requireFreshQuote(coin);
       if (block) return block;
@@ -49,7 +51,7 @@ export function createExecuteUseCase(ctx) {
           return {
             status: 400,
             body: {
-              error: `잔액 부족 (보유: ${applied.availableBalance.toLocaleString()}원, 요청: ${investmentAmount.toLocaleString()}원)`,
+              error: `잔액 부족 (보유: ${formatQuoteAmount(tradingSystem, applied.availableBalance)}, 요청: ${formatQuoteAmount(tradingSystem, investmentAmount)})`,
               success: false,
               availableBalance: applied.availableBalance
             }
@@ -61,7 +63,7 @@ export function createExecuteUseCase(ctx) {
           status: 200,
           body: {
             success: true,
-            message: `[모의투자] ${coin} ${investmentAmount.toLocaleString()}원 매수 완료 (수수료 ${applied.fee.toFixed(0)}원)`,
+            message: `[모의투자] ${coin} ${formatQuoteAmount(tradingSystem, investmentAmount)} 매수 완료 (수수료 ${formatQuoteAmount(tradingSystem, applied.fee)})`,
             order: {
               coin,
               action: 'BUY',
@@ -133,7 +135,7 @@ export function createExecuteUseCase(ctx) {
         status: 200,
         body: {
           success: true,
-          message: `[모의투자] ${coin} ${sellVolume.toFixed(8)} 매도 완료 (+${applied.netSellAmount.toLocaleString()}원, 수수료 ${applied.fee.toFixed(0)}원)`,
+          message: `[모의투자] ${coin} ${sellVolume.toFixed(8)} 매도 완료 (+${formatQuoteAmount(tradingSystem, applied.netSellAmount)}, 수수료 ${formatQuoteAmount(tradingSystem, applied.fee)})`,
           order: {
             coin,
             action: 'SELL',

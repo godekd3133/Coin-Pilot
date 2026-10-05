@@ -42,7 +42,8 @@ npm run asc:build-status -- --watch   # PROCESSING 끝날 때까지 60초 폴링
 - 같은 (version, build) 재업로드는 거절된다 — bump는 필수.
 - Archive는 development 인증서로 서명되고, export 시 App Store 프로필로 재서명된다 — 정상 동작.
 - 업로드 직후 `/v1/builds`에 바로 안 나타날 수 있다 — 수 분 후 PROCESSING → VALID. VALID가 되면 내부 테스터는 리뷰 없이 설치 가능.
-- `usesNonExemptEncryption` — 이 앱은 URLSession HTTPS만 쓰므로 비면제 암호화 아님(`false`). ASC가 물으면 기존 답변(No) 재사용.
+- `usesNonExemptEncryption` — 이 앱은 URLSession HTTPS만 쓰므로 비면제 암호화 아님(`false`). **`Info.plist`의 `ITSAppUsesNonExemptEncryption=false`는 필수** — 없으면 빌드가 ASC에서 VALID 처리돼도 테스터 설치가 막힌다(빌드마다 수출 규정 질문 수동 응답). "올렸는데 통과 안 된다"가 이 증상이다. 2026-10-01에 키 추가 후 build 13에서 해소 확인.
+- **업로드만으로는 테스터에게 안 보인다 — internal 베타 그룹 배정이 필수**. VALID여도 그룹에 안 넣으면 TestFlight 앱에 빌드가 안 뜬다(2026-10-01 build 14/15 실사례: 테스터 폰은 build 7에 멈춤). `POST /builds/{id}/relationships/betaGroups`로 `CoinPilot Internal` 그룹에 추가해야 한다 — 스크립트가 `scripts/asc-assign-internal-group.mjs`를 자동 호출한다. GET은 이 relationship에서 허용되지 않음(`GET_RELATED` 403).
 - Worktree가 더러워도 빌드에는 현재 파일이 쓰인다 — 아카이브 시점의 working tree 기준. 릴리스 전에 의도한 변경이 커밋/보존됐는지 확인.
 
 ## 검증

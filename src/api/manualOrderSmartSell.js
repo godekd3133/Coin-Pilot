@@ -3,6 +3,9 @@
 import {
   DUST_AMOUNT_THRESHOLD,
   MANUAL_ORDER_FEE_RATE,
+  quoteAmountLimits,
+  roundQuoteAmount,
+  formatQuoteAmount,
   getStrategyFor
 } from './manualOrderLegs.js';
 import { appendSmartTradeHistory } from './smartTradeHistory.js';
@@ -16,8 +19,9 @@ export function createSmartSellUseCase(ctx) {
   const { tradingSystem, inspectMarketQuote, marketQuoteBlockResult, readFreshTickers, readMinuteCandles } = ctx;
 
   async function smartSell({ targetAmount, strategy = 'worst' }, { attachLegIntent = null } = {}) {
-    if (!targetAmount || targetAmount < 1000) {
-      return { status: 400, body: { error: '목표 매도 금액은 최소 1,000원 이상이어야 합니다', success: false } };
+    const { minimumSmartSell } = quoteAmountLimits(tradingSystem);
+    if (!Number.isFinite(targetAmount) || targetAmount < minimumSmartSell) {
+      return { status: 400, body: { error: `목표 매도 금액은 최소 ${formatQuoteAmount(tradingSystem, minimumSmartSell)} 이상이어야 합니다`, success: false } };
     }
     if (!tradingSystem.upbit) {
       return { status: 400, body: { error: '거래 시스템 미초기화', success: false } };
@@ -150,7 +154,7 @@ export function createSmartSellUseCase(ctx) {
       const analyzedSellAmount = Math.min(data.currentValue, remainingTarget);
       const currentHoldingValue = currentHoldingAmount * currentPrice;
       const sellAmount = Math.min(analyzedSellAmount, currentHoldingValue);
-      if (sellAmount < 1000) continue; // 최소 금액
+      if (sellAmount < minimumSmartSell) continue;
 
       const sellVolume = Math.min(currentHoldingAmount, sellAmount / currentPrice);
       const actualGrossSellAmount = sellVolume * currentPrice;
@@ -259,10 +263,10 @@ export function createSmartSellUseCase(ctx) {
         coin: data.coin,
         volume: executedVolume,
         price: executedPrice,
-        grossAmount: Math.round(executedSellAmount),
-        fee: Math.round(executedFee),
-        amount: Math.round(executedNetSellAmount),
-        profit: Math.round(executedProfit),
+        grossAmount: roundQuoteAmount(tradingSystem, executedSellAmount),
+        fee: roundQuoteAmount(tradingSystem, executedFee),
+        amount: roundQuoteAmount(tradingSystem, executedNetSellAmount),
+        profit: roundQuoteAmount(tradingSystem, executedProfit),
         profitPercent: Number(executedProfitPercent).toFixed(2),
         type: 'SELL',
         source: 'smart-sell',
@@ -288,18 +292,18 @@ export function createSmartSellUseCase(ctx) {
         success: liveFailures.length === 0,
         mode: isDryRun ? 'DRY_RUN' : 'LIVE',
         targetAmount,
-        actualTargetAmount: Math.round(actualTargetAmount),
-        totalHoldingValue: Math.round(totalHoldingValue),
+        actualTargetAmount: roundQuoteAmount(tradingSystem, actualTargetAmount),
+        totalHoldingValue: roundQuoteAmount(tradingSystem, totalHoldingValue),
         amountWasAdjusted: sellWasAdjusted,
         strategy,
-        totalReceived: Math.round(totalSellAmount),
+        totalReceived: roundQuoteAmount(tradingSystem, totalSellAmount),
         trades: orders,
         failures: liveFailures,
         message: liveFailures.length > 0
           ? `${orders.length}건 체결 · ${liveFailures.length}건 미체결/실패. 미체결 주문은 전략 포지션과 손익에 반영하지 않았습니다.`
           : sellWasAdjusted
-          ? `${orders.length}개 코인에서 ${Math.round(totalSellAmount).toLocaleString()}원 매도 완료 (목표 ${targetAmount.toLocaleString()}원 → 최대 보유액 ${Math.round(totalHoldingValue).toLocaleString()}원으로 조절)`
-          : `${orders.length}개 코인에서 ${Math.round(totalSellAmount).toLocaleString()}원 매도 완료`
+          ? `${orders.length}개 코인에서 ${formatQuoteAmount(tradingSystem, totalSellAmount)} 매도 완료 (목표 ${formatQuoteAmount(tradingSystem, targetAmount)} → 최대 보유액 ${formatQuoteAmount(tradingSystem, totalHoldingValue)}으로 조절)`
+          : `${orders.length}개 코인에서 ${formatQuoteAmount(tradingSystem, totalSellAmount)} 매도 완료`
       }
     };
   }

@@ -297,7 +297,10 @@ async function main() {
     fs.writeFileSync(candleCacheOutputFile, JSON.stringify(capturedCandleCache), 'utf8');
     console.log(`🧾 원본 candle cache 저장: ${candleCacheOutputFile}`);
   }
-  fs.writeFileSync(outputFile, JSON.stringify(report, null, 2), 'utf8');
+  // 원자적 쓰기: 리프레시 도중 게이트/readiness 라우트가 찢긴 리포트를 읽지 않게 한다.
+  const tempOutputFile = `${outputFile}.${process.pid}.tmp`;
+  fs.writeFileSync(tempOutputFile, JSON.stringify(report, null, 2), 'utf8');
+  fs.renameSync(tempOutputFile, outputFile);
   console.log(`\n💾 검증 리포트 저장: ${outputFile}`);
   console.log(`승격 가능 마켓: ${report.promotedMarkets.length}/${markets.length}`);
   console.log(`전체 전략 승격: ${report.promoted ? '✅ 가능' : '⛔ 보류'}`);

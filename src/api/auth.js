@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { resolveExchange, quoteAssetForExchange } from '../exchange/exchangeFactory.js';
+import { quoteAmountLimits } from './manualOrderLegs.js';
 
 /**
  * Dashboard access control for the API/socket plane.
@@ -216,7 +217,7 @@ function boundedIntegerQuery(url, name, { min, max, fallback } = {}) {
 }
 
 function isMobileGetAllowed(url) {
-  if (MOBILE_READ_PATHS.has(url.pathname)) return url.searchParams.size === 0;
+  if (MOBILE_READ_PATHS.has(url.pathname) && url.searchParams.size === 0) return true;
 
   if (url.pathname === '/api/portfolio/history') {
     return queryIs(url, new Set(['period']), ['period']) &&
@@ -315,7 +316,7 @@ function isValidAiSessionBody(body) {
     (body.evaluationMinutes === undefined || isFiniteNumber(body.evaluationMinutes, 1, 1_440));
 }
 
-function isMobileRequestAllowed(req) {
+function isMobileRequestAllowed(req, quoteAsset = 'KRW') {
   let url;
   try {
     url = new URL(req.originalUrl || req.url || req.path || '/', 'http://dashboard.local');
@@ -336,6 +337,7 @@ function isMobileRequestAllowed(req) {
   }
   const requestPathname = url.pathname;
   const body = req.body;
+  const amountLimits = quoteAmountLimits({ quoteAsset });
 
   if (requestPathname === '/api/live/credentials') {
     if (!body || typeof body !== 'object' || Array.isArray(body)) return false;
@@ -357,12 +359,12 @@ function isMobileRequestAllowed(req) {
       ['BUY', 'SELL'].includes(String(body.action).toUpperCase()) && optionalPositiveNumber(body, 'amount');
   }
   if (requestPathname === '/api/trade/smart-buy') {
-    return hasOnlyKeys(body, new Set(['totalAmount', 'minScore', 'maxCoins'])) && isFiniteNumber(body.totalAmount, 5_000) &&
+    return hasOnlyKeys(body, new Set(['totalAmount', 'minScore', 'maxCoins'])) && isFiniteNumber(body.totalAmount, amountLimits.minimumBuy) &&
       (body.minScore === undefined || isFiniteNumber(body.minScore, 0, 100)) &&
       (body.maxCoins === undefined || isFiniteNumber(body.maxCoins, 1, 30));
   }
   if (requestPathname === '/api/trade/smart-sell') {
-    return hasOnlyKeys(body, new Set(['targetAmount', 'strategy'])) && isFiniteNumber(body.targetAmount, 1_000) &&
+    return hasOnlyKeys(body, new Set(['targetAmount', 'strategy'])) && isFiniteNumber(body.targetAmount, amountLimits.minimumSmartSell) &&
       (body.strategy === undefined || ['worst', 'best', 'overbought'].includes(body.strategy));
   }
   if (requestPathname === '/api/trade/execute-bundle') {
@@ -392,11 +394,12 @@ function isMobileRequestAllowed(req) {
   }
   if (requestPathname === '/api/paper-validation/start') {
     if (body === undefined) return true;
+    if (body && typeof body === 'object' && !Array.isArray(body) && Object.keys(body).length === 0) return true;
     return hasOnlyKeys(body, new Set(['reset'])) && typeof body.reset === 'boolean';
   }
-  if (requestPathname === '/api/virtual/reset') return hasOnlyKeys(body, new Set(['seedMoney'])) && isFiniteNumber(body.seedMoney, 100_000);
+  if (requestPathname === '/api/virtual/reset') return hasOnlyKeys(body, new Set(['seedMoney'])) && isFiniteNumber(body.seedMoney, amountLimits.minimumSeed);
   if (requestPathname === '/api/virtual/deposit' || requestPathname === '/api/virtual/withdraw') {
-    return hasOnlyKeys(body, new Set(['amount'])) && isFiniteNumber(body.amount, 1_000);
+    return hasOnlyKeys(body, new Set(['amount'])) && isFiniteNumber(body.amount, amountLimits.minimumWallet);
   }
   if (requestPathname === '/api/investment-presets/apply') return hasOnlyKeys(body, new Set(['presetId'])) && ['aggressive', 'conservative', 'shortterm', 'scalping', 'longterm', 'balanced'].includes(body.presetId);
   if (requestPathname === '/api/optimization/toggle') return hasOnlyKeys(body, new Set(['enabled'])) && typeof body.enabled === 'boolean';
@@ -631,7 +634,7 @@ export function createDashboardAuth(env = {}, options = {}) {
       return next();
     }
     if (safeTokenEqual(candidate, resolved.mobileToken)) {
-      if (!isMobileRequestAllowed(req)) {
+      if (!isMobileRequestAllowed(req, exchangeQuoteAsset)) {
         return res.status(403).json({
           success: false,
           error: '모바일 운영 토큰에서 허용되지 않은 요청입니다.'

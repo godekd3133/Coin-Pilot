@@ -9,16 +9,18 @@ import { createQuickUseCase } from './manualOrderQuick.js';
 import { createSmartBuyUseCase } from './manualOrderSmartBuy.js';
 import { createSmartSellUseCase } from './manualOrderSmartSell.js';
 import { createExecuteBundleUseCase } from './manualOrderBundle.js';
+import { quoteAmountMutationBlock } from './manualOrderLegs.js';
 
 export function createManualOrderService({ tradingSystem, marketDataProvider }) {
   const ctx = createManualOrderContext({ tradingSystem, marketDataProvider });
+  const supportedQuote = run => async (...args) => quoteAmountMutationBlock(tradingSystem) || run(...args);
   return {
-    execute: createExecuteUseCase(ctx),
-    buy: createBuyUseCase(ctx),
-    sell: createSellUseCase(ctx),
-    quick: createQuickUseCase(ctx),
-    smartBuy: createSmartBuyUseCase(ctx),
-    smartSell: createSmartSellUseCase(ctx),
-    executeBundle: createExecuteBundleUseCase(ctx)
+    execute: supportedQuote(createExecuteUseCase(ctx)),
+    buy: supportedQuote(createBuyUseCase(ctx)),
+    sell: supportedQuote(createSellUseCase(ctx)),
+    quick: supportedQuote(createQuickUseCase(ctx)),
+    smartBuy: supportedQuote(createSmartBuyUseCase(ctx)),
+    smartSell: supportedQuote(createSmartSellUseCase(ctx)),
+    executeBundle: supportedQuote(createExecuteBundleUseCase(ctx))
   };
 }

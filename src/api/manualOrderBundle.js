@@ -3,7 +3,9 @@
 import {
   DUST_AMOUNT_THRESHOLD,
   MANUAL_ORDER_FEE_RATE,
-  MIN_BUY_KRW,
+  quoteAmountLimits,
+  floorQuoteAmount,
+  formatQuoteAmount,
   getStrategyFor,
   liveFillFailureResult,
   readLiveHolding,
@@ -156,14 +158,15 @@ export function createExecuteBundleUseCase(ctx) {
     const requestedBuyAmount = Number(buyAmount);
     const investAmount = Number.isFinite(requestedBuyAmount) && requestedBuyAmount > 0
       ? requestedBuyAmount
-      : Math.floor(availableForBuy * 0.95);
-    if (!Number.isFinite(investAmount) || investAmount < MIN_BUY_KRW) {
+      : floorQuoteAmount(tradingSystem, availableForBuy * 0.95);
+    const { minimumBuy } = quoteAmountLimits(tradingSystem);
+    if (!Number.isFinite(investAmount) || investAmount < minimumBuy) {
       return {
         status: 400,
         body: {
           success: false,
           mode: isDryRun ? 'DRY_RUN' : 'LIVE',
-          message: '매수 금액이 최소 주문 금액(5,000원)보다 작습니다.',
+          message: `매수 금액이 최소 주문 금액(${formatQuoteAmount(tradingSystem, minimumBuy)})보다 작습니다.`,
           results
         }
       };

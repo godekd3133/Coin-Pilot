@@ -5,6 +5,7 @@ import { getMarketDataProvider, MARKET_DATA_FRESHNESS } from '../marketDataProvi
 import { readLogTail } from '../../utils/readLogTail.js';
 import { parseRecentLogErrors } from '../../utils/parseRecentLogErrors.js';
 import { quoteOfSystem } from '../../exchange/marketCodes.js';
+import { roundQuoteAmount, floorQuoteAmount } from '../manualOrderLegs.js';
 
 // 상태·요약·분석 read-model 라우트 — DashboardServer의 인라인 핸들러에서 추출.
 // 서버 소유 상태(tradingSystem, 캐시, logger)는 server 파라미터를 통해 접근한다.
@@ -159,10 +160,10 @@ export default function createStatusRoutes(server) {
         totalTrades: buyCount + sellCount,
         buyCount,
         sellCount,
-        totalBuyAmount: Math.round(totalBuyAmount),
-        totalSellAmount: Math.round(totalSellAmount),
-        netFlow: Math.round(totalSellAmount - totalBuyAmount),
-        realizedProfit: Math.round(realizedProfit),
+        totalBuyAmount: roundQuoteAmount(server.tradingSystem, totalBuyAmount),
+        totalSellAmount: roundQuoteAmount(server.tradingSystem, totalSellAmount),
+        netFlow: roundQuoteAmount(server.tradingSystem, totalSellAmount - totalBuyAmount),
+        realizedProfit: roundQuoteAmount(server.tradingSystem, realizedProfit),
         trades: todayTrades.slice(0, 10)
       });
     } catch (error) {
@@ -254,9 +255,9 @@ export default function createStatusRoutes(server) {
             amount: holding.amount,
             avgPrice: holding.avgPrice,
             currentPrice,
-            currentValue: currentValue === null ? null : Math.round(currentValue),
-            costBasis: Math.round(costBasis),
-            profit: profit === null ? null : Math.round(profit),
+            currentValue: currentValue === null ? null : roundQuoteAmount(server.tradingSystem, currentValue),
+            costBasis: roundQuoteAmount(server.tradingSystem, costBasis),
+            profit: profit === null ? null : roundQuoteAmount(server.tradingSystem, profit),
             profitPercent: profitPercent === null ? null : profitPercent.toFixed(2),
             change24h: change24hAvailable
               ? (Number(change24h) * 100).toFixed(2)
@@ -303,17 +304,17 @@ export default function createStatusRoutes(server) {
         holdings: byWeight,
         summary: {
           totalHoldings: holdings.length,
-          totalValue: totalValue === null ? null : Math.round(totalValue),
-          totalCost: Math.round(totalCost),
-          totalProfit: totalValue === null ? null : Math.round(totalValue - totalCost),
+          totalValue: totalValue === null ? null : roundQuoteAmount(server.tradingSystem, totalValue),
+          totalCost: roundQuoteAmount(server.tradingSystem, totalCost),
+          totalProfit: totalValue === null ? null : roundQuoteAmount(server.tradingSystem, totalValue - totalCost),
           totalProfitPercent: totalValue !== null && totalCost > 0
             ? (((totalValue / totalCost) - 1) * 100).toFixed(2)
             : null,
-          krwBalance: Math.round(krwBalance),
+          krwBalance: roundQuoteAmount(server.tradingSystem, krwBalance),
           krwWeight: totalAssets !== null && totalAssets > 0
             ? ((krwBalance / totalAssets) * 100).toFixed(1)
             : null,
-          totalAssets: totalAssets === null ? null : Math.round(totalAssets),
+          totalAssets: totalAssets === null ? null : roundQuoteAmount(server.tradingSystem, totalAssets),
           valuationAvailable,
           valuationStatus: valuationAvailable
             ? 'available'
@@ -340,34 +341,66 @@ export default function createStatusRoutes(server) {
     try {
       const coin = req.params.coin;
 
-      // 현재가 조회
-      let ticker = null;
-      let currentPrice = 0;
+      const tradingSystem = server.tradingSystem;
+      let marketSnapshot = {
+        tickers: [], freshPriceMap: new Map(), staleMarkets: [],
+        sourceAsOfByMarket: new Map(), fetchedAtByMarket: new Map()
+      };
       try {
-        ticker = await getMarketDataProvider(server).getTickers(coin, {
+        marketSnapshot = await getMarketDataProvider(server).getSnapshot([coin], {
           freshness: MARKET_DATA_FRESHNESS.FRESH
         });
-        currentPrice = ticker?.[0]?.trade_price || 0;
       } catch (tickerErr) {
         console.error(`[coin-detail] 현재가 조회 실패 (${coin}):`, tickerErr.message);
-        // 현재가 조회 실패해도 계속 진행
       }
+      const ticker = marketSnapshot.tickers.find(row => row.market === coin);
+      const currentPrice = marketSnapshot.freshPriceMap.get(coin) ?? null;
+      const quoteAvailable = Number.isFinite(currentPrice) && currentPrice > 0;
 
-      // 보유 정보
-      const holding = server.tradingSystem.virtualPortfolio?.holdings?.get(coin);
-      const holdingAmount = holding?.amount || 0;
-      const avgPrice = holding?.avgPrice || 0;
-      const holdingValue = holdingAmount * currentPrice;
-      const costBasis = holdingAmount * avgPrice;
-      const profit = holdingValue - costBasis;
-      const profitPercent = costBasis > 0 ? ((holdingValue / costBasis) - 1) * 100 : 0;
+      let holdingAmount = null;
+      let avgPrice = null;
+      let krwBalance = null;
+      let accountAvailable = false;
+      try {
+        if (tradingSystem.dryRun === true) {
+          const holdings = tradingSystem.virtualPortfolio?.holdings;
+          const holding = holdings instanceof Map ? holdings.get(coin) : holdings?.[coin];
+          holdingAmount = Number(holding?.amount ?? 0);
+          avgPrice = Number(holding?.avgPrice ?? 0);
+          krwBalance = Number(tradingSystem.virtualPortfolio?.krwBalance);
+        } else {
+          const accounts = typeof server.getObserverCachedAccountInfo === 'function'
+            ? await server.getObserverCachedAccountInfo()
+            : await tradingSystem.getAccountInfo();
+          if (!Array.isArray(accounts)) throw new TypeError('Account data is unavailable.');
+          const holding = accounts.find(row => row.currency === coin.split('-')[1]);
+          holdingAmount = Number(holding?.balance ?? 0);
+          avgPrice = Number(holding?.avg_buy_price ?? 0);
+          krwBalance = Number(tradingSystem.getKRWBalance(accounts));
+        }
+        accountAvailable = Number.isFinite(holdingAmount) && holdingAmount >= 0 &&
+          Number.isFinite(krwBalance) && krwBalance >= 0;
+      } catch (accountError) {
+        server.logApiError?.('/api/coin-detail/account', accountError);
+      }
+      if (!accountAvailable) {
+        holdingAmount = null;
+        avgPrice = null;
+        krwBalance = null;
+      }
+      const valuationAvailable = accountAvailable && quoteAvailable;
+      const holdingValue = valuationAvailable ? holdingAmount * currentPrice : null;
+      const costBasis = accountAvailable && (holdingAmount === 0 || (Number.isFinite(avgPrice) && avgPrice > 0))
+        ? holdingAmount * avgPrice : null;
+      const profit = holdingValue !== null && costBasis !== null ? holdingValue - costBasis : null;
+      const profitPercent = profit !== null && costBasis > 0 ? (profit / costBasis) * 100 : null;
 
       // 캔들 데이터로 기술적 분석
       let analysis = null;
       try {
         const candles = await getMarketDataProvider(server).getMinuteCandles(coin, 5, 50);
         if (candles?.length >= 30) {
-          const { comprehensiveAnalysis } = await import('../analysis/technicalIndicators.js');
+          const { comprehensiveAnalysis } = await import('../../analysis/technicalIndicators.js');
           analysis = comprehensiveAnalysis(candles, {});
         }
       } catch (candleErr) {
@@ -375,35 +408,48 @@ export default function createStatusRoutes(server) {
         // 캔들 조회 실패해도 계속 진행
       }
 
-      // KRW 잔액
-      const krwBalance = server.tradingSystem.dryRun
-        ? (server.tradingSystem.virtualPortfolio?.krwBalance || 0)
-        : 0;
+      const finiteValue = value => {
+        if (value === undefined || value === null || value === '') return null;
+        const numeric = Number(value);
+        return Number.isFinite(numeric) ? numeric : null;
+      };
+      const fixedIndicator = (value, digits) => finiteValue(value)?.toFixed(digits) ?? null;
+      const bands = analysis?.indicators?.bollingerBands;
+      const upper = finiteValue(bands?.upper);
+      const lower = finiteValue(bands?.lower);
+      const bandCurrent = finiteValue(bands?.current);
+      const percentB = upper !== null && lower !== null && bandCurrent !== null && upper > lower
+        ? (bandCurrent - lower) / (upper - lower) : null;
 
       res.json({
         coin,
         symbol: coin.split('-')[1],
         currentPrice,
-        change24h: ticker?.[0]?.signed_change_rate ? (ticker[0].signed_change_rate * 100).toFixed(2) : '0',
-        high24h: ticker?.[0]?.high_price || 0,
-        low24h: ticker?.[0]?.low_price || 0,
-        volume24h: ticker?.[0]?.acc_trade_price_24h || 0,
+        valuationAvailable,
+        valuationStatus: valuationAvailable ? 'available' : marketSnapshot.staleMarkets.length > 0 ? 'stale' : 'unavailable',
+        accountAvailable,
+        sourceAsOf: marketSnapshot.sourceAsOfByMarket.get(coin) ?? null,
+        fetchedAt: marketSnapshot.fetchedAtByMarket.get(coin) ?? null,
+        change24h: quoteAvailable ? fixedIndicator(finiteValue(ticker?.signed_change_rate) === null ? null : ticker.signed_change_rate * 100, 2) : null,
+        high24h: quoteAvailable ? finiteValue(ticker?.high_price) : null,
+        low24h: quoteAvailable ? finiteValue(ticker?.low_price) : null,
+        volume24h: quoteAvailable ? finiteValue(ticker?.acc_trade_price_24h) : null,
         holding: {
           amount: holdingAmount,
           avgPrice,
-          currentValue: Math.round(holdingValue),
-          costBasis: Math.round(costBasis),
-          profit: Math.round(profit),
-          profitPercent: profitPercent.toFixed(2)
+          currentValue: holdingValue === null ? null : roundQuoteAmount(tradingSystem, holdingValue),
+          costBasis: costBasis === null ? null : roundQuoteAmount(tradingSystem, costBasis),
+          profit: profit === null ? null : roundQuoteAmount(tradingSystem, profit),
+          profitPercent: profitPercent === null ? null : profitPercent.toFixed(2)
         },
         indicators: analysis?.indicators ? {
-          rsi: analysis.indicators.rsi?.toFixed(1) || '-',
-          macd: analysis.indicators.macd?.histogram?.toFixed(2) || '-',
-          bb: analysis.indicators.bollingerBands?.percentB?.toFixed(2) || '-'
+          rsi: fixedIndicator(analysis.indicators.rsi, 1),
+          macd: fixedIndicator(analysis.indicators.macd?.histogram, 2),
+          bb: fixedIndicator(percentB, 2)
         } : null,
-        krwBalance: Math.round(krwBalance),
-        maxBuyAmount: Math.floor(krwBalance * 0.95),
-        maxSellAmount: Math.round(holdingValue)
+        krwBalance: krwBalance === null ? null : roundQuoteAmount(tradingSystem, krwBalance),
+        maxBuyAmount: valuationAvailable ? floorQuoteAmount(tradingSystem, krwBalance * 0.95) : null,
+        maxSellAmount: holdingValue === null ? null : roundQuoteAmount(tradingSystem, holdingValue)
       });
     } catch (error) {
       console.error(`[coin-detail] 전체 오류:`, error);

@@ -1,8 +1,59 @@
+import { quoteOfSystem } from '../exchange/marketCodes.js';
+
 // 수동 주문 leg 프리미티브 — manualOrderService.js에서 추출.
 // DRY 포트폴리오·전략 반영, LIVE 실패 결과, 잔고 조회. 상태 없음.
 export const MANUAL_ORDER_FEE_RATE = 0.0005;
 export const DUST_AMOUNT_THRESHOLD = 0.00000001;
-export const MIN_BUY_KRW = 5000;
+const AMOUNT_QUOTE_ASSETS = new Set(['KRW', 'USDT', 'USDC', 'FDUSD', 'TUSD']);
+
+export function quoteAmountMutationBlock(system) {
+  const quoteCurrency = quoteOfSystem(system);
+  if (AMOUNT_QUOTE_ASSETS.has(quoteCurrency)) return null;
+  return {
+    status: 400,
+    body: {
+      success: false,
+      code: 'UNSUPPORTED_AMOUNT_CURRENCY',
+      quoteCurrency,
+      error: `${quoteCurrency} 기준 통화에서는 금액을 입력하는 주문과 모의 잔액 변경을 지원하지 않습니다. 조회 기능을 이용해 주세요.`
+    }
+  };
+}
+
+export function quoteAmountLimits(system) {
+  return quoteOfSystem(system) === 'KRW'
+    ? {
+      minimumBuy: 5_000, minimumSmartSell: 1_000, minimumWallet: 1_000,
+      minimumSeed: 100_000, maximumDeposit: 100_000_000,
+      defaultBuy: 50_000, defaultSeed: 10_000_000
+    }
+    : {
+      minimumBuy: 5, minimumSmartSell: 5, minimumWallet: 1,
+      minimumSeed: 100, maximumDeposit: 100_000_000,
+      defaultBuy: 50, defaultSeed: 10_000
+    };
+}
+
+// Exchange filters remain authoritative for LIVE orders. These helpers keep
+// dashboard amounts in the configured quote without truncating non-KRW funds.
+export function floorQuoteAmount(system, amount) {
+  return quoteOfSystem(system) === 'KRW' ? Math.floor(amount) : amount;
+}
+
+export function roundQuoteAmount(system, amount) {
+  return quoteOfSystem(system) === 'KRW' ? Math.round(amount) : amount;
+}
+
+export function parseQuoteAmount(system, value) {
+  if (typeof value !== 'number' && typeof value !== 'string') return NaN;
+  return floorQuoteAmount(system, Number(value));
+}
+
+export function formatQuoteAmount(system, amount) {
+  const quote = quoteOfSystem(system);
+  const value = Number(amount).toLocaleString('ko-KR', { maximumFractionDigits: quote === 'KRW' ? 0 : 8 });
+  return quote === 'KRW' ? `${value}원` : `${value} ${quote}`;
+}
 
 
 export function getStrategyFor(tradingSystem, coin) {

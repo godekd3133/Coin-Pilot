@@ -509,7 +509,7 @@ test('coin detail and bundle suggestions read from the injected source without a
       return [{
         market: 'KRW-BTC', trade_price: 101, signed_change_rate: 0.01,
         high_price: 102, low_price: 99, acc_trade_price_24h: 100_000,
-        trade_timestamp: Date.parse(sourceAsOf)
+        trade_timestamp: Date.now()
       }];
     },
     async getMinuteCandles(market, unit, count) {
@@ -560,7 +560,7 @@ test('coin detail and bundle suggestions read from the injected source without a
     assert.equal(response.statusCode, 200);
     assert.equal(response.body.currentPrice, 101);
     assert.deepEqual(sourceCalls, [
-      ['ticker', 'KRW-BTC'],
+      ['ticker', ['KRW-BTC']],
       ['candles', 'KRW-BTC', 5, 50]
     ]);
 

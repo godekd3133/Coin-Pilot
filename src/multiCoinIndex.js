@@ -9,6 +9,7 @@ import Logger from './utils/logger.js';
 import { loadEnv, formatEnvErrors, formatEnvWarnings } from './config/envLoader.js';
 import { runAfterDashboardReady as runAfterDashboardReadyDefault } from './runtime/dashboardStartup.js';
 import { acquireHeadlessRuntimeWriterLock, setupExitHandlers } from './runtime/exitHandlers.js';
+import { createAutoRecoverySupervisor } from './runtime/autoRecoverySupervisor.js';
 import { createProfileWriterStartup } from './runtime/profileWriterStartup.js';
 import { derivePublicMarketSnapshotFilePath } from './runtime/profileStoragePlan.js';
 
@@ -55,7 +56,13 @@ function createConfig(env) {
     dryRun: env.DRY_RUN !== false,
     logLevel: env.LOG_LEVEL || 'info',
     enableDashboard: env.ENABLE_DASHBOARD !== false,
-    dashboardPort: env.DASHBOARD_PORT || 3000
+    dashboardPort: env.DASHBOARD_PORT || 3000,
+
+    autoRecoveryEnabled: env.AUTO_RECOVERY_ENABLED !== false,
+    autoRecoveryProbeIntervalMs: env.AUTO_RECOVERY_PROBE_INTERVAL_MS,
+    autoRecoveryMinDownMs: env.AUTO_RECOVERY_MIN_DOWN_MS,
+    autoRecoveryHealthyProbes: env.AUTO_RECOVERY_HEALTHY_PROBES,
+    autoRecoveryStateFile: env.AUTO_RECOVERY_STATE_FILE
   };
 }
 
@@ -179,6 +186,11 @@ export async function runLegacyMultiCoinRuntime(config, dependencies = {}) {
       });
       activeExitHandlers = exitHandlers;
       runtimeLifecycleInstalled = true;
+
+      const autoRecovery = createAutoRecoverySupervisor(trader, config);
+      trader.autoRecovery = autoRecovery;
+      autoRecovery.start();
+      autoRecovery.noteDesiredRunning(true, 'boot_start');
 
       consoleApi.log('\n⏱️  3초 후 시작합니다...');
       const waitBeforeTraderStart = dependencies.waitBeforeTraderStart ||

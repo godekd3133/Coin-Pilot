@@ -848,7 +848,8 @@ test('LIVE risk-data gap pauses entries, retries quotes, and allows one protecte
     manualProtectionActive: false,
     protectiveMonitorActive: true,
     stopReason: 'risk_data_gap',
-    exchangeStateKnown: true
+    exchangeStateKnown: true,
+    autoRecovery: null
   });
   const drainWait = trader.waitForProtectiveDrain();
 
@@ -942,7 +943,8 @@ test('LIVE risk-data gap pauses entries, retries quotes, and allows one protecte
     manualProtectionActive: false,
     protectiveMonitorActive: false,
     stopReason: 'risk_data_gap',
-    exchangeStateKnown: true
+    exchangeStateKnown: true,
+    autoRecovery: null
   });
   assert.equal(await drainWait, true);
 });

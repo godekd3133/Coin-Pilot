@@ -7,6 +7,10 @@ private actor DeferredCoinPilotAPI: CoinPilotAPIProviding {
     private var heldFeaturePaths: Set<String>
     private var marketRows: [[String: Any]]
     private var marketSnapshotOverride: [String: Any]?
+    private var readResponseOverrides: [String: CoinPilotHTTPResponse] = [:]
+    private var heldMutationPaths: Set<String> = []
+    private var pendingMutations: [String: CheckedContinuation<CoinPilotHTTPResponse, Error>] = [:]
+    private var mutationWaiters: [String: CheckedContinuation<Void, Never>] = [:]
     private let requiresAuth: Bool
     private let statusOverride: [String: Any]
     private var loginTokenScope: String?
@@ -23,6 +27,7 @@ private actor DeferredCoinPilotAPI: CoinPilotAPIProviding {
     private var readTokens: [String?] = []
     private var readPaths: [String] = []
     private var mutationPaths: [String] = []
+    private var mutationBodies: [[String: Any]] = []
     private var failedPaths: Set<String> = []
     private var cancelledPaths: Set<String> = []
     private var upbitCredentialsConfigured: Bool?
@@ -93,6 +98,7 @@ private actor DeferredCoinPilotAPI: CoinPilotAPIProviding {
                 marketReadWaiters.removeValue(forKey: path)?.resume()
             }
         }
+        if let response = readResponseOverrides[path] { return response }
         return Self.readResponse(
             path: path,
             totalAssets: host == "first.example" ? 1111 : 2222,
@@ -136,7 +142,29 @@ private actor DeferredCoinPilotAPI: CoinPilotAPIProviding {
     ) async throws -> CoinPilotHTTPResponse {
         networkCalls += 1
         mutationPaths.append(path)
+        mutationBodies.append(body)
+        let key = "\(serverURL.host ?? "")\(path)"
+        if heldMutationPaths.contains(path) {
+            return try await withCheckedThrowingContinuation { continuation in
+                pendingMutations[key] = continuation
+                mutationWaiters.removeValue(forKey: key)?.resume()
+            }
+        }
         return Self.response(["success": true])
+    }
+
+    func setHeldMutationPaths(_ paths: Set<String>) { heldMutationPaths = paths }
+
+    func waitForHeldMutation(host: String, path: String) async {
+        let key = "\(host)\(path)"
+        if pendingMutations[key] != nil { return }
+        await withCheckedContinuation { continuation in mutationWaiters[key] = continuation }
+    }
+
+    func releaseHeldMutation(host: String, path: String, fails: Bool = false) {
+        let continuation = pendingMutations.removeValue(forKey: "\(host)\(path)")
+        if fails { continuation?.resume(throwing: CoinPilotAPIError.connection) }
+        else { continuation?.resume(returning: Self.response(["success": true])) }
     }
 
     func waitForHeldAccount(host: String) async {
@@ -184,6 +212,7 @@ private actor DeferredCoinPilotAPI: CoinPilotAPIProviding {
     func recordedReadTokens() -> [String?] { readTokens }
     func recordedReadPaths() -> [String] { readPaths }
     func recordedMutationPaths() -> [String] { mutationPaths }
+    func recordedMutationBodies() -> [[String: Any]] { mutationBodies }
     func recordedCredentialSubmissions() -> [[String: String]] { credentialSubmissions }
     func recordedCredentialSubmissionURLs() -> [String] { credentialSubmissionURLs }
     func recordedCredentialSubmissionTokens() -> [String?] { credentialSubmissionTokens }
@@ -195,6 +224,9 @@ private actor DeferredCoinPilotAPI: CoinPilotAPIProviding {
     func setHeldFeaturePaths(_ paths: Set<String>) { heldFeaturePaths = paths }
     func setMarketRows(_ rows: [[String: Any]]) { marketRows = rows }
     func setMarketSnapshot(_ snapshot: [String: Any]) { marketSnapshotOverride = snapshot }
+    func setReadResponse(path: String, body: Any, statusCode: Int = 200) {
+        readResponseOverrides[path] = Self.response(body, statusCode: statusCode)
+    }
 
     private static func readResponse(
         path: String,
@@ -438,6 +470,14 @@ struct CoinPilotStoreTests {
         try await featureRefreshCoalescesAndDiscardsResponsesAfterLogout()
         try await forcedFeatureRefreshRunsAfterAnInFlightAutomaticRefresh()
         try await detailFeatureGroupsRefreshIndependentlyByTTL()
+        try await portfolioSnapshotReloadsTheSelectedHistoryPeriod()
+        try await optimizationPartialRefreshPreservesSuccessfulTimeAndRetries()
+        try await latePendingOrderResultsCannotAlterAnotherServer()
+        try await lateMutationFailureCannotRepopulateLoggedOutScreen()
+        try await quoteCurrencyAmountsUseTheMatchingMinimumAndPreserveDecimals()
+        try await unsupportedQuoteCurrencyBlocksOnlyOrdersAndPaperWallet()
+        try await tuningEditableNumbersReachTheServerWithoutChangingDecimals()
+        try coinDetailPreservesUnknownValuationAndFiniteLosses()
         try await latestMarketDetailRequestWins()
         try localMarketPackRejectsInvalidData()
         try await bundledLocalMarketModeIsStrictReadOnlyAndOffline()
@@ -460,8 +500,356 @@ struct CoinPilotStoreTests {
         try await incompleteMarketSnapshotKeepsPricesVisibleAndMarksStale()
         try await staleMarketListAndInvalidFetchedAtNeverMarkCurrent()
         try chartAxisAndPositionFormattingStayNullSafe()
+        try percentFormattingPreservesSmallChanges()
         try await bundledServerDefaultsConnectAndOperateWithoutAuth()
-        print("CoinPilotStore: 40 scenarios passed")
+        print("CoinPilotStore: 51 scenarios passed")
+    }
+
+    private static func coinDetailPreservesUnknownValuationAndFiniteLosses() throws {
+        let fresh = CoinPilotCoinDetail([
+            "coin": "KRW-BTC", "currentPrice": 111,
+            "holding": ["amount": 1, "avgPrice": 120, "currentValue": 111, "profit": -9, "profitPercent": -7.5]
+        ])!
+        precondition(fresh.hasHolding && fresh.currentPrice == 111 && fresh.holdingValue == 111 &&
+                     fresh.holdingProfit == -9 && fresh.holdingProfitPercent == -7.5,
+                     "A current valuation must preserve both its value and a real negative holding profit.")
+
+        let stale = CoinPilotCoinDetail([
+            "coin": "KRW-BTC", "currentPrice": NSNull(),
+            "holding": ["amount": 1, "avgPrice": 120, "currentValue": NSNull(), "profit": NSNull(), "profitPercent": NSNull()]
+        ])!
+        let staleValue: Double? = stale.holdingValue
+        let staleProfit: Double? = stale.holdingProfit
+        precondition(stale.hasHolding && stale.currentPrice == nil && stale.holdingAvgPrice == 120 &&
+                     staleValue == nil && staleProfit == nil && stale.holdingProfitPercent == nil,
+                     "A stale holding remains present but an unavailable valuation or profit must not become zero.")
+
+        let missing = CoinPilotCoinDetail(["coin": "KRW-BTC", "holding": ["amount": 1]])!
+        let missingValue: Double? = missing.holdingValue
+        let missingProfit: Double? = missing.holdingProfit
+        precondition(missingValue == nil && missingProfit == nil,
+                     "Older coin-detail responses with no valuation fields must also remain unknown.")
+
+        let zero = CoinPilotCoinDetail([
+            "coin": "KRW-BTC", "holding": ["amount": 0, "currentValue": 0, "profit": 0]
+        ])!
+        precondition(zero.holdingValue == 0 && zero.holdingProfit == 0,
+                     "An explicitly known zero must remain distinct from an unavailable value.")
+
+        let invalid = CoinPilotCoinDetail([
+            "coin": "USDT-BTC", "currentPrice": "NaN", "change24h": "Infinity", "high24h": "Infinity",
+            "low24h": "-Infinity", "volume24h": "NaN", "krwBalance": "Infinity", "maxBuyAmount": "NaN",
+            "maxSellAmount": "Infinity",
+            "holding": ["amount": "NaN", "avgPrice": "Infinity", "currentValue": "NaN", "profit": "-Infinity", "profitPercent": "Infinity"],
+            "indicators": ["rsi": "NaN", "macd": "Infinity", "bb": "-Infinity"]
+        ])!
+        let invalidValue: Double? = invalid.holdingValue
+        let invalidProfit: Double? = invalid.holdingProfit
+        precondition(invalid.currentPrice == nil && invalid.change24hPercent == nil && invalid.high24h == nil &&
+                     invalid.low24h == nil && invalid.volume24h == nil && invalid.krwBalance == nil &&
+                     invalid.maxBuyAmount == nil && invalid.maxSellAmount == nil && invalidValue == nil &&
+                     invalidProfit == nil && invalid.holdingProfitPercent == nil && invalid.rsi == nil &&
+                     invalid.macdHistogram == nil && invalid.bollingerPercentB == nil && !invalid.hasHolding,
+                     "No coin-detail numeric field may expose NaN or Infinity as a usable number.")
+    }
+
+    private static func portfolioSnapshotReloadsTheSelectedHistoryPeriod() async throws {
+        let api = DeferredCoinPilotAPI(isReadOnlyObserver: false)
+        let store = CoinPilotStore(api: api, tokens: MemoryCoinPilotTokens(), configuredDataMode: "server")
+        let connected = await store.connect(using: "https://snapshot-reload.example")
+        precondition(connected && store.canOperate, "Snapshot testing requires an operable fake server.")
+        await store.setHistoryPeriod(.week)
+        precondition(store.history.isEmpty, "The fake server starts with no asset records.")
+        let historyPath = "/api/portfolio/history?period=7d"
+        let initialReads = await api.recordedReadPaths().filter { $0 == historyPath }.count
+        await api.setReadResponse(path: historyPath, body: [
+            "data": [["timestamp": "2026-10-05T10:00:00.000Z", "totalAssets": 2222]],
+            "period": "7d", "count": 1
+        ])
+
+        let recorded = await store.recordPortfolioSnapshot()
+        let refreshedReads = await api.recordedReadPaths().filter { $0 == historyPath }.count
+        let mutations = await api.recordedMutationPaths()
+        precondition(recorded && mutations == ["/api/portfolio/snapshot"],
+                     "Saving an asset snapshot should issue one mutation and report that save result.")
+        precondition(refreshedReads == initialReads + 1 && store.history.count == 1 &&
+                     store.history.first?.totalAssets == 2222 && store.historyPeriod == .week,
+                     "Saving a snapshot must immediately reload the visible period even when it is unchanged.")
+
+        await api.setFailedPaths([historyPath])
+        let secondRecorded = await store.recordPortfolioSnapshot()
+        precondition(secondRecorded && store.history.count == 1 && store.isResourceStale("portfolio-history"),
+                     "A saved snapshot remains successful when its follow-up read fails; keep the last chart and mark it stale.")
+    }
+
+    private static func optimizationPartialRefreshPreservesSuccessfulTimeAndRetries() async throws {
+        var currentNow = Date(timeIntervalSince1970: 1_800_000_000)
+        let api = DeferredCoinPilotAPI(isReadOnlyObserver: false)
+        let store = CoinPilotStore(
+            api: api, tokens: MemoryCoinPilotTokens(), configuredDataMode: "server", now: { currentNow }
+        )
+        let connected = await store.connect(using: "https://optimization-partial-refresh.example")
+        precondition(connected && store.canOperate, "Optimization testing requires an operable fake server.")
+        let initiallyLoaded = await store.loadOptimization()
+        precondition(initiallyLoaded && store.featureLastSuccessfulAt["optimization"] == currentNow,
+                     "An initial complete optimization read should establish its successful fetch time.")
+
+        for failedPath in ["/api/optimization-history", "/api/backtest/results", "/api/optimal-config", "/api/investment-presets"] {
+            let lastSuccessfulAt = store.featureLastSuccessfulAt["optimization"]
+            currentNow = currentNow.addingTimeInterval(301)
+            await api.setFailedPaths([failedPath])
+            let loaded = await store.loadOptimizationIfStale()
+            precondition(!loaded && store.featureLastSuccessfulAt["optimization"] == lastSuccessfulAt &&
+                         store.featureMessages["optimization"] != nil,
+                         "A failed optimization detail must preserve the last complete fetch time and expose the refresh failure.")
+            precondition(!store.optimizationHistory.isEmpty && !store.backtestResults.isEmpty &&
+                         !store.optimalConfig.isEmpty && !store.investmentPresets.isEmpty,
+                         "A partial optimization refresh must retain each last-good detail.")
+            let readCountAfterFailure = await api.recordedReadPaths().filter { $0 == failedPath }.count
+            await api.setFailedPaths([])
+            let recovered = await store.loadOptimizationIfStale()
+            let readCountAfterRecovery = await api.recordedReadPaths().filter { $0 == failedPath }.count
+            precondition(recovered && readCountAfterRecovery == readCountAfterFailure + 1 &&
+                         store.featureLastSuccessfulAt["optimization"] == currentNow &&
+                         store.featureMessages["optimization"] == nil,
+                         "An incomplete group should retry immediately after the connection recovers instead of waiting five minutes.")
+        }
+    }
+
+    private static func latePendingOrderResultsCannotAlterAnotherServer() async throws {
+        let path = "/api/virtual/deposit"
+        for fails in [false, true] {
+            let api = DeferredCoinPilotAPI(statusOverride: ["isRunning": false], isReadOnlyObserver: false)
+            let pendingOrders = CoinPilotMemoryPendingOrderStore()
+            let store = CoinPilotStore(
+                api: api, tokens: MemoryCoinPilotTokens(), configuredDataMode: "server", pendingOrderStore: pendingOrders
+            )
+            let firstURL = URL(string: "https://order-old.example")!
+            let secondURL = URL(string: "https://order-new.example")!
+            let connected = await store.connect(using: firstURL.absoluteString)
+            precondition(connected && store.paperWalletBlockReason == nil, "The old fake wallet should be operable.")
+            await api.setHeldMutationPaths([path])
+            let oldOrder = Task { await store.updatePaperWallet(amount: 1_000, deposit: true) }
+            await api.waitForHeldMutation(host: "order-old.example", path: path)
+            precondition(store.pendingManualOrderLocked && store.isSubmittingManualOrder,
+                         "The old request must retain its durable pending state while the response is held.")
+
+            let switched = await store.connect(using: secondURL.absoluteString)
+            precondition(switched && store.canOperate, "Connecting a different fake server should establish a new request context.")
+            await api.releaseHeldMutation(host: "order-old.example", path: path, fails: fails)
+            let oldResult = await oldOrder.value
+            precondition(!oldResult && store.phase == .dashboard && store.pendingManualOrder == nil &&
+                         !store.pendingManualOrderLocked && !store.isSubmittingManualOrder && store.orderMessage == nil,
+                         "A late success or connection failure from the old server must not change the new server's order state.")
+            guard case .saved = pendingOrders.read(for: firstURL) else {
+                preconditionFailure("The old server's pending record must remain available for idempotent result recovery.")
+            }
+            guard case .missing = pendingOrders.read(for: secondURL) else {
+                preconditionFailure("The old response must not create a pending record for the new server.")
+            }
+            let restored = CoinPilotStore(
+                api: api, tokens: MemoryCoinPilotTokens(), configuredDataMode: "server", pendingOrderStore: pendingOrders
+            )
+            let restoredConnection = await restored.connect(using: firstURL.absoluteString)
+            precondition(restoredConnection && restored.pendingManualOrderLocked && restored.pendingManualOrder != nil,
+                         "Returning to the original server must offer recovery of the exact stored request.")
+        }
+    }
+
+    private static func lateMutationFailureCannotRepopulateLoggedOutScreen() async throws {
+        for path in ["/api/portfolio/snapshot", "/api/control/start", "/api/config/update"] {
+            let api = DeferredCoinPilotAPI(statusOverride: ["isRunning": false], isReadOnlyObserver: false)
+            let store = CoinPilotStore(api: api, tokens: MemoryCoinPilotTokens(), configuredDataMode: "server")
+            let host = "mutation-logout.example"
+            let connected = await store.connect(using: "https://\(host)")
+            precondition(connected && store.canOperate, "The fake mutation requires an operable server.")
+            await api.setHeldMutationPaths([path])
+            let mutation = Task {
+                switch path {
+                case "/api/portfolio/snapshot": return await store.recordPortfolioSnapshot()
+                case "/api/control/start": return await store.setAutomationRunning(true)
+                default: return await store.saveTuning(["rsiOversold": 30])
+                }
+            }
+            await api.waitForHeldMutation(host: host, path: path)
+            store.logOut()
+            await api.releaseHeldMutation(host: host, path: path, fails: true)
+            let result = await mutation.value
+            precondition(!result && store.phase == .login && store.featureMessages.isEmpty &&
+                         store.dashboardMessage == nil && store.tuningMessage == nil,
+                         "A failed mutation from the logged-out request context must not repopulate the cleared screen.")
+        }
+    }
+
+    private static func quoteCurrencyAmountsUseTheMatchingMinimumAndPreserveDecimals() async throws {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let timestamp = formatter.string(from: Date())
+        for quote in ["USDT", "USDC", "FDUSD", "TUSD", "KRW"] {
+            let isKRW = quote == "KRW"
+            let coin = "\(quote)-BTC"
+            let buyCoin = "\(quote)-ETH"
+            let api = DeferredCoinPilotAPI(
+                marketRows: [
+                    ["coin": coin, "price": isKRW ? 60_000_000 : 60_000, "sourceAsOf": timestamp, "fetchedAt": timestamp],
+                    ["coin": buyCoin, "price": isKRW ? 3_000_000 : 3_000, "sourceAsOf": timestamp, "fetchedAt": timestamp]
+                ],
+                statusOverride: ["exchange": isKRW ? "upbit" : "binance", "quoteCurrency": quote, "isRunning": false],
+                isReadOnlyObserver: false
+            )
+            await api.setReadResponse(path: "/api/account", body: [
+                "krwBalance": isKRW ? 1_000_000 : 1_000, "totalAssets": isKRW ? 2_200_000 : 2_200,
+                "mode": "DRY_RUN", "readOnlyObserver": false, "valuationAvailable": true,
+                "positions": [["coin": coin, "amount": 0.02, "currentPrice": isKRW ? 60_000_000 : 60_000,
+                               "currentValue": isKRW ? 1_200_000 : 1_200]]
+            ])
+            let store = CoinPilotStore(api: api, tokens: MemoryCoinPilotTokens(), configuredDataMode: "server")
+            let connected = await store.connect(using: "https://quote-amount-\(quote.lowercased()).example")
+            precondition(connected && store.quoteCurrency == quote && store.manualOrderBlockReason(for: coin) == nil,
+                         "The test must use the server's verified quote currency and fresh fake quotes.")
+            if isKRW {
+                precondition(CoinPilotFormatting.won(5_000) == "₩5,000" &&
+                             CoinPilotFormatting.signedWon(-5) == "−₩5" &&
+                             CoinPilotFormatting.price(0.125) == "₩0.125",
+                             "KRW amounts and prices must retain their existing won symbol and precision.")
+            } else {
+                precondition(CoinPilotFormatting.won(5.75) == "$5.75" &&
+                             CoinPilotFormatting.signedWon(0.000125) == "+$0.000125" &&
+                             CoinPilotFormatting.price(60_000.125) == "$60,000.125",
+                             "Stablecoin amounts, small profit, and prices must retain meaningful decimals on screen.")
+            }
+
+            let buyAmount = isKRW ? 5_000.75 : 5.75
+            let smartBuyAmount = isKRW ? 10_000.75 : 10.75
+            let smartSellAmount = isKRW ? 2_000.25 : 5.25
+            let recommendationAmount = isKRW ? 7_000.375 : 7.375
+            let bundleAmount = isKRW ? 8_000.25 : 8.25
+            let depositAmount = isKRW ? 1_000.75 : 1.75
+            let withdrawAmount = isKRW ? 1_000.25 : 1.25
+            let seedAmount = isKRW ? 100_000.125 : 100.125
+            var results: [Bool] = []
+            results.append(await store.submitManualBuy(coin: coin, amount: buyAmount))
+            results.append(await store.submitSmartBuy(totalAmount: smartBuyAmount, minimumScore: 60, maximumCoins: 2))
+            results.append(await store.submitSmartSell(targetAmount: smartSellAmount, strategy: "worst"))
+            results.append(await store.submitRecommendation(CoinPilotRecommendation(["coin": coin, "action": "BUY"]), amount: recommendationAmount))
+            results.append(await store.submitBundle(sellCoin: coin, sellAmount: 0.001, buyCoin: buyCoin, buyAmount: bundleAmount))
+            results.append(await store.updatePaperWallet(amount: depositAmount, deposit: true))
+            results.append(await store.updatePaperWallet(amount: withdrawAmount, deposit: false))
+            results.append(await store.resetPaperWallet(seedMoney: seedAmount))
+            precondition(results.allSatisfy { $0 },
+                         "Valid \(quote) amounts must reach every order and wallet flow using that currency's minimum.")
+
+            let paths = await api.recordedMutationPaths()
+            let bodies = await api.recordedMutationBodies()
+            let expected: [(String, String, Double)] = [
+                ("/api/trade/buy", "amount", buyAmount),
+                ("/api/trade/smart-buy", "totalAmount", smartBuyAmount),
+                ("/api/trade/smart-sell", "targetAmount", smartSellAmount),
+                ("/api/trade/execute", "amount", recommendationAmount),
+                ("/api/trade/execute-bundle", "buyAmount", bundleAmount),
+                ("/api/virtual/deposit", "amount", depositAmount),
+                ("/api/virtual/withdraw", "amount", withdrawAmount),
+                ("/api/virtual/reset", "seedMoney", seedAmount)
+            ]
+            precondition(paths.count == expected.count && bodies.count == expected.count,
+                         "Each confirmed fake action should issue exactly one idempotent mutation.")
+            for (index, request) in expected.enumerated() {
+                let amount = (bodies[index][request.1] as? NSNumber)?.doubleValue
+                precondition(paths[index] == request.0 && amount == (isKRW ? floor(request.2) : request.2),
+                             "KRW retains whole-won requests; USDT/USDC must preserve the user's decimal amount.")
+            }
+            let belowOrderMinimum = await store.submitManualBuy(coin: coin, amount: store.minimumOrderAmount - 0.001)
+            let belowSmartSellMinimum = await store.submitSmartSell(targetAmount: store.minimumSmartSellAmount - 0.001, strategy: "worst")
+            let belowWalletMinimum = await store.updatePaperWallet(amount: store.minimumWalletAmount - 0.001, deposit: true)
+            let belowSeedMinimum = await store.resetPaperWallet(seedMoney: store.minimumSeedAmount - 0.001)
+            let finalPaths = await api.recordedMutationPaths()
+            precondition(!belowOrderMinimum && !belowSmartSellMinimum && !belowWalletMinimum && !belowSeedMinimum && finalPaths == paths,
+                         "Currency-specific minimums must still refuse undersized requests before mutation.")
+        }
+    }
+
+    private static func unsupportedQuoteCurrencyBlocksOnlyOrdersAndPaperWallet() async throws {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let timestamp = formatter.string(from: Date())
+        for quote in ["BTC", "ETH", "UNKNOWN"] {
+            let coin = "\(quote)-SOL"
+            let buyCoin = "\(quote)-LTC"
+            let api = DeferredCoinPilotAPI(
+                marketRows: [
+                    ["coin": coin, "price": 100, "sourceAsOf": timestamp, "fetchedAt": timestamp],
+                    ["coin": buyCoin, "price": 10, "sourceAsOf": timestamp, "fetchedAt": timestamp]
+                ],
+                statusOverride: ["exchange": "binance", "quoteCurrency": quote, "isRunning": false],
+                isReadOnlyObserver: false
+            )
+            await api.setReadResponse(path: "/api/account", body: [
+                "krwBalance": 1_000, "totalAssets": 2_000, "mode": "DRY_RUN",
+                "readOnlyObserver": false, "valuationAvailable": true,
+                "positions": [["coin": coin, "amount": 10, "currentPrice": 100, "currentValue": 1_000]]
+            ])
+            let store = CoinPilotStore(api: api, tokens: MemoryCoinPilotTokens(), configuredDataMode: "server")
+            let connected = await store.connect(using: "https://unsupported-quote-\(quote.lowercased()).example")
+            precondition(connected && store.account != nil && store.canOperate && !store.supportsAmountCurrency,
+                         "An unsupported amount currency must retain its account display and ordinary server access.")
+            precondition(CoinPilotFormatting.quoteAssetLabel == quote &&
+                         CoinPilotFormatting.won(1) == "\(quote) 1" &&
+                         CoinPilotFormatting.won(0.12345678) == "\(quote) 0.12345678" &&
+                         CoinPilotFormatting.signedWon(-0.00000001) == "−\(quote) 0.00000001" &&
+                         CoinPilotFormatting.signedWon(0.000125) == "+\(quote) 0.000125" &&
+                         CoinPilotFormatting.price(0.00001234) == "\(quote) 0.00001234",
+                         "Account amounts, profit, and prices must retain their actual quote currency and decimals.")
+            precondition(store.manualOrderBlockReason?.contains(quote) == true &&
+                         store.manualOrderBlockReason?.contains("조회") == true &&
+                         store.paperWalletBlockReason?.contains(quote) == true,
+                         "Order and wallet forms must explain the unsupported currency and available account viewing.")
+            precondition(store.canViewTuning && store.tuningBlockReason == nil && store.optimizationBlockReason == nil,
+                         "The amount currency gate must not expand into tuning, control, or other non-order features.")
+            var results: [Bool] = []
+            results.append(await store.submitManualBuy(coin: coin, amount: 5.75))
+            results.append(await store.submitManualSell(coin: coin, quantity: 1))
+            results.append(await store.submitSmartBuy(totalAmount: 10.75, minimumScore: 60, maximumCoins: 2))
+            results.append(await store.submitSmartSell(targetAmount: 5.25, strategy: "worst"))
+            results.append(await store.submitRecommendation(CoinPilotRecommendation(["coin": coin, "action": "BUY"]), amount: 7.375))
+            results.append(await store.submitBundle(sellCoin: coin, sellAmount: 1, buyCoin: buyCoin, buyAmount: 8.25))
+            results.append(await store.updatePaperWallet(amount: 1.75, deposit: true))
+            results.append(await store.updatePaperWallet(amount: 1.25, deposit: false))
+            results.append(await store.resetPaperWallet(seedMoney: 100.125))
+            let mutations = await api.recordedMutationPaths()
+            precondition(results.allSatisfy { !$0 } && mutations.isEmpty,
+                         "Every unsupported-currency order and paper wallet method must stop before a mutation request.")
+        }
+    }
+
+    private static func tuningEditableNumbersReachTheServerWithoutChangingDecimals() async throws {
+        let api = DeferredCoinPilotAPI(statusOverride: ["isRunning": false], isReadOnlyObserver: false)
+        let store = CoinPilotStore(api: api, tokens: MemoryCoinPilotTokens(), configuredDataMode: "server")
+        let connected = await store.connect(using: "https://tuning-number-roundtrip.example")
+        precondition(connected && store.tuningBlockReason == nil,
+                     "The editable-number test requires a stopped, operable fake server.")
+        let values: [String: Double] = [
+            "investmentRatio": 0.05, "minTrendSlopePercent": 0.001, "takeProfitPercent": 1.05, "rsiOversold": 30
+        ]
+        var updates: [String: Any] = [:]
+        for (key, value) in values {
+            let text = CoinPilotFormatting.editableNumber(value)
+            guard let parsed = Double(text) else {
+                preconditionFailure("A tuning value must produce an editable numeric input.")
+            }
+            updates[key] = parsed
+        }
+        precondition(CoinPilotFormatting.editableNumber(30) == "30",
+                     "Whole tuning values should omit only their trailing .0.")
+        let saved = await store.saveTuning(updates)
+        let paths = await api.recordedMutationPaths()
+        let bodies = await api.recordedMutationBodies()
+        precondition(saved && paths == ["/api/config/update"] && bodies.count == 1 &&
+                     Set(bodies[0].keys) == Set(values.keys),
+                     "Parsed editor inputs must travel through the real Store tuning mutation once.")
+        for (key, value) in values {
+            precondition((bodies[0][key] as? NSNumber)?.doubleValue == value,
+                         "The tuning editor must not turn \(value) into a different server configuration.")
+        }
     }
 
     private static func bundledPreviewMissingResourceDoesNotFallBackToServer() async throws {
@@ -2521,7 +2909,10 @@ struct CoinPilotStoreTests {
         precondition(connected, "Protective-only status should not make read-only account data unavailable.")
         precondition(store.status?.runtimeState == "PROTECTIVE_ONLY", "The runtime state should reach the app model.")
         precondition(store.status?.protectiveMonitorActive == true, "The app should know that position monitoring remains active.")
-        precondition(store.runtimeSafetyMessage?.contains("시세 공백") == true, "The home screen should explain the protective-only state.")
+        precondition(store.runtimeSafetyMessage?.contains("시세가 끊겨") == true &&
+                     store.runtimeSafetyMessage?.contains("위험 감시") == true &&
+                     store.runtimeSafetyMessage?.contains("서버의 복구 설정") == true,
+                     "The home screen should explain the price interruption, active protection, and server recovery policy.")
     }
 
     private static func chartAxisAndPositionFormattingStayNullSafe() throws {
@@ -2549,6 +2940,28 @@ struct CoinPilotStoreTests {
         ])
         precondition(position.costBasis == 50_000, "계좌 응답의 매입 금액이 포지션 모델에 도달해야 합니다.")
         precondition(position.entryPrice == 100_000)
+    }
+
+    private static func percentFormattingPreservesSmallChanges() throws {
+        let smallLossPercent = -5.0 / 1_000_000 * 100
+        precondition(CoinPilotFormatting.percent(smallLossPercent) == "-0.0005%",
+                     "A real five-won loss on one million won must not appear as -0%.")
+        precondition(CoinPilotFormatting.percent(0.0005) == "+0.0005%")
+        precondition(CoinPilotFormatting.percent(0.0005, signed: false) == "0.0005%")
+        precondition(CoinPilotFormatting.percent(-0.0001) == "-0.0001%")
+        precondition(CoinPilotFormatting.percent(0.0099) == "+0.0099%")
+        precondition(CoinPilotFormatting.percent(-0.00000001) == "0.0001% 미만 하락")
+        precondition(CoinPilotFormatting.percent(0.00000001) == "0.0001% 미만 상승")
+        precondition(CoinPilotFormatting.percent(0.00000001, signed: false) == "0.0001% 미만")
+        precondition(CoinPilotFormatting.percent(0) == "0%" && CoinPilotFormatting.percent(-0.0) == "0%",
+                     "Exact zero must stay neutral, including an IEEE negative zero.")
+        precondition(CoinPilotFormatting.percent(-1.234) == "-1.23%" &&
+                     CoinPilotFormatting.percent(1.234) == "+1.23%",
+                     "Ordinary percentages must retain the compact two-digit format.")
+        precondition(CoinPilotFormatting.percent(nil) == "변동률 미제공" &&
+                     CoinPilotFormatting.percent(.nan) == "변동률 미제공" &&
+                     CoinPilotFormatting.percent(.infinity, unavailable: "비중 미제공") == "비중 미제공",
+                     "Unavailable and nonfinite values must not become zero or a tiny-change label.")
     }
 
     private static func bundledServerDefaultsConnectAndOperateWithoutAuth() async throws {

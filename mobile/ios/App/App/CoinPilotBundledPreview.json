@@ -37,7 +37,7 @@
       {
         "coin": "KRW-ETH",
         "amount": 0.05,
-        "avgPrice": 4000000,
+        "avgPrice": 4200000,
         "entryPrice": 4200000,
         "currentPrice": 4000000,
         "currentValue": 200000,
@@ -219,7 +219,7 @@
       "coin": "KRW-ETH",
       "type": "OPEN",
       "entryTime": "2026-09-28T18:30:00.000Z",
-      "entryPrice": 4000000,
+      "entryPrice": 4200000,
       "amount": 0.05,
       "source": "paper"
     },

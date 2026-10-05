@@ -501,11 +501,16 @@ export default function createConfigRoutes(server) {
   router.post('/control/start', (req, res) => {
     const trader = server.tradingSystem;
     if (trader.isRunning || trader._startPromise || trader._gracefulShutdownPromise) {
+      // 이미 실행 중이면 운영자의 "켜기" 의도만 재확인한다.
+      if (!trader._gracefulShutdownPromise) {
+        trader.autoRecovery?.noteDesiredRunning?.(true, 'control_start');
+      }
       return res.json({ message: '자동매매가 실행 중이거나 거래소 상태를 확인하고 있습니다.', success: false });
     }
     try {
       trader.assertLiveValidationGate?.();
       const start = trader.start();
+      trader.autoRecovery?.noteDesiredRunning?.(true, 'control_start');
       Promise.resolve(start).catch(error => {
         console.error('Trading system start error:', error);
       });
@@ -519,6 +524,8 @@ export default function createConfigRoutes(server) {
         runtimeState: nextSafety.runtimeState || null
       });
     } catch (error) {
+      // 게이트 실패 시 최신 검증 리포트를 다시 만들어 다음 시작이 통과할 수 있게 한다.
+      trader.liveValidationRefresher?.requestRefresh?.('control_start_gate');
       const message = typeof error?.message === 'string' && error.message.includes('실전 매매 차단')
         ? error.message
         : '자동매매를 시작하지 못했습니다. 설정과 서버 상태를 확인해 주세요.';
@@ -530,6 +537,7 @@ export default function createConfigRoutes(server) {
   router.post('/control/stop', (req, res) => {
     try {
       const trader = server.tradingSystem;
+      trader.autoRecovery?.noteDesiredRunning?.(false, 'control_stop');
       if (typeof trader.requestGracefulShutdown === 'function') {
         const shutdown = trader.requestGracefulShutdown('operator_stop');
         Promise.resolve(shutdown).catch(error => {

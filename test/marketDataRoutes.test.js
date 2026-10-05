@@ -172,7 +172,7 @@ test('dashboard market-list and ticker reads stay behind the selected market-dat
     .split('async getTickerWithMetadata(coins) {')[1]
     ?.split('async getTicker(coins)')[0];
 
-  assert.match(coinDetail, /getMarketDataProvider\(server\)\.getTickers/);
+  assert.match(coinDetail, /getMarketDataProvider\(server\)\.getSnapshot/);
   assert.match(coinDetail, /getMarketDataProvider\(server\)\.getMinuteCandles/);
   assert.doesNotMatch(coinDetail, /server\.tradingSystem\.upbit\.get(?:Ticker|MinuteCandles)\s*\(/);
   assert.match(bundleRecommendations, /marketDataProvider\.getTickers/);

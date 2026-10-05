@@ -11,6 +11,7 @@ import fs from 'fs';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomUUID } from 'node:crypto';
 import path from 'path';
+import { quoteOfSystem } from '../exchange/marketCodes.js';
 
 function cloneManualPortfolioValue(value) {
   if (value === undefined) return undefined;
@@ -67,7 +68,7 @@ export class VirtualPortfolioStore {
     const totalAssets = await this.owner.calculateTotalAssets();
 
     const data = {
-      initialSeedMoney: Math.round(totalAssets),
+      initialSeedMoney: quoteOfSystem(this.owner) === 'KRW' ? Math.round(totalAssets) : totalAssets,
       recordedAt: new Date().toISOString(),
       note: '실전 모드 초기 투자금 (자동 기록)'
     };
@@ -124,22 +125,39 @@ export class VirtualPortfolioStore {
   }
 
   adjustVirtualWalletBalance(delta) {
-    if (!Number.isSafeInteger(delta) || delta === 0) {
+    const isKrw = quoteOfSystem(this.owner) === 'KRW';
+    const validDelta = isKrw
+      ? Number.isSafeInteger(delta)
+      : Number.isFinite(delta) && Math.abs(delta) <= Number.MAX_SAFE_INTEGER;
+    if (!validDelta || delta === 0) {
       throw new TypeError('모의 잔액 변경 금액이 올바르지 않습니다.');
     }
 
     const currentBalance = Number(this.virtualPortfolio?.krwBalance);
     const nextBalance = currentBalance + delta;
-    if (!Number.isFinite(currentBalance) || !Number.isFinite(nextBalance) || nextBalance < 0) {
+    if (!Number.isFinite(currentBalance) || !Number.isFinite(nextBalance) ||
+      nextBalance < 0 || nextBalance > Number.MAX_SAFE_INTEGER) {
       throw new RangeError('모의 잔액을 확인할 수 없습니다.');
+    }
+    // Reject arithmetic loss before saving, rather than silently accepting a
+    // fractional adjustment that a large stored balance cannot represent.
+    const deltaTolerance = Math.max(1e-8, Math.abs(delta) * Number.EPSILON * 4);
+    const preservesDelta = (current, next) => next !== current &&
+      Math.abs((next - current) - delta) <= deltaTolerance;
+    if (!isKrw && !preservesDelta(currentBalance, nextBalance)) {
+      throw new RangeError('현재 잔액에서는 입력한 소수 금액을 정확히 반영할 수 없습니다.');
     }
 
     const previousSeedMoney = this.initialSeedMoney;
     const nextSeedMoney = previousSeedMoney === undefined
       ? previousSeedMoney
       : Math.max(0, Number(previousSeedMoney) + delta);
-    if (nextSeedMoney !== undefined && !Number.isFinite(nextSeedMoney)) {
+    if (nextSeedMoney !== undefined && (!Number.isFinite(nextSeedMoney) || nextSeedMoney > Number.MAX_SAFE_INTEGER)) {
       throw new RangeError('수익률 기준 금액을 확인할 수 없습니다.');
+    }
+    if (!isKrw && nextSeedMoney !== undefined && Number(previousSeedMoney) + delta >= 0 &&
+      !preservesDelta(Number(previousSeedMoney), nextSeedMoney)) {
+      throw new RangeError('현재 수익률 기준 금액에서는 입력한 소수 금액을 정확히 반영할 수 없습니다.');
     }
 
     this.owner.mutateAndPersistVirtualPortfolio(() => {

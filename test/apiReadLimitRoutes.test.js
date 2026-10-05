@@ -125,3 +125,29 @@ test('read routes pass clamped limits to their synthetic downstream consumers', 
   assert.equal(coinNewsBody.coin, 'KRW-BTC');
   assert.equal(coinNewsBody.news.length, 100);
 });
+
+test('recent trade limit includes a recent close of an old position before newer entries', async t => {
+  const server = {
+    tradingSystem: {
+      config: {},
+      strategies: new Map([['KRW-BTC', {
+        getTradeHistory() {
+          return [
+            { id: 'partial', type: 'BUY', action: 'PARTIAL_CLOSE', entryTime: new Date('2026-01-01T00:00:00Z'), exitTime: new Date('2026-10-05T03:00:00.100Z') },
+            { id: 'close', type: 'BUY', action: 'CLOSE', entryTime: new Date('2026-01-01T00:00:00Z'), exitTime: new Date('2026-10-05T03:00:00.900Z') }
+          ];
+        }
+      }]]),
+      smartTradeHistory: [
+        { id: 'buy', type: 'BUY', timestamp: '2026-10-04T23:00:00Z' },
+        { id: 'unknown-time', type: 'SELL', timestamp: 'invalid' }
+      ]
+    }
+  };
+  const baseUrl = await startReadRoutes(t, server);
+  const limited = await fetch(`${baseUrl}/api/trades?limit=1`);
+  assert.equal(limited.status, 200);
+  assert.deepEqual((await limited.json()).map(trade => trade.id), ['close']);
+  const all = await fetch(`${baseUrl}/api/trades?limit=4`);
+  assert.deepEqual((await all.json()).map(trade => trade.id), ['close', 'partial', 'buy', 'unknown-time']);
+});

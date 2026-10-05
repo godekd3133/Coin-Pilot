@@ -1,0 +1,13 @@
+{
+  "images": [
+    {
+      "filename": "coinpilot-portfolio-hero.png",
+      "idiom": "universal",
+      "scale": "1x"
+    }
+  ],
+  "info": {
+    "author": "xcode",
+    "version": 1
+  }
+}

@@ -95,7 +95,7 @@
 
     const style = document.createElement('style');
     style.textContent = `
-      #cp-auth-gate{position:fixed;inset:0;z-index:99999;display:flex;align-items:center;justify-content:center;padding:24px;background:#f9fafb;font-family:inherit;color:#191f28}
+      #cp-auth-gate{position:fixed;inset:0;z-index:99999;display:flex;align-items:center;justify-content:center;padding:24px;background:#f9fafb;font-family:inherit;color:#191f28;overflow-y:auto;box-sizing:border-box}
       #cp-auth-gate[hidden]{display:none}
       #cp-auth-gate .cp-auth-card{width:min(100%,400px);background:#fff;border:1px solid #e5e8eb;border-top:2px solid #027648;border-radius:10px;padding:24px;box-shadow:none;color:#191f28}
       #cp-auth-gate h1{font-size:22px;margin:0 0 8px;font-weight:680;letter-spacing:-.035em}
@@ -107,6 +107,10 @@
       #cp-auth-gate button:disabled{opacity:.5;cursor:default}
       #cp-auth-gate .cp-auth-error{min-height:18px;margin-top:10px;font-size:12px;color:#a51926}
       #cp-auth-gate .cp-auth-hint{margin-top:14px;font-size:12px;color:#6b7684;line-height:1.5}
+      #cp-auth-gate .cp-auth-brand{color:#1b64da;font-size:13px;font-weight:700;margin-bottom:18px}
+      #cp-auth-gate .cp-auth-benefits{display:grid;gap:10px;padding:0 0 20px;margin:0 0 20px;border-bottom:1px solid #e5e8eb;list-style:none;font-size:13px;line-height:1.5;color:#4e5968}
+      #cp-auth-gate .cp-auth-benefits strong{display:block;color:#191f28;font-weight:650}
+      #cp-auth-gate .cp-auth-card{margin:auto}
     `;
     document.head.appendChild(style);
 
@@ -115,13 +119,19 @@
     overlay.hidden = true;
     overlay.innerHTML = `
       <form class="cp-auth-card" novalidate>
-        <h1>서버에 연결</h1>
-        <p>서버 토큰을 입력해 주세요. 토큰이 없으면 관리자에게 요청해 주세요.</p>
+        <p class="cp-auth-brand">CoinPilot</p>
+        <h1>내 자산과 거래를 한눈에</h1>
+        <p>연결한 계좌의 변화와 자동매매 상태를 함께 확인하세요.</p>
+        <ul class="cp-auth-benefits">
+          <li><strong>얼마나 달라졌는지</strong>자산 평가액과 실현 손익을 구분해 확인해요.</li>
+          <li><strong>어떤 거래가 있었는지</strong>최근 거래와 보유 코인을 살펴봐요.</li>
+          <li><strong>지금 확인할 일이 있는지</strong>시세 갱신과 자동매매 중단 상태를 확인해요.</li>
+        </ul>
         <label for="cp-auth-token">서버 접속 토큰</label>
-        <input id="cp-auth-token" type="password" name="token" autocomplete="off" placeholder="접속 토큰">
-        <button type="submit">접속</button>
-        <div class="cp-auth-error" role="alert"></div>
-        <div class="cp-auth-hint">입력한 토큰은 이 브라우저에 저장되어 서버 접속에 사용됩니다.</div>
+        <input id="cp-auth-token" type="password" name="token" autocomplete="off" autocapitalize="none" spellcheck="false" aria-describedby="cp-auth-help cp-auth-error" placeholder="관리자에게 받은 접속 토큰">
+        <button type="submit">연결하고 내 현황 보기</button>
+        <div id="cp-auth-error" class="cp-auth-error" role="alert"></div>
+        <div id="cp-auth-help" class="cp-auth-hint">토큰은 서버 관리자에게 받을 수 있어요. 거래소 API 키와는 다른 값입니다. 입력한 토큰은 이 브라우저에 저장됩니다.</div>
       </form>`;
     document.body.appendChild(overlay);
 
@@ -139,6 +149,7 @@
         return;
       }
       button.disabled = true;
+      button.textContent = '접속 권한 확인 중…';
       errorBox.textContent = '';
       try {
         const response = await rawFetch('/api/auth/login', {
@@ -169,12 +180,15 @@
         }
         errorBox.textContent = response.status === 429
           ? '접속 시도가 많습니다. 잠시 후 다시 시도해 주세요.'
-          : '접속 토큰이 맞지 않습니다. 다시 확인해 주세요.';
+          : response.status === 401 || response.status === 403
+            ? '접속 토큰이 맞지 않거나 권한이 없습니다. 관리자에게 토큰을 확인해 주세요.'
+            : '서버가 접속 요청을 처리하지 못했습니다. 입력한 토큰은 유지되니 잠시 후 다시 시도해 주세요.';
       } catch {
         errorBox.textContent = '서버에 연결하지 못했습니다. 인터넷 연결을 확인해 주세요.';
         setAuthState({ authRequired: true, tokenScope: null, authenticated: null, resolved: true, verification: 'unavailable', tokenPresent: Boolean(getToken()), error: 'network' }, true);
       } finally {
         button.disabled = false;
+        button.textContent = '연결하고 내 현황 보기';
       }
     });
 

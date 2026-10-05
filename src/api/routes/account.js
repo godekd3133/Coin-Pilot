@@ -2,6 +2,7 @@ import express from 'express';
 import { accountValuationMarkets, readCurrentMarketPrices } from '../marketValuation.js';
 import { projectReadOnlyPaperAccount, projectReadOnlyPaperPositions } from '../readOnlyPaperPortfolio.js';
 import { quoteOfSystem } from '../../exchange/marketCodes.js';
+import { quoteAmountLimits, roundQuoteAmount } from '../manualOrderLegs.js';
 
 async function getObserverAccountInfo(server) {
   if (typeof server.getObserverCachedAccountInfo === 'function') {
@@ -97,7 +98,7 @@ export default function createAccountRoutes(server) {
 
       // 2. 가상 포트폴리오 holdings (스마트 매수 등)
       // 중요: holdings의 amount가 strategy보다 정확함 (추가 매수 반영)
-      if (server.tradingSystem.virtualPortfolio?.holdings) {
+      if (server.tradingSystem.dryRun && server.tradingSystem.virtualPortfolio?.holdings) {
         const holdingsData = server.tradingSystem.virtualPortfolio.holdings;
         const holdingsEntries = holdingsData instanceof Map
           ? Array.from(holdingsData.entries())
@@ -126,6 +127,32 @@ export default function createAccountRoutes(server) {
         }
       }
 
+      if (!server.tradingSystem.dryRun) {
+        // The asset screen must describe the exchange account, including funds
+        // reserved by open orders. A previous paper wallet or strategy position
+        // cannot supply the current LIVE quantity or create an absent holding.
+        const strategyPositions = new Map(positions.map(position => [position.coin, position]));
+        positions.length = 0;
+        positionCoins.length = 0;
+        const quote = quoteOfSystem(server.tradingSystem);
+        for (const account of accounts) {
+          if (!account?.currency || account.currency === quote) continue;
+          const amount = Number(account.balance || 0) + Number(account.locked || 0);
+          if (!Number.isFinite(amount) || amount <= 0) continue;
+          const coin = `${quote}-${account.currency}`;
+          const avgPrice = Number(account.avg_buy_price || 0);
+          positions.push({
+            ...strategyPositions.get(coin),
+            coin,
+            amount,
+            avgPrice,
+            entryPrice: avgPrice,
+            source: 'exchange'
+          });
+          positionCoins.push(coin);
+        }
+      }
+
       const valuationMarkets = accountValuationMarkets(server.tradingSystem, accounts, positionCoins);
       const marketSnapshot = await readCurrentMarketPrices(server, valuationMarkets);
       const totalAssetsCandidate = await server.tradingSystem.calculateTotalAssets(marketSnapshot.freshPriceMap, {
@@ -140,15 +167,15 @@ export default function createAccountRoutes(server) {
         const amount = Number(pos.amount);
         const averagePrice = Number(pos.avgPrice ?? pos.entryPrice);
         const costBasis = Number.isFinite(amount) && Number.isFinite(averagePrice) && averagePrice > 0
-          ? Math.round(amount * averagePrice)
+          ? roundQuoteAmount(server.tradingSystem, amount * averagePrice)
           : null;
 
         if (Number.isFinite(currentPrice) && Number.isFinite(amount) && amount >= 0) {
           const positionValue = amount * currentPrice;
           pos.currentPrice = currentPrice;
-          pos.currentValue = Math.round(positionValue);
+          pos.currentValue = roundQuoteAmount(server.tradingSystem, positionValue);
           pos.costBasis = costBasis;
-          pos.profit = costBasis === null ? null : Math.round(positionValue - costBasis);
+          pos.profit = costBasis === null ? null : roundQuoteAmount(server.tradingSystem, positionValue - costBasis);
           pos.profitPercent = costBasis > 0
             ? (((positionValue / costBasis) - 1) * 100).toFixed(2)
             : null;
@@ -171,7 +198,7 @@ export default function createAccountRoutes(server) {
         }
       });
 
-      const initialSeedMoney = server.tradingSystem.initialSeedMoney || 10000000;
+      const initialSeedMoney = server.tradingSystem.initialSeedMoney || quoteAmountLimits(server.tradingSystem).defaultSeed;
       const mode = server.tradingSystem.dryRun ? 'DRY_RUN' : 'LIVE';
       const effectiveKrwBalance = server.tradingSystem.dryRun
         ? (server.tradingSystem.virtualPortfolio?.krwBalance || 0)
@@ -179,7 +206,7 @@ export default function createAccountRoutes(server) {
 
       res.json({
         krwBalance: effectiveKrwBalance,
-        totalAssets: valuationAvailable ? Math.round(totalAssets) : null,
+        totalAssets: valuationAvailable ? roundQuoteAmount(server.tradingSystem, totalAssets) : null,
         valuationAvailable,
         valuationStatus: valuationAvailable
           ? 'available'
@@ -245,7 +272,7 @@ export default function createAccountRoutes(server) {
       } else {
         const accounts = await getObserverAccountInfo(server);
         for (const acc of accounts) {
-          if (acc.currency !== 'KRW' && parseFloat(acc.balance) > 0) {
+          if (acc.currency !== quoteOfSystem(server.tradingSystem) && parseFloat(acc.balance) > 0) {
             coinList.push({
               coin: `${quoteOfSystem(server.tradingSystem)}-${acc.currency}`,
               amount: parseFloat(acc.balance),
@@ -263,7 +290,7 @@ export default function createAccountRoutes(server) {
         let completeValuation = true;
 
         for (const item of coinList) {
-          const quotedPrice = Number(priceMap[item.coin]);
+          const quotedPrice = Number(priceMap.get(item.coin));
           const valuationAvailable = Number.isFinite(quotedPrice) && quotedPrice > 0;
           const currentPrice = valuationAvailable ? quotedPrice : null;
           const currentValue = valuationAvailable ? item.amount * currentPrice : null;
@@ -281,8 +308,8 @@ export default function createAccountRoutes(server) {
             amount: item.amount,
             avgPrice: item.avgPrice,
             currentPrice,
-            currentValue: currentValue === null ? null : Math.round(currentValue),
-            profit: profit === null ? null : Math.round(profit),
+            currentValue: currentValue === null ? null : roundQuoteAmount(server.tradingSystem, currentValue),
+            profit: profit === null ? null : roundQuoteAmount(server.tradingSystem, profit),
             profitPercent,
             valuationAvailable,
             sourceAsOf: marketSnapshot.sourceAsOfByMarket.get(item.coin) ?? null,
@@ -297,7 +324,7 @@ export default function createAccountRoutes(server) {
 
       res.json({
         holdings,
-        totalValue: totalValue === null ? null : Math.round(totalValue),
+        totalValue: totalValue === null ? null : roundQuoteAmount(server.tradingSystem, totalValue),
         valuationAvailable: totalValue !== null,
         valuationStatus: totalValue !== null
           ? 'available'

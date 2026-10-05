@@ -11,6 +11,7 @@ import { summarizePaperForwardCohort } from '../../research/paperForwardCohort.j
 import { respondIfPaperEvidenceMutationBlocked } from '../../research/paperEvidenceMutationGuard.js';
 import { API_READ_QUERY_LIMITS, parseBoundedIntegerQuery } from '../queryLimits.js';
 import { quoteOfSystem } from '../../exchange/marketCodes.js';
+import { quoteAmountLimits, quoteAmountMutationBlock, parseQuoteAmount, roundQuoteAmount, formatQuoteAmount } from '../manualOrderLegs.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -91,12 +92,18 @@ export default function createPortfolioRoutes(server) {
         allTrades.push(...server.tradingSystem.smartTradeHistory);
       }
 
-      // 시간순 정렬 (최신 먼저)
-      allTrades.sort((a, b) => {
-        const timeA = new Date(a.timestamp || a.entryTime || a.exitTime || 0);
-        const timeB = new Date(b.timestamp || b.entryTime || b.exitTime || 0);
-        return timeB - timeA;
-      });
+      // A close retains the original entryTime. Sort by the close event before
+      // applying the limit, otherwise a recent sale of an old holding vanishes.
+      const eventTime = trade => {
+        const action = String(trade.action || trade.type || '').toUpperCase();
+        const isSell = ['SELL', 'CLOSE', 'PARTIAL_CLOSE'].includes(action);
+        const value = trade.timestamp || (isSell
+          ? trade.exitTime || trade.entryTime
+          : trade.entryTime || trade.exitTime);
+        const parsed = new Date(value || '').getTime();
+        return Number.isFinite(parsed) ? parsed : 0;
+      };
+      allTrades.sort((a, b) => eventTime(b) - eventTime(a));
 
       res.json(allTrades.slice(0, limit));
     } catch {
@@ -152,7 +159,7 @@ export default function createPortfolioRoutes(server) {
         } else {
           for (const acc of accounts) {
             const amount = parseFloat(acc.balance || 0) + parseFloat(acc.locked || 0);
-            if (acc.currency !== 'KRW' && Number.isFinite(amount) && amount > 0) {
+            if (acc.currency !== quoteOfSystem(server.tradingSystem) && Number.isFinite(amount) && amount > 0) {
               holdings.set(`${quoteOfSystem(server.tradingSystem)}-${acc.currency}`, {
                 amount,
                 avgPrice: parseFloat(acc.avg_buy_price) || 0
@@ -173,7 +180,7 @@ export default function createPortfolioRoutes(server) {
           totalAssets += price * holding.amount;
         }
 
-        const initialSeedMoney = server.tradingSystem.initialSeedMoney || 10000000;
+        const initialSeedMoney = server.tradingSystem.initialSeedMoney || quoteAmountLimits(server.tradingSystem).defaultSeed;
         const profit = valuationAvailable ? totalAssets - initialSeedMoney : null;
         const profitPercent = valuationAvailable && initialSeedMoney > 0
           ? ((totalAssets / initialSeedMoney) - 1) * 100
@@ -181,8 +188,8 @@ export default function createPortfolioRoutes(server) {
 
         res.json({
           initialSeedMoney,
-          totalAssets: valuationAvailable ? Math.round(totalAssets) : null,
-          profit: profit === null ? null : Math.round(profit),
+          totalAssets: valuationAvailable ? roundQuoteAmount(server.tradingSystem, totalAssets) : null,
+          profit: profit === null ? null : roundQuoteAmount(server.tradingSystem, profit),
           profitPercent,
           valuationAvailable,
           valuationStatus: valuationAvailable ? 'available' : 'unavailable',
@@ -376,6 +383,8 @@ export default function createPortfolioRoutes(server) {
 
   // 모의투자 입금 (드라이 모드 전용)
   router.post('/virtual/deposit', (req, res) => {
+    const quoteBlock = quoteAmountMutationBlock(server.tradingSystem);
+    if (quoteBlock) return res.status(quoteBlock.status).json(quoteBlock.body);
     if (respondIfPaperEvidenceMutationBlocked(server.tradingSystem, res, 'virtual_deposit')) return;
     try {
       if (!server.tradingSystem.dryRun) {
@@ -383,24 +392,25 @@ export default function createPortfolioRoutes(server) {
       }
 
       const { amount } = req.body;
-      const depositAmount = parseInt(amount);
+      const limits = quoteAmountLimits(server.tradingSystem);
+      const depositAmount = parseQuoteAmount(server.tradingSystem, amount);
 
-      if (!depositAmount || depositAmount < 1000) {
-        return res.status(400).json({ error: '최소 입금액은 1,000원입니다', success: false });
+      if (!Number.isFinite(depositAmount) || depositAmount < limits.minimumWallet) {
+        return res.status(400).json({ error: `최소 입금액은 ${formatQuoteAmount(server.tradingSystem, limits.minimumWallet)}입니다`, success: false });
       }
 
-      if (depositAmount > 100000000) {
-        return res.status(400).json({ error: '최대 입금액은 1억원입니다', success: false });
+      if (depositAmount > limits.maximumDeposit) {
+        return res.status(400).json({ error: `최대 입금액은 ${formatQuoteAmount(server.tradingSystem, limits.maximumDeposit)}입니다`, success: false });
       }
 
       server.tradingSystem.adjustVirtualWalletBalance(depositAmount);
 
       const seedMessage = server.tradingSystem.initialSeedMoney !== undefined
-        ? ` 수익률 기준 금액은 ${server.tradingSystem.initialSeedMoney.toLocaleString()}원입니다.`
+        ? ` 수익률 기준 금액은 ${formatQuoteAmount(server.tradingSystem, server.tradingSystem.initialSeedMoney)}입니다.`
         : '';
       res.json({
         success: true,
-        message: `모의투자 잔액에 ${depositAmount.toLocaleString()}원을 추가했습니다.${seedMessage}`,
+        message: `모의투자 잔액에 ${formatQuoteAmount(server.tradingSystem, depositAmount)}을 추가했습니다.${seedMessage}`,
         newBalance: server.tradingSystem.virtualPortfolio.krwBalance,
         newSeedMoney: server.tradingSystem.initialSeedMoney
       });
@@ -411,6 +421,8 @@ export default function createPortfolioRoutes(server) {
 
   // 모의투자 출금 (드라이 모드 전용)
   router.post('/virtual/withdraw', (req, res) => {
+    const quoteBlock = quoteAmountMutationBlock(server.tradingSystem);
+    if (quoteBlock) return res.status(quoteBlock.status).json(quoteBlock.body);
     if (respondIfPaperEvidenceMutationBlocked(server.tradingSystem, res, 'virtual_withdraw')) return;
     try {
       if (!server.tradingSystem.dryRun) {
@@ -418,16 +430,17 @@ export default function createPortfolioRoutes(server) {
       }
 
       const { amount } = req.body;
-      const withdrawAmount = parseInt(amount);
+      const { minimumWallet } = quoteAmountLimits(server.tradingSystem);
+      const withdrawAmount = parseQuoteAmount(server.tradingSystem, amount);
 
-      if (!withdrawAmount || withdrawAmount < 1000) {
-        return res.status(400).json({ error: '최소 출금액은 1,000원입니다', success: false });
+      if (!Number.isFinite(withdrawAmount) || withdrawAmount < minimumWallet) {
+        return res.status(400).json({ error: `최소 출금액은 ${formatQuoteAmount(server.tradingSystem, minimumWallet)}입니다`, success: false });
       }
 
       const currentBalance = server.tradingSystem.virtualPortfolio.krwBalance;
       if (withdrawAmount > currentBalance) {
         return res.status(400).json({
-          error: `출금 가능 금액이 부족합니다 (잔액: ${currentBalance.toLocaleString()}원)`,
+          error: `출금 가능 금액이 부족합니다 (잔액: ${formatQuoteAmount(server.tradingSystem, currentBalance)})`,
           success: false
         });
       }
@@ -435,11 +448,11 @@ export default function createPortfolioRoutes(server) {
       server.tradingSystem.adjustVirtualWalletBalance(-withdrawAmount);
 
       const seedMessage = server.tradingSystem.initialSeedMoney !== undefined
-        ? ` 수익률 기준 금액은 ${server.tradingSystem.initialSeedMoney.toLocaleString()}원입니다.`
+        ? ` 수익률 기준 금액은 ${formatQuoteAmount(server.tradingSystem, server.tradingSystem.initialSeedMoney)}입니다.`
         : '';
       res.json({
         success: true,
-        message: `모의투자 잔액에서 ${withdrawAmount.toLocaleString()}원을 출금했습니다.${seedMessage}`,
+        message: `모의투자 잔액에서 ${formatQuoteAmount(server.tradingSystem, withdrawAmount)}을 출금했습니다.${seedMessage}`,
         newBalance: server.tradingSystem.virtualPortfolio.krwBalance,
         newSeedMoney: server.tradingSystem.initialSeedMoney
       });
@@ -450,6 +463,8 @@ export default function createPortfolioRoutes(server) {
 
   // 모의투자 시드머니 리셋 (드라이 모드 전용)
   router.post('/virtual/reset', (req, res) => {
+    const quoteBlock = quoteAmountMutationBlock(server.tradingSystem);
+    if (quoteBlock) return res.status(quoteBlock.status).json(quoteBlock.body);
     if (respondIfPaperEvidenceMutationBlocked(server.tradingSystem, res, 'virtual_reset')) return;
     try {
       if (!server.tradingSystem.dryRun) {
@@ -457,7 +472,12 @@ export default function createPortfolioRoutes(server) {
       }
 
       const { seedMoney } = req.body;
-      const newSeedMoney = parseInt(seedMoney) || 10000000;
+      const { minimumSeed, defaultSeed } = quoteAmountLimits(server.tradingSystem);
+      const newSeedMoney = seedMoney === undefined
+        ? defaultSeed : parseQuoteAmount(server.tradingSystem, seedMoney);
+      if (!Number.isFinite(newSeedMoney) || newSeedMoney < minimumSeed || newSeedMoney > Number.MAX_SAFE_INTEGER) {
+        return res.status(400).json({ error: `초기 금액은 ${formatQuoteAmount(server.tradingSystem, minimumSeed)} 이상이어야 합니다.`, success: false });
+      }
 
       if (typeof server.tradingSystem.resetVirtualPortfolio !== 'function' ||
           server.tradingSystem.resetVirtualPortfolio(newSeedMoney) !== true) {
@@ -466,7 +486,7 @@ export default function createPortfolioRoutes(server) {
 
       res.json({
         success: true,
-        message: `모의투자 잔액과 수익률 계산 시작 금액을 ${newSeedMoney.toLocaleString()}원으로 초기화했습니다.`,
+        message: `모의투자 잔액과 수익률 계산 시작 금액을 ${formatQuoteAmount(server.tradingSystem, newSeedMoney)}으로 초기화했습니다.`,
         newBalance: newSeedMoney,
         initialSeedMoney: newSeedMoney
       });

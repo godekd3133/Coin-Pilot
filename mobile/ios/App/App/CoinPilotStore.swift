@@ -201,6 +201,24 @@ enum CoinPilotResourceState: Equatable {
     }
 }
 
+enum CoinPilotTradePeriod: String, CaseIterable, Identifiable {
+    case all = "전체"
+    case today = "오늘"
+    case week = "7일"
+    case month = "30일"
+
+    var id: String { rawValue }
+
+    func includes(_ timestamp: String?, at now: Date, calendar: Calendar = .current) -> Bool {
+        guard self != .all else { return true }
+        guard let date = CoinPilotMarketSnapshotMetadata.parseDate(timestamp), date <= now else { return false }
+        let startOfToday = calendar.startOfDay(for: now)
+        let days = self == .week ? 6 : self == .month ? 29 : 0
+        guard let start = calendar.date(byAdding: .day, value: -days, to: startOfToday) else { return false }
+        return date >= start
+    }
+}
+
 enum CoinPilotHistoryPeriod: String, CaseIterable, Identifiable {
     case hour = "1h"
     case day = "24h"
@@ -303,8 +321,8 @@ struct CoinPilotCoinDetail {
     let volume24h: Double?
     let holdingAmount: Double
     let holdingAvgPrice: Double
-    let holdingValue: Double
-    let holdingProfit: Double
+    let holdingValue: Double?
+    let holdingProfit: Double?
     let holdingProfitPercent: Double?
     let krwBalance: Double?
     let maxBuyAmount: Double?
@@ -315,9 +333,12 @@ struct CoinPilotCoinDetail {
 
     init?(_ object: [String: Any]) {
         func num(_ value: Any?) -> Double? {
-            if let number = value as? NSNumber { return number.doubleValue }
-            if let string = value as? String { return Double(string) }
-            return nil
+            let number: Double?
+            if let value = value as? NSNumber { number = value.doubleValue }
+            else if let value = value as? String { number = Double(value) }
+            else { number = nil }
+            guard let number, number.isFinite else { return nil }
+            return number
         }
         guard let coin = object["coin"] as? String else { return nil }
         self.coin = coin
@@ -329,8 +350,8 @@ struct CoinPilotCoinDetail {
         let holding = object["holding"] as? [String: Any] ?? [:]
         holdingAmount = num(holding["amount"]) ?? 0
         holdingAvgPrice = num(holding["avgPrice"]) ?? 0
-        holdingValue = num(holding["currentValue"]) ?? 0
-        holdingProfit = num(holding["profit"]) ?? 0
+        holdingValue = num(holding["currentValue"])
+        holdingProfit = num(holding["profit"])
         holdingProfitPercent = num(holding["profitPercent"])
         krwBalance = num(object["krwBalance"])
         maxBuyAmount = num(object["maxBuyAmount"])
@@ -1017,6 +1038,20 @@ struct CoinPilotAccount {
     let positions: [CoinPilotPosition]
     let hasPositionsField: Bool
 
+    var unvaluedPositionCount: Int {
+        positions.filter { position in
+            guard position.valuationAvailable != false, let value = position.currentValue else { return true }
+            return !value.isFinite || value < 0
+        }.count
+    }
+
+    /// A partial valuation is not the total value of the holdings.
+    var completePositionsValue: Double? {
+        guard hasPositionsField, valuationAvailable != false, unvaluedPositionCount == 0 else { return nil }
+        let value = positions.compactMap(\.currentValue).reduce(0, +)
+        return value.isFinite ? value : nil
+    }
+
     init(_ object: [String: Any]) {
         krwBalance = Self.number(object["krwBalance"])
         totalAssets = Self.number(object["totalAssets"])
@@ -1339,7 +1374,9 @@ struct CoinPilotTrade: Identifiable {
                 action = "거래"
             }
         }
-        timestamp = object["timestamp"] as? String ?? object["entryTime"] as? String ?? object["exitTime"] as? String
+        let entryTime = object["entryTime"] as? String
+        let exitTime = object["exitTime"] as? String
+        timestamp = object["timestamp"] as? String ?? (action == "매도" ? exitTime ?? entryTime : entryTime ?? exitTime)
         profit = Self.number(object["profit"])
         price = Self.number(object["price"]) ?? Self.number(object["exitPrice"]) ?? Self.number(object["entryPrice"])
         amount = Self.number(object["value"]) ?? Self.number(object["total"]) ?? Self.number(object["amount"])
@@ -2131,7 +2168,7 @@ final class CoinPilotStore: ObservableObject {
         guard status?.runtimeState == "PROTECTIVE_ONLY" || status?.protectiveMonitorActive == true else { return nil }
         switch status?.stopReason {
         case "risk_data_gap":
-            return "시세 공백으로 분석과 신규 진입을 멈췄어요. 열린 포지션은 위험 감시 중이며, 자동으로 매매를 재개하지 않습니다."
+            return "시세가 끊겨 분석과 신규 진입을 멈췄어요. 보유 포지션은 위험 감시 중이며, 재개 여부는 서버의 복구 설정과 점검 결과에 따라 달라집니다."
         case "analysis_data_gap":
             return "분석 자료 공백으로 신규 진입을 멈췄어요. 열린 포지션은 위험 감시를 계속합니다."
         default:
@@ -2267,6 +2304,9 @@ final class CoinPilotStore: ObservableObject {
               account?.mode == activeWorkspace.serverMode else { return "선택한 실거래/모의투자 서버를 확인해 주세요." }
         guard !authenticationRequired || authenticationScope.canOperate else { return "조회 전용 토큰입니다. 운영 토큰을 연결해야 주문할 수 있습니다." }
         guard !isObserverAccount else { return "읽기 전용 서버에서는 주문할 수 없습니다." }
+        guard supportsAmountCurrency else {
+            return "\(quoteCurrency) 기준통화의 주문 금액 규칙을 아직 지원하지 않아요. 시세와 계좌는 조회할 수 있어요."
+        }
         guard !pendingManualOrderLocked else { return "이전 주문 결과를 확인한 뒤에 새 주문을 보낼 수 있습니다." }
         guard !isSubmittingManualOrder else { return "주문 결과를 확인하고 있습니다." }
         if status?.runtimeState == "PROTECTIVE_ONLY" { return runtimeSafetyMessage ?? "위험 감시 상태에서는 새 주문을 보낼 수 없습니다." }
@@ -2380,6 +2420,9 @@ final class CoinPilotStore: ObservableObject {
             return "모의 지갑은 연결된 모의투자 서버에서만 변경할 수 있습니다."
         }
         guard canOperate else { return "운영 토큰이 있어야 모의 지갑을 변경할 수 있습니다." }
+        guard supportsAmountCurrency else {
+            return "\(quoteCurrency) 기준통화는 모의 지갑 금액 변경을 아직 지원하지 않아요. 계좌 조회는 계속 이용할 수 있어요."
+        }
         if pendingManualOrderLocked { return "이전 지갑 변경 결과를 확인한 뒤 다시 시도해 주세요." }
         if status?.isRunning == true { return "모의 자동매매를 중지한 뒤 가상 잔액을 바꿀 수 있습니다." }
         if paperValidationSummary?.active == true || tuningMutationLocked {
@@ -4264,12 +4307,16 @@ final class CoinPilotStore: ObservableObject {
             "optimization", path: "/api/optimization/settings", context: context
         ) as? [String: Any] else { return false }
         optimizationSettings = settings
+        var complete = true
         guard isCurrentMobileFeatureContext(context) else { return false }
         if let history = await loadMobileFeature(
             "optimization-history", path: "/api/optimization-history", context: context
         ) {
             if let values = history as? [[String: Any]] { optimizationHistory = values }
             else if let object = history as? [String: Any] { optimizationHistory = object["history"] as? [[String: Any]] ?? [] }
+            else { complete = false }
+        } else {
+            complete = false
         }
         guard isCurrentMobileFeatureContext(context) else { return false }
         if let resultPayload = await loadMobileFeature(
@@ -4279,21 +4326,29 @@ final class CoinPilotStore: ObservableObject {
                 backtestResults = results
             } else if let results = resultPayload as? [[String: Any]] {
                 backtestResults = ["entries": results]
+            } else {
+                complete = false
             }
+        } else {
+            complete = false
         }
         guard isCurrentMobileFeatureContext(context) else { return false }
         if let config = await loadMobileFeature(
             "optimal-config", path: "/api/optimal-config", context: context
         ) as? [String: Any] {
             optimalConfig = config
+        } else {
+            complete = false
         }
         guard isCurrentMobileFeatureContext(context) else { return false }
         if let presets = await loadMobileFeature(
             "investment-presets", path: "/api/investment-presets", context: context
         ) as? [String: Any] {
             investmentPresets = presets["presets"] as? [[String: Any]] ?? []
+        } else {
+            complete = false
         }
-        return true
+        return complete
     }
 
     func recordPortfolioSnapshot() async -> Bool {
@@ -4301,12 +4356,15 @@ final class CoinPilotStore: ObservableObject {
             featureMessages["snapshot"] = canOperate ? "자산 기록을 이미 저장하고 있습니다." : "운영 토큰이 필요합니다."
             return false
         }
+        let generation = requestGeneration
         isRecordingSnapshot = true
-        defer { isRecordingSnapshot = false }
+        defer {
+            if generation == requestGeneration { isRecordingSnapshot = false }
+        }
         guard let response = await performFeatureMutation("snapshot", path: "/api/portfolio/snapshot", body: [:]) else { return false }
         guard response["success"] as? Bool == true else { return false }
         featureMessages["snapshot"] = response["message"] as? String ?? "현재 자산 기록을 저장했습니다."
-        await setHistoryPeriod(historyPeriod)
+        await setHistoryPeriod(historyPeriod, force: true)
         return true
     }
 
@@ -4507,7 +4565,11 @@ final class CoinPilotStore: ObservableObject {
         let generation = requestGeneration
         let workspace = activeWorkspace
         isRunningFeatureAction = true
-        defer { isRunningFeatureAction = false }
+        defer {
+            if generation == requestGeneration, currentServerURL == serverURL, activeWorkspace == workspace {
+                isRunningFeatureAction = false
+            }
+        }
         do {
             let response = try await api.mutate(path: path, at: serverURL, token: token, body: body, idempotencyKey: nil)
             guard generation == requestGeneration, currentServerURL == serverURL, activeWorkspace == workspace else { return nil }
@@ -4521,17 +4583,19 @@ final class CoinPilotStore: ObservableObject {
             featureMessages.removeValue(forKey: key)
             return value
         } catch let error as CoinPilotAPIError {
+            guard generation == requestGeneration, currentServerURL == serverURL, activeWorkspace == workspace else { return nil }
             featureMessages[key] = error.message
             return nil
         } catch {
+            guard generation == requestGeneration, currentServerURL == serverURL, activeWorkspace == workspace else { return nil }
             featureMessages[key] = CoinPilotAPIError.connection.message
             return nil
         }
     }
 
-    func setHistoryPeriod(_ period: CoinPilotHistoryPeriod) async {
+    func setHistoryPeriod(_ period: CoinPilotHistoryPeriod, force: Bool = false) async {
         guard !isBundledLocalMarketData else { return }
-        guard period != historyPeriod else { return }
+        guard force || period != historyPeriod else { return }
         historyPeriod = period
         guard phase == .dashboard else { return }
         let generation = requestGeneration
@@ -4578,8 +4642,8 @@ final class CoinPilotStore: ObservableObject {
             orderMessage = manualOrderBlockReason(for: coin)
             return false
         }
-        guard amount.isFinite, amount >= 5_000 else {
-            orderMessage = "최소 매수 금액은 5,000원입니다."
+        guard amount.isFinite, amount >= minimumOrderAmount else {
+            orderMessage = "최소 매수 금액은 \(CoinPilotFormatting.won(minimumOrderAmount))입니다."
             return false
         }
         let requestURL = currentServerURL
@@ -4602,13 +4666,14 @@ final class CoinPilotStore: ObservableObject {
             orderMessage = "선택한 종목의 현재 시세를 확인할 수 없습니다."
             return false
         }
-        let body: [String: Any] = ["coin": coin, "amount": floor(amount)]
+        let normalizedAmount = normalizedQuoteAmount(amount)
+        let body: [String: Any] = ["coin": coin, "amount": normalizedAmount]
         return await beginPendingManualOrder(
             endpoint: "/api/trade/buy",
             body: body,
             market: coin,
             side: "매수",
-            displayAmount: CoinPilotFormatting.won(floor(amount))
+            displayAmount: CoinPilotFormatting.won(normalizedAmount)
         )
     }
 
@@ -4673,7 +4738,7 @@ final class CoinPilotStore: ObservableObject {
             orderMessage = "현재 계좌 잔액보다 큰 금액은 조건 매수에 사용할 수 없습니다."
             return false
         }
-        let amount = floor(totalAmount)
+        let amount = normalizedQuoteAmount(totalAmount)
         return await beginPendingManualOrder(
             endpoint: "/api/trade/smart-buy",
             body: ["totalAmount": amount, "minScore": minimumScore, "maxCoins": maximumCoins],
@@ -4685,7 +4750,7 @@ final class CoinPilotStore: ObservableObject {
 
     func submitSmartSell(targetAmount: Double, strategy: String) async -> Bool {
         guard manualOrderBlockReason == nil else { orderMessage = manualOrderBlockReason; return false }
-        guard targetAmount.isFinite, targetAmount >= 1_000,
+        guard targetAmount.isFinite, targetAmount >= minimumSmartSellAmount,
               ["worst", "best", "overbought"].contains(strategy) else {
             orderMessage = "매도 목표 금액과 우선순위를 확인해 주세요."
             return false
@@ -4704,7 +4769,7 @@ final class CoinPilotStore: ObservableObject {
             orderMessage = "현재 보유 자산 평가액보다 큰 금액은 조건 매도에 사용할 수 없습니다."
             return false
         }
-        let amount = floor(targetAmount)
+        let amount = normalizedQuoteAmount(targetAmount)
         return await beginPendingManualOrder(
             endpoint: "/api/trade/smart-sell",
             body: ["targetAmount": amount, "strategy": strategy],
@@ -4748,12 +4813,12 @@ final class CoinPilotStore: ObservableObject {
             return false
         }
         if let buyAmount, (!buyAmount.isFinite || buyAmount < minimumOrderAmount || buyAmount > (holding.currentValue ?? 0)) {
-            orderMessage = "매수 금액을 확인해 주세요. 매도 예상 금액 안에서 5,000원 이상이어야 합니다."
+            orderMessage = "매수 금액을 확인해 주세요. 매도 예상 금액 안에서 \(CoinPilotFormatting.won(minimumOrderAmount)) 이상이어야 합니다."
             return false
         }
         var body: [String: Any] = ["sellCoin": sellCoin, "buyCoin": buyCoin]
         if let sellAmount { body["sellAmount"] = sellAmount }
-        if let buyAmount { body["buyAmount"] = buyAmount }
+        if let buyAmount { body["buyAmount"] = normalizedQuoteAmount(buyAmount) }
         let sellDisplay = CoinPilotFormatting.won((holding.currentValue ?? 0))
         return await beginPendingManualOrder(
             endpoint: "/api/trade/execute-bundle",
@@ -4786,14 +4851,15 @@ final class CoinPilotStore: ObservableObject {
         var body: [String: Any] = ["coin": recommendation.coin, "action": action]
         var displayAmount = "보유량 전체"
         if action == "BUY" {
-            let requested = amount ?? recommendation.suggestedAmount ?? 50_000
+            let requested = amount ?? recommendation.suggestedAmount ?? buyAmountPresets[1]
             guard requested.isFinite, requested >= minimumOrderAmount,
                   let cash = account?.krwBalance, requested <= cash else {
                 orderMessage = "매수 금액이 최소 주문 금액보다 작거나 현재 잔액을 초과합니다."
                 return false
             }
-            body["amount"] = floor(requested)
-            displayAmount = CoinPilotFormatting.won(floor(requested))
+            let normalizedAmount = normalizedQuoteAmount(requested)
+            body["amount"] = normalizedAmount
+            displayAmount = CoinPilotFormatting.won(normalizedAmount)
         } else if !(account?.positions.contains(where: { $0.coin == recommendation.coin && ($0.amount ?? 0) > 0 }) ?? false) {
             orderMessage = "현재 보유 수량이 없어 추천 매도를 실행할 수 없습니다."
             return false
@@ -4829,8 +4895,8 @@ final class CoinPilotStore: ObservableObject {
             orderMessage = "모의 지갑을 변경하려면 운영 토큰이 필요합니다."
             return false
         }
-        guard amount.isFinite, amount >= 1_000 else {
-            orderMessage = "최소 1,000원 이상 입력해 주세요."
+        guard amount.isFinite, amount >= minimumWalletAmount else {
+            orderMessage = "최소 \(CoinPilotFormatting.won(minimumWalletAmount)) 이상 입력해 주세요."
             return false
         }
         if storePaperWalletLocked {
@@ -4856,10 +4922,10 @@ final class CoinPilotStore: ObservableObject {
         }
         return await beginPendingManualOrder(
             endpoint: "/api/virtual/\(deposit ? "deposit" : "withdraw")",
-            body: ["amount": floor(amount)],
+            body: ["amount": normalizedQuoteAmount(amount)],
             market: "가상 지갑",
             side: deposit ? "입금" : "출금",
-            displayAmount: CoinPilotFormatting.won(floor(amount))
+            displayAmount: CoinPilotFormatting.won(normalizedQuoteAmount(amount))
         )
     }
 
@@ -4868,8 +4934,8 @@ final class CoinPilotStore: ObservableObject {
             orderMessage = "모의 계좌 초기화는 운영 권한이 있는 모의투자 서버에서만 할 수 있습니다."
             return false
         }
-        guard seedMoney.isFinite, seedMoney >= 100_000 else {
-            orderMessage = "초기 금액은 100,000원 이상으로 입력해 주세요."
+        guard seedMoney.isFinite, seedMoney >= minimumSeedAmount else {
+            orderMessage = "초기 금액은 \(CoinPilotFormatting.won(minimumSeedAmount)) 이상으로 입력해 주세요."
             return false
         }
         if storePaperWalletLocked {
@@ -4888,10 +4954,10 @@ final class CoinPilotStore: ObservableObject {
         }
         return await beginPendingManualOrder(
             endpoint: "/api/virtual/reset",
-            body: ["seedMoney": floor(seedMoney)],
+            body: ["seedMoney": normalizedQuoteAmount(seedMoney)],
             market: "가상 지갑",
             side: "초기화",
-            displayAmount: CoinPilotFormatting.won(floor(seedMoney))
+            displayAmount: CoinPilotFormatting.won(normalizedQuoteAmount(seedMoney))
         )
     }
 
@@ -4957,8 +5023,15 @@ final class CoinPilotStore: ObservableObject {
             return false
         }
 
+        let generation = requestGeneration
+        let workspace = activeWorkspace
+        let isCurrentRequest = {
+            self.requestGeneration == generation && self.currentServerURL == serverURL && self.activeWorkspace == workspace
+        }
         isSubmittingManualOrder = true
-        defer { isSubmittingManualOrder = false }
+        defer {
+            if isCurrentRequest() { isSubmittingManualOrder = false }
+        }
         do {
             let response = try await api.mutate(
                 path: record.endpoint,
@@ -4967,6 +5040,7 @@ final class CoinPilotStore: ObservableObject {
                 body: body,
                 idempotencyKey: record.idempotencyKey
             )
+            guard isCurrentRequest() else { return false }
             let responseBody = (try? Self.jsonObject(response.body)) as? [String: Any] ?? [:]
             let state = response.headers.first { $0.key.caseInsensitiveCompare("Idempotency-Status") == .orderedSame }?.value.lowercased()
             let serverMessage = Self.message(from: responseBody)
@@ -5004,6 +5078,7 @@ final class CoinPilotStore: ObservableObject {
             orderMessage = serverMessage ?? "주문 응답을 확인하지 못했습니다. 중복 주문 방지를 위해 같은 요청만 재확인할 수 있습니다."
             return false
         } catch {
+            guard isCurrentRequest() else { return false }
             pendingManualOrderLocked = true
             orderMessage = "서버 응답이 끊겨 주문 결과를 확정하지 못했습니다. 같은 요청으로 결과를 확인하세요. 새 주문은 잠겨 있습니다."
             return false
@@ -5033,7 +5108,11 @@ final class CoinPilotStore: ObservableObject {
         let requestWorkspace = activeWorkspace
         let generation = requestGeneration
         isWorking = true
-        defer { isWorking = false }
+        defer {
+            if generation == requestGeneration, currentServerURL == requestURL, activeWorkspace == requestWorkspace {
+                isWorking = false
+            }
+        }
         do {
             let response = try await api.mutate(path: path, at: requestURL, token: token, body: [:], idempotencyKey: nil)
             guard requestGeneration == generation, currentServerURL == requestURL, activeWorkspace == requestWorkspace else { return false }
@@ -5046,6 +5125,7 @@ final class CoinPilotStore: ObservableObject {
             await refresh()
             return true
         } catch {
+            guard requestGeneration == generation, currentServerURL == requestURL, activeWorkspace == requestWorkspace else { return false }
             dashboardMessage = CoinPilotAPIError.connection.message
             return false
         }
@@ -5066,7 +5146,11 @@ final class CoinPilotStore: ObservableObject {
         let requestWorkspace = activeWorkspace
         let generation = requestGeneration
         isLoadingTuning = true
-        defer { isLoadingTuning = false }
+        defer {
+            if generation == requestGeneration, currentServerURL == requestURL, activeWorkspace == requestWorkspace {
+                isLoadingTuning = false
+            }
+        }
         do {
             async let configResponse = api.read(path: "/api/investment-config", at: requestURL, token: token)
             async let rangeResponse = api.read(path: "/api/parameter-ranges", at: requestURL, token: token)
@@ -5103,6 +5187,7 @@ final class CoinPilotStore: ObservableObject {
             tuningMessage = nil
             return true
         } catch {
+            guard requestGeneration == generation, currentServerURL == requestURL, activeWorkspace == requestWorkspace else { return false }
             tuningMessage = CoinPilotAPIError.connection.message
             return false
         }
@@ -5124,7 +5209,11 @@ final class CoinPilotStore: ObservableObject {
         let requestURL = serverURL
         let requestWorkspace = activeWorkspace
         let generation = requestGeneration
-        defer { isSavingTuning = false }
+        defer {
+            if generation == requestGeneration, currentServerURL == requestURL, activeWorkspace == requestWorkspace {
+                isSavingTuning = false
+            }
+        }
         do {
             let response = try await api.mutate(
                 path: "/api/config/update",
@@ -5143,6 +5232,7 @@ final class CoinPilotStore: ObservableObject {
             _ = await loadTuning()
             return true
         } catch {
+            guard requestGeneration == generation, currentServerURL == requestURL, activeWorkspace == requestWorkspace else { return false }
             tuningMessage = CoinPilotAPIError.connection.message
             return false
         }
@@ -5279,6 +5369,11 @@ final class CoinPilotStore: ObservableObject {
         loadingFeatures = []
         refreshingFeatureGroups = []
         featureLastSuccessfulAt = [:]
+        tuningValues = [:]
+        tuningRanges = [:]
+        tuningMessage = nil
+        tuningMutationLocked = false
+        tuningMutationReason = nil
         pendingMobileFeatureGroupRefreshes = []
         mobileFeatureRequestGenerations = [:]
         isRunningFeatureAction = false
@@ -5407,6 +5502,11 @@ final class CoinPilotStore: ObservableObject {
         requestGeneration += 1
         isRefreshing = false
         isWorking = false
+        isSubmittingManualOrder = false
+        isRunningFeatureAction = false
+        isRecordingSnapshot = false
+        isLoadingTuning = false
+        isSavingTuning = false
         return requestGeneration
     }
 
@@ -5414,12 +5514,20 @@ final class CoinPilotStore: ObservableObject {
         serverExchange = exchange ?? serverExchange
         if let quote, !quote.isEmpty {
             quoteCurrency = quote
-            CoinPilotFormatting.quoteSymbol = quote == "KRW" ? "₩" : "$"
+            switch quote {
+            case "KRW": CoinPilotFormatting.quoteSymbol = "₩"
+            case "USDT", "USDC", "FDUSD", "TUSD": CoinPilotFormatting.quoteSymbol = "$"
+            default: CoinPilotFormatting.quoteSymbol = "\(quote) "
+            }
             CoinPilotFormatting.quoteAssetLabel = quote == "KRW" ? "원화" : quote
         }
     }
 
-    /// 최소 주문 금액 — 기준통화 단위. KRW 5,000 / USDT 계열 5.
+    var supportsAmountCurrency: Bool {
+        ["KRW", "USDT", "USDC", "FDUSD", "TUSD"].contains(quoteCurrency)
+    }
+
+    /// 최소 주문 금액 — 기준통화 단위. KRW 5,000 / 지원하는 USD stablecoin 5.
     var minimumOrderAmount: Double { quoteCurrency == "KRW" ? 5_000 : 5 }
 
     /// 모의 계좌 초기 잔액 최소값 — 기준통화 단위.
@@ -5427,6 +5535,13 @@ final class CoinPilotStore: ObservableObject {
 
     /// 모의 계좌 입금·출금 최소 금액 — 기준통화 단위.
     var minimumWalletAmount: Double { quoteCurrency == "KRW" ? 1_000 : 1 }
+
+    /// 조건 매도 목표의 최소 금액 — 서버가 허용하는 기준통화 단위.
+    var minimumSmartSellAmount: Double { quoteCurrency == "KRW" ? 1_000 : minimumOrderAmount }
+
+    private func normalizedQuoteAmount(_ amount: Double) -> Double {
+        quoteCurrency == "KRW" ? floor(amount) : amount
+    }
 
     /// 매수 금액 빠른 입력 프리셋 — 기준통화 단위.
     var buyAmountPresets: [Double] {
@@ -5498,30 +5613,41 @@ enum CoinPilotFormatting {
     static func won(_ value: Double?, unavailable: String = "금액 미제공") -> String {
         guard let value, value.isFinite else { return unavailable }
         let sign = value < 0 ? "−" : ""
-        return "\(sign)\(quoteSymbol)\(number(abs(value), fractionDigits: 0))"
+        return "\(sign)\(quoteSymbol)\(number(abs(value), fractionDigits: quoteSymbol == "₩" ? 0 : 8))"
     }
 
     static func signedWon(_ value: Double?, unavailable: String = "손익 미제공") -> String {
         guard let value, value.isFinite else { return unavailable }
         let sign = value > 0 ? "+" : value < 0 ? "−" : ""
-        return "\(sign)\(quoteSymbol)\(number(abs(value), fractionDigits: 0))"
+        return "\(sign)\(quoteSymbol)\(number(abs(value), fractionDigits: quoteSymbol == "₩" ? 0 : 8))"
     }
 
     static func price(_ value: Double?) -> String {
         guard let value, value.isFinite else { return "시세 미제공" }
-        let fractionDigits = value >= 1_000 ? 0 : value >= 1 ? 2 : 6
+        let fractionDigits = quoteSymbol == "₩" ? (value >= 1_000 ? 0 : value >= 1 ? 2 : 6) : 8
         return "\(quoteSymbol)\(number(value, fractionDigits: fractionDigits))"
     }
 
     static func percent(_ value: Double?, signed: Bool = true, unavailable: String = "변동률 미제공") -> String {
         guard let value, value.isFinite else { return unavailable }
+        guard value != 0 else { return "0%" }
+        let magnitude = abs(value)
+        if magnitude < 0.0001 {
+            let direction = value < 0 ? " 하락" : signed ? " 상승" : ""
+            return "0.0001% 미만\(direction)"
+        }
         let sign = signed && value > 0 ? "+" : ""
-        return "\(sign)\(number(value, fractionDigits: 2))%"
+        return "\(sign)\(number(value, fractionDigits: magnitude < 0.01 ? 4 : 2))%"
     }
 
     static func quantity(_ value: Double?) -> String {
         guard let value, value.isFinite else { return "수량 미제공" }
         return number(value, fractionDigits: 8)
+    }
+
+    static func editableNumber(_ value: Double) -> String {
+        let text = String(value)
+        return text.hasSuffix(".0") ? String(text.dropLast(2)) : text
     }
 
     /// RSI, MACD 히스토그램, BB %B 같은 지표 숫자 표기.
