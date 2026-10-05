@@ -1,17 +1,36 @@
 {
   "recordedAt": "2026-10-05T10:37:37.682642+00:00",
-  "lastConfirmedInteractionScreenshot": "61-macos-conditional-invalid-count.png",
-  "latestNativeFeedbackScreens": "not verified",
+  "lastConfirmedInteractionScreenshot": "69-ios-preset-cancel-keeps-feedback.png",
+  "latestNativeFeedbackScreens": {
+    "conditionalInvalidCount": "64-ios-conditional-invalid-count-final.png",
+    "presetsLoaded": "66-ios-presets-loaded.png",
+    "presetPending": "67-ios-preset-pending.png",
+    "presetApplied": "68-ios-preset-success-final.png",
+    "cancelKeepsAppliedPreset": "69-ios-preset-cancel-keeps-feedback.png"
+  },
   "observedErrors": [
     "timeoutReached",
     "noWindowsAvailable",
     "AXError.cannotComplete",
-    "elementHasNoFrame"
+    "elementHasNoFrame",
+    "Sky Computer Use request timed out"
   ],
   "recoveryAttempts": [
     "rebound full app path and bundle id",
     "restarted task-owned QA app process",
     "reset CUA session and rebound app"
   ],
-  "result": "Accessibility text can intermittently be read; clicks and screenshots for the last changes could not be completed. Existing screenshots are kept as evidence for their own versions."
+  "result": "iOS interaction partly recovered: input 31, Done keyboard dismissal, More tab, presets load/apply and cancellation verified. Later field editing returned AXError.cannotComplete; remaining GUI branches are unverified.",
+  "latestPassiveSimulatorCapture": {
+    "file": "62-ios-integrated-qa-order.png",
+    "observed": "Final integrated QA app launched with restored Order tab; KRW BTC price, current synthetic balance 990988, start button and bottom tabs visibly rendered.",
+    "limits": "Capture only; no final preset/conditional feedback click verification."
+  },
+  "updatedAt": "2026-10-05T11:05:01.911976+00:00",
+  "lastAttempt": {
+    "action": "set conditional amount draft to 5000.9 and capture",
+    "result": "tool timed out; amount confirmation not verified",
+    "maximumCoinCountDraftLastObserved": 1,
+    "screenshot71Exists": false
+  }
 }
