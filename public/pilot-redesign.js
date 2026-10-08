@@ -954,6 +954,17 @@
         const report = readiness?.report;
         const gate = readiness?.liveGate || {};
         const freshness = report?.freshness;
+        if (readiness?.status === 'NOT_REQUIRED' &&
+            readiness?.decisionMeaning === 'performance_validation_optional' &&
+            gate.enforced === false) {
+            return {
+                report, gate, ready: false, blocked: false, stale: false, missing: false,
+                currentEvidence: false, stateLabel: '선택 사항',
+                headline: '성과 검증 없이 자동매매를 시작할 수 있습니다.',
+                description: '시작할 때 계좌와 미체결 주문을 확인하고, 거래 중 위험 감시를 유지합니다.',
+                reasons: []
+            };
+        }
         const blockerCodes = [
             ...(Array.isArray(readiness?.blockerDetails)
                 ? readiness.blockerDetails.map(detail => typeof detail === 'string' ? detail : detail?.code).filter(Boolean)
@@ -2978,8 +2989,9 @@
         const readiness = classifyReadiness(state.strategyReadiness);
         const ready = readiness.stateLabel === '통과';
         const blocked = readiness.stateLabel === '보류';
-        setText('pilot-gate-validation-detail', ready ? '점검 통과' : blocked ? '주문 조건 미충족' : '확인 필요');
-        renderGateIcon('pilot-gate-validation-icon', ready ? '' : blocked ? 'blocked' : 'pending', ready ? 'check' : 'warning');
+        const optional = readiness.stateLabel === '선택 사항';
+        setText('pilot-gate-validation-detail', optional ? '성과 검증은 선택 사항' : ready ? '점검 통과' : blocked ? '주문 조건 미충족' : '확인 필요');
+        renderGateIcon('pilot-gate-validation-icon', optional || ready ? '' : blocked ? 'blocked' : 'pending', optional ? 'info' : ready ? 'check' : 'warning');
 
         const paper = state.paper;
         const paperState = paper?.state || (paper?.active ? 'RUNNING' : 'STOPPED');
@@ -3875,7 +3887,7 @@
             timestamp_missing_or_invalid: '작성 시각을 확인할 수 없음'
         };
         const freshnessReason = freshnessReasonLabels[freshness.reason] || '추가 정보 없음';
-        const gateResult = gate.checked === true
+        const gateResult = readiness?.status === 'NOT_REQUIRED' ? '선택 사항' : gate.checked === true
             ? gate.passed === true ? '통과' : '미통과'
             : '점검할 수 없음';
         const gateApplicability = gate.enforced === true

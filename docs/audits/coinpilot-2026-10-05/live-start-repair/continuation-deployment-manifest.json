@@ -1,0 +1,37 @@
+[
+  {
+    "path": "src/research/strategyReadiness.js",
+    "oldSha256": "1062a9d60797412927502a062f22351bf8a01e2679b12f136af761958ebddcd7",
+    "newSha256": "cb0334262b7464fd2b47736215e17eae53909a1afa67233d788af13de57a44dd"
+  },
+  {
+    "path": "src/research/scalpingValidationConfig.js",
+    "oldSha256": "74cd367a60443a62f68e7bf819e777e37930887ae591849c6ab644872dfef932",
+    "newSha256": "a95ac4171775f5379d096c3868c17f83ea951d9da39f12712a0950c268bb3a07"
+  },
+  {
+    "path": "src/trader/tradingLifecycle.js",
+    "oldSha256": "b8cd5d3ca2aa39fa616c77dff688450190901ea40e73534c7db28bacdcecc494",
+    "newSha256": "526a22a86ffeebaaa33c197084bfa1a8b06d45c5a41056e2115bae2b53e93034"
+  },
+  {
+    "path": "src/trader/multiCoinTrader.js",
+    "oldSha256": "01d127475dcb770eef030307b08f55971fabcfe24d8a5dd9085a99b0518680dc",
+    "newSha256": "27e531c5fabd9a09d329fb3e7331f2e490c3ba06b6ed07df4582356dd2ba4755"
+  },
+  {
+    "path": "src/runtime/liveValidationReportRefresher.js",
+    "oldSha256": "b94a30dfe2516e5eb1803da6bb7feb47c8ab0b48bc5c251f7abe69ac16a376b3",
+    "newSha256": "4b02d2fc6e41a56df2454fa656bf1971c2dc729c347d0e74dcb7caeaf11de391"
+  },
+  {
+    "path": "src/scripts/validateScalping.js",
+    "oldSha256": "c117f6f43af99378b25ccc499b73f78b126dae7c6907397bd40f6e6c8404166c",
+    "newSha256": "79481130ad501b4577c508084f8b95dad84ee2e5a6cb0e78f9dbee8e0d33ad7c"
+  },
+  {
+    "path": "src/api/routes/config.js",
+    "oldSha256": "749d445aa205228a25fe0031ace9942d82e8967048c98324d2986d1b553e1f4d",
+    "newSha256": "089c6fa4e793bc04f6fd160d0396846e3f4e8475c995369f3f848d9397e48718"
+  }
+]

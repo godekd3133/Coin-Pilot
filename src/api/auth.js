@@ -27,6 +27,8 @@ const READ_ONLY_PATHS = new Set([
   '/api/market/prices',
   '/api/market/prices/snapshot',
   '/api/paper-validation/summary',
+  '/api/notifications/status',
+  '/api/automation/history',
   '/api/stream'
 ]);
 const READ_ONLY_PORTFOLIO_PERIODS = new Set(['24h', '7d', '30d']);
@@ -105,6 +107,8 @@ const MOBILE_CONFIG_KEYS = new Set([
   'maxPositions'
 ]);
 const MOBILE_POST_PATHS = new Set([
+  '/api/notifications/register',
+  '/api/notifications/unregister',
   '/api/trade/buy',
   '/api/trade/sell',
   '/api/trade/quick',
@@ -391,6 +395,14 @@ function isMobileRequestAllowed(req, quoteAsset = 'KRW') {
   if (requestPathname === '/api/control/start' || requestPathname === '/api/control/stop' || requestPathname === '/api/paper-validation/stop' || requestPathname === '/api/portfolio/snapshot' || requestPathname === '/api/optimization/run-now') {
     return body === undefined || (body && typeof body === 'object' &&
       !Array.isArray(body) && Object.keys(body).length === 0);
+  }
+  if (requestPathname === '/api/notifications/register') {
+    return hasOnlyKeys(body, new Set(['deviceId', 'token', 'environment'])) &&
+      /^[a-f0-9-]{36}$/i.test(body.deviceId || '') && /^[a-f0-9]{32,512}$/i.test(body.token || '') &&
+      ['sandbox', 'production'].includes(body.environment);
+  }
+  if (requestPathname === '/api/notifications/unregister') {
+    return hasOnlyKeys(body, new Set(['deviceId'])) && /^[a-f0-9-]{36}$/i.test(body.deviceId || '');
   }
   if (requestPathname === '/api/paper-validation/start') {
     if (body === undefined) return true;

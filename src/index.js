@@ -282,7 +282,7 @@ async function main() {
       trader.autoRecovery = autoRecovery;
       autoRecovery.start();
 
-      const startTraderOnBoot = config.dashboardStartTraderOnBoot;
+      const startTraderOnBoot = autoRecovery.resolveBootIntent(config.dashboardStartTraderOnBoot);
       if (startTraderOnBoot) {
         // 카운트다운
         console.log('\n⏱️  3초 후 자동매매를 시작합니다...');
@@ -294,7 +294,6 @@ async function main() {
 
         // 자동매매 시작
         try {
-          autoRecovery.noteDesiredRunning(true, 'boot_start');
           await trader.start();
         } catch (error) {
           console.error('\n❌ 치명적 오류:', error);

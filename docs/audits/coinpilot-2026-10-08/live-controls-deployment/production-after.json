@@ -1,0 +1,212 @@
+{
+  "checkedAt": "2026-10-08T06:42:28.073226+00:00",
+  "method": "GET only; no control/start or orders",
+  "endpoints": {
+    "/health": {
+      "httpStatus": 200,
+      "body": {
+        "status": "ok",
+        "uptimeSec": 21,
+        "pid": 75381,
+        "timestamp": "2026-10-08T06:42:28.762Z"
+      }
+    },
+    "/service-ready": {
+      "httpStatus": 200,
+      "body": {
+        "ready": true,
+        "uptimeSec": 21,
+        "timestamp": "2026-10-08T06:42:28.811Z",
+        "checks": {
+          "httpServerListening": true,
+          "marketDataScheduler": {
+            "available": true,
+            "queueLength": 0,
+            "queuedByPriority": {
+              "normal": 0,
+              "risk": 0
+            },
+            "oldestWaitAgeMsByPriority": {
+              "normal": null,
+              "risk": null
+            },
+            "inFlightByPriority": {
+              "normal": 0,
+              "risk": 0
+            },
+            "inFlightTotal": 0,
+            "maxInFlight": 4,
+            "maxQueuedByPriority": {
+              "normal": 64,
+              "risk": 16
+            },
+            "nextStartInMs": 0,
+            "backoffRemainingMs": 0,
+            "pressure": {
+              "normalQueueSaturated": false,
+              "riskQueueSaturated": false,
+              "backoffActive": false
+            }
+          },
+          "publicMarketSnapshot": {
+            "available": true,
+            "marketCount": 291,
+            "persistedAt": "2026-10-08T06:39:06.836Z",
+            "dirty": false,
+            "readOnly": false,
+            "persistenceHealthy": true,
+            "loadHealthy": true
+          },
+          "marketDataCoordinator": {
+            "required": true,
+            "enabled": true,
+            "available": true,
+            "failureCode": null,
+            "queuedTotal": 0,
+            "inFlightTotal": 0,
+            "maxInFlight": 4,
+            "nextStartInMs": 0
+          }
+        }
+      }
+    },
+    "/ready": {
+      "httpStatus": 503,
+      "body": {
+        "ready": false,
+        "uptimeSec": 21,
+        "timestamp": "2026-10-08T06:42:29.004Z",
+        "checks": {
+          "httpServerListening": true,
+          "marketDataScheduler": {
+            "available": true,
+            "queueLength": 0,
+            "queuedByPriority": {
+              "normal": 0,
+              "risk": 0
+            },
+            "oldestWaitAgeMsByPriority": {
+              "normal": null,
+              "risk": null
+            },
+            "inFlightByPriority": {
+              "normal": 0,
+              "risk": 0
+            },
+            "inFlightTotal": 0,
+            "maxInFlight": 4,
+            "maxQueuedByPriority": {
+              "normal": 64,
+              "risk": 16
+            },
+            "nextStartInMs": 0,
+            "backoffRemainingMs": 0,
+            "pressure": {
+              "normalQueueSaturated": false,
+              "riskQueueSaturated": false,
+              "backoffActive": false
+            }
+          },
+          "publicMarketSnapshot": {
+            "available": true,
+            "marketCount": 291,
+            "persistedAt": "2026-10-08T06:39:06.836Z",
+            "dirty": false,
+            "readOnly": false,
+            "persistenceHealthy": true,
+            "loadHealthy": true
+          },
+          "traderRunning": false,
+          "runtimeSafetyAvailable": true,
+          "runtimeState": "STOPPED",
+          "entriesPaused": true,
+          "protectiveMonitorActive": false,
+          "stopReason": "operator_stop",
+          "exchangeStateKnown": true,
+          "lastCycleAt": null,
+          "analysisHealthAvailable": true,
+          "analysisHealthy": true,
+          "analysisStaleReason": null,
+          "analysisCycleConfigValid": true,
+          "analysisLastCompleteAt": null,
+          "analysisFirstCycleComplete": false,
+          "analysisCycleAgeSeconds": null,
+          "analysisCycleMaxAgeSeconds": 120,
+          "analysisCycleFresh": false,
+          "riskHealthAvailable": true,
+          "riskHealthy": true,
+          "riskStaleReason": null,
+          "marketDataCoordinator": {
+            "required": true,
+            "enabled": true,
+            "available": true,
+            "failureCode": null,
+            "queuedTotal": 0,
+            "inFlightTotal": 0,
+            "maxInFlight": 4,
+            "nextStartInMs": 0
+          }
+        }
+      }
+    },
+    "/api/system-status": {
+      "httpStatus": 200,
+      "body": {
+        "mode": "LIVE",
+        "isRunning": false,
+        "runtimeState": "STOPPED",
+        "currentPositions": 0,
+        "exchangeStateKnown": true,
+        "stopReason": "operator_stop",
+        "manualProtectionActive": true,
+        "liveManualPrepared": null
+      }
+    },
+    "/api/strategy-readiness": {
+      "httpStatus": 200,
+      "body": {
+        "status": "NOT_REQUIRED",
+        "decisionMeaning": "performance_validation_optional",
+        "currentEvidence": false,
+        "source": "configured_scalping_validation_report",
+        "report": {
+          "available": false,
+          "filename": "scalping_validation.json",
+          "generatedAt": null,
+          "validationMode": null,
+          "promoted": null,
+          "freshness": {
+            "fresh": false,
+            "reason": "timestamp_missing_or_invalid",
+            "generatedAt": null,
+            "ageSeconds": null,
+            "maxAgeSeconds": 86400
+          }
+        },
+        "runtime": {
+          "strategyMode": "oversold_reaction_scalping",
+          "dryRun": false,
+          "isScalpingMode": true,
+          "requireValidationPassForLive": false,
+          "readinessMeaning": "live_validation_evidence",
+          "applies": true
+        },
+        "liveGate": {
+          "checked": false,
+          "passed": null,
+          "enforced": false,
+          "enforcedFreshness": false,
+          "reason": null
+        },
+        "blockers": [],
+        "blockerDetails": []
+      }
+    },
+    "/api/positions": {
+      "httpStatus": 200,
+      "body": {
+        "positionCount": 0
+      }
+    }
+  }
+}

@@ -616,7 +616,7 @@ final class CoinPilotAPIClient: CoinPilotAPIProviding, @unchecked Sendable {
 
         let queryItems = components.queryItems ?? []
         switch components.path {
-        case "/api/status", "/api/account", "/api/cumulative-pnl", "/api/today-summary", "/api/market/prices", "/api/market/prices/snapshot", "/api/paper-validation/summary", "/api/positions", "/api/parameter-ranges", "/api/investment-config", "/api/investment-presets":
+        case "/api/notifications/status", "/api/automation/history", "/api/status", "/api/account", "/api/cumulative-pnl", "/api/today-summary", "/api/market/prices", "/api/market/prices/snapshot", "/api/paper-validation/summary", "/api/positions", "/api/parameter-ranges", "/api/investment-config", "/api/investment-presets":
             return queryItems.isEmpty
         case "/api/portfolio/history":
             guard queryItems.count == 1, queryItems.first?.name == "period",
@@ -759,6 +759,12 @@ final class CoinPilotAPIClient: CoinPilotAPIProviding, @unchecked Sendable {
         case "/api/control/start", "/api/control/stop", "/api/paper-validation/stop", "/api/portfolio/snapshot", "/api/optimization/run-now":
             return keys.isEmpty
         case "/api/virtual/reset": return keys == ["seedMoney"]
+        case "/api/notifications/register":
+            return keys == ["deviceId", "token", "environment"] &&
+                (body["deviceId"] as? String)?.range(of: "^[a-fA-F0-9-]{36}$", options: .regularExpression) != nil &&
+                (body["token"] as? String)?.range(of: "^[a-fA-F0-9]{32,512}$", options: .regularExpression) != nil &&
+                ["sandbox", "production"].contains(body["environment"] as? String ?? "")
+        case "/api/notifications/unregister": return keys == ["deviceId"] && body["deviceId"] is String
         case "/api/paper-validation/start":
             return keys.isEmpty || (keys == ["reset"] && body["reset"] is Bool)
         case "/api/virtual/deposit", "/api/virtual/withdraw": return keys == ["amount"]
@@ -1108,8 +1114,13 @@ struct CoinPilotStatus {
     let maxCandleAgeSeconds: Double?
     let exchange: String?
     let quoteCurrency: String?
+    let desiredAutomationRunning: Bool?
+    let automationTrackingSavedAt: String?
 
     init(_ object: [String: Any]) {
+        let recovery = object["autoRecovery"] as? [String: Any]
+        desiredAutomationRunning = recovery?["desiredRunning"] as? Bool
+        automationTrackingSavedAt = (recovery?["tracking"] as? [String: Any])?["savedAt"] as? String
         isRunning = object["isRunning"] as? Bool
         mode = object["mode"] as? String
         isReadOnlyObserver = object["readOnlyObserver"] as? Bool
@@ -1953,6 +1964,10 @@ final class CoinPilotStore: ObservableObject {
     @Published private(set) var aiConsultations: [[String: Any]] = []
     @Published private(set) var aiConsultationMessage: String?
     @Published private(set) var strategyResearch: [String: Any] = [:]
+    @Published private(set) var orderNotificationMessage: String?
+    private var registeringOrderNotifications = false
+    private var pushRegistrations: [String: Date] = [:]
+    private var pushProviderReady: [String: Bool] = [:]
     @Published private(set) var strategyReadiness: [String: Any] = [:]
     @Published private(set) var scalpingValidation: [String: Any] = [:]
     @Published private(set) var paperValidationState: [String: Any] = [:]
@@ -1983,6 +1998,7 @@ final class CoinPilotStore: ObservableObject {
     private let offlineReplaySessionUptime: () -> TimeInterval
     private var currentServerURL: URL?
     private var requestGeneration = 0
+    private var automationFeedbackMessage: String?
     private var lastSuccessfulResourceAt: [String: Date] = [:]
     private var bootstrapped = false
     private var shouldInferWorkspaceFromLegacyURL = false
@@ -3011,6 +3027,24 @@ final class CoinPilotStore: ObservableObject {
 
     func logOut() {
         guard !usesManagedServerConnection else { return }
+        #if canImport(UIKit)
+        let deviceId = CoinPilotOrderNotifications.shared.deviceId
+        let requests = CoinPilotWorkspaceMode.allCases.compactMap { workspace -> (URL, String?)? in
+            guard let url = workspace == activeWorkspace ? currentServerURL : bundledServers.url(for: workspace),
+                  let bearer = tokens.token(for: url) else { return nil }
+            return (url, bearer)
+        }
+        let client = api
+        Task {
+            for (url, bearer) in requests {
+                _ = try? await client.mutate(path: "/api/notifications/unregister", at: url, token: bearer,
+                    body: ["deviceId": deviceId], idempotencyKey: nil)
+            }
+        }
+        #endif
+        pushRegistrations.removeAll()
+        pushProviderReady.removeAll()
+        orderNotificationMessage = nil
         _ = beginRequestGeneration()
         stopLiveStream()
         if let currentServerURL { tokens.delete(for: currentServerURL) }
@@ -3075,6 +3109,62 @@ final class CoinPilotStore: ObservableObject {
         }
     }
 
+    func syncOrderNotifications() async {
+        #if canImport(UIKit)
+        guard canOperate, !isBundledPreview, !isBundledLocalMarketData,
+              !registeringOrderNotifications, let activeURL = currentServerURL else { return }
+        registeringOrderNotifications = true
+        defer { registeringOrderNotifications = false }
+        let generation = requestGeneration
+        let notifications = CoinPilotOrderNotifications.shared
+        guard await notifications.prepare() else {
+            orderNotificationMessage = "주문 알림을 받으려면 iPhone 설정에서 CoinPilot 알림을 허용해 주세요."
+            return
+        }
+        guard let deviceToken = notifications.deviceToken else {
+            orderNotificationMessage = notifications.registrationError ?? "주문 알림 기기를 연결하고 있어요."
+            return
+        }
+        var registrations = 0
+        var providerReady = true
+        for workspace in CoinPilotWorkspaceMode.allCases {
+            let url = workspace == activeWorkspace ? activeURL : bundledServers.url(for: workspace)
+            guard let url else { continue }
+            // Only reuse credentials across the release's same-origin profiles.
+            let sameOrigin = url.scheme == activeURL.scheme && url.host == activeURL.host && url.port == activeURL.port
+            let bearer = tokens.token(for: url) ?? (sameOrigin ? requestBearerToken(for: activeURL) : nil)
+            guard bearer != nil || !authenticationRequired else { continue }
+            let key = "\(url.absoluteString)|\(deviceToken)|\(generation)"
+            if let registeredAt = pushRegistrations[key], now().timeIntervalSince(registeredAt) < 300 {
+                registrations += 1
+                providerReady = providerReady && (pushProviderReady[key] == true)
+                continue
+            }
+            do {
+                let statusResponse = try await api.mobileRead(path: "/api/status", at: url, token: bearer)
+                guard (200..<300).contains(statusResponse.statusCode),
+                      let state = try Self.jsonObject(statusResponse.body) as? [String: Any],
+                      state["mode"] as? String == workspace.serverMode else { continue }
+                guard generation == requestGeneration, canOperate else { return }
+                let response = try await api.mutate(path: "/api/notifications/register", at: url, token: bearer,
+                    body: ["deviceId": notifications.deviceId, "token": deviceToken, "environment": notifications.environment], idempotencyKey: nil)
+                guard generation == requestGeneration else { return }
+                guard (200..<300).contains(response.statusCode),
+                      let body = try Self.jsonObject(response.body) as? [String: Any], body["success"] as? Bool == true else { continue }
+                providerReady = providerReady && (body["configured"] as? Bool == true)
+                pushProviderReady[key] = body["configured"] as? Bool == true
+                pushRegistrations[key] = now()
+                registrations += 1
+            } catch { continue }
+        }
+        guard generation == requestGeneration else { return }
+        orderNotificationMessage = registrations == 0 ? "주문 알림 서버에 연결하지 못했어요. 다시 확인합니다."
+            : !providerReady ? "기기는 등록됐지만 서버 알림 설정을 확인해야 해요."
+            : registrations == 2 ? "실거래·모의거래 주문 푸시 알림이 켜져 있어요."
+            : "현재 계좌의 주문 푸시 알림이 켜져 있어요."
+        #endif
+    }
+
     func refresh() async {
         syncLiveStream()
         guard phase == .dashboard, !isRefreshing else { return }
@@ -3090,7 +3180,7 @@ final class CoinPilotStore: ObservableObject {
             return
         }
         isRefreshing = true
-        dashboardMessage = nil
+        updateDashboardRefreshMessage(nil)
         defer {
             if generation == requestGeneration { isRefreshing = false }
         }
@@ -3138,7 +3228,7 @@ final class CoinPilotStore: ObservableObject {
         }()
         guard let preflightStatus,
               preflightStatus.mode == activeWorkspace.serverMode else {
-            clearLoadedData()
+            clearLoadedData(preservingAutomationFeedback: preflightStatus == nil)
             status = preflightStatus
             serverModeMatchesWorkspace = false
             if let statusResponse, (200..<300).contains(statusResponse.statusCode), preflightStatus != nil {
@@ -3150,16 +3240,17 @@ final class CoinPilotStore: ObservableObject {
             for name in Self.resourceNames where name != "status" {
                 resourceStates[name] = .unavailable
             }
-            dashboardMessage = usesBundledPreview
+            updateDashboardRefreshMessage(usesBundledPreview
                 ? "앱에 포함된 예시 자료를 불러오지 못했어요."
                 : preflightStatus == nil
                     ? "서버 거래 모드를 확인할 수 없어 계좌 정보를 불러오지 않았어요."
-                    : workspaceModeMismatchMessage ?? "서버 거래 모드를 확인할 수 없어 화면을 잠갔습니다."
+                    : workspaceModeMismatchMessage ?? "서버 거래 모드를 확인할 수 없어 화면을 잠갔습니다.")
             return
         }
 
         status = preflightStatus
         serverModeMatchesWorkspace = true
+        Task { await self.syncOrderNotifications() }
         rawResponses["status"] = statusResponse
         markResourceLoaded("status", at: updatedAt)
         if !usesBundledPreview, let serverURL {
@@ -3326,13 +3417,13 @@ final class CoinPilotStore: ObservableObject {
 
         if successes == Self.requiredResourceCount {
             lastCheckedAt = updatedAt
-            dashboardMessage = nil
+            updateDashboardRefreshMessage(nil)
         } else if successes > 0 {
-            dashboardMessage = "일부 정보를 새로 확인하지 못했어요. 표시된 항목의 마지막 확인 시각을 살펴봐 주세요."
+            updateDashboardRefreshMessage("일부 정보를 새로 확인하지 못했어요. 표시된 항목의 마지막 확인 시각을 살펴봐 주세요.")
         } else {
-            dashboardMessage = usesBundledPreview
+            updateDashboardRefreshMessage(usesBundledPreview
                 ? "앱에 포함된 예시 자료를 불러오지 못했어요."
-                : "서버에서 정보를 불러오지 못했어요. 연결 상태를 확인한 뒤 다시 시도해 주세요."
+                : "서버에서 정보를 불러오지 못했어요. 연결 상태를 확인한 뒤 다시 시도해 주세요.")
         }
     }
 
@@ -4709,7 +4800,7 @@ final class CoinPilotStore: ObservableObject {
            let values = object["data"] as? [[String: Any]] {
             history = values.enumerated().map { CoinPilotHistoryPoint($0.element, index: $0.offset) }
             markResourceLoaded("portfolio-history", at: usesBundledPreview ? bundledPreview.generatedAt ?? Date() : Date())
-            dashboardMessage = nil
+            updateDashboardRefreshMessage(nil)
         } else if case .success(let response) = result, response.statusCode == 401, authenticationRequired,
                   let serverURL {
             tokens.delete(for: serverURL)
@@ -4719,7 +4810,7 @@ final class CoinPilotStore: ObservableObject {
             connectionMessage = "서버 인증을 확인할 수 없습니다. 서버 토큰을 다시 입력해 주세요."
         } else {
             markResourceFailed("portfolio-history")
-            dashboardMessage = "자산 기록을 불러오지 못했습니다."
+            updateDashboardRefreshMessage("자산 기록을 불러오지 못했습니다.")
         }
     }
 
@@ -5193,6 +5284,8 @@ final class CoinPilotStore: ObservableObject {
         let requestURL = serverURL
         let requestWorkspace = activeWorkspace
         let generation = requestGeneration
+        automationFeedbackMessage = nil
+        dashboardMessage = nil
         isWorking = true
         defer {
             if generation == requestGeneration, currentServerURL == requestURL, activeWorkspace == requestWorkspace {
@@ -5204,15 +5297,18 @@ final class CoinPilotStore: ObservableObject {
             guard requestGeneration == generation, currentServerURL == requestURL, activeWorkspace == requestWorkspace else { return false }
             let body = (try? Self.jsonObject(response.body)) as? [String: Any] ?? [:]
             guard (200..<300).contains(response.statusCode), body["success"] as? Bool == true else {
-                dashboardMessage = Self.message(from: body) ?? CoinPilotAPIError.forStatusCode(response.statusCode).message
+                automationFeedbackMessage = Self.message(from: body) ?? CoinPilotAPIError.forStatusCode(response.statusCode).message
+                updateDashboardRefreshMessage(nil)
                 return false
             }
-            dashboardMessage = Self.message(from: body)
+            automationFeedbackMessage = Self.message(from: body)
+            updateDashboardRefreshMessage(nil)
             await refresh()
             return true
         } catch {
             guard requestGeneration == generation, currentServerURL == requestURL, activeWorkspace == requestWorkspace else { return false }
-            dashboardMessage = CoinPilotAPIError.connection.message
+            automationFeedbackMessage = CoinPilotAPIError.connection.message
+            updateDashboardRefreshMessage(nil)
             return false
         }
     }
@@ -5408,7 +5504,13 @@ final class CoinPilotStore: ObservableObject {
         return nil
     }
 
-    private func clearLoadedData() {
+    private func updateDashboardRefreshMessage(_ refreshMessage: String?) {
+        let messages = [automationFeedbackMessage, refreshMessage].compactMap { $0 }
+        dashboardMessage = messages.isEmpty ? nil : messages.joined(separator: "\n\n")
+    }
+
+    private func clearLoadedData(preservingAutomationFeedback: Bool = false) {
+        if !preservingAutomationFeedback { automationFeedbackMessage = nil }
         account = nil
         status = nil
         serverExchange = nil

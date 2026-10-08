@@ -1,3 +1,5 @@
+import { OrderPushService, createApnsSender } from './orderPushService.js';
+import { createNotificationRoutes, manualNotificationMiddleware } from './routes/notifications.js';
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -61,6 +63,10 @@ class DashboardServer {
     }
     this.publicMarketDataSource = publicMarketDataSource ?? null;
     const dashboardEnv = options.env || process.env;
+    const pushFile = options.orderPushFile || dashboardEnv.ORDER_PUSH_STATE_FILE || (tradingSystem?.virtualPortfolioFile ? `${tradingSystem.virtualPortfolioFile}.push.json` : null);
+    this.orderPush = new OrderPushService({ file: pushFile,
+      mode: tradingSystem?.dryRun === false ? 'LIVE' : 'DRY_RUN',
+      sender: options.apnsSender || createApnsSender(dashboardEnv) });
     this.optimizationStoragePaths = resolveOptimizationStoragePaths({
       env: dashboardEnv,
       cwd: options.cwd || process.cwd(),
@@ -373,6 +379,8 @@ class DashboardServer {
     // ========================================
     // 모듈화된 라우트 마운트
     // ========================================
+    this.app.use('/api', createNotificationRoutes(this));
+    this.app.use('/api', manualNotificationMiddleware(this));
     this.app.use('/api', createAccountRoutes(this));
     this.app.use('/api', createLiveCredentialsRoutes(this));
     this.app.use('/api', createPortfolioRoutes(this));
@@ -506,6 +514,10 @@ class DashboardServer {
    */
   emitTradeNotification(tradeInfo) {
     this._notificationMonitor().emitTradeNotification(tradeInfo);
+    try {
+      this.orderPush.enqueue(tradeInfo);
+      this.tradingSystem.autoRecovery?.tracking?.record('trade', { type: tradeInfo.type, market: tradeInfo.coin, orderId: tradeInfo.orderId || null });
+    } catch (error) { this.orderPush.error = error.message; this.logger.error('주문 알림 기록 실패', { error: error.message }); }
   }
 
   /**
@@ -608,6 +620,7 @@ class DashboardServer {
             console.log(`   🔐 인증: ${this.auth.enabled ? '대시보드 토큰 필요' : '비활성 (루프백 전용)'}`);
             console.log(`   📡 실시간 알림: Socket.io 활성화`);
             this.logger.info(`Dashboard server started on ${this.auth.host}:${boundPort} (auth=${this.auth.enabled})`);
+            this.orderPush.start();
             resolve(server);
           });
         })
@@ -708,6 +721,9 @@ class DashboardServer {
   }
 
   stop() {
+    this.orderPush?.stop();
+    this.tradingSystem.autoRecovery?.stop?.();
+    try { this.tradingSystem.autoRecovery?.tracking?.record('shutdown'); } catch { /* persistence error remains in status */ }
     this.optimizationScheduler?.stop();
     this.realtimeHub?.stop();
     this.notificationMonitor?.stop();

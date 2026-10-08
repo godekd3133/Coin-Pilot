@@ -11,36 +11,20 @@ import {
 } from '../research/scalpingValidationConfig.js';
 import { pathToFileURL } from 'node:url';
 import { envBool, envList, envNumber, envString } from '../config/envConfig.js';
+import { fetchCompleteUpbitCandleHistory } from '../market-data/completeUpbitCandleHistory.js';
 
 dotenv.config();
 
-const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const number = (value, fallback) => Number.isFinite(Number(value)) ? Number(value) : fallback;
 
 export async function getHistoricalCandles(upbit, market, unit, totalCount) {
-  const candles = [];
-  let to = null;
-
-  while (candles.length < totalCount) {
-    const count = Math.min(200, totalCount - candles.length);
-    const batch = to
-      ? await upbit.getMinuteCandles(market, unit, count, { to })
-      : await upbit.getMinuteCandles(market, unit, count);
-
-    if (!Array.isArray(batch) || batch.length === 0) break;
-    candles.push(...batch);
-    const oldest = batch[batch.length - 1];
-    to = oldest?.candle_date_time_utc;
-    if (!to || batch.length < count) break;
-    await sleep(120);
-  }
-
-  const byTimestamp = new Map();
-  for (const candle of candles) {
-    const key = candle?.candle_date_time_utc || candle?.candle_date_time_kst || candle?.timestamp;
-    if (key !== undefined) byTimestamp.set(String(key), candle);
-  }
-  return Array.from(byTimestamp.values());
+  return fetchCompleteUpbitCandleHistory({
+    marketDataClient: upbit,
+    market,
+    intervalMinutes: unit,
+    totalCount,
+    requestSpacingMs: 120
+  });
 }
 
 async function selectMarkets(upbit) {
@@ -186,7 +170,9 @@ async function main() {
   console.log(`캔들: ${unit}분봉 ${candleCount}개 / 수수료 ${(config.tradingFee * 100).toFixed(3)}% / 슬리피지 ${(config.slippage * 100).toFixed(3)}%`);
   console.log(`검증 모드: ${fixedConfigValidation ? 'fixed_config (현재 설정 그대로)' : 'tuned_holdout (학습 구간 튜닝)'}`);
   console.log(paperSnapshot
-    ? `설정 source: paper snapshot ${paperSnapshot.filePath} (session ${paperSnapshot.sessionId || 'unknown'})`
+    ? paperSnapshot.sourceType === 'runtime_config_snapshot'
+      ? '설정 source: 현재 서버 투자 설정 snapshot'
+      : `설정 source: paper snapshot ${paperSnapshot.filePath} (session ${paperSnapshot.sessionId || 'unknown'})`
     : '설정 source: environment/defaults');
 
   for (const market of markets) {
@@ -250,7 +236,7 @@ async function main() {
     candleCacheFile: candleCacheFile || null,
     configSource: paperSnapshot
       ? {
-          type: 'paper_validation_snapshot',
+          type: paperSnapshot.sourceType,
           filePath: paperSnapshot.filePath,
           sessionId: paperSnapshot.sessionId,
           startedAt: paperSnapshot.startedAt,

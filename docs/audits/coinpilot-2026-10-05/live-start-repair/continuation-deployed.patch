@@ -1,0 +1,550 @@
+--- a/src/research/strategyReadiness.js
++++ b/src/research/strategyReadiness.js
+@@ -19,6 +19,11 @@
+   confidence_gate_failed: '거래 수익에 대한 검증이 충분하지 않아 실거래 자동매매를 시작할 수 없습니다. 모의투자로 검증을 계속해 주세요.',
+   promotion_gate_failed: '투자 전략이 실거래 자동매매 검증을 통과하지 못했습니다. 모의투자로 검증을 계속해 주세요.',
+   markets_missing: '점검 결과에 투자 대상 코인이 없습니다. 현재 투자 설정으로 다시 점검해 주세요.',
++  validation_markets_invalid: '점검 결과의 투자 대상 코인 목록이 잘못되었거나 중복되어 있습니다. 현재 투자 설정으로 다시 점검해 주세요.',
++  runtime_markets_invalid: '현재 투자 대상 코인 목록을 확인할 수 없습니다. 투자 대상을 설정한 뒤 다시 점검해 주세요.',
++  validation_market_mismatch: '현재 투자 대상 코인과 점검 당시 대상이 다릅니다. 현재 투자 대상으로 다시 점검한 뒤 시도해 주세요.',
++  validation_results_invalid: '점검 결과에 투자 대상별 검증 자료가 빠져 있거나 중복되어 있습니다. 현재 투자 설정으로 다시 점검해 주세요.',
++  live_universe_update_requires_stop: '실거래 자동매매가 실행 중이거나 시작을 준비 중입니다. 자동매매를 중지한 뒤 투자 대상과 포지션 설정을 변경해 주세요.',
+   report_config_incomplete: '점검 결과에 필요한 투자 설정이 빠져 있습니다. 현재 투자 설정으로 다시 점검해 주세요.',
+   strategy_mode_mismatch: '현재 투자 전략과 점검 당시 전략이 다릅니다. 현재 전략으로 다시 점검해 주세요.',
+   risk_monitor_disabled: '포지션 위험 감시가 꺼져 있어 실거래 자동매매를 시작할 수 없습니다. 서버에서 위험 감시를 켠 뒤 다시 시도해 주세요.',
+--- a/src/research/scalpingValidationConfig.js
++++ b/src/research/scalpingValidationConfig.js
+@@ -117,8 +117,9 @@
+ 
+   return {
+     filePath,
+-    sessionId: ledger.sessionId || null,
+-    startedAt: ledger.startedAt || null,
++    sourceType: ledger.sourceType === 'runtime_config_snapshot' ? 'runtime_config_snapshot' : 'paper_validation_snapshot',
++    sessionId: ledger.sourceType === 'runtime_config_snapshot' ? null : ledger.sessionId || null,
++    startedAt: ledger.sourceType === 'runtime_config_snapshot' ? null : ledger.startedAt || null,
+     configSnapshotComplete: true,
+     config: copyValidationFields(ledger.configSnapshot)
+   };
+@@ -146,4 +147,3 @@
+     candleUnit: candleUnit ?? snapshot.config.candleUnit ?? baseConfig.candleUnit
+   };
+ }
+-
+--- a/src/trader/tradingLifecycle.js
++++ b/src/trader/tradingLifecycle.js
+@@ -14,6 +14,20 @@
+ import UpbitAPI from '../api/upbit.js';
+ import { assessScalpingValidationReportFreshness } from '../research/scalpingValidationFreshness.js';
+ import { LIVE_GATE_COMPARABLE_KEYS } from '../research/scalpingValidationConfig.js';
++import { MARKET_CODE_RE, quoteOfSystem } from '../exchange/marketCodes.js';
++
++function hasUniqueMarketCodes(markets, quoteAsset) {
++  if (!Array.isArray(markets) || markets.length === 0) return false;
++  const seen = new Set();
++  for (const market of markets) {
++    if (typeof market !== 'string' || !MARKET_CODE_RE.test(market) ||
++        !market.startsWith(`${quoteAsset}-`) || seen.has(market)) {
++      return false;
++    }
++    seen.add(market);
++  }
++  return true;
++}
+ 
+ export class TradingLifecycle {
+   constructor(owner) {
+@@ -273,6 +287,27 @@
+     if (!Array.isArray(report.markets) || report.markets.length === 0) {
+       throw new Error('실전 스캘핑 차단: 검증 대상 market 목록이 비어 있습니다.');
+     }
++    const quoteAsset = quoteOfSystem(this.owner);
++    if (!hasUniqueMarketCodes(report.markets, quoteAsset)) {
++      throw Object.assign(
++        new Error('실전 스캘핑 차단: 검증 대상 market 목록에 잘못된 코드나 중복이 있습니다.'),
++        { code: 'validation_markets_invalid' }
++      );
++    }
++    if (!hasUniqueMarketCodes(this.owner.targetCoins, quoteAsset)) {
++      throw Object.assign(
++        new Error('실전 스캘핑 차단: 현재 투자 대상 market 목록이 확정되지 않았거나 잘못되었습니다.'),
++        { code: 'runtime_markets_invalid' }
++      );
++    }
++    const reportMarkets = new Set(report.markets);
++    if (reportMarkets.size !== this.owner.targetCoins.length ||
++        this.owner.targetCoins.some(market => !reportMarkets.has(market))) {
++      throw Object.assign(
++        new Error('실전 스캘핑 차단: 검증 대상 market 목록과 현재 투자 대상이 다릅니다. 현재 투자 대상으로 fixed validation을 다시 실행하세요.'),
++        { code: 'validation_market_mismatch' }
++      );
++    }
+ 
+     const currentSnapshot = this.owner.getPaperValidationConfigSnapshot();
+     const comparableKeys = LIVE_GATE_COMPARABLE_KEYS;
+@@ -298,6 +333,16 @@
+       });
+     if (configDrift.length > 0) {
+       throw new Error(`실전 스캘핑 차단: validation report와 현재 runtime 설정이 다릅니다 (${configDrift.join(', ')}). fixed validation을 다시 실행하세요.`);
++    }
++
++    const resultMarkets = Array.isArray(report.results) ? report.results.map(result => result?.market) : null;
++    if (!hasUniqueMarketCodes(resultMarkets, quoteAsset) ||
++        resultMarkets.length !== reportMarkets.size ||
++        resultMarkets.some(market => !reportMarkets.has(market))) {
++      throw Object.assign(
++        new Error('실전 스캘핑 차단: 검증 결과에 투자 대상별 고유 market 증거가 빠져 있거나 중복되어 있습니다.'),
++        { code: 'validation_results_invalid' }
++      );
+     }
+ 
+     const confidenceSummary = report.statisticalConfidence;
+@@ -457,37 +502,64 @@
+   }
+ 
+   /**
++   * LIVE 검증을 통과한 실행 중 설정은 중지 후에만 변경한다. 시작 준비
++   * 중에도 차단하여 시작 게이트를 통과한 뒤 대상이 바뀌지 않게 한다.
++   */
++  assertRuntimeMarketUniverseUpdateAllowed({ targetCoins, scalpMaxMarkets, maxPositions } = {}) {
++    const hasUpdate = (targetCoins !== undefined && targetCoins !== null) ||
++      scalpMaxMarkets !== undefined || maxPositions !== undefined;
++    if (hasUpdate && !this.owner.dryRun && this.owner.isScalpingMode &&
++        (this.isRunning || this._startPromise || this.owner._startupReconciliationPending)) {
++      throw Object.assign(
++        new Error('실거래 자동매매가 실행 중이거나 시작을 준비 중입니다. 자동매매를 중지한 뒤 투자 대상과 포지션 설정을 변경해 주세요.'),
++        { code: 'live_universe_update_requires_stop' }
++      );
++    }
++  }
++
++  /**
+    * 대시보드 /api/config/update 경유 런타임 대상 마켓·포지션 상한 갱신.
+    * targetCoins: KRW-* 코드 배열 또는 'ALL'(스캘핑에서는 유동성 상위 N개로 해석).
+-   * LIVE 모드에서는 새 관리 마켓이 다시 미검증 상태로 표시되어 sync gate가
+-   * 재적용된다.
++   * LIVE 스캘핑 실행·시작 준비 중에는 변경을 거부한다. 중지 후 변경한
++   * 관리 마켓은 다시 미검증 상태로 표시하고 다음 시작 때 검증한다.
+    */
+   async applyRuntimeMarketUniverse({ targetCoins, scalpMaxMarkets, maxPositions } = {}) {
++    const update = { targetCoins, scalpMaxMarkets, maxPositions };
++    this.assertRuntimeMarketUniverseUpdateAllowed(update);
++    let nextScalpMaxMarkets;
++    let nextMaxPositions;
++    let resolved;
+     if (scalpMaxMarkets !== undefined) {
+       const value = Number(scalpMaxMarkets);
+       if (!Number.isInteger(value) || value < 1 || value > 500) {
+         throw new Error('scalpMaxMarkets must be an integer from 1 to 500');
+       }
+-      this.owner.config.maxScalpMarkets = value;
++      nextScalpMaxMarkets = value;
+     }
+     if (maxPositions !== undefined) {
+       const value = Number(maxPositions);
+       if (!Number.isInteger(value) || value < 1 || value > 50) {
+         throw new Error('maxPositions must be an integer from 1 to 50');
+       }
+-      this.owner.maxPositions = value;
+-      this.owner.config.maxPositions = value;
++      nextMaxPositions = value;
+     }
+     if (targetCoins !== undefined && targetCoins !== null) {
+-      let resolved;
+       if (typeof targetCoins === 'string' && targetCoins.trim().toUpperCase() === 'ALL') {
+-        resolved = await this.owner.resolveAllKrwMarketUniverse();
++        resolved = await this.owner.resolveAllKrwMarketUniverse({
++          scalpMaxMarkets: nextScalpMaxMarkets ?? this.owner.config.maxScalpMarkets
++        });
+       } else if (Array.isArray(targetCoins)) {
+         const seen = new Set();
+         resolved = [];
+         for (const entry of targetCoins) {
+           const code = String(entry || '').trim().toUpperCase();
+-          if (!/^[A-Z0-9]{2,10}-[A-Z0-9]{2,15}$/.test(code) || seen.has(code)) continue;
++          if (!MARKET_CODE_RE.test(code)) {
++            throw Object.assign(
++              new Error(`targetCoins must contain only valid ${quoteOfSystem(this.owner)}-* markets`),
++              { code: 'runtime_markets_invalid' }
++            );
++          }
++          if (seen.has(code)) continue;
+           seen.add(code);
+           resolved.push(code);
+         }
+@@ -497,6 +569,22 @@
+       } else {
+         throw new Error(`targetCoins must be an array of ${this.owner.quoteAsset}-* codes or "ALL"`);
+       }
++      if (!hasUniqueMarketCodes(resolved, quoteOfSystem(this.owner))) {
++        throw Object.assign(
++          new Error(`targetCoins must contain only valid ${quoteOfSystem(this.owner)}-* markets`),
++          { code: 'runtime_markets_invalid' }
++        );
++      }
++    }
++    // ALL resolution awaits public data; startup may begin during that await.
++    // Recheck before committing any of the staged fields.
++    this.assertRuntimeMarketUniverseUpdateAllowed(update);
++    if (nextScalpMaxMarkets !== undefined) this.owner.config.maxScalpMarkets = nextScalpMaxMarkets;
++    if (nextMaxPositions !== undefined) {
++      this.owner.maxPositions = nextMaxPositions;
++      this.owner.config.maxPositions = nextMaxPositions;
++    }
++    if (resolved !== undefined) {
+       this.owner.targetCoins = resolved;
+       this.owner.config.targetCoins = [...resolved];
+       if (resolved.length <= 20) {
+@@ -513,7 +601,7 @@
+     };
+   }
+ 
+-  async resolveAllKrwMarketUniverse() {
++  async resolveAllKrwMarketUniverse({ scalpMaxMarkets = this.owner.config.maxScalpMarkets } = {}) {
+     const markets = await this.owner.marketDataAdapter.getMarkets();
+     const krwMarkets = (Array.isArray(markets) ? markets : [])
+       .map(entry => entry?.market)
+@@ -523,7 +611,7 @@
+     }
+     if (!this.owner.isScalpingMode) return krwMarkets;
+     const tickers = await this.owner.marketDataAdapter.getTickers(krwMarkets);
+-    const limit = Math.max(1, Math.floor(Number(this.owner.config.maxScalpMarkets)) || 20);
++    const limit = Math.max(1, Math.floor(Number(scalpMaxMarkets)) || 20);
+     const ranked = [...(Array.isArray(tickers) ? tickers : [])]
+       .filter(ticker => Number.isFinite(Number(ticker?.acc_trade_price_24h)))
+       .sort((a, b) => Number(b.acc_trade_price_24h) - Number(a.acc_trade_price_24h))
+--- a/src/trader/multiCoinTrader.js
++++ b/src/trader/multiCoinTrader.js
+@@ -607,6 +607,8 @@
+ 
+   applyRuntimeMarketUniverse(...args) { return this._lifecycle().applyRuntimeMarketUniverse(...args); }
+ 
++  assertRuntimeMarketUniverseUpdateAllowed(...args) { return this._lifecycle().assertRuntimeMarketUniverseUpdateAllowed(...args); }
++
+   resolveAllKrwMarketUniverse(...args) { return this._lifecycle().resolveAllKrwMarketUniverse(...args); }
+ 
+   ensureLiveOrderMarketStateVerified(...args) { return this._liveGateway().ensureLiveOrderMarketStateVerified(...args); }
+--- a/src/runtime/liveValidationReportRefresher.js
++++ b/src/runtime/liveValidationReportRefresher.js
+@@ -8,12 +8,17 @@
+ // 계속 닫힌다 — 안전 계약 자체는 변하지 않는다.
+ //
+ // 실행 방식: 자식 프로세스로 validateScalping.js를 실행해 부모 트레이더의
+-// 메모리/CPU와 격리한다. 동일한 env를 상속하되 candle cache 입력은 제거해
+-// 항상 신선한 네트워크 윈도우로 검증한다.
++// 메모리/CPU와 격리한다. 현재 runtime 설정과 대상 코인을 매번 캡처하고,
++// candle cache 입력은 제거해 신선한 네트워크 윈도우로 검증한다.
+ import { spawn as nodeSpawn } from 'node:child_process';
+ import fs from 'node:fs';
++import os from 'node:os';
+ import path from 'node:path';
+ import { fileURLToPath } from 'node:url';
++import {
++  LIVE_GATE_COMPARABLE_KEYS,
++  loadPaperValidationConfigSnapshot
++} from '../research/scalpingValidationConfig.js';
+ 
+ const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
+ export const VALIDATION_SCRIPT_PATH = path.resolve(MODULE_DIR, '../scripts/validateScalping.js');
+@@ -21,6 +26,18 @@
+ export const DEFAULT_REFRESH_MIN_GAP_MS = 30 * 60 * 1000;
+ export const DEFAULT_REFRESH_TIMEOUT_MS = 15 * 60 * 1000;
+ export const DEFAULT_TICK_INTERVAL_MS = 60 * 1000;
++
++const BOOLEAN_SNAPSHOT_KEYS = new Set([
++  'requirePreviousHighBreak', 'requireReboundBelowOverbought', 'requireNextCandleBullish', 'marketRegimeEnabled'
++]);
++const SIGNAL_PROFILES = new Set(['rsi_rebound', 'momentum_breakout', 'bb_reclaim', 'trend_rebound']);
++const RUNTIME_BEHAVIOR_ENV = {
++  entryDelayMinMs: 'SCALP_ENTRY_DELAY_MIN_MS',
++  entryDelayMaxMs: 'SCALP_ENTRY_DELAY_MAX_MS',
++  maxCandleAgeSeconds: 'SCALP_MAX_CANDLE_AGE_SECONDS',
++  maxRiskDataGapSeconds: 'SCALP_MAX_RISK_DATA_GAP_SECONDS',
++  maxAnalysisDataGapSeconds: 'SCALP_MAX_ANALYSIS_DATA_GAP_SECONDS'
++};
+ 
+ export class LiveValidationReportRefresher {
+   constructor(trader, options = {}) {
+@@ -45,6 +62,7 @@
+     this._env = options.env || process.env;
+     this._cwd = options.cwd || process.cwd();
+     this._execPath = options.execPath || process.execPath;
++    this._snapshotTempRoot = options.snapshotTempRoot || os.tmpdir();
+ 
+     this._timer = null;
+     this._running = false;
+@@ -149,10 +167,21 @@
+     this._lastRunStartedAt = startedAt;
+     this._lastRunReason = reason;
+     this._lastError = null;
++    this._lastExitCode = null;
+     this._log('log', `\n🧪 LIVE 검증 리포트 갱신 시작 (${reason}) - fixed validation을 새로 실행합니다.`);
+ 
+-    const env = { ...this._env, SCALP_VALIDATION_FIXED: 'true', SCALP_VALIDATION_OUTPUT_FILE: this._reportPath() };
+-    delete env.SCALP_VALIDATION_CANDLES_FILE;
++    let capturedInput;
++    try {
++      capturedInput = this._captureRuntimeValidationInput();
++    } catch {
++      this._running = false;
++      this._lastError = 'runtime_validation_snapshot_unavailable';
++      this._lastRunFinishedAt = this._now();
++      this._nextRunAllowedAt = this._now() + this.minGapMs;
++      this._log('error', '❌ 현재 투자 설정과 대상 코인을 확인할 수 없어 LIVE 검증 리포트를 갱신하지 않습니다.');
++      return;
++    }
++    const { env, cleanup } = capturedInput;
+ 
+     let child;
+     try {
+@@ -162,6 +191,7 @@
+         stdio: ['ignore', 'pipe', 'pipe']
+       });
+     } catch (error) {
++      cleanup();
+       this._running = false;
+       this._lastError = error.message;
+       this._lastRunFinishedAt = this._now();
+@@ -177,25 +207,30 @@
+     child.stdout?.on?.('data', append);
+     child.stderr?.on?.('data', append);
+ 
+-    const exitCode = await new Promise(resolve => {
+-      const timer = this._setTimeout(() => {
+-        try { child.kill?.('SIGKILL'); } catch { /* ignore */ }
+-      }, this.timeoutMs);
+-      if (typeof timer?.unref === 'function') timer.unref();
+-      let settled = false;
+-      child.once('close', code => {
+-        if (settled) return;
+-        settled = true;
+-        this._clearTimeout(timer);
+-        resolve(code);
++    let exitCode;
++    try {
++      exitCode = await new Promise(resolve => {
++        const timer = this._setTimeout(() => {
++          try { child.kill?.('SIGKILL'); } catch { /* ignore */ }
++        }, this.timeoutMs);
++        if (typeof timer?.unref === 'function') timer.unref();
++        let settled = false;
++        child.once('close', code => {
++          if (settled) return;
++          settled = true;
++          this._clearTimeout(timer);
++          resolve(code);
++        });
++        child.once('error', () => {
++          if (settled) return;
++          settled = true;
++          this._clearTimeout(timer);
++          resolve(-1);
++        });
+       });
+-      child.once('error', () => {
+-        if (settled) return;
+-        settled = true;
+-        this._clearTimeout(timer);
+-        resolve(-1);
+-      });
+-    });
++    } finally {
++      cleanup();
++    }
+ 
+     const finishedAt = this._now();
+     this._running = false;
+@@ -214,6 +249,66 @@
+       this._lastError = `validation_exit_${exitCode}`;
+       this._log('error',
+         `❌ validation 리포트 갱신 실패 (exit=${exitCode}): ${outputTail.split('\n').filter(Boolean).slice(-3).join(' | ') || '출력 없음'}`);
++    }
++  }
++
++  _captureRuntimeValidationInput() {
++    if (typeof this.trader.getPaperValidationConfigSnapshot !== 'function') {
++      throw new Error('Current runtime configuration is unavailable.');
++    }
++    const current = this.trader.getPaperValidationConfigSnapshot();
++    const markets = this.trader.targetCoins;
++    if (!current || typeof current !== 'object' || Array.isArray(current) ||
++        !Array.isArray(markets) || markets.length === 0 ||
++        markets.some(market => typeof market !== 'string' || !/^KRW-[A-Z0-9]{2,15}$/.test(market)) ||
++        new Set(markets).size !== markets.length) {
++      throw new Error('Current runtime configuration or resolved markets are invalid.');
++    }
++    const configSnapshot = Object.fromEntries(LIVE_GATE_COMPARABLE_KEYS.map(key => {
++      const value = current[key];
++      const valid = BOOLEAN_SNAPSHOT_KEYS.has(key)
++        ? typeof value === 'boolean'
++        : key === 'signalProfile'
++          ? SIGNAL_PROFILES.has(value)
++          : typeof value === 'number' && Number.isFinite(value);
++      if (!valid) throw new Error('Current runtime configuration is incomplete.');
++      return [key, value];
++    }));
++    const env = {
++      ...this._env,
++      SCALP_VALIDATION_FIXED: 'true',
++      SCALP_VALIDATION_OUTPUT_FILE: this._reportPath(),
++      SCALP_VALIDATION_MARKETS: markets.join(','),
++      SCALP_VALIDATION_CANDLE_UNIT: String(configSnapshot.candleUnit)
++    };
++    delete env.SCALP_VALIDATION_CANDLES_FILE;
++    for (const [key, envKey] of Object.entries(RUNTIME_BEHAVIOR_ENV)) {
++      env[envKey] = String(configSnapshot[key]);
++    }
++    const directory = fs.mkdtempSync(path.join(this._snapshotTempRoot, 'coinpilot-live-validation-'));
++    const snapshotFile = path.join(directory, 'runtime-config.json');
++    const cleanup = () => fs.rmSync(directory, { recursive: true, force: true });
++    try {
++      const fd = fs.openSync(snapshotFile, 'wx', 0o600);
++      try {
++        fs.writeFileSync(fd, JSON.stringify({
++          sourceType: 'runtime_config_snapshot',
++          capturedAt: new Date(this._now()).toISOString(),
++          targetCoins: [...markets],
++          configSnapshotComplete: true,
++          configSnapshot
++        }));
++        fs.fsyncSync(fd);
++      } finally {
++        fs.closeSync(fd);
++      }
++      // Verify the child's reader can consume this exact file before spawn.
++      loadPaperValidationConfigSnapshot(snapshotFile);
++      env.SCALP_VALIDATION_CONFIG_SNAPSHOT_FILE = snapshotFile;
++      return { env, cleanup };
++    } catch (error) {
++      cleanup();
++      throw error;
+     }
+   }
+ 
+--- a/src/scripts/validateScalping.js
++++ b/src/scripts/validateScalping.js
+@@ -11,36 +11,20 @@
+ } from '../research/scalpingValidationConfig.js';
+ import { pathToFileURL } from 'node:url';
+ import { envBool, envList, envNumber, envString } from '../config/envConfig.js';
++import { fetchCompleteUpbitCandleHistory } from '../market-data/completeUpbitCandleHistory.js';
+ 
+ dotenv.config();
+ 
+-const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+ const number = (value, fallback) => Number.isFinite(Number(value)) ? Number(value) : fallback;
+ 
+ export async function getHistoricalCandles(upbit, market, unit, totalCount) {
+-  const candles = [];
+-  let to = null;
+-
+-  while (candles.length < totalCount) {
+-    const count = Math.min(200, totalCount - candles.length);
+-    const batch = to
+-      ? await upbit.getMinuteCandles(market, unit, count, { to })
+-      : await upbit.getMinuteCandles(market, unit, count);
+-
+-    if (!Array.isArray(batch) || batch.length === 0) break;
+-    candles.push(...batch);
+-    const oldest = batch[batch.length - 1];
+-    to = oldest?.candle_date_time_utc;
+-    if (!to || batch.length < count) break;
+-    await sleep(120);
+-  }
+-
+-  const byTimestamp = new Map();
+-  for (const candle of candles) {
+-    const key = candle?.candle_date_time_utc || candle?.candle_date_time_kst || candle?.timestamp;
+-    if (key !== undefined) byTimestamp.set(String(key), candle);
+-  }
+-  return Array.from(byTimestamp.values());
++  return fetchCompleteUpbitCandleHistory({
++    marketDataClient: upbit,
++    market,
++    intervalMinutes: unit,
++    totalCount,
++    requestSpacingMs: 120
++  });
+ }
+ 
+ async function selectMarkets(upbit) {
+@@ -186,7 +170,9 @@
+   console.log(`캔들: ${unit}분봉 ${candleCount}개 / 수수료 ${(config.tradingFee * 100).toFixed(3)}% / 슬리피지 ${(config.slippage * 100).toFixed(3)}%`);
+   console.log(`검증 모드: ${fixedConfigValidation ? 'fixed_config (현재 설정 그대로)' : 'tuned_holdout (학습 구간 튜닝)'}`);
+   console.log(paperSnapshot
+-    ? `설정 source: paper snapshot ${paperSnapshot.filePath} (session ${paperSnapshot.sessionId || 'unknown'})`
++    ? paperSnapshot.sourceType === 'runtime_config_snapshot'
++      ? '설정 source: 현재 서버 투자 설정 snapshot'
++      : `설정 source: paper snapshot ${paperSnapshot.filePath} (session ${paperSnapshot.sessionId || 'unknown'})`
+     : '설정 source: environment/defaults');
+ 
+   for (const market of markets) {
+@@ -250,7 +236,7 @@
+     candleCacheFile: candleCacheFile || null,
+     configSource: paperSnapshot
+       ? {
+-          type: 'paper_validation_snapshot',
++          type: paperSnapshot.sourceType,
+           filePath: paperSnapshot.filePath,
+           sessionId: paperSnapshot.sessionId,
+           startedAt: paperSnapshot.startedAt,
+@@ -297,6 +283,7 @@
+     fs.writeFileSync(candleCacheOutputFile, JSON.stringify(capturedCandleCache), 'utf8');
+     console.log(`🧾 원본 candle cache 저장: ${candleCacheOutputFile}`);
+   }
++  // 원자적 쓰기: 리프레시 도중 게이트/readiness 라우트가 찢긴 리포트를 읽지 않게 한다.
+   const tempOutputFile = `${outputFile}.${process.pid}.tmp`;
+   fs.writeFileSync(tempOutputFile, JSON.stringify(report, null, 2), 'utf8');
+   fs.renameSync(tempOutputFile, outputFile);
+--- a/src/api/routes/config.js
++++ b/src/api/routes/config.js
+@@ -700,6 +700,18 @@
+         newConfig.requireReboundBelowOverbought = newConfig.requireReboundBelowOverbought === 'true';
+       }
+ 
++      let universeApplied = null;
++      if (Object.keys(universeUpdate).length > 0) {
++        if (typeof server.tradingSystem.applyRuntimeMarketUniverse !== 'function') {
++          return res.status(400).json({
++            error: '이 서버에서는 대상 마켓 변경을 지원하지 않습니다.',
++            success: false
++          });
++        }
++        server.tradingSystem.assertRuntimeMarketUniverseUpdateAllowed?.(universeUpdate);
++        universeApplied = await server.tradingSystem.applyRuntimeMarketUniverse(universeUpdate);
++      }
++
+       const configUpdates = { ...newConfig };
+       delete configUpdates.investmentRatio;
+       Object.assign(server.tradingSystem.config, configUpdates);
+@@ -756,16 +768,6 @@
+         }
+       }
+ 
+-      let universeApplied = null;
+-      if (Object.keys(universeUpdate).length > 0) {
+-        if (typeof server.tradingSystem.applyRuntimeMarketUniverse !== 'function') {
+-          return res.status(400).json({
+-            error: '이 서버에서는 대상 마켓 변경을 지원하지 않습니다.',
+-            success: false
+-          });
+-        }
+-        universeApplied = await server.tradingSystem.applyRuntimeMarketUniverse(universeUpdate);
+-      }
+ 
+       res.json({
+         message: '설정을 저장했습니다.',
+@@ -774,7 +776,12 @@
+         investmentRatio: server.tradingSystem.investmentRatio,
+         universe: universeApplied
+       });
+-    } catch {
++    } catch (error) {
++      if (error?.code === 'live_universe_update_requires_stop' || error?.code === 'runtime_markets_invalid') {
++        const failure = describeLiveTradingFailure(error);
++        const statusCode = error.code === 'live_universe_update_requires_stop' ? 409 : 400;
++        return res.status(statusCode).json({ error: failure.message, code: failure.code, success: false });
++      }
+       res.status(500).json({ error: '설정을 저장하지 못했습니다. 잠시 후 다시 시도해 주세요.', success: false });
+     }
+   });

@@ -17,6 +17,8 @@
 //   assertLiveValidationGate·거래소 상태 재동기화가 매번 다시 적용된다.
 import fs from 'fs';
 import path from 'path';
+import { writeDurableJson } from './durableJson.js';
+import { AutomationTrackingStore } from './automationTrackingStore.js';
 import { inspectMarketQuoteFreshness } from '../api/marketQuoteFreshness.js';
 
 // 자동 재개가 허용되는 중지 사유. 운영자 중지(operator_*)나 종료 계열 사유는
@@ -47,7 +49,7 @@ export function readAutomationIntent(file) {
   }
   try {
     const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== 'object') return null;
+    if (!parsed || typeof parsed !== 'object' || parsed.version !== 1 || typeof parsed.desiredRunning !== 'boolean') return null;
     return {
       desiredRunning: parsed.desiredRunning === true,
       updatedAt: typeof parsed.updatedAt === 'string' ? parsed.updatedAt : null,
@@ -68,10 +70,7 @@ export function writeAutomationIntent(file, { desiredRunning, source } = {}) {
     updatedAt: new Date().toISOString(),
     source: typeof source === 'string' && source ? source : 'unknown'
   };
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  const tempFile = `${file}.${process.pid}.tmp`;
-  fs.writeFileSync(tempFile, `${JSON.stringify(record, null, 2)}\n`, 'utf8');
-  fs.renameSync(tempFile, file);
+  writeDurableJson(file, record);
   return record;
 }
 
@@ -113,6 +112,8 @@ export class AutoRecoverySupervisor {
     this._lastStartError = null;
     this._lastResumedAt = null;
     this._intentWriteError = null;
+    this.tracking = new AutomationTrackingStore(trader, this.intentFile ? `${this.intentFile}.tracking.json` : null);
+    this._lastTrackingAt = 0;
   }
 
   start() {
@@ -137,7 +138,22 @@ export class AutoRecoverySupervisor {
    * 기록한다. 안전 중지는 intent를 바꾸지 않으므로, desired=true인 채 종료된
    * 프로세스는 재시작 후 자동 복구된다.
    */
-  noteDesiredRunning(desiredRunning, source = 'operator') {
+  resolveBootIntent(defaultRunning) {
+    const saved = readAutomationIntent(this.intentFile);
+    if (this.intentFile && fs.existsSync(this.intentFile) && !saved) {
+      throw new Error('자동매매 선택 기록을 읽을 수 없어 자동 시작을 보류합니다.');
+    }
+    if (saved) {
+      this._desiredRunningCache = saved.desiredRunning;
+      this.tracking.record('restart', { desiredRunning: saved.desiredRunning });
+      return saved.desiredRunning;
+    }
+    this.noteDesiredRunning(defaultRunning === true, 'first_boot', { requirePersistence: true });
+    return defaultRunning === true;
+  }
+
+  noteDesiredRunning(desiredRunning, source = 'operator', { requirePersistence = false } = {}) {
+    const previousDesired = this._desiredRunningCache;
     this._desiredRunningCache = desiredRunning === true;
     if (this.intentFile) {
       try {
@@ -149,9 +165,12 @@ export class AutoRecoverySupervisor {
       } catch (error) {
         this._intentWriteError = error.message;
         this._log('error', `⚠️ 자동화 intent 파일 저장 실패: ${error.message}`);
+        if (requirePersistence) { this._desiredRunningCache = previousDesired; throw error; }
       }
     }
-    if (!this._desiredRunningCache) this._clearIncident();
+    if (!this._desiredRunningCache) { this._sawRunning = false; this._clearIncident(); }
+    try { this.tracking.record('operator_intent', { desiredRunning: this._desiredRunningCache, source }); }
+    catch (error) { this._log('error', `자동매매 추적 저장 실패: ${error.message}`); }
     return this._desiredRunningCache;
   }
 
@@ -225,6 +244,10 @@ export class AutoRecoverySupervisor {
 
   async tick(nowMs = this._now()) {
     const trader = this.trader;
+    if (nowMs - this._lastTrackingAt >= 15000) {
+      try { this.tracking.record('runtime'); this._lastTrackingAt = nowMs; }
+      catch (error) { this._log('error', `자동매매 추적 저장 실패: ${error.message}`); }
+    }
     if (!this.enabled || this._tickInFlight) return this.getStatus();
 
     if (trader.isRunning === true) {
@@ -232,6 +255,7 @@ export class AutoRecoverySupervisor {
       if (this._pendingResume) {
         this._resumeCount += 1;
         this._lastResumedAt = new Date(nowMs).toISOString();
+        this.tracking.record('resumed');
         this._log('log', '\n✅ 자동매매 자동 복구 완료 - 매매 루프가 다시 실행 중입니다.');
       }
       this._clearIncident();
@@ -312,6 +336,7 @@ export class AutoRecoverySupervisor {
       const recordStartFailure = error => {
         this._startFailures += 1;
         this._lastStartError = error?.message || 'start_failed';
+        try { this.tracking.record('resume_failed', { reason: this._lastStartError }); } catch { /* status exposes persistence errors */ }
         this._healthyProbes = 0;
         this._pendingResume = false;
         const backoff = Math.min(
@@ -373,6 +398,7 @@ export class AutoRecoverySupervisor {
       resumeCount: this._resumeCount,
       lastResumedAt: this._lastResumedAt,
       intentWriteError: this._intentWriteError,
+      tracking: this.tracking.summary(),
       validationRefresh: this.trader.liveValidationRefresher?.getStatus?.() || null
     };
   }

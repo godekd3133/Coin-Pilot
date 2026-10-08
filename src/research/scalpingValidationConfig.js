@@ -117,8 +117,9 @@ export function loadPaperValidationConfigSnapshot(filePath) {
 
   return {
     filePath,
-    sessionId: ledger.sessionId || null,
-    startedAt: ledger.startedAt || null,
+    sourceType: ledger.sourceType === 'runtime_config_snapshot' ? 'runtime_config_snapshot' : 'paper_validation_snapshot',
+    sessionId: ledger.sourceType === 'runtime_config_snapshot' ? null : ledger.sessionId || null,
+    startedAt: ledger.sourceType === 'runtime_config_snapshot' ? null : ledger.startedAt || null,
     configSnapshotComplete: true,
     config: copyValidationFields(ledger.configSnapshot)
   };
@@ -146,4 +147,3 @@ export function mergePaperValidationConfig(baseConfig, snapshot, candleUnit) {
     candleUnit: candleUnit ?? snapshot.config.candleUnit ?? baseConfig.candleUnit
   };
 }
-

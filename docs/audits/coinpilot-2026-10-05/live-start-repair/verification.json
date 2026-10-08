@@ -1,0 +1,164 @@
+{
+  "nodeVersion": "v24.21.0",
+  "fileReadbacks": [
+    {
+      "path": "src/research/strategyReadiness.js",
+      "sha256": "1062a9d60797412927502a062f22351bf8a01e2679b12f136af761958ebddcd7",
+      "expectedSha256": "1062a9d60797412927502a062f22351bf8a01e2679b12f136af761958ebddcd7"
+    },
+    {
+      "path": "src/api/routes/config.js",
+      "sha256": "749d445aa205228a25fe0031ace9942d82e8967048c98324d2986d1b553e1f4d",
+      "expectedSha256": "749d445aa205228a25fe0031ace9942d82e8967048c98324d2986d1b553e1f4d"
+    },
+    {
+      "path": "src/index.js",
+      "sha256": "e78ff3869d45315c795b68a170ad841bb733bab8aeb8ab02214ffd8a2a4401c1",
+      "expectedSha256": "e78ff3869d45315c795b68a170ad841bb733bab8aeb8ab02214ffd8a2a4401c1"
+    },
+    {
+      "path": "src/runtime/liveValidationReportRefresher.js",
+      "sha256": "b94a30dfe2516e5eb1803da6bb7feb47c8ab0b48bc5c251f7abe69ac16a376b3",
+      "expectedSha256": "b94a30dfe2516e5eb1803da6bb7feb47c8ab0b48bc5c251f7abe69ac16a376b3"
+    },
+    {
+      "path": "src/scripts/validateScalping.js",
+      "sha256": "c117f6f43af99378b25ccc499b73f78b126dae7c6907397bd40f6e6c8404166c",
+      "expectedSha256": "c117f6f43af99378b25ccc499b73f78b126dae7c6907397bd40f6e6c8404166c"
+    }
+  ],
+  "validation": {
+    "generatedAt": "2026-10-05T11:17:46.509Z",
+    "mode": "fixed_config",
+    "markets": [
+      "KRW-BTC",
+      "KRW-ETH",
+      "KRW-XRP"
+    ],
+    "promoted": false,
+    "statisticalConfidencePassed": false,
+    "results": [
+      {
+        "market": "KRW-BTC",
+        "candles": 10080,
+        "reason": "training_confidence_gate_failed"
+      },
+      {
+        "market": "KRW-ETH",
+        "candles": 10080,
+        "reason": "historical_candle_continuity_failed"
+      },
+      {
+        "market": "KRW-XRP",
+        "candles": 10080,
+        "reason": "historical_candle_continuity_failed"
+      }
+    ]
+  },
+  "verification": {
+    "serverFocusedTests": {
+      "passed": 73,
+      "reportedBy": "server_start_trace",
+      "realOrders": false
+    },
+    "validationRefresherTests": {
+      "passed": 10,
+      "realOrders": false
+    },
+    "nativeStoreTests": {
+      "passed": 62,
+      "reportedBy": "native_start_trace",
+      "synthetic": true
+    },
+    "iosSimulatorBuild": {
+      "succeeded": true,
+      "log": "/Users/kimminkyu/Library/Caches/CoinPilotStartRepair-01a10bc0/ios-build.log"
+    },
+    "deployedRouteProbe": {
+      "type": "in_process_fake_trader",
+      "httpStatus": 400,
+      "code": "confidence_gate_failed",
+      "startCalls": 0,
+      "refreshRequests": 1,
+      "manualProtectionActive": true
+    },
+    "productionStartRequests": 0,
+    "exchangeOrders": 0,
+    "nativeReleaseUploaded": false
+  },
+  "productionReadback": {
+    "/live/api/system-status": {
+      "statusCode": 200,
+      "body": {
+        "mode": "LIVE",
+        "isRunning": false,
+        "runtimeState": "STOPPED",
+        "currentPositions": 0,
+        "exchangeStateKnown": true,
+        "manualProtectionActive": true,
+        "stopReason": "operator_stop"
+      }
+    },
+    "/live/api/strategy-readiness": {
+      "statusCode": 200,
+      "body": {
+        "status": "BLOCKED",
+        "decisionMeaning": "current_validation_evidence_only",
+        "currentEvidence": false,
+        "source": "configured_scalping_validation_report",
+        "report": {
+          "available": true,
+          "filename": "scalping_validation.json",
+          "generatedAt": "2026-10-05T11:17:46.509Z",
+          "validationMode": "fixed_config",
+          "promoted": false,
+          "freshness": {
+            "fresh": true,
+            "reason": "fresh",
+            "generatedAt": "2026-10-05T11:17:46.509Z",
+            "ageSeconds": 543,
+            "maxAgeSeconds": 86400
+          }
+        },
+        "runtime": {
+          "strategyMode": "oversold_reaction_scalping",
+          "dryRun": false,
+          "isScalpingMode": true,
+          "requireValidationPassForLive": true,
+          "readinessMeaning": "live_validation_evidence",
+          "applies": true
+        },
+        "liveGate": {
+          "checked": true,
+          "passed": false,
+          "enforced": true,
+          "enforcedFreshness": true,
+          "code": "confidence_gate_failed",
+          "reason": "거래 수익에 대한 검증이 충분하지 않아 실거래 자동매매를 시작할 수 없습니다. 모의투자로 검증을 계속해 주세요."
+        },
+        "blockers": [
+          "The validation report has not promoted the strategy.",
+          "거래 수익에 대한 검증이 충분하지 않아 실거래 자동매매를 시작할 수 없습니다. 모의투자로 검증을 계속해 주세요."
+        ],
+        "blockerDetails": [
+          {
+            "code": "report_not_promoted",
+            "message": "The validation report has not promoted the strategy."
+          },
+          {
+            "code": "confidence_gate_failed",
+            "message": "거래 수익에 대한 검증이 충분하지 않아 실거래 자동매매를 시작할 수 없습니다. 모의투자로 검증을 계속해 주세요."
+          }
+        ]
+      }
+    },
+    "/live/service-ready": {
+      "statusCode": 200,
+      "body": {
+        "ready": true,
+        "uptimeSec": 187
+      }
+    }
+  },
+  "capturedAt": "2026-10-05T11:26:50.164577+00:00"
+}

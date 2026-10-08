@@ -369,26 +369,39 @@ test('abort, absolute deadline, and client disconnect remove waiting tickets wit
 
 test('group and IP-wide backoffs survive daemon restart; Remaining-Req stays group-scoped', async t => {
   const stateDir = createStateRoot(t);
-  let server = await startUpbitRateCoordinatorServer({ stateDir, allowTemporaryStateDir: true });
-  const client = new UpbitRateCoordinatorClient({ socketPath: server.socketPath });
+  let wallNow = Date.now();
+  let monotonicNow = process.hrtime.bigint();
+  const clock = { now: () => wallNow, monotonicNow: () => monotonicNow };
+  let server = await startUpbitRateCoordinatorServer({ stateDir, allowTemporaryStateDir: true, ...clock });
+  // This fixture measures persisted cooldowns with a controlled clock. Host
+  // scheduling and filesystem latency are outside the clock contract.
+  const transportTimeouts = { connectionTimeoutMs: 60_000, commandTimeoutMs: 60_000 };
+  const client = new UpbitRateCoordinatorClient({ socketPath: server.socketPath, ...transportTimeouts });
+  let restarted;
+  t.after(async () => {
+    await client.close();
+    await restarted?.close();
+    await server.close();
+  });
   const dispatchLease = await client.acquireTurn({ group: 'market', minRequestIntervalMs: 10_000 });
   await dispatchLease.release();
   await client.applyBackoff(20_000, { scope: 'ip', group: 'candle' });
   const scopeWideUntil = await client.applyBackoff(30_000, { scope: 'ip', scopeWide: true });
   await client.observeRemaining('ticker', 0);
-  assert.ok(scopeWideUntil >= Date.now() + 29_000);
+  assert.equal(scopeWideUntil, wallNow + 30_000);
   const paths = server.paths;
   await client.close();
   await server.close();
 
-  server = await startUpbitRateCoordinatorServer({ stateDir, allowTemporaryStateDir: true });
-  t.after(() => server.close());
-  const restarted = new UpbitRateCoordinatorClient({ socketPath: paths.socketPath });
+  wallNow += 500;
+  monotonicNow += 500_000_000n;
+  server = await startUpbitRateCoordinatorServer({ stateDir, allowTemporaryStateDir: true, ...clock });
+  restarted = new UpbitRateCoordinatorClient({ socketPath: paths.socketPath, ...transportTimeouts });
   const status = await restarted.getStatus();
-  assert.ok(status.nextStartInMs > 9_000);
-  assert.ok(status.backoffRemainingMsByScopeAndGroup['ip:candle'] > 0);
-  assert.ok(status.backoffRemainingMsByScopeAndGroup['ip:*'] > 0);
-  assert.ok(status.backoffRemainingMsByScopeAndGroup['ip:ticker'] > 0);
+  assert.equal(status.nextStartInMs, 9_500);
+  assert.equal(status.backoffRemainingMsByScopeAndGroup['ip:candle'], 19_500);
+  assert.equal(status.backoffRemainingMsByScopeAndGroup['ip:*'], 29_500);
+  assert.equal(status.backoffRemainingMsByScopeAndGroup['ip:ticker'], 500);
   await restarted.close();
 });
 

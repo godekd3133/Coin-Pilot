@@ -14,6 +14,20 @@ import path from 'path';
 import UpbitAPI from '../api/upbit.js';
 import { assessScalpingValidationReportFreshness } from '../research/scalpingValidationFreshness.js';
 import { LIVE_GATE_COMPARABLE_KEYS } from '../research/scalpingValidationConfig.js';
+import { MARKET_CODE_RE, quoteOfSystem } from '../exchange/marketCodes.js';
+
+function hasUniqueMarketCodes(markets, quoteAsset) {
+  if (!Array.isArray(markets) || markets.length === 0) return false;
+  const seen = new Set();
+  for (const market of markets) {
+    if (typeof market !== 'string' || !MARKET_CODE_RE.test(market) ||
+        !market.startsWith(`${quoteAsset}-`) || seen.has(market)) {
+      return false;
+    }
+    seen.add(market);
+  }
+  return true;
+}
 
 export class TradingLifecycle {
   constructor(owner) {
@@ -227,8 +241,8 @@ export class TradingLifecycle {
   }
 
   /**
-   * 스캘핑 실전 주문은 읽기 전용 워크포워드 검증이 전체 마켓에서
-   * 통과하기 전까지 시작하지 않는다. DRY_RUN에는 적용하지 않는다.
+   * LIVE 위험 감시는 필수다. 워크포워드 성과 검증은 운영자 설정에 따라
+   * 시작 조건으로 적용하며, DRY_RUN에는 적용하지 않는다.
    */
   assertLiveValidationGate() {
     if (this.owner.dryRun) return;
@@ -239,12 +253,8 @@ export class TradingLifecycle {
       throw new Error('실전 매매 차단: 리스크 데이터 공백 감지를 비활성화할 수 없습니다. SCALP_MAX_RISK_DATA_GAP_SECONDS를 0보다 크게 설정하세요.');
     }
     if (!this.owner.isScalpingMode) return;
-    if (this.owner.config.requireValidationPassForLive === false) {
-      throw Object.assign(
-        new Error('실전 스캘핑 차단: 실전 검증 게이트를 비활성화할 수 없습니다. SCALP_REQUIRE_VALIDATION_PASS=true로 설정하고 최신 fixed_config 검증을 통과하세요.'),
-        { code: 'live_validation_bypass_not_supported' }
-      );
-    }
+    // Performance evidence is an operator choice; runtime order protections above remain mandatory.
+    if (this.owner.config.requireValidationPassForLive === false) return;
 
     const reportFile = this.owner.config.scalpingValidationOutputFile ||
       envString('SCALP_VALIDATION_OUTPUT_FILE') ||
@@ -273,6 +283,27 @@ export class TradingLifecycle {
     if (!Array.isArray(report.markets) || report.markets.length === 0) {
       throw new Error('실전 스캘핑 차단: 검증 대상 market 목록이 비어 있습니다.');
     }
+    const quoteAsset = quoteOfSystem(this.owner);
+    if (!hasUniqueMarketCodes(report.markets, quoteAsset)) {
+      throw Object.assign(
+        new Error('실전 스캘핑 차단: 검증 대상 market 목록에 잘못된 코드나 중복이 있습니다.'),
+        { code: 'validation_markets_invalid' }
+      );
+    }
+    if (!hasUniqueMarketCodes(this.owner.targetCoins, quoteAsset)) {
+      throw Object.assign(
+        new Error('실전 스캘핑 차단: 현재 투자 대상 market 목록이 확정되지 않았거나 잘못되었습니다.'),
+        { code: 'runtime_markets_invalid' }
+      );
+    }
+    const reportMarkets = new Set(report.markets);
+    if (reportMarkets.size !== this.owner.targetCoins.length ||
+        this.owner.targetCoins.some(market => !reportMarkets.has(market))) {
+      throw Object.assign(
+        new Error('실전 스캘핑 차단: 검증 대상 market 목록과 현재 투자 대상이 다릅니다. 현재 투자 대상으로 fixed validation을 다시 실행하세요.'),
+        { code: 'validation_market_mismatch' }
+      );
+    }
 
     const currentSnapshot = this.owner.getPaperValidationConfigSnapshot();
     const comparableKeys = LIVE_GATE_COMPARABLE_KEYS;
@@ -298,6 +329,16 @@ export class TradingLifecycle {
       });
     if (configDrift.length > 0) {
       throw new Error(`실전 스캘핑 차단: validation report와 현재 runtime 설정이 다릅니다 (${configDrift.join(', ')}). fixed validation을 다시 실행하세요.`);
+    }
+
+    const resultMarkets = Array.isArray(report.results) ? report.results.map(result => result?.market) : null;
+    if (!hasUniqueMarketCodes(resultMarkets, quoteAsset) ||
+        resultMarkets.length !== reportMarkets.size ||
+        resultMarkets.some(market => !reportMarkets.has(market))) {
+      throw Object.assign(
+        new Error('실전 스캘핑 차단: 검증 결과에 투자 대상별 고유 market 증거가 빠져 있거나 중복되어 있습니다.'),
+        { code: 'validation_results_invalid' }
+      );
     }
 
     const confidenceSummary = report.statisticalConfidence;
@@ -460,37 +501,64 @@ export class TradingLifecycle {
   }
 
   /**
+   * LIVE 검증을 통과한 실행 중 설정은 중지 후에만 변경한다. 시작 준비
+   * 중에도 차단하여 시작 게이트를 통과한 뒤 대상이 바뀌지 않게 한다.
+   */
+  assertRuntimeMarketUniverseUpdateAllowed({ targetCoins, scalpMaxMarkets, maxPositions } = {}) {
+    const hasUpdate = (targetCoins !== undefined && targetCoins !== null) ||
+      scalpMaxMarkets !== undefined || maxPositions !== undefined;
+    if (hasUpdate && !this.owner.dryRun && this.owner.isScalpingMode &&
+        (this.isRunning || this._startPromise || this.owner._startupReconciliationPending)) {
+      throw Object.assign(
+        new Error('실거래 자동매매가 실행 중이거나 시작을 준비 중입니다. 자동매매를 중지한 뒤 투자 대상과 포지션 설정을 변경해 주세요.'),
+        { code: 'live_universe_update_requires_stop' }
+      );
+    }
+  }
+
+  /**
    * 대시보드 /api/config/update 경유 런타임 대상 마켓·포지션 상한 갱신.
    * targetCoins: KRW-* 코드 배열 또는 'ALL'(스캘핑에서는 유동성 상위 N개로 해석).
-   * LIVE 모드에서는 새 관리 마켓이 다시 미검증 상태로 표시되어 sync gate가
-   * 재적용된다.
+   * LIVE 스캘핑 실행·시작 준비 중에는 변경을 거부한다. 중지 후 변경한
+   * 관리 마켓은 다시 미검증 상태로 표시하고 다음 시작 때 검증한다.
    */
   async applyRuntimeMarketUniverse({ targetCoins, scalpMaxMarkets, maxPositions } = {}) {
+    const update = { targetCoins, scalpMaxMarkets, maxPositions };
+    this.assertRuntimeMarketUniverseUpdateAllowed(update);
+    let nextScalpMaxMarkets;
+    let nextMaxPositions;
+    let resolved;
     if (scalpMaxMarkets !== undefined) {
       const value = Number(scalpMaxMarkets);
       if (!Number.isInteger(value) || value < 1 || value > 500) {
         throw new Error('scalpMaxMarkets must be an integer from 1 to 500');
       }
-      this.owner.config.maxScalpMarkets = value;
+      nextScalpMaxMarkets = value;
     }
     if (maxPositions !== undefined) {
       const value = Number(maxPositions);
       if (!Number.isInteger(value) || value < 1 || value > 50) {
         throw new Error('maxPositions must be an integer from 1 to 50');
       }
-      this.owner.maxPositions = value;
-      this.owner.config.maxPositions = value;
+      nextMaxPositions = value;
     }
     if (targetCoins !== undefined && targetCoins !== null) {
-      let resolved;
       if (typeof targetCoins === 'string' && targetCoins.trim().toUpperCase() === 'ALL') {
-        resolved = await this.owner.resolveAllKrwMarketUniverse();
+        resolved = await this.owner.resolveAllKrwMarketUniverse({
+          scalpMaxMarkets: nextScalpMaxMarkets ?? this.owner.config.maxScalpMarkets
+        });
       } else if (Array.isArray(targetCoins)) {
         const seen = new Set();
         resolved = [];
         for (const entry of targetCoins) {
           const code = String(entry || '').trim().toUpperCase();
-          if (!/^[A-Z0-9]{2,10}-[A-Z0-9]{2,15}$/.test(code) || seen.has(code)) continue;
+          if (!MARKET_CODE_RE.test(code)) {
+            throw Object.assign(
+              new Error(`targetCoins must contain only valid ${quoteOfSystem(this.owner)}-* markets`),
+              { code: 'runtime_markets_invalid' }
+            );
+          }
+          if (seen.has(code)) continue;
           seen.add(code);
           resolved.push(code);
         }
@@ -500,6 +568,22 @@ export class TradingLifecycle {
       } else {
         throw new Error(`targetCoins must be an array of ${this.owner.quoteAsset}-* codes or "ALL"`);
       }
+      if (!hasUniqueMarketCodes(resolved, quoteOfSystem(this.owner))) {
+        throw Object.assign(
+          new Error(`targetCoins must contain only valid ${quoteOfSystem(this.owner)}-* markets`),
+          { code: 'runtime_markets_invalid' }
+        );
+      }
+    }
+    // ALL resolution awaits public data; startup may begin during that await.
+    // Recheck before committing any of the staged fields.
+    this.assertRuntimeMarketUniverseUpdateAllowed(update);
+    if (nextScalpMaxMarkets !== undefined) this.owner.config.maxScalpMarkets = nextScalpMaxMarkets;
+    if (nextMaxPositions !== undefined) {
+      this.owner.maxPositions = nextMaxPositions;
+      this.owner.config.maxPositions = nextMaxPositions;
+    }
+    if (resolved !== undefined) {
       this.owner.targetCoins = resolved;
       this.owner.config.targetCoins = [...resolved];
       if (resolved.length <= 20) {
@@ -516,7 +600,7 @@ export class TradingLifecycle {
     };
   }
 
-  async resolveAllKrwMarketUniverse() {
+  async resolveAllKrwMarketUniverse({ scalpMaxMarkets = this.owner.config.maxScalpMarkets } = {}) {
     const markets = await this.owner.marketDataAdapter.getMarkets();
     const krwMarkets = (Array.isArray(markets) ? markets : [])
       .map(entry => entry?.market)
@@ -526,7 +610,7 @@ export class TradingLifecycle {
     }
     if (!this.owner.isScalpingMode) return krwMarkets;
     const tickers = await this.owner.marketDataAdapter.getTickers(krwMarkets);
-    const limit = Math.max(1, Math.floor(Number(this.owner.config.maxScalpMarkets)) || 20);
+    const limit = Math.max(1, Math.floor(Number(scalpMaxMarkets)) || 20);
     const ranked = [...(Array.isArray(tickers) ? tickers : [])]
       .filter(ticker => Number.isFinite(Number(ticker?.acc_trade_price_24h)))
       .sort((a, b) => Number(b.acc_trade_price_24h) - Number(a.acc_trade_price_24h))

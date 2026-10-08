@@ -8,6 +8,7 @@ private actor DeferredCoinPilotAPI: CoinPilotAPIProviding {
     private var marketRows: [[String: Any]]
     private var marketSnapshotOverride: [String: Any]?
     private var readResponseOverrides: [String: CoinPilotHTTPResponse] = [:]
+    private var mutationResponseOverrides: [String: CoinPilotHTTPResponse] = [:]
     private var heldMutationPaths: Set<String> = []
     private var pendingMutations: [String: CheckedContinuation<CoinPilotHTTPResponse, Error>] = [:]
     private var mutationWaiters: [String: CheckedContinuation<Void, Never>] = [:]
@@ -161,6 +162,7 @@ private actor DeferredCoinPilotAPI: CoinPilotAPIProviding {
                 mutationWaiters.removeValue(forKey: key)?.resume()
             }
         }
+        if let response = mutationResponseOverrides[path] { return response }
         return Self.response(["success": true])
     }
 
@@ -242,6 +244,10 @@ private actor DeferredCoinPilotAPI: CoinPilotAPIProviding {
     func setMarketSnapshot(_ snapshot: [String: Any]) { marketSnapshotOverride = snapshot }
     func setReadResponse(path: String, body: Any, statusCode: Int = 200) {
         readResponseOverrides[path] = Self.response(body, statusCode: statusCode)
+    }
+
+    func setMutationResponse(path: String, body: Any, statusCode: Int = 200) {
+        mutationResponseOverrides[path] = Self.response(body, statusCode: statusCode)
     }
 
     private static func readResponse(
@@ -467,6 +473,10 @@ private actor MemoryCoinPilotOfflineReplaySessionStore: CoinPilotOfflineReplaySe
 @main
 struct CoinPilotStoreTests {
     static func main() async throws {
+        try await withCleanConnectionDefaults { try await runScenarios() }
+    }
+
+    private static func runScenarios() async throws {
         try await logoutDiscardsLateAccountResponse()
         try await serverSwitchDiscardsPreviousAccountResponse()
         try await liveWorkspaceUsesItsOwnAddressAndRejectsPaperMode()
@@ -475,6 +485,8 @@ struct CoinPilotStoreTests {
         try await signInUsesAndStoresOnlyTheServerToken()
         try await fullOperatorScopeGrantsNativeControl()
         try liveManualPrepareStatusKeepsAutomationControlAvailable()
+        try await automationAcceptanceRemainsVisibleAcrossDashboardAndHistoryRefresh()
+        try await liveStartRejectionKeepsItsReasonAndAllowsRetry()
         try simulatorTokenStoreIsScopedAndVolatile()
         try await simulatorDefaultTokenStoreSupportsReadOnlySignIn()
         try nativeReadAllowlistIncludesOnlyThePaperSummary()
@@ -527,7 +539,7 @@ struct CoinPilotStoreTests {
         try await managedServerRetryPreservesAuthenticationAndPendingOrders()
         try await managedWorkspaceSwitchDiscardsQueuedConnections()
         try await managedAccountAuthenticationExpiryAllowsRelogin()
-        print("CoinPilotStore: 60 scenarios passed")
+        print("CoinPilotStore: 62 scenarios passed")
     }
 
     private static func coinDetailPreservesUnknownValuationAndFiniteLosses() throws {
@@ -2580,6 +2592,94 @@ struct CoinPilotStoreTests {
         let control = CoinPilotAutomationPresentation(isBundledPreview: false, isRunning: status.isRunning)
         precondition(control.showsControls && control.stateLabel == "중지",
                      "A prepared, stopped LIVE process must keep the explicit automation controls available.")
+    }
+
+    private static func automationAcceptanceRemainsVisibleAcrossDashboardAndHistoryRefresh() async throws {
+        let defaults = UserDefaults.standard
+        let workspaceKey = "coinpilot.native.activeWorkspace"
+        let savedWorkspace = defaults.object(forKey: workspaceKey)
+        defer {
+            if let savedWorkspace { defaults.set(savedWorkspace, forKey: workspaceKey) }
+            else { defaults.removeObject(forKey: workspaceKey) }
+        }
+        defaults.set("live", forKey: workspaceKey)
+        let api = DeferredCoinPilotAPI(
+            statusOverride: ["mode": "LIVE", "isRunning": false, "exchangeStateKnown": true],
+            isReadOnlyObserver: false
+        )
+        let store = CoinPilotStore(api: api, tokens: MemoryCoinPilotTokens(), configuredDataMode: "server")
+        let connected = await store.connect(using: "https://automation-feedback.example/live")
+        precondition(connected && store.canOperate, "Automation feedback requires an operable fake LIVE server.")
+
+        for (shouldRun, path, message) in [
+            (true, "/api/control/start", "설정한 시장의 계좌와 미체결 주문을 확인한 뒤 시작합니다."),
+            (false, "/api/control/stop", "신규 자동 진입 중지를 요청했습니다. 보유 포지션은 계속 감시합니다.")
+        ] {
+            await api.setMutationResponse(path: path, body: ["success": true, "message": message], statusCode: 202)
+            let accepted = await store.setAutomationRunning(shouldRun)
+            precondition(accepted && store.dashboardMessage == message,
+                         "The immediate dashboard refresh must preserve the accepted control response.")
+            precondition(store.status?.isRunning == false && !store.isWorking,
+                         "An accepted control request must not invent a running state or leave controls busy.")
+            await store.refresh()
+            precondition(store.dashboardMessage == message,
+                         "The periodic dashboard refresh must preserve the latest control response.")
+            await store.setHistoryPeriod(.week, force: true)
+            precondition(store.dashboardMessage == message,
+                         "Changing the chart period must not erase the control response.")
+        }
+        store.logOut()
+        precondition(store.dashboardMessage == nil,
+                     "Automation feedback belongs to its authenticated server context and must clear on logout.")
+    }
+
+    private static func liveStartRejectionKeepsItsReasonAndAllowsRetry() async throws {
+        let defaults = UserDefaults.standard
+        let workspaceKey = "coinpilot.native.activeWorkspace"
+        let savedWorkspace = defaults.object(forKey: workspaceKey)
+        defer {
+            if let savedWorkspace { defaults.set(savedWorkspace, forKey: workspaceKey) }
+            else { defaults.removeObject(forKey: workspaceKey) }
+        }
+        defaults.set("live", forKey: workspaceKey)
+        let api = DeferredCoinPilotAPI(
+            statusOverride: ["mode": "LIVE", "isRunning": false, "exchangeStateKnown": true],
+            isReadOnlyObserver: false
+        )
+        let store = CoinPilotStore(api: api, tokens: MemoryCoinPilotTokens(), configuredDataMode: "server")
+        let connected = await store.connect(using: "https://automation-rejection.example/live")
+        precondition(connected && store.canOperate, "The rejection test requires an operable fake LIVE server.")
+        let reason = "실거래 자동매매를 시작할 수 없습니다. 현재 전략의 검증 자료가 부족합니다."
+        await api.setMutationResponse(path: "/api/control/start", body: ["success": false, "error": reason], statusCode: 400)
+        let rejected = await store.setAutomationRunning(true)
+        precondition(!rejected && store.dashboardMessage == reason && !store.isWorking && store.status?.isRunning == false,
+                     "A rejected LIVE start must show the safe server reason, keep the stopped state, and release the controls.")
+        await store.refresh()
+        precondition(store.dashboardMessage == reason,
+                     "A healthy read refresh must not hide the reason LIVE automation was rejected.")
+        await api.setFailedPaths(["/api/account"])
+        await store.refresh()
+        precondition(store.dashboardMessage?.contains(reason) == true &&
+                     store.dashboardMessage?.contains("일부 정보를 새로 확인하지 못했어요") == true,
+                     "A read failure must remain visible alongside the last rejected control request.")
+        await api.setFailedPaths(["/api/status"])
+        await store.refresh()
+        precondition(store.dashboardMessage?.contains(reason) == true &&
+                     store.dashboardMessage?.contains("서버 거래 모드를 확인할 수 없어") == true && !store.canOperate,
+                     "An unavailable status must keep the control reason visible while locking the unverified server context.")
+        await api.setFailedPaths([])
+        await store.refresh()
+        precondition(store.dashboardMessage == reason && store.canOperate,
+                     "Healthy status recovery must retain the rejection reason and allow an explicit retry.")
+        let acceptedMessage = "자동매매 시작을 요청했습니다."
+        await api.setMutationResponse(path: "/api/control/start", body: ["success": true, "message": acceptedMessage], statusCode: 202)
+        let retried = await store.setAutomationRunning(true)
+        precondition(retried && store.dashboardMessage == acceptedMessage && !store.isWorking && store.status?.isRunning == false,
+                     "A later accepted retry must replace the failure reason without falsely reporting running automation.")
+        let mutationPaths = await api.recordedMutationPaths()
+        let mutationBodies = await api.recordedMutationBodies()
+        precondition(mutationPaths == ["/api/control/start", "/api/control/start"] && mutationBodies.allSatisfy(\.isEmpty),
+                     "Retry must remain an explicit empty-body control request; the app must not submit an order or retry by itself.")
     }
 
     private static func signInUsesAndStoresOnlyTheServerToken() async throws {

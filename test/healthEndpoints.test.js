@@ -257,6 +257,96 @@ test('/control/start returns a LIVE validation failure instead of reporting a fa
   }
 });
 
+test('/control/start explains the actual scalping gate failure without starting or changing manual protection', async () => {
+  const ctx = await startDashboard();
+  let startCalls = 0;
+  let intentCalls = 0;
+  let refreshCalls = 0;
+  const protectionTimer = {};
+  ctx.trader.dryRun = false;
+  ctx.trader.isRunning = false;
+  ctx.trader._startPromise = null;
+  ctx.trader._entriesPaused = true;
+  ctx.trader._manualRiskProtection = true;
+  ctx.trader.positionRiskTimer = protectionTimer;
+  ctx.trader.autoRecovery = { noteDesiredRunning: () => { intentCalls += 1; } };
+  ctx.trader.liveValidationRefresher = { requestRefresh: () => { refreshCalls += 1; } };
+  ctx.trader.assertLiveValidationGate = () => {
+    throw Object.assign(new Error('실전 스캘핑 차단: 검증 리포트가 오래되었습니다 (/private/secret-report.json).'), {
+      code: 'report_not_current'
+    });
+  };
+  ctx.trader.start = () => { startCalls += 1; return Promise.resolve(); };
+
+  try {
+    const response = await fetch(`${ctx.baseUrl}/api/control/start`, { method: 'POST' });
+    const body = await response.json();
+
+    assert.equal(response.status, 400);
+    assert.equal(body.success, false);
+    assert.equal(body.code, 'report_not_current');
+    assert.match(body.error, /점검 결과가 오래되었거나/);
+    assert.doesNotMatch(JSON.stringify(body), /private|secret-report|실전 스캘핑 차단/);
+    assert.equal(startCalls, 0);
+    assert.equal(intentCalls, 0);
+    assert.equal(refreshCalls, 1);
+    assert.equal(ctx.trader._entriesPaused, true);
+    assert.equal(ctx.trader._manualRiskProtection, true);
+    assert.equal(ctx.trader.positionRiskTimer, protectionTimer);
+  } finally {
+    ctx.trader.positionRiskTimer = null;
+    await stopDashboard(ctx);
+  }
+});
+
+test('/control/start classifies known LIVE blockers and sanitizes unknown failures', async () => {
+  const ctx = await startDashboard();
+  let startCalls = 0;
+  let intentCalls = 0;
+  let gateError;
+  ctx.trader.dryRun = false;
+  ctx.trader.isRunning = false;
+  ctx.trader._startPromise = null;
+  ctx.trader.autoRecovery = { noteDesiredRunning: () => { intentCalls += 1; } };
+  ctx.trader.assertLiveValidationGate = () => { throw gateError; };
+  ctx.trader.start = () => { startCalls += 1; return Promise.resolve(); };
+  const cases = [
+    ['실전 스캘핑 차단: /private/secret-report.json 검증 리포트가 없습니다. 먼저 npm run validate:scalping을 실행하세요.', 'report_missing', /점검 결과가 필요/],
+    ['실전 스캘핑 차단: 검증 리포트를 읽을 수 없습니다 (Unexpected token secret-report)', 'report_unreadable', /점검 결과를 불러오지 못/],
+    ['실전 스캘핑 차단: 검증 리포트가 오래되었거나 작성 시각을 확인할 수 없습니다 (stale).', 'report_not_current', /점검 결과가 오래되었거나/],
+    ['실전 스캘핑 차단: 현재 runtime 설정을 고정 검증한 fixed_config 리포트가 필요합니다.', 'fixed_config_required', /현재 투자 설정으로 점검/],
+    ['실전 스캘핑 차단: validation report와 현재 runtime 설정이 다릅니다 (secret-report).', 'runtime_config_mismatch', /현재 투자 설정과 점검 당시 설정이 다릅니다/],
+    ['실전 스캘핑 차단: fixed validation report 설정이 불완전합니다 (secret-report).', 'report_config_incomplete', /필요한 투자 설정이 빠져/],
+    ['실전 스캘핑 차단: 95% 거래수익 신뢰도 게이트가 없거나 통과하지 않았습니다.', 'confidence_gate_failed', /거래 수익에 대한 검증이 충분하지/],
+    ['실전 스캘핑 차단: 전체 워크포워드 게이트 미통과 (0/20). DRY_RUN=true로 계속 검증하세요.', 'promotion_gate_failed', /투자 전략이 실거래 자동매매 검증을 통과하지/],
+    ['실전 스캘핑 차단: 검증 대상 market 목록이 비어 있습니다.', 'markets_missing', /투자 대상 코인이 없습니다/],
+    ['실전 스캘핑 차단: validation report 전략 모드가 다릅니다 (secret-report).', 'strategy_mode_mismatch', /현재 투자 전략과 점검 당시 전략이 다릅니다/],
+    ['실전 스캘핑 차단: 실전 검증 게이트를 비활성화할 수 없습니다.', 'live_validation_bypass_not_supported', /검증을 끌 수 없습니다/],
+    ['실전 매매 차단: 포지션 위험 감시를 비활성화할 수 없습니다. SCALP_RISK_CHECK_INTERVAL_MS를 0보다 크게 설정하세요.', 'risk_monitor_disabled', /포지션 위험 감시/],
+    ['실전 매매 차단: 리스크 데이터 공백 감지를 비활성화할 수 없습니다.', 'risk_data_gap_protection_disabled', /거래소 데이터가 끊겼을 때의 보호 설정/],
+    ['Failed to read fixed_config at /private/secret-report.json: {"token":"secret-value"}', 'trading_start_failed', /^자동매매를 시작하지 못했습니다\. 설정과 서버 상태를 확인해 주세요\.$/]
+  ];
+
+  try {
+    for (const [message, code, expectedMessage] of cases) {
+      gateError = Object.assign(new Error(message), { code: 'UNKNOWN_PRIVATE_CODE' });
+      const response = await fetch(`${ctx.baseUrl}/api/control/start`, { method: 'POST' });
+      const body = await response.json();
+
+      assert.equal(response.status, 400, code);
+      assert.equal(body.success, false, code);
+      assert.equal(body.code, code);
+      assert.match(body.error, expectedMessage);
+      assert.doesNotMatch(JSON.stringify(body), /private|secret-report|secret-value|UNKNOWN_PRIVATE_CODE/);
+      assert.doesNotMatch(body.error, /fixed_config|SCALP_|실전 스캘핑 차단/);
+      assert.equal(startCalls, 0, code);
+      assert.equal(intentCalls, 0, code);
+    }
+  } finally {
+    await stopDashboard(ctx);
+  }
+});
+
 test('/control/start reports a sync-required startup as accepted and prevents a duplicate start', async () => {
   const ctx = await startDashboard();
   let startCalls = 0;

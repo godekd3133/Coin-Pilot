@@ -1,0 +1,124 @@
+{
+  "generatedAt": "2026-10-05T11:45:28.337Z",
+  "strategyMode": "oversold_reaction_scalping",
+  "candleUnit": 1,
+  "candleCount": 10080,
+  "candleCacheFile": "/Users/kimminkyu/Library/Caches/CoinPilotStartRepair-01a10bc0/long-window/latest-common-cache.json",
+  "configSource": {
+    "type": "runtime_config_snapshot",
+    "filePath": "/Users/kimminkyu/Library/Caches/CoinPilotStartRepair-01a10bc0/runtime-config-snapshot.json",
+    "sessionId": null,
+    "startedAt": null,
+    "configSnapshotComplete": true
+  },
+  "candleCacheOutputFile": null,
+  "validationMode": "fixed_config",
+  "config": {
+    "initialBalance": 1000000,
+    "tradingFee": 0.0005,
+    "slippage": 0.001,
+    "investmentRatio": 0.02,
+    "maxCandleAgeSeconds": 90,
+    "rsiPeriod": 14,
+    "rsiOversold": 30,
+    "rsiOverbought": 70,
+    "oversoldLookback": 1,
+    "minReboundPercent": 0.15,
+    "minRsiRecovery": 2,
+    "minVolumeRatio": 1,
+    "volumeLookback": 20,
+    "minCloseStrength": 0.65,
+    "trendPeriod": 30,
+    "trendSlopeLookback": 3,
+    "minTrendSlopePercent": -0.2,
+    "requirePreviousHighBreak": true,
+    "maxSignalRangePercent": 0,
+    "minSignalRangePercent": 0,
+    "maxReboundPercent": 0,
+    "marketRegimeEnabled": false,
+    "marketRegimeLookback": 5,
+    "marketRegimeMinBreadth": 0.5,
+    "marketRegimeMinReturnPercent": -0.2,
+    "requireReboundBelowOverbought": false,
+    "signalProfile": "rsi_rebound",
+    "bbPeriod": 20,
+    "bbStdDev": 2,
+    "emaPeriod": 60,
+    "maxPositions": 3,
+    "portfolioAllocation": 0.1,
+    "requireNextCandleBullish": false,
+    "maxEntryRetracePercent": 0.25,
+    "maxEntryChasePercent": 0.35,
+    "breakEvenTriggerPercent": 0,
+    "breakEvenOffsetPercent": 0.05,
+    "trailingActivationPercent": 0,
+    "trailingStopPercent": 0,
+    "stopLossPercent": 1.2,
+    "takeProfitPercent": 1.8,
+    "maxHoldMinutes": 30,
+    "maxLosingHoldMinutes": 0,
+    "winnerExtendMinutes": 0,
+    "winnerExtendMinProfitPercent": 0,
+    "maxEntriesPerSignalWindow": 0,
+    "maxRiskDataGapSeconds": 30,
+    "maxAnalysisDataGapSeconds": 60,
+    "entryDelayMinMs": 1000,
+    "entryDelayMaxMs": 5000,
+    "cooldownAfterLossMinutes": 15,
+    "maxConsecutiveLosses": 3,
+    "lossCircuitBreakerCount": 0,
+    "lossCircuitBreakerWindowMinutes": 30,
+    "lossCircuitBreakerCooldownMinutes": 60,
+    "candleUnit": 1
+  },
+  "markets": [
+    "KRW-BTC",
+    "KRW-ETH",
+    "KRW-XRP"
+  ],
+  "results": [
+    {
+      "market": "KRW-BTC",
+      "fetchedCandles": 936,
+      "candleSource": "cache",
+      "validation": {
+        "promoted": false,
+        "reason": "insufficient_candles:936<2000",
+        "candleCount": 936
+      }
+    },
+    {
+      "market": "KRW-ETH",
+      "fetchedCandles": 936,
+      "candleSource": "cache",
+      "validation": {
+        "promoted": false,
+        "reason": "insufficient_candles:936<2000",
+        "candleCount": 936
+      }
+    },
+    {
+      "market": "KRW-XRP",
+      "fetchedCandles": 936,
+      "candleSource": "cache",
+      "validation": {
+        "promoted": false,
+        "reason": "insufficient_candles:936<2000",
+        "candleCount": 936
+      }
+    }
+  ],
+  "statisticalConfidence": {
+    "required": true,
+    "method": "one_sided_t_mean",
+    "confidenceLevel": 0.95,
+    "minimumTrainingTrades": 10,
+    "minimumValidationTrades": 20,
+    "minimumLowerBoundPercent": 0,
+    "passed": false
+  },
+  "promotedMarkets": [],
+  "promoted": false,
+  "promotionReason": "all_markets_must_pass_before_live_promotion",
+  "note": "분봉 OHLC 기반 결과입니다. 1~5초 지연은 다음 캔들 시가를 보수적 대용치로 사용했으며 실시간 체결/슬리피지와 동일하지 않습니다."
+}

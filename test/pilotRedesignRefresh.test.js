@@ -2108,6 +2108,19 @@ test('readiness classifies passed, blocked, stale, and unknown states without fa
   assert.equal(settingsMismatch.headline, '실제 주문 조건을 충족하지 못했습니다.');
   assert.deepEqual(settingsMismatch.reasons, ['현재 설정과 점검 당시 설정이 다릅니다. 현재 설정으로 다시 점검하세요.']);
 
+  const optionalPerformance = classifyReadiness({
+    source: 'configured_scalping_validation_report',
+    status: 'NOT_REQUIRED',
+    decisionMeaning: 'performance_validation_optional',
+    currentEvidence: false,
+    liveGate: { checked: false, passed: null, enforced: false, enforcedFreshness: false }
+  });
+  assert.equal(optionalPerformance.stateLabel, '선택 사항');
+  assert.equal(optionalPerformance.ready, false, 'optional performance must not claim evidence passed');
+  assert.equal(optionalPerformance.blocked, false);
+  assert.equal(optionalPerformance.currentEvidence, false);
+  assert.deepEqual(optionalPerformance.reasons, []);
+
   const validationBypass = classifyReadiness({
     source: 'configured_scalping_validation_report',
     status: 'BLOCKED',

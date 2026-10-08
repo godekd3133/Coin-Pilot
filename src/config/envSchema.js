@@ -3,6 +3,11 @@
 // of silently falling back. See envLoader.js for parsing semantics and
 // test/envDocumentation.test.js for the .env.example sync contract.
 export const ENV_SCHEMA = {
+  APNS_KEY_FILE: { type: 'string', secret: true },
+  APNS_KEY_ID: { type: 'string' },
+  APNS_TEAM_ID: { type: 'string' },
+  APNS_TOPIC: { type: 'string' },
+  ORDER_PUSH_STATE_FILE: { type: 'string' },
   // --- Core ---
   EXCHANGE: { type: 'string' },
   UPBIT_ACCESS_KEY: { type: 'string', secret: true },

@@ -153,6 +153,18 @@ if sys.argv[2] == 'server':
 print('Verified release archive excludes developer credentials.')
 PY
 
+# The app now has Push Notifications. Use its explicitly refreshed Store
+# profile so an older Xcode-managed profile cannot drop aps-environment.
+COINPILOT_EXPORT_PROFILE="${COINPILOT_EXPORT_PROFILE:-CoinPilot Push TestFlight 20261008}"
+python3 - "$WORK/ExportOptions.plist" "$COINPILOT_EXPORT_PROFILE" <<'PYEXPORT'
+import plistlib, sys
+with open(sys.argv[1], 'rb') as f: options = plistlib.load(f)
+options['signingStyle'] = 'manual'
+options['signingCertificate'] = 'Apple Distribution'
+options['provisioningProfiles'] = {'com.godekd3133.coinpilot': sys.argv[2]}
+with open(sys.argv[1], 'wb') as f: plistlib.dump(options, f)
+PYEXPORT
+
 # --- Export + upload to App Store Connect -----------------------------------
 echo "==> Uploading to App Store Connect (TestFlight)"
 xcodebuild -exportArchive -archivePath "$ARCHIVE" \

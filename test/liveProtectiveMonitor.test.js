@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import MultiCoinTrader from '../src/trader/multiCoinTrader.js';
+import DashboardServer from '../src/api/dashboardServer.js';
 
 function currentTicker(market, trade_price) {
   return { market, trade_price, trade_timestamp: Date.now() };
@@ -81,7 +82,7 @@ test('LIVE startup refuses to disable the risk data freshness stop', async t => 
   );
 });
 
-test('LIVE scalping cannot bypass a missing validation report with the legacy false flag', async t => {
+test('LIVE scalping can start without performance evidence when the operator disables that requirement', async t => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'coinpilot-live-validation-bypass-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
 
@@ -89,10 +90,7 @@ test('LIVE scalping cannot bypass a missing validation report with the legacy fa
   trader.config.requireValidationPassForLive = false;
   trader.config.scalpingValidationOutputFile = path.join(root, 'missing-scalping-validation.json');
 
-  assert.throws(
-    () => trader.assertLiveValidationGate(),
-    error => error.code === 'live_validation_bypass_not_supported'
-  );
+  assert.doesNotThrow(() => trader.assertLiveValidationGate());
 });
 
 test('validation bypass flag remains outside DRY_RUN and non-scalping startup', async t => {
@@ -142,7 +140,8 @@ test('LIVE startup remains paused until a complete exchange reconciliation succe
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
 
   const trader = makeLiveTrader(root, {}, false);
-  trader.assertLiveValidationGate = () => {};
+  trader.config.requireValidationPassForLive = false;
+  trader.config.scalpingValidationOutputFile = path.join(root, 'missing-report.json');
   const events = [];
   let syncAttempts = 0;
   trader.syncWithExchange = async () => {
@@ -1223,4 +1222,51 @@ test('stopping a manual session clears protection and its timer', async t => {
   assert.equal(trader._manualRiskProtection, false);
   assert.equal(trader.positionRiskTimer, null);
   assert.equal(trader.getRuntimeSafetyStatus().manualProtectionActive, false);
+});
+
+
+test('LIVE control API starts analysis without a performance report and stops it without sending orders', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'coinpilot-live-optional-control-'));
+  const trader = makeLiveTrader(root, {
+    requireValidationPassForLive: false,
+    scalpingValidationOutputFile: path.join(root, 'missing-report.json')
+  });
+  let cycleCount = 0;
+  let orderCount = 0;
+  trader.startPositionRiskMonitor = () => {};
+  trader.startAnalysisDataWatchdog = () => {};
+  trader.syncWithExchange = async () => true;
+  trader.executeTradingCycle = async () => { cycleCount += 1; };
+  trader.recordPaperValidationSnapshot = async () => {};
+  trader.sleep = async () => new Promise(resolve => setTimeout(resolve, 5));
+  trader.upbit.order = async () => { orderCount += 1; throw new Error('No real exchange in this test'); };
+  const dashboard = new DashboardServer(trader, 0, { env: {
+    ...process.env, DASHBOARD_TOKEN: '', DASHBOARD_READ_ONLY_TOKEN: '',
+    DASHBOARD_MOBILE_TOKEN: '', DASHBOARD_HOST: '127.0.0.1'
+  } });
+  const httpServer = await dashboard.start();
+  t.after(async () => {
+    trader.stop();
+    await dashboard.stop();
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+  const base = `http://127.0.0.1:${httpServer.address().port}/api`;
+  const start = await fetch(`${base}/control/start`, { method: 'POST' });
+  assert.equal(start.status, 202);
+  assert.equal((await start.json()).success, true);
+  assert.equal(trader.isRunning, true);
+  assert.ok(cycleCount > 0);
+  const duplicate = await fetch(`${base}/control/start`, { method: 'POST' });
+  assert.equal((await duplicate.json()).success, false);
+  const stop = await fetch(`${base}/control/stop`, { method: 'POST' });
+  assert.ok([200, 202].includes(stop.status));
+  assert.equal((await stop.json()).success, true);
+  await trader._startPromise;
+  await trader._gracefulShutdownPromise;
+  assert.equal(trader.isRunning, false);
+  assert.equal(trader.getRuntimeSafetyStatus().entriesPaused, true);
+  const cyclesAtStop = cycleCount;
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal(cycleCount, cyclesAtStop);
+  assert.equal(orderCount, 0);
 });

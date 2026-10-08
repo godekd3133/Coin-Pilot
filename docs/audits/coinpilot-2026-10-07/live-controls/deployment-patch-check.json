@@ -1,0 +1,21 @@
+{
+  "exactPatchRoundTrip": true,
+  "baseline": [
+    {
+      "path": "src/trader/tradingLifecycle.js",
+      "originalSha256": "37f5041443d6b867dcb0cea8c83e0a5ac13fe0937ff678a3af9ab419814acf44",
+      "matchesPriorDeployment": false
+    },
+    {
+      "path": "src/research/strategyReadiness.js",
+      "originalSha256": "cb0334262b7464fd2b47736215e17eae53909a1afa67233d788af13de57a44dd",
+      "matchesPriorDeployment": true
+    },
+    {
+      "path": "src/runtime/liveValidationReportRefresher.js",
+      "originalSha256": "4b02d2fc6e41a56df2454fa656bf1971c2dc729c347d0e74dcb7caeaf11de391",
+      "matchesPriorDeployment": true
+    }
+  ],
+  "productionApplied": false
+}

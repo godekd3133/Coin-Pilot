@@ -1,0 +1,86 @@
+--- a/src/trader/tradingLifecycle.js
++++ b/src/trader/tradingLifecycle.js
+@@ -241,8 +241,8 @@
+   }
+ 
+   /**
+-   * 스캘핑 실전 주문은 읽기 전용 워크포워드 검증이 전체 마켓에서
+-   * 통과하기 전까지 시작하지 않는다. DRY_RUN에는 적용하지 않는다.
++   * LIVE 위험 감시는 필수다. 워크포워드 성과 검증은 운영자 설정에 따라
++   * 시작 조건으로 적용하며, DRY_RUN에는 적용하지 않는다.
+    */
+   assertLiveValidationGate() {
+     if (this.owner.dryRun) return;
+@@ -253,12 +253,8 @@
+       throw new Error('실전 매매 차단: 리스크 데이터 공백 감지를 비활성화할 수 없습니다. SCALP_MAX_RISK_DATA_GAP_SECONDS를 0보다 크게 설정하세요.');
+     }
+     if (!this.owner.isScalpingMode) return;
+-    if (this.owner.config.requireValidationPassForLive === false) {
+-      throw Object.assign(
+-        new Error('실전 스캘핑 차단: 실전 검증 게이트를 비활성화할 수 없습니다. SCALP_REQUIRE_VALIDATION_PASS=true로 설정하고 최신 fixed_config 검증을 통과하세요.'),
+-        { code: 'live_validation_bypass_not_supported' }
+-      );
+-    }
++    // Performance evidence is an operator choice; runtime order protections above remain mandatory.
++    if (this.owner.config.requireValidationPassForLive === false) return;
+ 
+     const reportFile = this.owner.config.scalpingValidationOutputFile ||
+       envString('SCALP_VALIDATION_OUTPUT_FILE') ||
+--- a/src/research/strategyReadiness.js
++++ b/src/research/strategyReadiness.js
+@@ -100,19 +100,20 @@
+   };
+   const validationBypassRequested = runtime.applies && runtime.requireValidationPassForLive === false;
+   if (validationBypassRequested) {
+-    addBlocker('live_validation_bypass_not_supported', 'LIVE scalping validation cannot be disabled.');
++    return {
++      status: 'NOT_REQUIRED',
++      decisionMeaning: 'performance_validation_optional',
++      currentEvidence: false,
++      source: 'configured_scalping_validation_report',
++      report: reportMeta,
++      runtime,
++      liveGate: { checked: false, passed: null, enforced: false, enforcedFreshness: false, reason: null },
++      blockers: [],
++      blockerDetails: []
++    };
+   }
+   let report = null;
+-  let gate = validationBypassRequested
+-    ? {
+-        checked: true,
+-        passed: false,
+-        enforced: true,
+-        enforcedFreshness: true,
+-        code: 'live_validation_bypass_not_supported',
+-        reason: 'LIVE scalping validation cannot be disabled.'
+-      }
+-    : { checked: false, passed: false, enforced: runtime.applies, enforcedFreshness: false, reason: null };
++  let gate = { checked: false, passed: false, enforced: runtime.applies, enforcedFreshness: false, reason: null };
+ 
+   if (!fs.existsSync(reportFile)) {
+     addBlocker('report_missing', `${reportMeta.filename} validation report is missing.`);
+@@ -146,10 +147,7 @@
+     }
+   }
+ 
+-  if (validationBypassRequested) {
+-    // The explicit runtime bypass is itself a hard blocker for LIVE scalping.
+-    // Still read the report above so the response can expose its freshness.
+-  } else if (report) {
++  if (report) {
+     if (typeof tradingSystem?.validatePromotionReport !== 'function') {
+       gate = {
+         checked: false,
+--- a/src/runtime/liveValidationReportRefresher.js
++++ b/src/runtime/liveValidationReportRefresher.js
+@@ -80,7 +80,8 @@
+ 
+   /** LIVE 스캘핑 프로세스에서만 게이트 증거 갱신이 의미 있다. */
+   _eligible() {
+-    return this.enabled === true && this.trader.dryRun === false && this.trader.isScalpingMode === true;
++    return this.enabled === true && this.trader.dryRun === false && this.trader.isScalpingMode === true &&
++      this.trader.config?.requireValidationPassForLive !== false;
+   }
+ 
+   start() {

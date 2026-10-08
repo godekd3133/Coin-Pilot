@@ -1,5 +1,48 @@
 #if canImport(UIKit)
 import UIKit
+import UserNotifications
+import Combine
+
+@MainActor
+final class CoinPilotOrderNotifications: NSObject, ObservableObject, UNUserNotificationCenterDelegate {
+    static let shared = CoinPilotOrderNotifications()
+    @Published var deviceToken: String?
+    @Published var registrationError: String?
+    private var requested = false
+    private var authorized = false
+    var deviceId: String {
+        let key = "coinpilot.push.installation"
+        if let saved = UserDefaults.standard.string(forKey: key) { return saved }
+        let id = UUID().uuidString
+        UserDefaults.standard.set(id, forKey: key)
+        return id
+    }
+    var environment: String {
+        #if DEBUG
+        return "sandbox"
+        #else
+        return "production"
+        #endif
+    }
+    func prepare() async -> Bool {
+        let center = UNUserNotificationCenter.current()
+        center.delegate = self
+        let settings = await center.notificationSettings()
+        if settings.authorizationStatus == .notDetermined && !requested {
+            requested = true
+            authorized = (try? await center.requestAuthorization(options: [.alert, .sound, .badge])) == true
+        } else {
+            authorized = [.authorized, .provisional, .ephemeral].contains(settings.authorizationStatus)
+        }
+        if authorized { UIApplication.shared.registerForRemoteNotifications() }
+        return authorized
+    }
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        completionHandler([.banner, .list, .sound])
+    }
+}
 
 @UIApplicationMain
 class AppDelegate: UIResponder, UIApplicationDelegate {
@@ -7,10 +50,19 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     var window: UIWindow?
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
-        // Override point for customization after application launch.
+        UNUserNotificationCenter.current().delegate = CoinPilotOrderNotifications.shared
         return true
     }
 
+    func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
+        CoinPilotOrderNotifications.shared.deviceToken = deviceToken.map { String(format: "%02x", $0) }.joined()
+        NotificationCenter.default.post(name: Notification.Name("CoinPilotPushDeviceToken"), object: nil)
+    }
+
+
+    func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
+        CoinPilotOrderNotifications.shared.registrationError = "기기 알림 등록을 완료하지 못했습니다. 다시 연결해 주세요."
+    }
 
     func applicationWillResignActive(_ application: UIApplication) {
         // Sent when the application is about to move from active to inactive state. This can occur for certain types of temporary interruptions (such as an incoming phone call or SMS message) or when the user quits the application and it begins the transition to the background state.

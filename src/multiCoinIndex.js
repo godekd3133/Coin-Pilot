@@ -190,7 +190,7 @@ export async function runLegacyMultiCoinRuntime(config, dependencies = {}) {
       const autoRecovery = createAutoRecoverySupervisor(trader, config);
       trader.autoRecovery = autoRecovery;
       autoRecovery.start();
-      autoRecovery.noteDesiredRunning(true, 'boot_start');
+      if (!autoRecovery.resolveBootIntent(true)) return;
 
       consoleApi.log('\n⏱️  3초 후 시작합니다...');
       const waitBeforeTraderStart = dependencies.waitBeforeTraderStart ||

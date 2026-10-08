@@ -1,6 +1,7 @@
 import express from 'express';
 import { resolveMaxCandleAgeSeconds } from '../../risk/candleFreshness.js';
 import { getPaperEvidenceMutationLock, respondIfPaperEvidenceMutationBlocked } from '../../research/paperEvidenceMutationGuard.js';
+import { describeLiveTradingFailure } from '../../research/strategyReadiness.js';
 import { getMarketDataProvider, MARKET_DATA_FRESHNESS } from '../marketDataProvider.js';
 
 const MOBILE_INVESTMENT_PRESETS = {
@@ -509,8 +510,8 @@ export default function createConfigRoutes(server) {
     }
     try {
       trader.assertLiveValidationGate?.();
+      trader.autoRecovery?.noteDesiredRunning?.(true, 'control_start', { requirePersistence: true });
       const start = trader.start();
-      trader.autoRecovery?.noteDesiredRunning?.(true, 'control_start');
       Promise.resolve(start).catch(error => {
         console.error('Trading system start error:', error);
       });
@@ -526,10 +527,8 @@ export default function createConfigRoutes(server) {
     } catch (error) {
       // 게이트 실패 시 최신 검증 리포트를 다시 만들어 다음 시작이 통과할 수 있게 한다.
       trader.liveValidationRefresher?.requestRefresh?.('control_start_gate');
-      const message = typeof error?.message === 'string' && error.message.includes('실전 매매 차단')
-        ? error.message
-        : '자동매매를 시작하지 못했습니다. 설정과 서버 상태를 확인해 주세요.';
-      return res.status(400).json({ error: message, success: false });
+      const failure = describeLiveTradingFailure(error, { fallbackCode: 'trading_start_failed' });
+      return res.status(400).json({ error: failure.message, code: failure.code, success: false });
     }
   });
 
@@ -708,6 +707,18 @@ export default function createConfigRoutes(server) {
         newConfig.requireReboundBelowOverbought = newConfig.requireReboundBelowOverbought === 'true';
       }
 
+      let universeApplied = null;
+      if (Object.keys(universeUpdate).length > 0) {
+        if (typeof server.tradingSystem.applyRuntimeMarketUniverse !== 'function') {
+          return res.status(400).json({
+            error: '이 서버에서는 대상 마켓 변경을 지원하지 않습니다.',
+            success: false
+          });
+        }
+        server.tradingSystem.assertRuntimeMarketUniverseUpdateAllowed?.(universeUpdate);
+        universeApplied = await server.tradingSystem.applyRuntimeMarketUniverse(universeUpdate);
+      }
+
       const configUpdates = { ...newConfig };
       delete configUpdates.investmentRatio;
       Object.assign(server.tradingSystem.config, configUpdates);
@@ -764,16 +775,6 @@ export default function createConfigRoutes(server) {
         }
       }
 
-      let universeApplied = null;
-      if (Object.keys(universeUpdate).length > 0) {
-        if (typeof server.tradingSystem.applyRuntimeMarketUniverse !== 'function') {
-          return res.status(400).json({
-            error: '이 서버에서는 대상 마켓 변경을 지원하지 않습니다.',
-            success: false
-          });
-        }
-        universeApplied = await server.tradingSystem.applyRuntimeMarketUniverse(universeUpdate);
-      }
 
       res.json({
         message: '설정을 저장했습니다.',
@@ -782,7 +783,12 @@ export default function createConfigRoutes(server) {
         investmentRatio: server.tradingSystem.investmentRatio,
         universe: universeApplied
       });
-    } catch {
+    } catch (error) {
+      if (error?.code === 'live_universe_update_requires_stop' || error?.code === 'runtime_markets_invalid') {
+        const failure = describeLiveTradingFailure(error);
+        const statusCode = error.code === 'live_universe_update_requires_stop' ? 409 : 400;
+        return res.status(statusCode).json({ error: failure.message, code: failure.code, success: false });
+      }
       res.status(500).json({ error: '설정을 저장하지 못했습니다. 잠시 후 다시 시도해 주세요.', success: false });
     }
   });

@@ -8,12 +8,17 @@
 // 계속 닫힌다 — 안전 계약 자체는 변하지 않는다.
 //
 // 실행 방식: 자식 프로세스로 validateScalping.js를 실행해 부모 트레이더의
-// 메모리/CPU와 격리한다. 동일한 env를 상속하되 candle cache 입력은 제거해
-// 항상 신선한 네트워크 윈도우로 검증한다.
+// 메모리/CPU와 격리한다. 현재 runtime 설정과 대상 코인을 매번 캡처하고,
+// candle cache 입력은 제거해 신선한 네트워크 윈도우로 검증한다.
 import { spawn as nodeSpawn } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import {
+  LIVE_GATE_COMPARABLE_KEYS,
+  loadPaperValidationConfigSnapshot
+} from '../research/scalpingValidationConfig.js';
 
 const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
 export const VALIDATION_SCRIPT_PATH = path.resolve(MODULE_DIR, '../scripts/validateScalping.js');
@@ -21,6 +26,18 @@ export const DEFAULT_REFRESH_INTERVAL_MS = 12 * 60 * 60 * 1000;
 export const DEFAULT_REFRESH_MIN_GAP_MS = 30 * 60 * 1000;
 export const DEFAULT_REFRESH_TIMEOUT_MS = 15 * 60 * 1000;
 export const DEFAULT_TICK_INTERVAL_MS = 60 * 1000;
+
+const BOOLEAN_SNAPSHOT_KEYS = new Set([
+  'requirePreviousHighBreak', 'requireReboundBelowOverbought', 'requireNextCandleBullish', 'marketRegimeEnabled'
+]);
+const SIGNAL_PROFILES = new Set(['rsi_rebound', 'momentum_breakout', 'bb_reclaim', 'trend_rebound']);
+const RUNTIME_BEHAVIOR_ENV = {
+  entryDelayMinMs: 'SCALP_ENTRY_DELAY_MIN_MS',
+  entryDelayMaxMs: 'SCALP_ENTRY_DELAY_MAX_MS',
+  maxCandleAgeSeconds: 'SCALP_MAX_CANDLE_AGE_SECONDS',
+  maxRiskDataGapSeconds: 'SCALP_MAX_RISK_DATA_GAP_SECONDS',
+  maxAnalysisDataGapSeconds: 'SCALP_MAX_ANALYSIS_DATA_GAP_SECONDS'
+};
 
 export class LiveValidationReportRefresher {
   constructor(trader, options = {}) {
@@ -45,6 +62,7 @@ export class LiveValidationReportRefresher {
     this._env = options.env || process.env;
     this._cwd = options.cwd || process.cwd();
     this._execPath = options.execPath || process.execPath;
+    this._snapshotTempRoot = options.snapshotTempRoot || os.tmpdir();
 
     this._timer = null;
     this._running = false;
@@ -62,7 +80,8 @@ export class LiveValidationReportRefresher {
 
   /** LIVE 스캘핑 프로세스에서만 게이트 증거 갱신이 의미 있다. */
   _eligible() {
-    return this.enabled === true && this.trader.dryRun === false && this.trader.isScalpingMode === true;
+    return this.enabled === true && this.trader.dryRun === false && this.trader.isScalpingMode === true &&
+      this.trader.config?.requireValidationPassForLive !== false;
   }
 
   start() {
@@ -149,10 +168,21 @@ export class LiveValidationReportRefresher {
     this._lastRunStartedAt = startedAt;
     this._lastRunReason = reason;
     this._lastError = null;
+    this._lastExitCode = null;
     this._log('log', `\n🧪 LIVE 검증 리포트 갱신 시작 (${reason}) - fixed validation을 새로 실행합니다.`);
 
-    const env = { ...this._env, SCALP_VALIDATION_FIXED: 'true', SCALP_VALIDATION_OUTPUT_FILE: this._reportPath() };
-    delete env.SCALP_VALIDATION_CANDLES_FILE;
+    let capturedInput;
+    try {
+      capturedInput = this._captureRuntimeValidationInput();
+    } catch {
+      this._running = false;
+      this._lastError = 'runtime_validation_snapshot_unavailable';
+      this._lastRunFinishedAt = this._now();
+      this._nextRunAllowedAt = this._now() + this.minGapMs;
+      this._log('error', '❌ 현재 투자 설정과 대상 코인을 확인할 수 없어 LIVE 검증 리포트를 갱신하지 않습니다.');
+      return;
+    }
+    const { env, cleanup } = capturedInput;
 
     let child;
     try {
@@ -162,6 +192,7 @@ export class LiveValidationReportRefresher {
         stdio: ['ignore', 'pipe', 'pipe']
       });
     } catch (error) {
+      cleanup();
       this._running = false;
       this._lastError = error.message;
       this._lastRunFinishedAt = this._now();
@@ -177,25 +208,30 @@ export class LiveValidationReportRefresher {
     child.stdout?.on?.('data', append);
     child.stderr?.on?.('data', append);
 
-    const exitCode = await new Promise(resolve => {
-      const timer = this._setTimeout(() => {
-        try { child.kill?.('SIGKILL'); } catch { /* ignore */ }
-      }, this.timeoutMs);
-      if (typeof timer?.unref === 'function') timer.unref();
-      let settled = false;
-      child.once('close', code => {
-        if (settled) return;
-        settled = true;
-        this._clearTimeout(timer);
-        resolve(code);
+    let exitCode;
+    try {
+      exitCode = await new Promise(resolve => {
+        const timer = this._setTimeout(() => {
+          try { child.kill?.('SIGKILL'); } catch { /* ignore */ }
+        }, this.timeoutMs);
+        if (typeof timer?.unref === 'function') timer.unref();
+        let settled = false;
+        child.once('close', code => {
+          if (settled) return;
+          settled = true;
+          this._clearTimeout(timer);
+          resolve(code);
+        });
+        child.once('error', () => {
+          if (settled) return;
+          settled = true;
+          this._clearTimeout(timer);
+          resolve(-1);
+        });
       });
-      child.once('error', () => {
-        if (settled) return;
-        settled = true;
-        this._clearTimeout(timer);
-        resolve(-1);
-      });
-    });
+    } finally {
+      cleanup();
+    }
 
     const finishedAt = this._now();
     this._running = false;
@@ -214,6 +250,66 @@ export class LiveValidationReportRefresher {
       this._lastError = `validation_exit_${exitCode}`;
       this._log('error',
         `❌ validation 리포트 갱신 실패 (exit=${exitCode}): ${outputTail.split('\n').filter(Boolean).slice(-3).join(' | ') || '출력 없음'}`);
+    }
+  }
+
+  _captureRuntimeValidationInput() {
+    if (typeof this.trader.getPaperValidationConfigSnapshot !== 'function') {
+      throw new Error('Current runtime configuration is unavailable.');
+    }
+    const current = this.trader.getPaperValidationConfigSnapshot();
+    const markets = this.trader.targetCoins;
+    if (!current || typeof current !== 'object' || Array.isArray(current) ||
+        !Array.isArray(markets) || markets.length === 0 ||
+        markets.some(market => typeof market !== 'string' || !/^KRW-[A-Z0-9]{2,15}$/.test(market)) ||
+        new Set(markets).size !== markets.length) {
+      throw new Error('Current runtime configuration or resolved markets are invalid.');
+    }
+    const configSnapshot = Object.fromEntries(LIVE_GATE_COMPARABLE_KEYS.map(key => {
+      const value = current[key];
+      const valid = BOOLEAN_SNAPSHOT_KEYS.has(key)
+        ? typeof value === 'boolean'
+        : key === 'signalProfile'
+          ? SIGNAL_PROFILES.has(value)
+          : typeof value === 'number' && Number.isFinite(value);
+      if (!valid) throw new Error('Current runtime configuration is incomplete.');
+      return [key, value];
+    }));
+    const env = {
+      ...this._env,
+      SCALP_VALIDATION_FIXED: 'true',
+      SCALP_VALIDATION_OUTPUT_FILE: this._reportPath(),
+      SCALP_VALIDATION_MARKETS: markets.join(','),
+      SCALP_VALIDATION_CANDLE_UNIT: String(configSnapshot.candleUnit)
+    };
+    delete env.SCALP_VALIDATION_CANDLES_FILE;
+    for (const [key, envKey] of Object.entries(RUNTIME_BEHAVIOR_ENV)) {
+      env[envKey] = String(configSnapshot[key]);
+    }
+    const directory = fs.mkdtempSync(path.join(this._snapshotTempRoot, 'coinpilot-live-validation-'));
+    const snapshotFile = path.join(directory, 'runtime-config.json');
+    const cleanup = () => fs.rmSync(directory, { recursive: true, force: true });
+    try {
+      const fd = fs.openSync(snapshotFile, 'wx', 0o600);
+      try {
+        fs.writeFileSync(fd, JSON.stringify({
+          sourceType: 'runtime_config_snapshot',
+          capturedAt: new Date(this._now()).toISOString(),
+          targetCoins: [...markets],
+          configSnapshotComplete: true,
+          configSnapshot
+        }));
+        fs.fsyncSync(fd);
+      } finally {
+        fs.closeSync(fd);
+      }
+      // Verify the child's reader can consume this exact file before spawn.
+      loadPaperValidationConfigSnapshot(snapshotFile);
+      env.SCALP_VALIDATION_CONFIG_SNAPSHOT_FILE = snapshotFile;
+      return { env, cleanup };
+    } catch (error) {
+      cleanup();
+      throw error;
     }
   }
 

@@ -1,0 +1,402 @@
+--- a/src/research/strategyReadiness.js
++++ b/src/research/strategyReadiness.js
+@@ -9,33 +9,45 @@
+   return path.isAbsolute(configured) ? configured : path.resolve(process.cwd(), configured);
+ }
+ 
+-function describeGateFailure(error) {
+-  const message = String(error?.message || '');
+-  if (error?.code === 'live_validation_bypass_not_supported') {
+-    return { code: 'live_validation_bypass_not_supported', message: 'LIVE scalping validation cannot be disabled.' };
++const LIVE_GATE_FAILURE_MESSAGES = {
++  live_validation_bypass_not_supported: '실거래 자동매매의 검증을 끌 수 없습니다. 서버에서 검증을 켜고 현재 투자 설정의 점검을 완료해 주세요.',
++  report_missing: '실거래 자동매매를 시작하려면 현재 투자 설정의 점검 결과가 필요합니다. 서버에서 점검을 완료한 뒤 다시 시도해 주세요.',
++  report_unreadable: '실거래 자동매매 점검 결과를 불러오지 못했습니다. 서버에서 다시 점검한 뒤 시도해 주세요.',
++  report_not_current: '실거래 자동매매 점검 결과가 오래되었거나 작성 시각을 확인할 수 없습니다. 서버에서 다시 점검한 뒤 시도해 주세요.',
++  runtime_config_mismatch: '현재 투자 설정과 점검 당시 설정이 다릅니다. 현재 설정으로 다시 점검한 뒤 시도해 주세요.',
++  fixed_config_required: '현재 투자 설정으로 점검한 결과가 필요합니다. 서버에서 다시 점검한 뒤 시도해 주세요.',
++  confidence_gate_failed: '거래 수익에 대한 검증이 충분하지 않아 실거래 자동매매를 시작할 수 없습니다. 모의투자로 검증을 계속해 주세요.',
++  promotion_gate_failed: '투자 전략이 실거래 자동매매 검증을 통과하지 못했습니다. 모의투자로 검증을 계속해 주세요.',
++  markets_missing: '점검 결과에 투자 대상 코인이 없습니다. 현재 투자 설정으로 다시 점검해 주세요.',
++  report_config_incomplete: '점검 결과에 필요한 투자 설정이 빠져 있습니다. 현재 투자 설정으로 다시 점검해 주세요.',
++  strategy_mode_mismatch: '현재 투자 전략과 점검 당시 전략이 다릅니다. 현재 전략으로 다시 점검해 주세요.',
++  risk_monitor_disabled: '포지션 위험 감시가 꺼져 있어 실거래 자동매매를 시작할 수 없습니다. 서버에서 위험 감시를 켠 뒤 다시 시도해 주세요.',
++  risk_data_gap_protection_disabled: '거래소 데이터가 끊겼을 때의 보호 설정이 꺼져 있습니다. 서버에서 보호 설정을 켠 뒤 다시 시도해 주세요.',
++  promotion_validation_failed: '실거래 자동매매 점검을 통과하지 못했습니다. 서버의 점검 결과를 확인해 주세요.',
++  trading_start_failed: '자동매매를 시작하지 못했습니다. 설정과 서버 상태를 확인해 주세요.'
++};
++
++/** Classify known failures without returning raw errors, paths, or report data. */
++export function describeLiveTradingFailure(error, { fallbackCode = 'promotion_validation_failed' } = {}) {
++  const message = typeof error?.message === 'string' ? error.message : '';
++  let code = Object.hasOwn(LIVE_GATE_FAILURE_MESSAGES, error?.code) ? error.code : null;
++  if (!code && /^실전 (?:매매|스캘핑) 차단:/.test(message)) {
++    if (/포지션 위험 감시/.test(message)) code = 'risk_monitor_disabled';
++    else if (/리스크 데이터 공백/.test(message)) code = 'risk_data_gap_protection_disabled';
++    else if (/검증 게이트를 비활성화/.test(message)) code = 'live_validation_bypass_not_supported';
++    else if (/검증 리포트가 없습니다/.test(message)) code = 'report_missing';
++    else if (/검증 리포트를 읽을 수 없습니다/.test(message)) code = 'report_unreadable';
++    else if (/오래되었거나 작성 시각/.test(message)) code = 'report_not_current';
++    else if (/설정이 다릅니다/.test(message)) code = 'runtime_config_mismatch';
++    else if (/설정이 불완전/.test(message)) code = 'report_config_incomplete';
++    else if (/전략 모드가 다릅니다/.test(message)) code = 'strategy_mode_mismatch';
++    else if (/fixed_config/.test(message)) code = 'fixed_config_required';
++    else if (/신뢰도 게이트/.test(message)) code = 'confidence_gate_failed';
++    else if (/워크포워드 게이트/.test(message)) code = 'promotion_gate_failed';
++    else if (/market 목록/.test(message)) code = 'markets_missing';
+   }
+-  if (error?.code === 'report_not_current') {
+-    return { code: 'report_not_current', message: 'Validation report is not current.' };
+-  }
+-  if (/설정이 다릅니다/.test(message)) {
+-    return { code: 'runtime_config_mismatch', message: 'Validation report settings do not match current runtime settings.' };
+-  }
+-  if (/fixed_config/.test(message)) {
+-    return { code: 'fixed_config_required', message: 'A fixed_config validation report is required.' };
+-  }
+-  if (/신뢰도 게이트/.test(message)) {
+-    return { code: 'confidence_gate_failed', message: 'The required validation confidence gate is missing or failed.' };
+-  }
+-  if (/워크포워드 게이트/.test(message)) {
+-    return { code: 'promotion_gate_failed', message: 'The report did not pass the complete walk-forward promotion gate.' };
+-  }
+-  if (/market 목록/.test(message)) {
+-    return { code: 'markets_missing', message: 'The validation report has no market list.' };
+-  }
+-  if (/설정이 불완전/.test(message)) {
+-    return { code: 'report_config_incomplete', message: 'The fixed validation report settings are incomplete.' };
+-  }
+-  return { code: 'promotion_validation_failed', message: 'The runtime promotion validation did not pass.' };
++  code ||= fallbackCode === 'trading_start_failed' ? fallbackCode : 'promotion_validation_failed';
++  return { code, message: LIVE_GATE_FAILURE_MESSAGES[code] };
+ }
+ 
+ /**
+@@ -152,7 +164,7 @@
+         });
+         gate = { checked: true, passed: true, enforced: runtime.applies, enforcedFreshness: true, reason: null };
+       } catch (error) {
+-        const safeFailure = describeGateFailure(error);
++        const safeFailure = describeLiveTradingFailure(error);
+         gate = {
+           checked: true,
+           passed: false,
+--- a/src/api/routes/config.js
++++ b/src/api/routes/config.js
+@@ -1,6 +1,7 @@
+ import express from 'express';
+ import { resolveMaxCandleAgeSeconds } from '../../risk/candleFreshness.js';
+ import { getPaperEvidenceMutationLock, respondIfPaperEvidenceMutationBlocked } from '../../research/paperEvidenceMutationGuard.js';
++import { describeLiveTradingFailure } from '../../research/strategyReadiness.js';
+ import { getMarketDataProvider, MARKET_DATA_FRESHNESS } from '../marketDataProvider.js';
+ 
+ const MOBILE_INVESTMENT_PRESETS = {
+@@ -519,10 +520,9 @@
+         runtimeState: nextSafety.runtimeState || null
+       });
+     } catch (error) {
+-      const message = typeof error?.message === 'string' && error.message.includes('실전 매매 차단')
+-        ? error.message
+-        : '자동매매를 시작하지 못했습니다. 설정과 서버 상태를 확인해 주세요.';
+-      return res.status(400).json({ error: message, success: false });
++      trader.liveValidationRefresher?.requestRefresh?.('control_start_gate');
++      const failure = describeLiveTradingFailure(error, { fallbackCode: 'trading_start_failed' });
++      return res.status(400).json({ error: failure.message, code: failure.code, success: false });
+     }
+   });
+ 
+--- a/src/index.js
++++ b/src/index.js
+@@ -10,6 +10,7 @@
+ import { acquireHeadlessRuntimeWriterLock, setupExitHandlers } from './runtime/exitHandlers.js';
+ import { runAfterDashboardReady } from './runtime/dashboardStartup.js';
+ import { createProfileWriterStartup } from './runtime/profileWriterStartup.js';
++import { createLiveValidationReportRefresher } from './runtime/liveValidationReportRefresher.js';
+ import { derivePublicMarketSnapshotFilePath } from './runtime/profileStoragePlan.js';
+ import { assertSupportedNodeVersion } from './runtime/nodeRuntimeRequirement.js';
+ import { createConfig, redactConfigForLog, printBanner, printConfig } from './config/runtimeConfig.js';
+@@ -267,6 +268,10 @@
+         }
+       }
+ 
++      const validationRefresher = createLiveValidationReportRefresher(trader, config);
++      trader.liveValidationRefresher = validationRefresher;
++      validationRefresher.start();
++
+       const startTraderOnBoot = config.dashboardStartTraderOnBoot;
+       if (startTraderOnBoot) {
+         // 카운트다운
+--- a/src/runtime/liveValidationReportRefresher.js
++++ b/src/runtime/liveValidationReportRefresher.js
+@@ -0,0 +1,258 @@
++// LiveValidationReportRefresher — LIVE 스캘핑의 fixed_config 검증 리포트를
++// 주기적으로 재생성한다.
++//
++// 배경: assertLiveValidationGate는 24시간 이상 지난 scalping_validation.json을
++// 거부한다. 자동 복구(supervisor)나 운영자 시작 시점에 리포트만 오래됐어도
++// 영구 블록될 수 있으므로, 게이트 자체를 완화하는 대신 "증거를 갱신"한다.
++// 리프레시된 리포트가 promoted/confidence 게이트를 통과하지 못하면 live 게이트는
++// 계속 닫힌다 — 안전 계약 자체는 변하지 않는다.
++//
++// 실행 방식: 자식 프로세스로 validateScalping.js를 실행해 부모 트레이더의
++// 메모리/CPU와 격리한다. 동일한 env를 상속하되 candle cache 입력은 제거해
++// 항상 신선한 네트워크 윈도우로 검증한다.
++import { spawn as nodeSpawn } from 'node:child_process';
++import fs from 'node:fs';
++import path from 'node:path';
++import { fileURLToPath } from 'node:url';
++
++const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
++export const VALIDATION_SCRIPT_PATH = path.resolve(MODULE_DIR, '../scripts/validateScalping.js');
++export const DEFAULT_REFRESH_INTERVAL_MS = 12 * 60 * 60 * 1000;
++export const DEFAULT_REFRESH_MIN_GAP_MS = 30 * 60 * 1000;
++export const DEFAULT_REFRESH_TIMEOUT_MS = 15 * 60 * 1000;
++export const DEFAULT_TICK_INTERVAL_MS = 60 * 1000;
++
++export class LiveValidationReportRefresher {
++  constructor(trader, options = {}) {
++    if (!trader || typeof trader !== 'object') {
++      throw new TypeError('LiveValidationReportRefresher requires a trader instance.');
++    }
++    this.trader = trader;
++    this.enabled = options.enabled !== false;
++    this.intervalMs = Math.max(60000, Number(options.intervalMs) || DEFAULT_REFRESH_INTERVAL_MS);
++    this.minGapMs = Math.max(60000, Number(options.minGapMs) || DEFAULT_REFRESH_MIN_GAP_MS);
++    this.timeoutMs = Math.max(60000, Number(options.timeoutMs) || DEFAULT_REFRESH_TIMEOUT_MS);
++    this.tickIntervalMs = Math.max(5000, Math.min(Number(options.tickIntervalMs) || DEFAULT_TICK_INTERVAL_MS, this.minGapMs));
++    this.reportFile = options.reportFile || trader.config?.scalpingValidationOutputFile || 'scalping_validation.json';
++    this.scriptPath = options.scriptPath || VALIDATION_SCRIPT_PATH;
++    this._spawn = options.spawn || nodeSpawn;
++    this._now = options.now || (() => Date.now());
++    this._logger = options.logger || console;
++    this._setInterval = options.setInterval || setInterval;
++    this._clearInterval = options.clearInterval || clearInterval;
++    this._setTimeout = options.setTimeout || setTimeout;
++    this._clearTimeout = options.clearTimeout || clearTimeout;
++    this._env = options.env || process.env;
++    this._cwd = options.cwd || process.cwd();
++    this._execPath = options.execPath || process.execPath;
++
++    this._timer = null;
++    this._running = false;
++    this._queued = false;
++    this._queuedReason = null;
++    this._nextRunAllowedAt = 0;
++    this._runCount = 0;
++    this._lastRunStartedAt = null;
++    this._lastRunFinishedAt = null;
++    this._lastRunReason = null;
++    this._lastExitCode = null;
++    this._lastError = null;
++    this._lastReport = null; // {promoted, generatedAt, promotedMarkets, markets}
++  }
++
++  /** LIVE 스캘핑 프로세스에서만 게이트 증거 갱신이 의미 있다. */
++  _eligible() {
++    return this.enabled === true && this.trader.dryRun === false && this.trader.isScalpingMode === true;
++  }
++
++  start() {
++    if (!this._eligible() || this._timer) return false;
++    this._timer = this._setInterval(() => {
++      this.tick().catch(error => {
++        this._log('error', `⚠️ validation 리포트 갱신 감시 오류: ${error.message}`);
++      });
++    }, this.tickIntervalMs);
++    if (typeof this._timer?.unref === 'function') this._timer.unref();
++    return true;
++  }
++
++  stop() {
++    if (!this._timer) return;
++    this._clearInterval(this._timer);
++    this._timer = null;
++  }
++
++  /**
++   * 자동 복구나 운영자 start 시도가 게이트에 막혔을 때 호출한다. 리프레시는
++   * minGap으로 묶이고, 진행 중이면 플래그만 쌓는다.
++   */
++  requestRefresh(reason = 'on_demand') {
++    if (!this._eligible()) return false;
++    this._queued = true;
++    this._queuedReason = typeof reason === 'string' && reason ? reason : 'on_demand';
++    return true;
++  }
++
++  _reportPath() {
++    return path.isAbsolute(this.reportFile)
++      ? this.reportFile
++      : path.resolve(this._cwd, this.reportFile);
++  }
++
++  _readReportSummary() {
++    try {
++      const raw = fs.readFileSync(this._reportPath(), 'utf8');
++      const report = JSON.parse(raw);
++      return {
++        generatedAt: typeof report?.generatedAt === 'string' ? report.generatedAt : null,
++        promoted: report?.promoted === true,
++        markets: Array.isArray(report?.markets) ? report.markets.length : 0,
++        promotedMarkets: Array.isArray(report?.promotedMarkets) ? report.promotedMarkets.length : 0
++      };
++    } catch {
++      return null;
++    }
++  }
++
++  _automationDesired() {
++    if (this.trader.isRunning === true) return true;
++    return this.trader.autoRecovery?.getStatus?.().desiredRunning === true;
++  }
++
++  async tick(nowMs = this._now()) {
++    if (!this._eligible()) return this.getStatus();
++    // 그레이스풀 셧다운/보호 드레이닝 중에는 검증 자식 프로세스를 만들지 않는다.
++    if (this.trader._gracefulShutdownPromise) return this.getStatus();
++    if (this._running) return this.getStatus();
++
++    const desired = this._automationDesired();
++    const summary = this._readReportSummary();
++    const generatedMs = summary?.generatedAt ? Date.parse(summary.generatedAt) : NaN;
++    const scheduledDueAt = desired
++      ? (Number.isFinite(generatedMs) ? generatedMs + this.intervalMs : 0)
++      : null;
++
++    const scheduledDue = scheduledDueAt !== null && nowMs >= scheduledDueAt;
++    const queuedDue = this._queued && nowMs >= this._nextRunAllowedAt;
++    if (!scheduledDue && !queuedDue) return this.getStatus();
++    if (nowMs < this._nextRunAllowedAt) return this.getStatus();
++
++    await this._runRefresh(queuedDue ? (this._queuedReason || 'on_demand') : 'scheduled');
++    return this.getStatus();
++  }
++
++  async _runRefresh(reason) {
++    const startedAt = this._now();
++    this._running = true;
++    this._queued = false;
++    this._runCount += 1;
++    this._lastRunStartedAt = startedAt;
++    this._lastRunReason = reason;
++    this._lastError = null;
++    this._log('log', `\n🧪 LIVE 검증 리포트 갱신 시작 (${reason}) - fixed validation을 새로 실행합니다.`);
++
++    const env = { ...this._env, SCALP_VALIDATION_FIXED: 'true', SCALP_VALIDATION_OUTPUT_FILE: this._reportPath() };
++    delete env.SCALP_VALIDATION_CANDLES_FILE;
++
++    let child;
++    try {
++      child = this._spawn(this._processExecPath(), [this.scriptPath], {
++        env,
++        cwd: this._cwd,
++        stdio: ['ignore', 'pipe', 'pipe']
++      });
++    } catch (error) {
++      this._running = false;
++      this._lastError = error.message;
++      this._lastRunFinishedAt = this._now();
++      this._nextRunAllowedAt = this._now() + this.minGapMs;
++      this._log('error', `❌ validation 리포트 갱신 프로세스 생성 실패: ${error.message}`);
++      return;
++    }
++
++    let outputTail = '';
++    const append = chunk => {
++      outputTail = (outputTail + chunk.toString()).slice(-2000);
++    };
++    child.stdout?.on?.('data', append);
++    child.stderr?.on?.('data', append);
++
++    const exitCode = await new Promise(resolve => {
++      const timer = this._setTimeout(() => {
++        try { child.kill?.('SIGKILL'); } catch { /* ignore */ }
++      }, this.timeoutMs);
++      if (typeof timer?.unref === 'function') timer.unref();
++      let settled = false;
++      child.once('close', code => {
++        if (settled) return;
++        settled = true;
++        this._clearTimeout(timer);
++        resolve(code);
++      });
++      child.once('error', () => {
++        if (settled) return;
++        settled = true;
++        this._clearTimeout(timer);
++        resolve(-1);
++      });
++    });
++
++    const finishedAt = this._now();
++    this._running = false;
++    this._lastRunFinishedAt = finishedAt;
++    this._lastExitCode = exitCode;
++    this._nextRunAllowedAt = finishedAt + this.minGapMs;
++    this._lastReport = this._readReportSummary();
++
++    if (exitCode === 0) {
++      const promoted = this._lastReport?.promoted === true;
++      this._log('log',
++        `\n🧾 LIVE 검증 리포트 갱신 완료: 승격 ${promoted ? '가능' : '보류'} ` +
++        `(${this._lastReport?.promotedMarkets ?? 0}/${this._lastReport?.markets ?? 0} 마켓)` +
++        (promoted ? '' : ' - live 게이트는 새 리포트가 통과할 때까지 닫혀 있습니다.'));
++    } else {
++      this._lastError = `validation_exit_${exitCode}`;
++      this._log('error',
++        `❌ validation 리포트 갱신 실패 (exit=${exitCode}): ${outputTail.split('\n').filter(Boolean).slice(-3).join(' | ') || '출력 없음'}`);
++    }
++  }
++
++  _processExecPath() {
++    return this._execPath;
++  }
++
++  _log(level, message) {
++    const logger = this._logger;
++    const fn = level === 'error' ? logger.error : logger.log;
++    if (typeof fn === 'function') fn.call(logger, message);
++  }
++
++  getStatus() {
++    return {
++      enabled: this.enabled,
++      eligible: this._eligible(),
++      active: this._timer !== null,
++      running: this._running,
++      queued: this._queued,
++      runCount: this._runCount,
++      lastRunStartedAt: this._lastRunStartedAt === null ? null : new Date(this._lastRunStartedAt).toISOString(),
++      lastRunFinishedAt: this._lastRunFinishedAt === null ? null : new Date(this._lastRunFinishedAt).toISOString(),
++      lastRunReason: this._lastRunReason,
++      lastExitCode: this._lastExitCode,
++      lastError: this._lastError,
++      lastReport: this._lastReport,
++      reportFile: this.reportFile
++    };
++  }
++}
++
++export function createLiveValidationReportRefresher(trader, config = {}, options = {}) {
++  return new LiveValidationReportRefresher(trader, {
++    enabled: config.liveValidationRefreshEnabled !== false,
++    intervalMs: config.liveValidationRefreshIntervalMs,
++    minGapMs: config.liveValidationRefreshMinGapMs,
++    timeoutMs: config.liveValidationRefreshTimeoutMs,
++    reportFile: config.scalpingValidationOutputFile,
++    ...options
++  });
++}
+--- a/src/scripts/validateScalping.js
++++ b/src/scripts/validateScalping.js
+@@ -297,7 +297,9 @@
+     fs.writeFileSync(candleCacheOutputFile, JSON.stringify(capturedCandleCache), 'utf8');
+     console.log(`🧾 원본 candle cache 저장: ${candleCacheOutputFile}`);
+   }
+-  fs.writeFileSync(outputFile, JSON.stringify(report, null, 2), 'utf8');
++  const tempOutputFile = `${outputFile}.${process.pid}.tmp`;
++  fs.writeFileSync(tempOutputFile, JSON.stringify(report, null, 2), 'utf8');
++  fs.renameSync(tempOutputFile, outputFile);
+   console.log(`\n💾 검증 리포트 저장: ${outputFile}`);
+   console.log(`승격 가능 마켓: ${report.promotedMarkets.length}/${markets.length}`);
+   console.log(`전체 전략 승격: ${report.promoted ? '✅ 가능' : '⛔ 보류'}`);

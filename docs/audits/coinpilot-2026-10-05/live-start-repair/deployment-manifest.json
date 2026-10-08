@@ -1,0 +1,27 @@
+[
+  {
+    "path": "src/research/strategyReadiness.js",
+    "oldSha256": "e9c1f8c06f2e78031b0617dd767c2e7b2f0f315f044c2a4a8bade4bf0d8ed7b6",
+    "newSha256": "1062a9d60797412927502a062f22351bf8a01e2679b12f136af761958ebddcd7"
+  },
+  {
+    "path": "src/api/routes/config.js",
+    "oldSha256": "224f376574738e757b6de1732a58142248dd910bea397a4423f664c35294422f",
+    "newSha256": "749d445aa205228a25fe0031ace9942d82e8967048c98324d2986d1b553e1f4d"
+  },
+  {
+    "path": "src/index.js",
+    "oldSha256": "95b877ff2b3403951d2d5dd5ee731e363a57deda94e654af2732a9635cb252cc",
+    "newSha256": "e78ff3869d45315c795b68a170ad841bb733bab8aeb8ab02214ffd8a2a4401c1"
+  },
+  {
+    "path": "src/runtime/liveValidationReportRefresher.js",
+    "oldSha256": null,
+    "newSha256": "b94a30dfe2516e5eb1803da6bb7feb47c8ab0b48bc5c251f7abe69ac16a376b3"
+  },
+  {
+    "path": "src/scripts/validateScalping.js",
+    "oldSha256": "aca6c9cdfd15ae0f596b89476e49736b0c0240c169f2ca19fd7b286cd7533416",
+    "newSha256": "c117f6f43af99378b25ccc499b73f78b126dae7c6907397bd40f6e6c8404166c"
+  }
+]

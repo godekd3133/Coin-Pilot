@@ -61,13 +61,16 @@ test('strategy readiness reports current configured report, live gate result, an
     trader.config.requireValidationPassForLive = false;
     const bypassResponse = await fetch(url);
     const bypass = await bypassResponse.json();
-    assert.equal(bypass.status, 'BLOCKED');
+    assert.equal(bypass.status, 'NOT_REQUIRED');
     assert.equal(bypass.currentEvidence, false);
     assert.equal(bypass.runtime.applies, true);
-    assert.equal(bypass.liveGate.checked, true);
-    assert.equal(bypass.liveGate.passed, false);
-    assert.equal(bypass.liveGate.code, 'live_validation_bypass_not_supported');
-    assert.match(bypass.blockers.join(' '), /cannot be disabled/i);
+    assert.equal(bypass.liveGate.checked, false);
+    assert.equal(bypass.liveGate.passed, null);
+    assert.equal(bypass.liveGate.enforced, false);
+    assert.equal(bypass.liveGate.enforcedFreshness, false);
+    assert.equal(bypass.decisionMeaning, 'performance_validation_optional');
+    assert.deepEqual(bypass.blockers, []);
+    assert.equal(gateCalls, 1, 'optional evidence must not call the performance validator');
 
     trader.dryRun = true;
     const paperBypassResponse = await fetch(url);
@@ -139,16 +142,16 @@ test('strategy readiness reports current configured report, live gate result, an
 test('strategy readiness uses the actual MultiCoinTrader validator and blocks incomplete report settings', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'coinpilot-strategy-readiness-real-gate-'));
   const reportFile = path.join(root, 'scalping_validation.json');
+  const trader = createMockTrader();
   fs.writeFileSync(reportFile, JSON.stringify({
     generatedAt: new Date().toISOString(),
     validationMode: 'fixed_config',
     strategyMode: 'oversold_reaction_scalping',
-    markets: ['KRW-BTC'],
+    markets: [...trader.targetCoins],
     config: {},
     promoted: true
   }), 'utf8');
 
-  const trader = createMockTrader();
   trader.config.scalpingValidationOutputFile = reportFile;
   const dashboard = new DashboardServer(trader, 0, { env: { ...process.env, DASHBOARD_TOKEN: '', DASHBOARD_READ_ONLY_TOKEN: '', DASHBOARD_MOBILE_TOKEN: '' } });
   const httpServer = await dashboard.start();
@@ -161,7 +164,7 @@ test('strategy readiness uses the actual MultiCoinTrader validator and blocks in
     assert.equal(body.liveGate.checked, true);
     assert.equal(body.liveGate.passed, false);
     assert.equal(body.liveGate.code, 'report_config_incomplete');
-    assert.equal(body.liveGate.reason, 'The fixed validation report settings are incomplete.');
+    assert.equal(body.liveGate.reason, '점검 결과에 필요한 투자 설정이 빠져 있습니다. 현재 투자 설정으로 다시 점검해 주세요.');
   } finally {
     await dashboard.stop();
     trader.stop();

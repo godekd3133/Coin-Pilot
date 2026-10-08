@@ -1,0 +1,211 @@
+{
+  "checkedAt": "2026-10-07T03:42:54.943797+00:00",
+  "method": "GET only; no orders or control requests",
+  "endpoints": {
+    "/health": {
+      "httpStatus": 200,
+      "body": {
+        "status": "ok",
+        "uptimeSec": 142617,
+        "pid": 58171,
+        "timestamp": "2026-10-07T03:42:55.520Z"
+      }
+    },
+    "/service-ready": {
+      "httpStatus": 200,
+      "body": {
+        "ready": true,
+        "uptimeSec": 142618,
+        "timestamp": "2026-10-07T03:42:55.593Z",
+        "checks": {
+          "httpServerListening": true,
+          "marketDataScheduler": {
+            "available": true,
+            "queueLength": 0,
+            "queuedByPriority": {
+              "normal": 0,
+              "risk": 0
+            },
+            "oldestWaitAgeMsByPriority": {
+              "normal": null,
+              "risk": null
+            },
+            "inFlightByPriority": {
+              "normal": 0,
+              "risk": 0
+            },
+            "inFlightTotal": 0,
+            "maxInFlight": 4,
+            "maxQueuedByPriority": {
+              "normal": 64,
+              "risk": 16
+            },
+            "nextStartInMs": 0,
+            "backoffRemainingMs": 0,
+            "pressure": {
+              "normalQueueSaturated": false,
+              "riskQueueSaturated": false,
+              "backoffActive": false
+            }
+          },
+          "publicMarketSnapshot": {
+            "available": true,
+            "marketCount": 291,
+            "persistedAt": "2026-10-05T12:01:41.381Z",
+            "dirty": false,
+            "readOnly": false,
+            "persistenceHealthy": true,
+            "loadHealthy": true
+          },
+          "marketDataCoordinator": {
+            "required": true,
+            "enabled": true,
+            "available": true,
+            "failureCode": null,
+            "queuedTotal": 0,
+            "inFlightTotal": 0,
+            "maxInFlight": 4,
+            "nextStartInMs": 0
+          }
+        }
+      }
+    },
+    "/ready": {
+      "httpStatus": 503,
+      "body": {
+        "ready": false,
+        "uptimeSec": 142618,
+        "timestamp": "2026-10-07T03:42:55.665Z",
+        "checks": {
+          "httpServerListening": true,
+          "marketDataScheduler": {
+            "available": true,
+            "queueLength": 0,
+            "queuedByPriority": {
+              "normal": 0,
+              "risk": 0
+            },
+            "oldestWaitAgeMsByPriority": {
+              "normal": null,
+              "risk": null
+            },
+            "inFlightByPriority": {
+              "normal": 0,
+              "risk": 0
+            },
+            "inFlightTotal": 0,
+            "maxInFlight": 4,
+            "maxQueuedByPriority": {
+              "normal": 64,
+              "risk": 16
+            },
+            "nextStartInMs": 0,
+            "backoffRemainingMs": 0,
+            "pressure": {
+              "normalQueueSaturated": false,
+              "riskQueueSaturated": false,
+              "backoffActive": false
+            }
+          },
+          "publicMarketSnapshot": {
+            "available": true,
+            "marketCount": 291,
+            "persistedAt": "2026-10-05T12:01:41.381Z",
+            "dirty": false,
+            "readOnly": false,
+            "persistenceHealthy": true,
+            "loadHealthy": true
+          },
+          "traderRunning": false,
+          "runtimeSafetyAvailable": true,
+          "runtimeState": "STOPPED",
+          "entriesPaused": true,
+          "protectiveMonitorActive": false,
+          "stopReason": "operator_stop",
+          "exchangeStateKnown": true,
+          "lastCycleAt": null,
+          "analysisHealthAvailable": true,
+          "analysisHealthy": true,
+          "analysisStaleReason": null,
+          "analysisCycleConfigValid": true,
+          "analysisLastCompleteAt": null,
+          "analysisFirstCycleComplete": false,
+          "analysisCycleAgeSeconds": null,
+          "analysisCycleMaxAgeSeconds": 120,
+          "analysisCycleFresh": false,
+          "riskHealthAvailable": true,
+          "riskHealthy": true,
+          "riskStaleReason": null,
+          "marketDataCoordinator": {
+            "required": true,
+            "enabled": true,
+            "available": true,
+            "failureCode": null,
+            "queuedTotal": 0,
+            "inFlightTotal": 0,
+            "maxInFlight": 4,
+            "nextStartInMs": 0
+          }
+        }
+      }
+    },
+    "/api/status": {
+      "httpStatus": 200,
+      "body": {
+        "mode": "LIVE",
+        "isRunning": false,
+        "runtimeState": "STOPPED",
+        "stopReason": "operator_stop",
+        "exchangeStateKnown": true,
+        "entriesPaused": true,
+        "protectiveMonitorActive": false,
+        "liveManualPrepared": true,
+        "liveManualPrepareOnBoot": true
+      }
+    },
+    "/api/strategy-readiness": {
+      "httpStatus": 200,
+      "body": {
+        "status": "BLOCKED",
+        "currentEvidence": false,
+        "decisionMeaning": "current_validation_evidence_only",
+        "liveGate": {
+          "checked": true,
+          "passed": false,
+          "enforced": true,
+          "enforcedFreshness": true,
+          "code": "confidence_gate_failed",
+          "reason": "거래 수익에 대한 검증이 충분하지 않아 실거래 자동매매를 시작할 수 없습니다. 모의투자로 검증을 계속해 주세요."
+        },
+        "runtime": {
+          "strategyMode": "oversold_reaction_scalping",
+          "dryRun": false,
+          "isScalpingMode": true,
+          "requireValidationPassForLive": true,
+          "readinessMeaning": "live_validation_evidence",
+          "applies": true
+        },
+        "blockerDetails": [
+          {
+            "code": "report_not_current",
+            "message": "Validation report is not current (stale)."
+          },
+          {
+            "code": "report_not_promoted",
+            "message": "The validation report has not promoted the strategy."
+          },
+          {
+            "code": "confidence_gate_failed",
+            "message": "거래 수익에 대한 검증이 충분하지 않아 실거래 자동매매를 시작할 수 없습니다. 모의투자로 검증을 계속해 주세요."
+          }
+        ]
+      }
+    },
+    "/api/positions": {
+      "httpStatus": 200,
+      "body": {
+        "positionCount": 0
+      }
+    }
+  }
+}

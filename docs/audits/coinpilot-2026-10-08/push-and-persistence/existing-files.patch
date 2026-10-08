@@ -1,0 +1,291 @@
+--- live/src/index.js
++++ live/src/index.js
+@@ -1,3 +1,4 @@
++import { createAutoRecoverySupervisor } from './runtime/autoRecoverySupervisor.js';
+ import dotenv from 'dotenv';
+ import MultiCoinTrader from './trader/multiCoinTrader.js';
+ import DashboardServer from './api/dashboardServer.js';
+@@ -272,7 +273,11 @@
+       trader.liveValidationRefresher = validationRefresher;
+       validationRefresher.start();
+ 
+-      const startTraderOnBoot = config.dashboardStartTraderOnBoot;
++      const autoRecovery = createAutoRecoverySupervisor(trader, { ...config,
++        autoRecoveryStateFile: process.env.AUTO_RECOVERY_STATE_FILE || config.autoRecoveryStateFile });
++      trader.autoRecovery = autoRecovery;
++      autoRecovery.start();
++      const startTraderOnBoot = autoRecovery.resolveBootIntent(config.dashboardStartTraderOnBoot);
+       if (startTraderOnBoot) {
+         // 카운트다운
+         console.log('\n⏱️  3초 후 자동매매를 시작합니다...');
+--- live/src/api/dashboardServer.js
++++ live/src/api/dashboardServer.js
+@@ -1,3 +1,5 @@
++import { OrderPushService, createApnsSender } from './orderPushService.js';
++import { createNotificationRoutes, manualNotificationMiddleware } from './routes/notifications.js';
+ import express from 'express';
+ import path from 'path';
+ import { fileURLToPath } from 'url';
+@@ -61,6 +63,9 @@
+     }
+     this.publicMarketDataSource = publicMarketDataSource ?? null;
+     const dashboardEnv = options.env || process.env;
++    this.orderPush = new OrderPushService({
++      file: dashboardEnv.ORDER_PUSH_STATE_FILE || (tradingSystem?.virtualPortfolioFile ? `${tradingSystem.virtualPortfolioFile}.push.json` : null),
++      mode: tradingSystem?.dryRun === false ? 'LIVE' : 'DRY_RUN', sender: createApnsSender(dashboardEnv) });
+     this.optimizationStoragePaths = resolveOptimizationStoragePaths({
+       env: dashboardEnv,
+       cwd: options.cwd || process.cwd(),
+@@ -373,6 +378,8 @@
+     // ========================================
+     // 모듈화된 라우트 마운트
+     // ========================================
++    this.app.use('/api', createNotificationRoutes(this));
++    this.app.use('/api', manualNotificationMiddleware(this));
+     this.app.use('/api', createAccountRoutes(this));
+     this.app.use('/api', createLiveCredentialsRoutes(this));
+     this.app.use('/api', createPortfolioRoutes(this));
+@@ -506,6 +513,10 @@
+    */
+   emitTradeNotification(tradeInfo) {
+     this._notificationMonitor().emitTradeNotification(tradeInfo);
++    try {
++      this.orderPush.enqueue(tradeInfo);
++      this.tradingSystem.autoRecovery?.tracking?.record('trade', { type: tradeInfo.type, market: tradeInfo.coin, orderId: tradeInfo.orderId || null });
++    } catch (error) { this.orderPush.error = error.message; this.logger.error('주문 알림 기록 실패', { error: error.message }); }
+   }
+ 
+   /**
+@@ -558,6 +569,7 @@
+       this.logger.warn(warning);
+     }
+ 
++    this.orderPush.start();
+     const server = this.httpServer;
+     this.server = server;
+     let listening = false;
+@@ -708,6 +720,9 @@
+   }
+ 
+   stop() {
++    this.orderPush?.stop();
++    this.tradingSystem.autoRecovery?.stop?.();
++    try { this.tradingSystem.autoRecovery?.tracking?.record('shutdown'); } catch { /* preserve error in status */ }
+     this.optimizationScheduler?.stop();
+     this.realtimeHub?.stop();
+     this.notificationMonitor?.stop();
+--- live/src/api/auth.js
++++ live/src/api/auth.js
+@@ -26,6 +26,8 @@
+   '/api/market/prices',
+   '/api/market/prices/snapshot',
+   '/api/paper-validation/summary',
++  '/api/notifications/status',
++  '/api/automation/history',
+   '/api/stream'
+ ]);
+ const READ_ONLY_PORTFOLIO_PERIODS = new Set(['24h', '7d', '30d']);
+@@ -104,6 +106,8 @@
+   'maxPositions'
+ ]);
+ const MOBILE_POST_PATHS = new Set([
++  '/api/notifications/register',
++  '/api/notifications/unregister',
+   '/api/trade/buy',
+   '/api/trade/sell',
+   '/api/trade/quick',
+@@ -389,6 +393,14 @@
+   if (requestPathname === '/api/control/start' || requestPathname === '/api/control/stop' || requestPathname === '/api/paper-validation/stop' || requestPathname === '/api/portfolio/snapshot' || requestPathname === '/api/optimization/run-now') {
+     return body === undefined || (body && typeof body === 'object' &&
+       !Array.isArray(body) && Object.keys(body).length === 0);
++  }
++  if (requestPathname === '/api/notifications/register') {
++    return hasOnlyKeys(body, new Set(['deviceId', 'token', 'environment'])) &&
++      /^[a-f0-9-]{36}$/i.test(body.deviceId || '') && /^[a-f0-9]{32,512}$/i.test(body.token || '') &&
++      ['sandbox', 'production'].includes(body.environment);
++  }
++  if (requestPathname === '/api/notifications/unregister') {
++    return hasOnlyKeys(body, new Set(['deviceId'])) && /^[a-f0-9-]{36}$/i.test(body.deviceId || '');
+   }
+   if (requestPathname === '/api/paper-validation/start') {
+     if (body === undefined) return true;
+--- live/src/api/routes/config.js
++++ live/src/api/routes/config.js
+@@ -506,6 +506,7 @@
+     }
+     try {
+       trader.assertLiveValidationGate?.();
++      trader.autoRecovery?.noteDesiredRunning?.(true, 'control_start', { requirePersistence: true });
+       const start = trader.start();
+       Promise.resolve(start).catch(error => {
+         console.error('Trading system start error:', error);
+@@ -530,6 +531,7 @@
+   router.post('/control/stop', (req, res) => {
+     try {
+       const trader = server.tradingSystem;
++      trader.autoRecovery?.noteDesiredRunning?.(false, 'control_stop');
+       if (typeof trader.requestGracefulShutdown === 'function') {
+         const shutdown = trader.requestGracefulShutdown('operator_stop');
+         Promise.resolve(shutdown).catch(error => {
+--- live/src/config/envSchema.js
++++ live/src/config/envSchema.js
+@@ -3,6 +3,12 @@
+ // of silently falling back. See envLoader.js for parsing semantics and
+ // test/envDocumentation.test.js for the .env.example sync contract.
+ export const ENV_SCHEMA = {
++  APNS_KEY_FILE: { type: 'string', secret: true },
++  APNS_KEY_ID: { type: 'string' },
++  APNS_TEAM_ID: { type: 'string' },
++  APNS_TOPIC: { type: 'string' },
++  ORDER_PUSH_STATE_FILE: { type: 'string' },
++  AUTO_RECOVERY_STATE_FILE: { type: 'string' },
+   // --- Core ---
+   EXCHANGE: { type: 'string' },
+   UPBIT_ACCESS_KEY: { type: 'string', secret: true },
+--- paper/src/index.js
++++ paper/src/index.js
+@@ -1,3 +1,4 @@
++import { createAutoRecoverySupervisor } from './runtime/autoRecoverySupervisor.js';
+ import dotenv from 'dotenv';
+ import MultiCoinTrader from './trader/multiCoinTrader.js';
+ import DashboardServer from './api/dashboardServer.js';
+@@ -825,7 +826,11 @@
+         }
+       }
+ 
+-      const startTraderOnBoot = config.dashboardStartTraderOnBoot;
++      const autoRecovery = createAutoRecoverySupervisor(trader, { ...config,
++        autoRecoveryStateFile: process.env.AUTO_RECOVERY_STATE_FILE || config.autoRecoveryStateFile });
++      trader.autoRecovery = autoRecovery;
++      autoRecovery.start();
++      const startTraderOnBoot = autoRecovery.resolveBootIntent(config.dashboardStartTraderOnBoot);
+       if (startTraderOnBoot) {
+         // 카운트다운
+         console.log('\n⏱️  3초 후 자동매매를 시작합니다...');
+--- paper/src/api/dashboardServer.js
++++ paper/src/api/dashboardServer.js
+@@ -1,3 +1,5 @@
++import { OrderPushService, createApnsSender } from './orderPushService.js';
++import { createNotificationRoutes, manualNotificationMiddleware } from './routes/notifications.js';
+ import express from 'express';
+ import fs from 'fs';
+ import path from 'path';
+@@ -69,6 +71,9 @@
+     }
+     this.publicMarketDataSource = publicMarketDataSource ?? null;
+     const dashboardEnv = options.env || process.env;
++    this.orderPush = new OrderPushService({
++      file: dashboardEnv.ORDER_PUSH_STATE_FILE || (tradingSystem?.virtualPortfolioFile ? `${tradingSystem.virtualPortfolioFile}.push.json` : null),
++      mode: tradingSystem?.dryRun === false ? 'LIVE' : 'DRY_RUN', sender: createApnsSender(dashboardEnv) });
+     this.optimizationStoragePaths = resolveOptimizationStoragePaths({
+       env: dashboardEnv,
+       cwd: options.cwd || process.cwd(),
+@@ -552,6 +557,8 @@
+     // ========================================
+     // 모듈화된 라우트 마운트
+     // ========================================
++    this.app.use('/api', createNotificationRoutes(this));
++    this.app.use('/api', manualNotificationMiddleware(this));
+     this.app.use('/api', createAccountRoutes(this));
+     this.app.use('/api', createLiveCredentialsRoutes(this));
+     this.app.use('/api', createPortfolioRoutes(this));
+@@ -1403,6 +1410,7 @@
+       this.logger.warn(warning);
+     }
+ 
++    this.orderPush.start();
+     const server = this.httpServer;
+     this.server = server;
+     let listening = false;
+--- paper/src/api/auth.js
++++ paper/src/api/auth.js
+@@ -25,6 +25,8 @@
+   '/api/market/prices',
+   '/api/market/prices/snapshot',
+   '/api/paper-validation/summary',
++  '/api/notifications/status',
++  '/api/automation/history',
+   '/api/stream'
+ ]);
+ const READ_ONLY_PORTFOLIO_PERIODS = new Set(['24h', '7d', '30d']);
+@@ -103,6 +105,8 @@
+   'maxPositions'
+ ]);
+ const MOBILE_POST_PATHS = new Set([
++  '/api/notifications/register',
++  '/api/notifications/unregister',
+   '/api/trade/buy',
+   '/api/trade/sell',
+   '/api/trade/quick',
+@@ -388,6 +392,14 @@
+   if (requestPathname === '/api/control/start' || requestPathname === '/api/control/stop' || requestPathname === '/api/paper-validation/stop' || requestPathname === '/api/portfolio/snapshot' || requestPathname === '/api/optimization/run-now') {
+     return body === undefined || (body && typeof body === 'object' &&
+       !Array.isArray(body) && Object.keys(body).length === 0);
++  }
++  if (requestPathname === '/api/notifications/register') {
++    return hasOnlyKeys(body, new Set(['deviceId', 'token', 'environment'])) &&
++      /^[a-f0-9-]{36}$/i.test(body.deviceId || '') && /^[a-f0-9]{32,512}$/i.test(body.token || '') &&
++      ['sandbox', 'production'].includes(body.environment);
++  }
++  if (requestPathname === '/api/notifications/unregister') {
++    return hasOnlyKeys(body, new Set(['deviceId'])) && /^[a-f0-9-]{36}$/i.test(body.deviceId || '');
+   }
+   if (requestPathname === '/api/paper-validation/start') {
+     if (body === undefined) return true;
+--- paper/src/api/routes/config.js
++++ paper/src/api/routes/config.js
+@@ -505,6 +505,7 @@
+     }
+     try {
+       trader.assertLiveValidationGate?.();
++      trader.autoRecovery?.noteDesiredRunning?.(true, 'control_start', { requirePersistence: true });
+       const start = trader.start();
+       Promise.resolve(start).catch(error => {
+         console.error('Trading system start error:', error);
+@@ -530,6 +531,7 @@
+   router.post('/control/stop', (req, res) => {
+     try {
+       const trader = server.tradingSystem;
++      trader.autoRecovery?.noteDesiredRunning?.(false, 'control_stop');
+       if (typeof trader.requestGracefulShutdown === 'function') {
+         const shutdown = trader.requestGracefulShutdown('operator_stop');
+         Promise.resolve(shutdown).catch(error => {
+--- paper/src/config/envSchema.js
++++ paper/src/config/envSchema.js
+@@ -3,6 +3,12 @@
+ // of silently falling back. See envLoader.js for parsing semantics and
+ // test/envDocumentation.test.js for the .env.example sync contract.
+ export const ENV_SCHEMA = {
++  APNS_KEY_FILE: { type: 'string', secret: true },
++  APNS_KEY_ID: { type: 'string' },
++  APNS_TEAM_ID: { type: 'string' },
++  APNS_TOPIC: { type: 'string' },
++  ORDER_PUSH_STATE_FILE: { type: 'string' },
++  AUTO_RECOVERY_STATE_FILE: { type: 'string' },
+   // --- Core ---
+   UPBIT_ACCESS_KEY: { type: 'string', secret: true },
+   UPBIT_SECRET_KEY: { type: 'string', secret: true },
+--- live/src/trader/tradingLifecycle.js
++++ live/src/trader/tradingLifecycle.js
+@@ -493,7 +493,8 @@
+       manualProtectionActive: this._manualRiskProtection === true && this.owner.positionRiskTimer !== null,
+       protectiveMonitorActive: this.owner._riskMonitorProtectiveOnly && this.owner.positionRiskTimer !== null,
+       stopReason: this.stopReason || (!this.owner.dryRun && !this.owner._liveExchangeStateKnown ? 'exchange_state_unverified' : null),
+-      exchangeStateKnown: this.owner.dryRun ? null : this.owner._liveExchangeStateKnown
++      exchangeStateKnown: this.owner.dryRun ? null : this.owner._liveExchangeStateKnown,
++      autoRecovery: this.owner.autoRecovery?.getStatus?.() || null
+     };
+   }
+ 
+--- paper/src/trader/multiCoinTrader.js
++++ paper/src/trader/multiCoinTrader.js
+@@ -5713,7 +5713,8 @@
+       manualProtectionActive: this._manualRiskProtection === true && this.positionRiskTimer !== null,
+       protectiveMonitorActive: this._riskMonitorProtectiveOnly && this.positionRiskTimer !== null,
+       stopReason: this.stopReason || (!this.dryRun && !this._liveExchangeStateKnown ? 'exchange_state_unverified' : null),
+-      exchangeStateKnown: this.dryRun ? null : this._liveExchangeStateKnown
++      exchangeStateKnown: this.dryRun ? null : this._liveExchangeStateKnown,
++      autoRecovery: this.autoRecovery?.getStatus?.() || null
+     };
+   }
+ 

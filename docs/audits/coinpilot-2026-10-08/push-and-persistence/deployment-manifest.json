@@ -1,0 +1,134 @@
+[
+  {
+    "profile": "live",
+    "path": "src/index.js",
+    "originalSha256": "e78ff3869d45315c795b68a170ad841bb733bab8aeb8ab02214ffd8a2a4401c1",
+    "newSha256": "4aab262050e8c4c161e3880f18f3de97f8e506f4af4c8f6532d88eec932dc8e7"
+  },
+  {
+    "profile": "live",
+    "path": "src/api/dashboardServer.js",
+    "originalSha256": "5676b111b1757c67e39d47a06d61ec01467636e24c92b8d2077233b7643a28aa",
+    "newSha256": "015f68f07bd06ba793be685caeafac82432b742db46dda27723c2bef927ea0e4"
+  },
+  {
+    "profile": "live",
+    "path": "src/api/auth.js",
+    "originalSha256": "9f606f9ad6bd65409286e66594b770de2fbd9513e3670635d42d5a6fa6020a0d",
+    "newSha256": "644d714a7f2ebf84dabadd9d9e9c34ed518f73e74b5931d3df4a924277bb0dba"
+  },
+  {
+    "profile": "live",
+    "path": "src/api/routes/config.js",
+    "originalSha256": "089c6fa4e793bc04f6fd160d0396846e3f4e8475c995369f3f848d9397e48718",
+    "newSha256": "fafc569e68c90dbbb97b2fb2e00bcd91143c8759ac4199d7ccf6abe95ab9443f"
+  },
+  {
+    "profile": "live",
+    "path": "src/config/envSchema.js",
+    "originalSha256": "8c6c13961ba82e6e8db8c3eff07f131f02823a500940fc1d88b51febfdddc9f1",
+    "newSha256": "73a0fa25a7d2bc953bfdcd363988163db12be9bec2f3de37e5768d4e347ee786"
+  },
+  {
+    "profile": "live",
+    "path": "src/runtime/autoRecoverySupervisor.js",
+    "originalSha256": null,
+    "newSha256": "b1adb057c3c8300178fba90ddefc3028b3c14e863e3d6a879d8b68b79e70f6dd"
+  },
+  {
+    "profile": "live",
+    "path": "src/runtime/durableJson.js",
+    "originalSha256": null,
+    "newSha256": "6c9dceba0a0908e553cb45e5de3b6b05c5e8f020a7c963ec2c59cbe4885e4465"
+  },
+  {
+    "profile": "live",
+    "path": "src/runtime/automationTrackingStore.js",
+    "originalSha256": null,
+    "newSha256": "9cf8c70673ebeef2f84b868ff961326fbd7db630076498bf25202db1be81a2c5"
+  },
+  {
+    "profile": "live",
+    "path": "src/api/orderPushService.js",
+    "originalSha256": null,
+    "newSha256": "1130de5b23b81cb3c7451d30b68b8d045261dc222758e1820d2676d668f6e8b6"
+  },
+  {
+    "profile": "live",
+    "path": "src/api/routes/notifications.js",
+    "originalSha256": null,
+    "newSha256": "3820216079eb00d6f63a9cdee1aa7c3d8386e3617d523398e815b3c94379ef35"
+  },
+  {
+    "profile": "paper",
+    "path": "src/index.js",
+    "originalSha256": "726679972a1c53828dd52ae20b7737a6b35df4187300cd0623dfdeccd939c7fa",
+    "newSha256": "f672f72528eca975d05bf0f558beb0bb9117b86d000a4c91d0f138f9fbe89da3"
+  },
+  {
+    "profile": "paper",
+    "path": "src/api/dashboardServer.js",
+    "originalSha256": "3bc66b80fdda08a2a680ab662240bae4cd48f0fde7f2c4ccab9ec9eb3205eb8c",
+    "newSha256": "3b258c1e08038dbd34444ff4b6acb712beb7718e8fa42462685b673652986744"
+  },
+  {
+    "profile": "paper",
+    "path": "src/api/auth.js",
+    "originalSha256": "0d36784bc03d3bc6fc1e56cb97b6ae8c7d20b7f978c7a533d8c112ae0268356c",
+    "newSha256": "c9fd151177d3726097f02ce0e65d66fc13ea7c896e31a1e1d19279969b2ed13b"
+  },
+  {
+    "profile": "paper",
+    "path": "src/api/routes/config.js",
+    "originalSha256": "93982e2b996fd197426c6532bac69d371c2f219638a5c3bca3d584395c434538",
+    "newSha256": "2ff52aadeb07e5c01a2834425708dc58ddc65b4b5b8a9478f7abca0627712814"
+  },
+  {
+    "profile": "paper",
+    "path": "src/config/envSchema.js",
+    "originalSha256": "1fa9cc4072674007c546b5c456d09ac13eb49a0b9acadb43d9e31b92adafb813",
+    "newSha256": "0a3515442d361fc6eafc58fddf65f05491ef5500fec8c7dc51f738b3fe444873"
+  },
+  {
+    "profile": "paper",
+    "path": "src/runtime/autoRecoverySupervisor.js",
+    "originalSha256": null,
+    "newSha256": "b1adb057c3c8300178fba90ddefc3028b3c14e863e3d6a879d8b68b79e70f6dd"
+  },
+  {
+    "profile": "paper",
+    "path": "src/runtime/durableJson.js",
+    "originalSha256": null,
+    "newSha256": "6c9dceba0a0908e553cb45e5de3b6b05c5e8f020a7c963ec2c59cbe4885e4465"
+  },
+  {
+    "profile": "paper",
+    "path": "src/runtime/automationTrackingStore.js",
+    "originalSha256": null,
+    "newSha256": "9cf8c70673ebeef2f84b868ff961326fbd7db630076498bf25202db1be81a2c5"
+  },
+  {
+    "profile": "paper",
+    "path": "src/api/orderPushService.js",
+    "originalSha256": null,
+    "newSha256": "1130de5b23b81cb3c7451d30b68b8d045261dc222758e1820d2676d668f6e8b6"
+  },
+  {
+    "profile": "paper",
+    "path": "src/api/routes/notifications.js",
+    "originalSha256": null,
+    "newSha256": "3820216079eb00d6f63a9cdee1aa7c3d8386e3617d523398e815b3c94379ef35"
+  },
+  {
+    "profile": "live",
+    "path": "src/trader/tradingLifecycle.js",
+    "originalSha256": "b7fd037cf8e0393667c86a842a28394112f8316f1bb387c70407352a5c377dc5",
+    "newSha256": "f08b6e5c04ca7e001786a2f8b9515fb45175c3bda863806f60c948d982174047"
+  },
+  {
+    "profile": "paper",
+    "path": "src/trader/multiCoinTrader.js",
+    "originalSha256": "c0ffb6ec00322736702173f0d4baca5e978d719bb0e8fb723c61cebd77774fc5",
+    "newSha256": "6e92062577825b58782242908551a921fcdb761ca3e0fe392299a8721ae0769d"
+  }
+]

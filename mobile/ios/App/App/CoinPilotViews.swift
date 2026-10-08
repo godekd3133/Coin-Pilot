@@ -43,6 +43,9 @@ struct CoinPilotNativeRootView: View {
         .tint(CoinPilotColors.blue)
         .animation(.easeInOut(duration: 0.2), value: store.phase)
         .task { await store.bootstrap() }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("CoinPilotPushDeviceToken"))) { _ in
+            Task { await store.syncOrderNotifications() }
+        }
         .task(id: scenePhase) {
             guard scenePhase == .active, !store.isBundledLocalMarketData else { return }
             if store.phase == .dashboard { await store.refresh() }
@@ -1520,6 +1523,18 @@ private struct CoinPilotAutomationControl: View {
                     }
                     .accessibilityElement(children: .combine)
                 }
+                if let desired = store.status?.desiredAutomationRunning {
+                    Text(desired ? "자동매매 켜짐 선택이 저장돼 있어요. 서버 재시작 후 계좌와 시세를 확인하고 재개합니다."
+                         : "자동매매 꺼짐 선택이 저장돼 있어요. 서버가 재시작돼도 자동으로 켜지지 않아요.")
+                        .font(.caption).foregroundColor(CoinPilotColors.secondaryInk)
+                    if let savedAt = store.status?.automationTrackingSavedAt {
+                        Text("진행 기록 저장 · \(savedAt)")
+                            .font(.caption2).foregroundColor(CoinPilotColors.secondaryInk)
+                    }
+                }
+                if let message = store.orderNotificationMessage {
+                    Text(message).font(.caption).foregroundColor(CoinPilotColors.secondaryInk)
+                }
                 if !store.isBundledPreview {
                     NavigationLink(destination: CoinPilotResearchDeskView(store: store)) {
                         HStack(spacing: 12) {
@@ -1527,7 +1542,7 @@ private struct CoinPilotAutomationControl: View {
                                 Text("주문 전 점검")
                                     .font(.subheadline.weight(.semibold))
                                     .foregroundColor(CoinPilotColors.blue)
-                                Text("서버 조건과 모의투자 검증 자료 확인")
+                                Text("서버 연결과 투자 전략 자료 확인")
                                     .font(.caption)
                                     .foregroundColor(CoinPilotColors.secondaryInk)
                                     .fixedSize(horizontal: false, vertical: true)
@@ -5836,6 +5851,7 @@ private struct CoinPilotResearchDeskView: View {
     private var readinessStatusText: String {
         switch store.strategyReadiness["status"] as? String {
         case "READY": return "검증 자료 준비됨"
+        case "NOT_REQUIRED": return "성과 검증은 선택 사항"
         case "BLOCKED": return "자료 확인 필요"
         default: return "상태 확인 필요"
         }
@@ -5869,8 +5885,8 @@ private struct CoinPilotResearchDeskView: View {
                         } else {
                             let gate = store.strategyReadiness["liveGate"] as? [String: Any] ?? [:]
                             AnalyticsMetric(title: "준비 상태", value: readinessStatusText)
-                            AnalyticsMetric(title: "자료 확인", value: store.strategyReadiness["currentEvidence"] as? Bool == true ? "확인 완료" : "확인 필요")
-                            AnalyticsMetric(title: "실거래 진입", value: gate["passed"] as? Bool == true ? "서버 조건 통과" : "잠금")
+                            AnalyticsMetric(title: "자료 확인", value: store.strategyReadiness["status"] as? String == "NOT_REQUIRED" ? "시작 필수 조건 아님" : store.strategyReadiness["currentEvidence"] as? Bool == true ? "확인 완료" : "확인 필요")
+                            AnalyticsMetric(title: "실거래 진입", value: store.strategyReadiness["status"] as? String == "NOT_REQUIRED" ? "계좌와 주문 상태 확인 후 시작" : gate["passed"] as? Bool == true ? "서버 조건 통과" : "잠금")
                             Text("검증 자료가 있다고 실거래 주문이 자동 승인되지는 않습니다. 실제 주문은 서버의 계좌 동기화와 안전 조건을 별도로 통과해야 합니다.")
                                 .font(.caption).foregroundColor(CoinPilotColors.secondaryInk)
                         }

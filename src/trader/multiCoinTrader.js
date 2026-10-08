@@ -611,6 +611,8 @@ class MultiCoinTrader {
 
   applyRuntimeMarketUniverse(...args) { return this._lifecycle().applyRuntimeMarketUniverse(...args); }
 
+  assertRuntimeMarketUniverseUpdateAllowed(...args) { return this._lifecycle().assertRuntimeMarketUniverseUpdateAllowed(...args); }
+
   resolveAllKrwMarketUniverse(...args) { return this._lifecycle().resolveAllKrwMarketUniverse(...args); }
 
   ensureLiveOrderMarketStateVerified(...args) { return this._liveGateway().ensureLiveOrderMarketStateVerified(...args); }

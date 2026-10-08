@@ -1,0 +1,94 @@
+{
+  "capturedAt": "2026-10-05T11:57:40.844269+00:00",
+  "releaseSourceBaseCommit": "ef68e5ac60ea427d6ef05e0656024c3413fd819f",
+  "releaseSnapshotPath": "/Users/kimminkyu/Library/Caches/CoinPilotStartRepair-01a10bc0/release21",
+  "version": "1.0",
+  "build": "21",
+  "nativeOverlayPaths": [
+    "mobile/ios/App/App/CoinPilotStore.swift",
+    "mobile/tests/CoinPilotStoreTests.swift"
+  ],
+  "buildNumberChange": "The snapshot project alone changed 20 to 21; the shared repository project remains 20.",
+  "sourceSha256": {
+    "mobile/ios/App/App.xcodeproj/project.pbxproj": "de89384157993558a388394f176a7d92435be36defb4b35b038b10ff8358c1e5",
+    "mobile/ios/App/App/CoinPilotStore.swift": "cb2f5d3e5fa18a2a2c5abe79dc81c5aee1042605bbdc6bed79ab791c397151ce",
+    "mobile/ios/App/App/CoinPilotViews.swift": "788f036d239058ba51b8ac319e16067e8209a3da780cab57060ef286af0205f2",
+    "mobile/scripts/asc-assign-internal-group.mjs": "c9efe9fd482207b59f36ac7f53937e368b515d575c1035fb027d66bac7a90b7a",
+    "mobile/scripts/testflight-upload.sh": "e9019bae8bafd8f28f43965c753011cd0696404f81365990cdfd83f059ee8366",
+    "mobile/tests/CoinPilotStoreTests.swift": "2d6072e0a203c85b2e59644860bd2ed4b87121646f434efe9bf56ff105942163"
+  },
+  "sourceManifest": {
+    "path": "/Users/kimminkyu/Library/Caches/CoinPilotStartRepair-01a10bc0/release21/final-source-manifest.json",
+    "sha256": "89041fc47e5d9bce965c35b7d2312ef801ee000c895c58a4e263c4ef3eb97312",
+    "files": 80,
+    "nativeOverlayUnchanged": true,
+    "snapshotProjectOnlyBuildNumberChanged": true,
+    "sharedProjectUnchanged": true
+  },
+  "releaseArchive": {
+    "path": "/tmp/coinpilot-testflight-21/App.xcarchive",
+    "archiveSucceeded": true,
+    "codesignVerified": true,
+    "versionVerified": true,
+    "actualEndpointsVerified": true,
+    "developerCredentialsExcluded": true,
+    "bundledExampleAndLocalDataExcluded": true
+  },
+  "ipa": {
+    "path": "/Users/kimminkyu/Library/Caches/CoinPilotStartRepair-01a10bc0/release21/artifacts/CoinPilot-1.0-b21.ipa",
+    "sha256": "f8ff73d4d6d160f72924270e3e0eba85b9f35dd13a7336eafb6a82355a970fb7",
+    "bytes": 7891496,
+    "appleDistributionSignature": true,
+    "codesignVerified": true,
+    "getTaskAllow": false,
+    "developerCredentialsExcluded": true
+  },
+  "upload": {
+    "exportUploadSucceeded": true,
+    "releaseScriptExitCode": 0
+  },
+  "appStoreConnect": {
+    "checkedAt": "2026-10-05T11:55:55.348Z",
+    "appId": "6815908841",
+    "groupId": "0cce1fc8-8022-4836-a4a2-bd1fa4d681f1",
+    "groupName": "CoinPilot Internal",
+    "buildId": "bb2565f8-d306-4989-b86b-519670fd67b8",
+    "version": "21",
+    "uploadedDate": "2026-10-05T04:54:23-07:00",
+    "processingState": "VALID",
+    "expired": false,
+    "internalBuildState": "IN_BETA_TESTING",
+    "externalBuildState": "READY_FOR_BETA_SUBMISSION",
+    "autoNotifyEnabled": true,
+    "internalGroupMember": true,
+    "internalTesterCount": 1,
+    "readbackEndpoints": [
+      "/v1/apps?filter[bundleId]=com.godekd3133.coinpilot",
+      "/v1/builds?filter[app]=6815908841&filter[version]=21&limit=200",
+      "/v1/betaGroups?filter[app]=6815908841&limit=200",
+      "/v1/builds/bb2565f8-d306-4989-b86b-519670fd67b8/buildBetaDetail",
+      "/v1/betaGroups/0cce1fc8-8022-4836-a4a2-bd1fa4d681f1/builds?limit=200",
+      "/v1/betaGroups/0cce1fc8-8022-4836-a4a2-bd1fa4d681f1/betaTesters?fields[betaTesters]=firstName&limit=200"
+    ],
+    "readOnlyVerification": true,
+    "newTesterInvitations": 0
+  },
+  "verification": {
+    "snapshotStoreScenariosPassed": 62,
+    "snapshotStoreExitCode": 0,
+    "storeLog": "/Users/kimminkyu/Library/Caches/CoinPilotStartRepair-01a10bc0/release21/store-tests.log",
+    "archiveLog": "/Users/kimminkyu/Library/Caches/CoinPilotStartRepair-01a10bc0/release21/archive.log",
+    "uploadLog": "/Users/kimminkyu/Library/Caches/CoinPilotStartRepair-01a10bc0/release21/upload.log",
+    "releaseLog": "/Users/kimminkyu/Library/Caches/CoinPilotStartRepair-01a10bc0/release21/release.log",
+    "physicalDeviceInstalledOrLaunched": false
+  },
+  "operationalBoundary": {
+    "productionStartRequests": 0,
+    "exchangeOrders": 0,
+    "newTestersCreated": 0,
+    "testerInvitationsSent": 0,
+    "messagesSent": 0,
+    "sharedRepositoryProjectMutated": false
+  },
+  "behavior": "The native app preserves accepted or rejected automation control feedback across dashboard and history refresh, while retaining server-reported running state and safety gates."
+}

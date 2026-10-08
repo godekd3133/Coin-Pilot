@@ -1,0 +1,756 @@
+{
+  "generatedAt": "2026-10-05T11:43:46.368Z",
+  "config": {
+    "initialBalance": 1000000,
+    "tradingFee": 0.0005,
+    "slippage": 0.001,
+    "investmentRatio": 0.02,
+    "maxCandleAgeSeconds": 90,
+    "rsiPeriod": 14,
+    "rsiOversold": 30,
+    "rsiOverbought": 70,
+    "oversoldLookback": 1,
+    "minReboundPercent": 0.15,
+    "minRsiRecovery": 2,
+    "minVolumeRatio": 1,
+    "volumeLookback": 20,
+    "minCloseStrength": 0.65,
+    "trendPeriod": 30,
+    "trendSlopeLookback": 3,
+    "minTrendSlopePercent": -0.2,
+    "requirePreviousHighBreak": true,
+    "maxSignalRangePercent": 0,
+    "minSignalRangePercent": 0,
+    "maxReboundPercent": 0,
+    "marketRegimeEnabled": false,
+    "marketRegimeLookback": 5,
+    "marketRegimeMinBreadth": 0.5,
+    "marketRegimeMinReturnPercent": -0.2,
+    "requireReboundBelowOverbought": false,
+    "signalProfile": "rsi_rebound",
+    "bbPeriod": 20,
+    "bbStdDev": 2,
+    "emaPeriod": 60,
+    "maxPositions": 3,
+    "portfolioAllocation": 0.1,
+    "requireNextCandleBullish": false,
+    "maxEntryRetracePercent": 0.25,
+    "maxEntryChasePercent": 0.35,
+    "breakEvenTriggerPercent": 0,
+    "breakEvenOffsetPercent": 0.05,
+    "trailingActivationPercent": 0,
+    "trailingStopPercent": 0,
+    "stopLossPercent": 1.2,
+    "takeProfitPercent": 1.8,
+    "maxHoldMinutes": 30,
+    "maxLosingHoldMinutes": 0,
+    "winnerExtendMinutes": 0,
+    "winnerExtendMinProfitPercent": 0,
+    "maxEntriesPerSignalWindow": 0,
+    "maxRiskDataGapSeconds": 30,
+    "maxAnalysisDataGapSeconds": 60,
+    "entryDelayMinMs": 1000,
+    "entryDelayMaxMs": 5000,
+    "cooldownAfterLossMinutes": 15,
+    "maxConsecutiveLosses": 3,
+    "lossCircuitBreakerCount": 0,
+    "lossCircuitBreakerWindowMinutes": 30,
+    "lossCircuitBreakerCooldownMinutes": 60,
+    "candleUnit": 1
+  },
+  "latest": [
+    {
+      "market": "KRW-BTC",
+      "count": 39998,
+      "from": "2026-09-07T16:54:00.000Z",
+      "to": "2026-10-05T11:31:00.000Z",
+      "gaps": 47,
+      "latestGap": {
+        "index": 89602,
+        "previousTimestamp": "2026-09-07T16:52:00.000Z",
+        "timestamp": "2026-09-07T16:54:00.000Z",
+        "gapSeconds": 120,
+        "reason": "historical_candle_gap"
+      },
+      "gapAtPageBoundary": 0
+    },
+    {
+      "market": "KRW-ETH",
+      "count": 936,
+      "from": "2026-10-04T19:56:00.000Z",
+      "to": "2026-10-05T11:31:00.000Z",
+      "gaps": 344,
+      "latestGap": {
+        "index": 128664,
+        "previousTimestamp": "2026-10-04T19:54:00.000Z",
+        "timestamp": "2026-10-04T19:56:00.000Z",
+        "gapSeconds": 120,
+        "reason": "historical_candle_gap"
+      },
+      "gapAtPageBoundary": 1
+    },
+    {
+      "market": "KRW-XRP",
+      "count": 953,
+      "from": "2026-10-04T19:39:00.000Z",
+      "to": "2026-10-05T11:31:00.000Z",
+      "gaps": 31,
+      "latestGap": {
+        "index": 128647,
+        "previousTimestamp": "2026-10-04T19:37:00.000Z",
+        "timestamp": "2026-10-04T19:39:00.000Z",
+        "gapSeconds": 120,
+        "reason": "historical_candle_gap"
+      },
+      "gapAtPageBoundary": 0
+    }
+  ],
+  "selectionRule": "latest common contiguous raw time interval; no performance-based selection",
+  "commonWindow": {
+    "from": "2026-10-04T19:56:00.000Z",
+    "to": "2026-10-05T11:31:00.000Z",
+    "counts": {
+      "KRW-BTC": 936,
+      "KRW-ETH": 936,
+      "KRW-XRP": 936
+    }
+  },
+  "diagnostic": [
+    {
+      "market": "KRW-BTC",
+      "metrics": {
+        "initialBalance": 1000000,
+        "finalBalance": 997618.614902849,
+        "netProfit": -2381.38509715104,
+        "totalReturnPercent": -0.238138509715104,
+        "tradeCount": 50,
+        "winningTrades": 13,
+        "losingTrades": 37,
+        "winRate": 26,
+        "profitFactor": 0.2384369587801072,
+        "maxDrawdownPercent": 0.23983886171394259,
+        "averageTrade": -47.6277019430208,
+        "tradeReturnConfidence": {
+          "method": "one_sided_t_mean",
+          "confidenceLevel": 0.95,
+          "sampleCount": 50,
+          "meanReturnPercent": -0.238397817932991,
+          "standardDeviationPercent": 0.44039617190881036,
+          "standardErrorPercent": 0.062281423913063266,
+          "tCritical": 1.645,
+          "lowerBoundPercent": -0.34085076026998007
+        },
+        "signals": 50,
+        "cancelledSignals": 0,
+        "fees": 997.7187498489702,
+        "rejectionCounts": {},
+        "circuitBlockedEntries": 0,
+        "circuitBreaks": 0,
+        "marketRegimeBlockedEntries": 0,
+        "signalWindowBlockedEntries": 0,
+        "volatilityScaledEntries": 0,
+        "volatilityBlockedEntries": 0,
+        "referenceBreakExits": 0,
+        "dataQuality": {
+          "valid": false,
+          "reason": "segmented_diagnostic_only",
+          "diagnosticOnly": true,
+          "policy": "split_on_gap_exclude_boundary_positions",
+          "raw": {
+            "valid": false,
+            "reason": "historical_candle_gap",
+            "candleCount": 129600,
+            "expectedIntervalSeconds": 60,
+            "maxGapSeconds": 90,
+            "timestampCount": 129600,
+            "missingTimestampCount": 0,
+            "nonIncreasingCount": 0,
+            "gapCount": 47,
+            "missingIntervalCount": 47,
+            "largestGapSeconds": 120,
+            "firstTimestamp": "2026-07-07T10:45:00.000Z",
+            "lastTimestamp": "2026-10-05T11:31:00.000Z",
+            "gaps": [
+              {
+                "index": 7595,
+                "previousTimestamp": "2026-07-12T17:19:00.000Z",
+                "timestamp": "2026-07-12T17:21:00.000Z",
+                "gapSeconds": 120,
+                "missingIntervals": 1
+              },
+              {
+                "index": 7679,
+                "previousTimestamp": "2026-07-12T18:44:00.000Z",
+                "timestamp": "2026-07-12T18:46:00.000Z",
+                "gapSeconds": 120,
+                "missingIntervals": 1
+              },
+              {
+                "index": 7733,
+                "previousTimestamp": "2026-07-12T19:39:00.000Z",
+                "timestamp": "2026-07-12T19:41:00.000Z",
+                "gapSeconds": 120,
+                "missingIntervals": 1
+              },
+              {
+                "index": 14837,
+                "previousTimestamp": "2026-07-17T18:04:00.000Z",
+                "timestamp": "2026-07-17T18:06:00.000Z",
+                "gapSeconds": 120,
+                "missingIntervals": 1
+              },
+              {
+                "index": 22096,
+                "previousTimestamp": "2026-07-22T19:04:00.000Z",
+                "timestamp": "2026-07-22T19:06:00.000Z",
+                "gapSeconds": 120,
+                "missingIntervals": 1
+              },
+              {
+                "index": 23615,
+                "previousTimestamp": "2026-07-23T20:24:00.000Z",
+                "timestamp": "2026-07-23T20:26:00.000Z",
+                "gapSeconds": 120,
+                "missingIntervals": 1
+              },
+              {
+                "index": 26449,
+                "previousTimestamp": "2026-07-25T19:39:00.000Z",
+                "timestamp": "2026-07-25T19:41:00.000Z",
+                "gapSeconds": 120,
+                "missingIntervals": 1
+              },
+              {
+                "index": 26628,
+                "previousTimestamp": "2026-07-25T22:39:00.000Z",
+                "timestamp": "2026-07-25T22:41:00.000Z",
+                "gapSeconds": 120,
+                "missingIntervals": 1
+              },
+              {
+                "index": 27679,
+                "previousTimestamp": "2026-07-26T16:11:00.000Z",
+                "timestamp": "2026-07-26T16:13:00.000Z",
+                "gapSeconds": 120,
+                "missingIntervals": 1
+              },
+              {
+                "index": 27736,
+                "previousTimestamp": "2026-07-26T17:09:00.000Z",
+                "timestamp": "2026-07-26T17:11:00.000Z",
+                "gapSeconds": 120,
+                "missingIntervals": 1
+              },
+              {
+                "index": 27825,
+                "previousTimestamp": "2026-07-26T18:39:00.000Z",
+                "timestamp": "2026-07-26T18:41:00.000Z",
+                "gapSeconds": 120,
+                "missingIntervals": 1
+              },
+              {
+                "index": 27864,
+                "previousTimestamp": "2026-07-26T19:19:00.000Z",
+                "timestamp": "2026-07-26T19:21:00.000Z",
+                "gapSeconds": 120,
+                "missingIntervals": 1
+              },
+              {
+                "index": 29313,
+                "previousTimestamp": "2026-07-27T19:29:00.000Z",
+                "timestamp": "2026-07-27T19:31:00.000Z",
+                "gapSeconds": 120,
+                "missingIntervals": 1
+              },
+              {
+                "index": 33480,
+                "previousTimestamp": "2026-07-30T16:57:00.000Z",
+                "timestamp": "2026-07-30T16:59:00.000Z",
+                "gapSeconds": 120,
+                "missingIntervals": 1
+              },
+              {
+                "index": 36354,
+                "previousTimestamp": "2026-08-01T16:52:00.000Z",
+                "timestamp": "2026-08-01T16:54:00.000Z",
+                "gapSeconds": 120,
+                "missingIntervals": 1
+              },
+              {
+                "index": 39335,
+                "previousTimestamp": "2026-08-03T18:34:00.000Z",
+                "timestamp": "2026-08-03T18:36:00.000Z",
+                "gapSeconds": 120,
+                "missingIntervals": 1
+              },
+              {
+                "index": 39349,
+                "previousTimestamp": "2026-08-03T18:49:00.000Z",
+                "timestamp": "2026-08-03T18:51:00.000Z",
+                "gapSeconds": 120,
+                "missingIntervals": 1
+              },
+              {
+                "index": 39433,
+                "previousTimestamp": "2026-08-03T20:14:00.000Z",
+                "timestamp": "2026-08-03T20:16:00.000Z",
+                "gapSeconds": 120,
+                "missingIntervals": 1
+              },
+              {
+                "index": 40747,
+                "previousTimestamp": "2026-08-04T18:09:00.000Z",
+                "timestamp": "2026-08-04T18:11:00.000Z",
+                "gapSeconds": 120,
+                "missingIntervals": 1
+              },
+              {
+                "index": 43555,
+                "previousTimestamp": "2026-08-06T16:58:00.000Z",
+                "timestamp": "2026-08-06T17:00:00.000Z",
+                "gapSeconds": 120,
+                "missingIntervals": 1
+              }
+            ],
+            "truncatedGapCount": 27
+          },
+          "candleCount": 129600,
+          "boundaryCount": 47,
+          "segmentCount": 28,
+          "usedSegmentCount": 28,
+          "excludedSegmentCount": 20,
+          "unknownBoundaryPositionCount": 0
+        },
+        "qualityScore": -0.8347541952002164
+      },
+      "usedSegments": 28,
+      "excludedSegments": 20,
+      "unknownBoundaryPositions": 0
+    },
+    {
+      "market": "KRW-ETH",
+      "metrics": {
+        "initialBalance": 1000000,
+        "finalBalance": 997057.5838091936,
+        "netProfit": -2942.416190806427,
+        "totalReturnPercent": -0.29424161908064267,
+        "tradeCount": 56,
+        "winningTrades": 13,
+        "losingTrades": 43,
+        "winRate": 23.214285714285715,
+        "profitFactor": 0.20661418623726352,
+        "maxDrawdownPercent": 0.3029633956756984,
+        "averageTrade": -52.543146264400484,
+        "tradeReturnConfidence": {
+          "method": "one_sided_t_mean",
+          "confidenceLevel": 0.95,
+          "sampleCount": 56,
+          "meanReturnPercent": -0.26307958208776194,
+          "standardDeviationPercent": 0.40982483220335886,
+          "standardErrorPercent": 0.054765146810610316,
+          "tCritical": 1.645,
+          "lowerBoundPercent": -0.3531682485912159
+        },
+        "signals": 57,
+        "cancelledSignals": 0,
+        "fees": 1116.8404901990798,
+        "rejectionCounts": {},
+        "circuitBlockedEntries": 0,
+        "circuitBreaks": 0,
+        "marketRegimeBlockedEntries": 0,
+        "signalWindowBlockedEntries": 0,
+        "volatilityScaledEntries": 0,
+        "volatilityBlockedEntries": 0,
+        "referenceBreakExits": 0,
+        "dataQuality": {
+          "valid": false,
+          "reason": "segmented_diagnostic_only",
+          "diagnosticOnly": true,
+          "policy": "split_on_gap_exclude_boundary_positions",
+          "raw": {
+            "valid": false,
+            "reason": "historical_candle_gap",
+            "candleCount": 129600,
+            "expectedIntervalSeconds": 60,
+            "maxGapSeconds": 90,
+            "timestampCount": 129600,
+            "missingTimestampCount": 0,
+            "nonIncreasingCount": 0,
+            "gapCount": 344,
+            "missingIntervalCount": 356,
+            "largestGapSeconds": 240,
+            "firstTimestamp": "2026-07-07T05:36:00.000Z",
+            "lastTimestamp": "2026-10-05T11:31:00.000Z",
+            "gaps": [
+              {
+                "index": 729,
+                "previousTimestamp": "2026-07-07T17:44:00.000Z",
+                "timestamp": "2026-07-07T17:46:00.000Z",
+                "gapSeconds": 120,
+                "missingIntervals": 1
+              },
+              {
+                "index": 753,
+                "previousTimestamp": "2026-07-07T18:09:00.000Z",
+                "timestamp": "2026-07-07T18:11:00.000Z",
+                "gapSeconds": 120,
+                "missingIntervals": 1
+              },
+              {
+                "index": 877,
+                "previousTimestamp": "2026-07-07T20:14:00.000Z",
+                "timestamp": "2026-07-07T20:16:00.000Z",
+                "gapSeconds": 120,
+                "missingIntervals": 1
+              },
+              {
+                "index": 906,
+                "previousTimestamp": "2026-07-07T20:44:00.000Z",
+                "timestamp": "2026-07-07T20:46:00.000Z",
+                "gapSeconds": 120,
+                "missingIntervals": 1
+              },
+              {
+                "index": 2094,
+                "previousTimestamp": "2026-07-08T16:33:00.000Z",
+                "timestamp": "2026-07-08T16:35:00.000Z",
+                "gapSeconds": 120,
+                "missingIntervals": 1
+              },
+              {
+                "index": 2134,
+                "previousTimestamp": "2026-07-08T17:14:00.000Z",
+                "timestamp": "2026-07-08T17:16:00.000Z",
+                "gapSeconds": 120,
+                "missingIntervals": 1
+              },
+              {
+                "index": 2198,
+                "previousTimestamp": "2026-07-08T18:19:00.000Z",
+                "timestamp": "2026-07-08T18:21:00.000Z",
+                "gapSeconds": 120,
+                "missingIntervals": 1
+              },
+              {
+                "index": 2332,
+                "previousTimestamp": "2026-07-08T20:34:00.000Z",
+                "timestamp": "2026-07-08T20:36:00.000Z",
+                "gapSeconds": 120,
+                "missingIntervals": 1
+              },
+              {
+                "index": 2396,
+                "previousTimestamp": "2026-07-08T21:39:00.000Z",
+                "timestamp": "2026-07-08T21:41:00.000Z",
+                "gapSeconds": 120,
+                "missingIntervals": 1
+              },
+              {
+                "index": 2555,
+                "previousTimestamp": "2026-07-09T00:19:00.000Z",
+                "timestamp": "2026-07-09T00:21:00.000Z",
+                "gapSeconds": 120,
+                "missingIntervals": 1
+              },
+              {
+                "index": 3478,
+                "previousTimestamp": "2026-07-09T15:43:00.000Z",
+                "timestamp": "2026-07-09T15:45:00.000Z",
+                "gapSeconds": 120,
+                "missingIntervals": 1
+              },
+              {
+                "index": 3552,
+                "previousTimestamp": "2026-07-09T16:58:00.000Z",
+                "timestamp": "2026-07-09T17:00:00.000Z",
+                "gapSeconds": 120,
+                "missingIntervals": 1
+              },
+              {
+                "index": 3717,
+                "previousTimestamp": "2026-07-09T19:44:00.000Z",
+                "timestamp": "2026-07-09T19:46:00.000Z",
+                "gapSeconds": 120,
+                "missingIntervals": 1
+              },
+              {
+                "index": 3756,
+                "previousTimestamp": "2026-07-09T20:24:00.000Z",
+                "timestamp": "2026-07-09T20:26:00.000Z",
+                "gapSeconds": 120,
+                "missingIntervals": 1
+              },
+              {
+                "index": 4922,
+                "previousTimestamp": "2026-07-10T15:51:00.000Z",
+                "timestamp": "2026-07-10T15:53:00.000Z",
+                "gapSeconds": 120,
+                "missingIntervals": 1
+              },
+              {
+                "index": 4976,
+                "previousTimestamp": "2026-07-10T16:46:00.000Z",
+                "timestamp": "2026-07-10T16:48:00.000Z",
+                "gapSeconds": 120,
+                "missingIntervals": 1
+              },
+              {
+                "index": 5053,
+                "previousTimestamp": "2026-07-10T18:04:00.000Z",
+                "timestamp": "2026-07-10T18:06:00.000Z",
+                "gapSeconds": 120,
+                "missingIntervals": 1
+              },
+              {
+                "index": 5907,
+                "previousTimestamp": "2026-07-11T08:19:00.000Z",
+                "timestamp": "2026-07-11T08:21:00.000Z",
+                "gapSeconds": 120,
+                "missingIntervals": 1
+              },
+              {
+                "index": 6631,
+                "previousTimestamp": "2026-07-11T20:24:00.000Z",
+                "timestamp": "2026-07-11T20:26:00.000Z",
+                "gapSeconds": 120,
+                "missingIntervals": 1
+              },
+              {
+                "index": 7330,
+                "previousTimestamp": "2026-07-12T08:04:00.000Z",
+                "timestamp": "2026-07-12T08:06:00.000Z",
+                "gapSeconds": 120,
+                "missingIntervals": 1
+              }
+            ],
+            "truncatedGapCount": 324
+          },
+          "candleCount": 129600,
+          "boundaryCount": 344,
+          "segmentCount": 86,
+          "usedSegmentCount": 86,
+          "excludedSegmentCount": 259,
+          "unknownBoundaryPositionCount": 1
+        },
+        "qualityScore": -0.9189156879889444
+      },
+      "usedSegments": 86,
+      "excludedSegments": 259,
+      "unknownBoundaryPositions": 1
+    },
+    {
+      "market": "KRW-XRP",
+      "metrics": {
+        "initialBalance": 1000000,
+        "finalBalance": 996522.9913466395,
+        "netProfit": -3477.0086533605354,
+        "totalReturnPercent": -0.34770086533605354,
+        "tradeCount": 78,
+        "winningTrades": 23,
+        "losingTrades": 55,
+        "winRate": 29.48717948717949,
+        "profitFactor": 0.2889934261544065,
+        "maxDrawdownPercent": 0.35807772336142285,
+        "averageTrade": -44.57703401744276,
+        "tradeReturnConfidence": {
+          "method": "one_sided_t_mean",
+          "confidenceLevel": 0.95,
+          "sampleCount": 78,
+          "meanReturnPercent": -0.22324637345808482,
+          "standardDeviationPercent": 0.4741955295007831,
+          "standardErrorPercent": 0.05369207077477728,
+          "tCritical": 1.645,
+          "lowerBoundPercent": -0.3115698298825934
+        },
+        "signals": 78,
+        "cancelledSignals": 0,
+        "fees": 1555.70596280826,
+        "rejectionCounts": {},
+        "circuitBlockedEntries": 0,
+        "circuitBreaks": 0,
+        "marketRegimeBlockedEntries": 0,
+        "signalWindowBlockedEntries": 0,
+        "volatilityScaledEntries": 0,
+        "volatilityBlockedEntries": 0,
+        "referenceBreakExits": 0,
+        "dataQuality": {
+          "valid": false,
+          "reason": "segmented_diagnostic_only",
+          "diagnosticOnly": true,
+          "policy": "split_on_gap_exclude_boundary_positions",
+          "raw": {
+            "valid": false,
+            "reason": "historical_candle_gap",
+            "candleCount": 129600,
+            "expectedIntervalSeconds": 60,
+            "maxGapSeconds": 90,
+            "timestampCount": 129600,
+            "missingTimestampCount": 0,
+            "nonIncreasingCount": 0,
+            "gapCount": 31,
+            "missingIntervalCount": 31,
+            "largestGapSeconds": 120,
+            "firstTimestamp": "2026-07-07T11:01:00.000Z",
+            "lastTimestamp": "2026-10-05T11:31:00.000Z",
+            "gaps": [
+              {
+                "index": 13457,
+                "previousTimestamp": "2026-07-16T19:17:00.000Z",
+                "timestamp": "2026-07-16T19:19:00.000Z",
+                "gapSeconds": 120,
+                "missingIntervals": 1
+              },
+              {
+                "index": 14931,
+                "previousTimestamp": "2026-07-17T19:52:00.000Z",
+                "timestamp": "2026-07-17T19:54:00.000Z",
+                "gapSeconds": 120,
+                "missingIntervals": 1
+              },
+              {
+                "index": 15044,
+                "previousTimestamp": "2026-07-17T21:46:00.000Z",
+                "timestamp": "2026-07-17T21:48:00.000Z",
+                "gapSeconds": 120,
+                "missingIntervals": 1
+              },
+              {
+                "index": 16184,
+                "previousTimestamp": "2026-07-18T16:47:00.000Z",
+                "timestamp": "2026-07-18T16:49:00.000Z",
+                "gapSeconds": 120,
+                "missingIntervals": 1
+              },
+              {
+                "index": 16192,
+                "previousTimestamp": "2026-07-18T16:56:00.000Z",
+                "timestamp": "2026-07-18T16:58:00.000Z",
+                "gapSeconds": 120,
+                "missingIntervals": 1
+              },
+              {
+                "index": 16379,
+                "previousTimestamp": "2026-07-18T20:04:00.000Z",
+                "timestamp": "2026-07-18T20:06:00.000Z",
+                "gapSeconds": 120,
+                "missingIntervals": 1
+              },
+              {
+                "index": 16420,
+                "previousTimestamp": "2026-07-18T20:46:00.000Z",
+                "timestamp": "2026-07-18T20:48:00.000Z",
+                "gapSeconds": 120,
+                "missingIntervals": 1
+              },
+              {
+                "index": 17767,
+                "previousTimestamp": "2026-07-19T19:14:00.000Z",
+                "timestamp": "2026-07-19T19:16:00.000Z",
+                "gapSeconds": 120,
+                "missingIntervals": 1
+              },
+              {
+                "index": 17787,
+                "previousTimestamp": "2026-07-19T19:35:00.000Z",
+                "timestamp": "2026-07-19T19:37:00.000Z",
+                "gapSeconds": 120,
+                "missingIntervals": 1
+              },
+              {
+                "index": 27689,
+                "previousTimestamp": "2026-07-26T16:38:00.000Z",
+                "timestamp": "2026-07-26T16:40:00.000Z",
+                "gapSeconds": 120,
+                "missingIntervals": 1
+              },
+              {
+                "index": 27691,
+                "previousTimestamp": "2026-07-26T16:41:00.000Z",
+                "timestamp": "2026-07-26T16:43:00.000Z",
+                "gapSeconds": 120,
+                "missingIntervals": 1
+              },
+              {
+                "index": 27847,
+                "previousTimestamp": "2026-07-26T19:18:00.000Z",
+                "timestamp": "2026-07-26T19:20:00.000Z",
+                "gapSeconds": 120,
+                "missingIntervals": 1
+              },
+              {
+                "index": 27851,
+                "previousTimestamp": "2026-07-26T19:23:00.000Z",
+                "timestamp": "2026-07-26T19:25:00.000Z",
+                "gapSeconds": 120,
+                "missingIntervals": 1
+              },
+              {
+                "index": 33445,
+                "previousTimestamp": "2026-07-30T16:38:00.000Z",
+                "timestamp": "2026-07-30T16:40:00.000Z",
+                "gapSeconds": 120,
+                "missingIntervals": 1
+              },
+              {
+                "index": 33569,
+                "previousTimestamp": "2026-07-30T18:43:00.000Z",
+                "timestamp": "2026-07-30T18:45:00.000Z",
+                "gapSeconds": 120,
+                "missingIntervals": 1
+              },
+              {
+                "index": 33624,
+                "previousTimestamp": "2026-07-30T19:39:00.000Z",
+                "timestamp": "2026-07-30T19:41:00.000Z",
+                "gapSeconds": 120,
+                "missingIntervals": 1
+              },
+              {
+                "index": 35093,
+                "previousTimestamp": "2026-07-31T20:09:00.000Z",
+                "timestamp": "2026-07-31T20:11:00.000Z",
+                "gapSeconds": 120,
+                "missingIntervals": 1
+              },
+              {
+                "index": 37753,
+                "previousTimestamp": "2026-08-02T16:30:00.000Z",
+                "timestamp": "2026-08-02T16:32:00.000Z",
+                "gapSeconds": 120,
+                "missingIntervals": 1
+              },
+              {
+                "index": 37773,
+                "previousTimestamp": "2026-08-02T16:51:00.000Z",
+                "timestamp": "2026-08-02T16:53:00.000Z",
+                "gapSeconds": 120,
+                "missingIntervals": 1
+              },
+              {
+                "index": 37955,
+                "previousTimestamp": "2026-08-02T19:54:00.000Z",
+                "timestamp": "2026-08-02T19:56:00.000Z",
+                "gapSeconds": 120,
+                "missingIntervals": 1
+              }
+            ],
+            "truncatedGapCount": 11
+          },
+          "candleCount": 129600,
+          "boundaryCount": 31,
+          "segmentCount": 14,
+          "usedSegmentCount": 14,
+          "excludedSegmentCount": 18,
+          "unknownBoundaryPositionCount": 0
+        },
+        "qualityScore": -0.9950826978907704
+      },
+      "usedSegments": 14,
+      "excludedSegments": 18,
+      "unknownBoundaryPositions": 0
+    }
+  ],
+  "promoted": false,
+  "diagnosticOnly": true,
+  "syntheticCandles": 0
+}
