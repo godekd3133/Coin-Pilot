@@ -68,6 +68,10 @@ const CONFIGURATION_RANGES = {
 };
 const BOOLEAN_CONFIGURATION_KEYS = new Set(['marketRegimeEnabled', 'requireReboundBelowOverbought']);
 
+function assignDefined(target, values) {
+  Object.assign(target, Object.fromEntries(Object.entries(values).filter(([, value]) => value !== undefined)));
+}
+
 /**
  * 설정/제어 관련 라우트
  */
@@ -271,7 +275,7 @@ export default function createConfigRoutes(server) {
         return res.status(400).json({ error: '프리셋 설정이 없습니다', success: false });
       }
 
-      Object.assign(server.tradingSystem.config, {
+      assignDefined(server.tradingSystem.config, {
         rsiPeriod: config.rsiPeriod,
         rsiOversold: config.rsiOversold,
         rsiOverbought: config.rsiOverbought,
@@ -307,7 +311,7 @@ export default function createConfigRoutes(server) {
       });
 
       if (server.tradingSystem.strategyConfig) {
-        Object.assign(server.tradingSystem.strategyConfig, {
+        assignDefined(server.tradingSystem.strategyConfig, {
           stopLossPercent: config.stopLossPercent,
           takeProfitPercent: config.takeProfitPercent,
           oversoldLookback: config.oversoldLookback,
@@ -319,10 +323,12 @@ export default function createConfigRoutes(server) {
       if (server.tradingSystem.strategies && server.tradingSystem.strategies.size > 0) {
         for (const strategy of server.tradingSystem.strategies.values()) {
           if (strategy && strategy.config) {
-            strategy.config.stopLossPercent = config.stopLossPercent;
-            strategy.config.takeProfitPercent = config.takeProfitPercent;
-            strategy.config.buyThreshold = config.buyThreshold;
-            strategy.config.sellThreshold = config.sellThreshold;
+            assignDefined(strategy.config, {
+              stopLossPercent: config.stopLossPercent,
+              takeProfitPercent: config.takeProfitPercent,
+              buyThreshold: config.buyThreshold,
+              sellThreshold: config.sellThreshold
+            });
           }
         }
       }
@@ -537,6 +543,8 @@ export default function createConfigRoutes(server) {
     try {
       const trader = server.tradingSystem;
       trader.autoRecovery?.noteDesiredRunning?.(false, 'control_stop');
+      const persistenceWarning = trader.autoRecovery?.getStatus?.().intentWriteError
+        ? ' 중지 선택을 저장하지 못했습니다. 서버를 재시작하기 전에 저장 상태를 확인해 주세요.' : '';
       if (typeof trader.requestGracefulShutdown === 'function') {
         const shutdown = trader.requestGracefulShutdown('operator_stop');
         Promise.resolve(shutdown).catch(error => {
@@ -553,7 +561,8 @@ export default function createConfigRoutes(server) {
           success: true,
           shutdownRequested: true,
           runtimeState: safety.runtimeState || null,
-          message: safety.runtimeState === 'PROTECTIVE_ONLY'
+          automationStateSaved: !persistenceWarning,
+          message: (safety.runtimeState === 'PROTECTIVE_ONLY'
             ? '신규 진입을 잠갔습니다. 보유 포지션의 위험 감시를 유지하고 있습니다.'
             : safety.runtimeState === 'SYNC_REQUIRED' || safety.exchangeStateKnown === false
               ? '거래소 계좌와 미체결 주문을 확인할 때까지 중지를 보류합니다.'
@@ -561,7 +570,7 @@ export default function createConfigRoutes(server) {
                 ? '신규 진입을 잠그고 보유 포지션 확인을 시작했습니다.'
                 : shutdownInProgress
                   ? '진행 중인 주문과 위험 확인을 마친 뒤 중지를 완료합니다.'
-                : '자동매매를 중지했습니다.'
+                : '자동매매를 중지했습니다.') + persistenceWarning
         });
       }
       if (trader.isRunning) {

@@ -152,7 +152,9 @@ test('successful toggle and interval changes persist before updating scheduler s
   assert.deepEqual(JSON.parse(fs.readFileSync(server.optimizationStateFile, 'utf8')), {
     enabled: true,
     interval: ONE_HOUR,
-    lastRun: null
+    lastRun: null,
+    lastAttemptAt: null,
+    lastOutcome: null
   });
 
   const interval = await requestJson(app, '/optimization/interval', 'POST', { interval: 43_200_000 });
@@ -164,7 +166,9 @@ test('successful toggle and interval changes persist before updating scheduler s
   assert.deepEqual(JSON.parse(fs.readFileSync(server.optimizationStateFile, 'utf8')), {
     enabled: true,
     interval: 43_200_000,
-    lastRun: null
+    lastRun: null,
+    lastAttemptAt: null,
+    lastOutcome: null
   });
 });
 
@@ -249,7 +253,9 @@ test('candidate comparison writes history without changing active config or trad
   assert.deepEqual(JSON.parse(fs.readFileSync(server.optimizationStateFile, 'utf8')), {
     enabled: false,
     interval: ONE_HOUR,
-    lastRun: server.optimizationState.lastRun
+    lastRun: server.optimizationState.lastRun,
+    lastAttemptAt: server.optimizationState.lastAttemptAt,
+    lastOutcome: { status: 'COMPLETED', completedAt: server.optimizationState.lastRun, candleCount: 250 }
   });
 
   const activeConfigResponse = await requestJson(app, '/optimal-config', 'GET');

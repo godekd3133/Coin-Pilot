@@ -84,6 +84,9 @@ export class OptimizationScheduler {
       if (fs.existsSync(stateFile)) {
         const saved = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
         this.state = { ...this.state, ...saved };
+        if (this.state.lastOutcome?.status === 'RUNNING') {
+          this.state.lastOutcome = { status: 'INTERRUPTED', message: '비교가 끝나기 전에 서버가 다시 시작됐습니다. 다시 비교해 주세요.' };
+        }
 
         // 서버 재시작 시 스케줄러 복원
         if (this.state.enabled) {
@@ -109,7 +112,9 @@ export class OptimizationScheduler {
       const saveData = {
         enabled: state.enabled,
         interval: state.interval,
-        lastRun: state.lastRun
+        lastRun: state.lastRun,
+        lastAttemptAt: state.lastAttemptAt ?? null,
+        lastOutcome: state.lastOutcome ?? null
       };
       descriptor = fs.openSync(tempFile, 'wx', 0o600);
       tempCreated = true;
@@ -181,6 +186,9 @@ export class OptimizationScheduler {
 
     try {
       this.state.isRunning = true;
+      this.state.lastAttemptAt = new Date().toISOString();
+      this.state.lastOutcome = { status: 'RUNNING' };
+      this.save();
       console.log('\n🧬 자동 최적화 사이클 시작...');
 
       const targetCoin = envString('TARGET_COIN', 'KRW-BTC');
@@ -193,7 +201,8 @@ export class OptimizationScheduler {
 
       if (candles.length < 250) {
         console.log(`⚠️ 데이터 부족 (${candles.length}개), 최적화 건너뜀`);
-        return;
+        this.state.lastOutcome = { status: 'INSUFFICIENT_DATA', candleCount: candles.length, minimumCandleCount: 250 };
+        return { skipped: true, reason: 'insufficient_candles' };
       }
 
       // 최적화 실행
@@ -220,6 +229,7 @@ export class OptimizationScheduler {
       }));
 
       this.state.lastRun = new Date().toISOString();
+      this.state.lastOutcome = { status: 'COMPLETED', completedAt: this.state.lastRun, candleCount: candles.length };
       if (this.state.enabled) {
         this.state.nextRun = new Date(Date.now() + this.state.interval).toISOString();
       }
@@ -229,9 +239,11 @@ export class OptimizationScheduler {
       console.log(`   예상 수익률: ${result.fitness?.toFixed(2)}%`);
 
     } catch (error) {
+      this.state.lastOutcome = { status: 'FAILED', message: '비교 자료를 처리하지 못했습니다. 다시 시도해 주세요.' };
       console.error('❌ 최적화 오류:', error.message);
     } finally {
       this.state.isRunning = false;
+      try { this.save(); } catch (error) { this.logger.error?.('후보 비교 상태 저장 실패:', error.message); }
     }
   }
 
