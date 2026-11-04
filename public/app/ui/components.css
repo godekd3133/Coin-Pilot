@@ -336,6 +336,10 @@ body.cp-sheet-open { overflow: hidden; }
 .cp-workspace.is-live { background: var(--cp-red-soft); box-shadow: inset 0 0 0 1.5px var(--cp-red); }
 .cp-workspace strong { display: block; font-weight: 700; color: var(--cp-ink); }
 .cp-workspace span { color: var(--cp-muted); }
+.cp-sidebar-footer .cp-btn { width: 100%; margin-top: var(--cp-space-2); justify-content: center; }
+.cp-ws-switch { display: inline-flex; align-items: center; gap: 4px; min-height: 32px; padding: 0 10px; border: 1px solid var(--cp-line); border-radius: 999px; background: var(--cp-surface); color: var(--cp-ink); font: var(--cp-text-caption); font-weight: 650; cursor: pointer; }
+.cp-ws-switch.is-to-live { border-color: var(--cp-red); color: var(--cp-red); }
+.cp-ws-switch:focus-visible { outline: 2px solid var(--cp-blue, #1b64da); outline-offset: 2px; }
 .cp-conn { display: inline-flex; align-items: center; gap: 6px; font: var(--cp-text-micro); color: var(--cp-muted); }
 .cp-conn i { width: 7px; height: 7px; border-radius: 50%; background: var(--cp-muted); }
 .cp-conn.is-ok i { background: var(--cp-green); }

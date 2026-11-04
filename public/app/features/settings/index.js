@@ -54,7 +54,8 @@ export default {
             ['최대 보유', status?.maxPositions ? `${status.maxPositions}개` : '—']
           ])}
           ${s.isLive && !status?.upbitCredentialsConfigured ? html`<div style="margin-top:12px">${notice({ tone: 'warning', iconName: 'key', title: '거래소 키 등록', body: '보안을 위해 거래소 키는 모바일 앱에서만 등록할 수 있어요 (HTTPS · 모바일 운영 토큰 · 서버 정지 상태). 키는 어떤 화면에서도 다시 표시되지 않아요.' })}</div>` : ''}
-          <p class="cp-caption" style="margin-top:8px">모의/실전은 서버 프로필로 정해져요. 화면에서 바꿀 수 없어요.</p>`
+          ${ctx.store.get('siblingWorkspace') ? html`<div class="cp-actions" style="margin-top:12px">${button({ label: s.isLive ? '모의투자로 전환' : '실전으로 전환', iconName: 'swap', attrs: { 'data-action': 'switch-workspace' } })}</div>
+          <p class="cp-caption" style="margin-top:8px">한 번 로그인하면 모의투자와 실전을 여기서 바로 오갈 수 있어요. 지금 화면 그대로 전환돼요.</p>` : html`<p class="cp-caption" style="margin-top:8px">이 서버에는 다른 작업공간이 연결되어 있지 않아요.</p>`}`
         })}
         ${card({
           index: 2,
@@ -86,13 +87,14 @@ export default {
       }));
     }
 
-    ctx.watch([ctx.res('status'), ctx.res('notifications'), 'auth', 'online', 'theme', 'installPrompt', 'realtime'], renderPage);
+    ctx.watch([ctx.res('status'), ctx.res('notifications'), 'auth', 'online', 'theme', 'installPrompt', 'realtime', 'siblingWorkspace'], renderPage);
     ctx.on('click', '[data-segment="theme"]', (event, target) => ctx.store.setTheme?.(target.dataset.value));
     ctx.on('click', '[data-action="change-token"]', () => window.coinPilotAuth?.requestLogin?.(''));
     ctx.on('click', '[data-action="logout"]', async () => {
-      const ok = await ctx.confirm({ title: '이 기기에서 로그아웃할까요?', message: '저장된 접속 토큰을 지웁니다. 다시 접속하려면 로그인해야 해요.', confirmLabel: '로그아웃', tone: 'danger' });
+      const ok = await ctx.confirm({ title: '이 기기에서 로그아웃할까요?', message: '모의투자와 실전 모두에서 로그아웃해요. 다시 접속하려면 로그인해야 해요.', confirmLabel: '로그아웃', tone: 'danger' });
       if (!ok) return;
       for (const key of TOKEN_KEYS) { try { localStorage.removeItem(key); } catch { /* ignore */ } }
+      window.coinPilotAuth?.signOutEverywhere?.();
       location.reload();
     });
     ctx.on('click', '[data-action="install"]', async () => {

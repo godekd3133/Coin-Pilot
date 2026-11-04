@@ -1,6 +1,6 @@
 // Bootstrap: auth gate → store/api/resources → shell chrome → router.
 import { createStore } from './core/store.js';
-import { APP_BASE } from './core/base.js';
+import { APP_BASE, LIVE_BASE, workspaceSwitchUrl } from './core/base.js';
 import { createApi } from './core/api.js';
 import { createResourceManager, resourceKey } from './core/resources.js';
 import { RESOURCE_CATALOG } from './core/resourceCatalog.js';
@@ -178,8 +178,18 @@ function renderNav(route) {
   ]);
 }
 
+// One sign-in covers Paper and LIVE. When the other workspace is deployed
+// next to this one, the chrome offers a switch that keeps the current screen.
+function workspaceSwitch(current) {
+  const sibling = store.get('siblingWorkspace');
+  if (!sibling) return null;
+  const onLive = current.modeKnown ? current.isLive : APP_BASE === LIVE_BASE;
+  return { label: onLive ? '모의투자로 전환' : '실전으로 전환', short: onLive ? '모의투자' : '실전', toLive: !onLive };
+}
+
 function renderChrome() {
   const current = session();
+  const switcher = workspaceSwitch(current);
   const route = store.get('route');
   const entry = route ? registry.get(route.id) : null;
   const titleSlot = app.querySelector('[data-slot="title"]');
@@ -188,13 +198,15 @@ function renderChrome() {
   const realtime = store.get('realtime');
   render(app.querySelector('[data-slot="topbar"]'), html`
     ${current.modeKnown ? (current.isLive ? liveBadge() : paperBadge()) : ''}
+    ${switcher ? html`<button type="button" class="${switcher.toLive ? 'cp-ws-switch is-to-live' : 'cp-ws-switch'}" data-action="switch-workspace" title="${switcher.label}">${icon('swap', { size: 16 })}<span>${switcher.short}</span></button>` : ''}
     <span class="cp-conn ${current.online && realtime?.connected ? 'is-ok' : !current.online ? 'is-bad' : ''}" title="${current.online ? (realtime?.connected ? '실시간 연결됨' : '주기적으로 갱신 중') : '오프라인'}"><i></i><span class="cp-visually-hidden">${current.online ? '온라인' : '오프라인'}</span></span>
     <button type="button" class="cp-icon-btn" data-action="refresh" aria-label="새로고침">${icon('refresh', { size: 20 })}</button>`);
   render(app.querySelector('[data-slot="workspace"]'), html`
     <div class="${current.isLive ? 'cp-workspace is-live' : 'cp-workspace'}">
       ${current.isLive ? liveBadge() : current.modeKnown ? paperBadge() : ''}
       <div><strong>${current.isLive ? '실전 작업공간' : current.isPaper ? '모의투자 작업공간' : '작업공간 확인 중'}</strong><span>${current.isLive ? '실제 자금으로 주문합니다' : current.isPaper ? '가상 자금으로만 주문합니다' : '서버 모드를 확인하고 있어요'}</span></div>
-    </div>`);
+    </div>
+    ${switcher ? button({ label: switcher.label, size: 'sm', iconName: 'swap', attrs: { 'data-action': 'switch-workspace' } }) : ''}`);
   document.documentElement.dataset.workspace = current.isLive ? 'live' : current.isPaper ? 'paper' : 'unknown';
   renderBanners(current);
 }
@@ -238,6 +250,9 @@ on(app, 'click', '[data-action]', async (event, target) => {
     await retryPendingMutation();
   } else if (action === 'login') {
     authClient?.requestLogin?.('');
+  } else if (action === 'switch-workspace') {
+    const url = workspaceSwitchUrl();
+    if (url) window.location.assign(url);
   } else if (action === 'sw-update') {
     swRegistration?.waiting?.postMessage({ type: 'SKIP_WAITING' });
   }
@@ -313,7 +328,8 @@ const router = createRouter({
 });
 on(content, 'click', '[data-action="reload-route"]', () => router.resolve());
 
-store.subscribe([resourceKey('status'), resourceKey('account'), resourceKey('paper'), 'auth', 'online', 'mutation', 'swWaiting', 'realtime'], () => renderChrome());
+store.subscribe([resourceKey('status'), resourceKey('account'), resourceKey('paper'), 'auth', 'online', 'mutation', 'swWaiting', 'realtime', 'siblingWorkspace'], () => renderChrome());
+authClient?.probeSibling?.().then(sibling => { if (sibling) store.set({ siblingWorkspace: sibling }); });
 
 // ----------------------------------------------------------- connectivity
 window.addEventListener('offline', () => store.set({ online: false }));
