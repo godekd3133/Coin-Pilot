@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { resolveExchange, quoteAssetForExchange } from '../exchange/exchangeFactory.js';
 import { quoteAmountLimits } from './manualOrderLegs.js';
+import { parsePasswordHash, verifyPassword } from './passwordHash.js';
 
 /**
  * Dashboard access control for the API/socket plane.
@@ -475,6 +476,7 @@ export function resolveDashboardAuth(env = {}) {
     throw new Error('DASHBOARD_MOBILE_TOKEN must differ from dashboard tokens.');
   }
   const enabled = token.length > 0 || readOnlyToken.length > 0 || mobileToken.length > 0;
+  const passwordLogin = resolvePasswordLogin(env, { token });
   const allowInsecure = isTrue(env.DASHBOARD_ALLOW_INSECURE);
   const requestedHost = String(env.DASHBOARD_HOST || '').trim();
   const corsOrigins = String(env.DASHBOARD_CORS_ORIGINS || '')
@@ -511,6 +513,7 @@ export function resolveDashboardAuth(env = {}) {
     token,
     mobileToken,
     readOnlyToken,
+    passwordLogin,
     // Full and mobile operator credentials represent the same server-side
     // account. Keep manual-order idempotency stable across token rotation.
     writeProfileId: 'operator',
@@ -520,6 +523,30 @@ export function resolveDashboardAuth(env = {}) {
     corsOrigins,
     warnings
   };
+}
+
+/**
+ * Optional username/password sign-in. A correct credential is exchanged for
+ * the server's existing bearer token (operator for the web shell, the narrower
+ * mobile token for the native app when one is configured), so every guard
+ * downstream keeps checking exactly the same tokens as before.
+ */
+export function resolvePasswordLogin(env = {}, { token = '' } = {}) {
+  const username = String(env.DASHBOARD_LOGIN_USERNAME || '').trim();
+  const rawHash = String(env.DASHBOARD_LOGIN_PASSWORD_HASH || '').trim();
+  if (!username && !rawHash) return null;
+  if (!username || !rawHash) {
+    throw new Error('DASHBOARD_LOGIN_USERNAME과 DASHBOARD_LOGIN_PASSWORD_HASH는 함께 설정해야 합니다.');
+  }
+  if (username.length > 128) throw new Error('DASHBOARD_LOGIN_USERNAME은 128자 이하여야 합니다.');
+  const parsed = parsePasswordHash(rawHash);
+  if (!parsed) {
+    throw new Error('DASHBOARD_LOGIN_PASSWORD_HASH 형식이 올바르지 않습니다. npm run auth:hash-password로 만드세요.');
+  }
+  if (!token) {
+    throw new Error('아이디·비밀번호 로그인은 DASHBOARD_TOKEN이 설정된 서버에서만 사용할 수 있습니다.');
+  }
+  return { username, parsed };
 }
 
 /**
@@ -712,8 +739,42 @@ export function createDashboardAuth(env = {}, options = {}) {
     res.json({
       success: true,
       authRequired: resolved.enabled,
+      passwordLogin: Boolean(resolved.enabled && resolved.passwordLogin),
       exchange: exchangeName,
       quoteCurrency: exchangeQuoteAsset
+    });
+  };
+
+  const rejectLogin = (res, key) => {
+    if (!limiter.recordFailure(key)) {
+      return res.status(429).json({
+        success: false,
+        error: '로그인 보호 용량에 도달했습니다. 잠시 후 다시 시도하세요.',
+        retryAfterSeconds: limiter.capacityRetryAfterSeconds()
+      });
+    }
+    return unauthorized(res);
+  };
+
+  const passwordLoginResponse = (req, res, key, body) => {
+    const config = resolved.passwordLogin;
+    if (!config) {
+      return res.status(400).json({ success: false, error: '이 서버는 아이디·비밀번호 로그인을 사용하지 않습니다.' });
+    }
+    const username = typeof body.username === 'string' ? body.username.trim() : '';
+    const password = typeof body.password === 'string' ? body.password : '';
+    // Always run both checks so timing does not reveal which one failed.
+    const usernameMatches = safeTokenEqual(username, config.username);
+    const passwordMatches = verifyPassword(password, config.parsed);
+    if (!usernameMatches || !passwordMatches) return rejectLogin(res, key);
+    limiter.recordSuccess(key);
+    const nativeClient = body.client === 'native';
+    const useMobileToken = nativeClient && resolved.mobileToken.length > 0;
+    res.set('Cache-Control', 'no-store');
+    return res.json({
+      success: true,
+      tokenScope: useMobileToken ? 'mobile_operator' : 'operator',
+      token: useMobileToken ? resolved.mobileToken : resolved.token
     });
   };
 
@@ -728,7 +789,11 @@ export function createDashboardAuth(env = {}, options = {}) {
         retryAfterSeconds: Math.ceil((blockedUntil - Date.now()) / 1000)
       });
     }
-    const candidate = String(req.body?.token || '');
+    const body = req.body && typeof req.body === 'object' ? req.body : {};
+    if (body.username !== undefined || body.password !== undefined) {
+      return passwordLoginResponse(req, res, key, body);
+    }
+    const candidate = String(body.token || '');
     let tokenScope = null;
     if (safeTokenEqual(candidate, resolved.token)) tokenScope = 'operator';
     else if (safeTokenEqual(candidate, resolved.mobileToken)) tokenScope = 'mobile_operator';
@@ -737,14 +802,7 @@ export function createDashboardAuth(env = {}, options = {}) {
       limiter.recordSuccess(key);
       return res.json({ success: true, tokenScope });
     }
-    if (!limiter.recordFailure(key)) {
-      return res.status(429).json({
-        success: false,
-        error: '로그인 보호 용량에 도달했습니다. 잠시 후 다시 시도하세요.',
-        retryAfterSeconds: limiter.capacityRetryAfterSeconds()
-      });
-    }
-    return unauthorized(res);
+    return rejectLogin(res, key);
   };
 
   return {

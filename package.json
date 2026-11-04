@@ -8,6 +8,7 @@
     "prestart": "node src/scripts/verifyNodeRuntime.js",
     "predev": "node src/scripts/verifyNodeRuntime.js",
     "start": "node src/index.js",
+    "auth:hash-password": "node src/scripts/hashDashboardPassword.js",
     "dev": "node --watch src/index.js",
     "backtest": "node src/scripts/runBacktest.js",
     "validate:scalping": "node src/scripts/validateScalping.js",

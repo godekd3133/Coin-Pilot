@@ -12,7 +12,7 @@ import {
 import { createMockTrader } from '../src/scripts/runDashboard.js';
 
 function authOffEnv() {
-  return { ...process.env, DASHBOARD_TOKEN: '', DASHBOARD_READ_ONLY_TOKEN: '', DASHBOARD_MOBILE_TOKEN: '', DASHBOARD_HOST: '', DASHBOARD_ALLOW_INSECURE: '' };
+  return { ...process.env, DASHBOARD_TOKEN: '', DASHBOARD_READ_ONLY_TOKEN: '', DASHBOARD_MOBILE_TOKEN: '', DASHBOARD_LOGIN_USERNAME: '', DASHBOARD_LOGIN_PASSWORD_HASH: '', DASHBOARD_HOST: '', DASHBOARD_ALLOW_INSECURE: '' };
 }
 
 async function startDashboard(env, options = {}) {
@@ -525,6 +525,7 @@ test('인증 활성 서버는 /api/*를 토큰 없이 401로 거부한다', asyn
     assert.deepEqual(await statusRes.json(), {
       success: true,
       authRequired: true,
+      passwordLogin: false,
       exchange: 'upbit',
       quoteCurrency: 'KRW'
     });
@@ -809,6 +810,7 @@ test('인증 비활성 서버는 /api를 토큰 없이 서빙하고 루프백에
     assert.deepEqual(await status.json(), {
       success: true,
       authRequired: false,
+      passwordLogin: false,
       exchange: 'upbit',
       quoteCurrency: 'KRW'
     });

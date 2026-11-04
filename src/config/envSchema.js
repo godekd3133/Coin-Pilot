@@ -259,6 +259,8 @@ export const ENV_SCHEMA = {
   DASHBOARD_TOKEN: { type: 'string', secret: true },
   DASHBOARD_READ_ONLY_TOKEN: { type: 'string', secret: true },
   DASHBOARD_MOBILE_TOKEN: { type: 'string', secret: true },
+  DASHBOARD_LOGIN_USERNAME: { type: 'string' },
+  DASHBOARD_LOGIN_PASSWORD_HASH: { type: 'string', secret: true },
   DASHBOARD_START_TRADER_ON_BOOT: { type: 'bool' },
   AUTO_RECOVERY_ENABLED: { type: 'bool' },
   AUTO_RECOVERY_PROBE_INTERVAL_MS: { type: 'int', min: 1000 },
@@ -524,6 +526,11 @@ export const ENV_REQUIRED_RULES = [
     keys: ['UPBIT_ACCESS_KEY', 'UPBIT_SECRET_KEY'],
     when: values => values.DRY_RUN === false && values.DASHBOARD_LIVE_CREDENTIAL_SETUP_MODE !== true,
     reason: 'DRY_RUN=false (실전투자)에서는 업비트 API 키가 필수입니다'
+  },
+  {
+    keys: ['DASHBOARD_LOGIN_USERNAME', 'DASHBOARD_LOGIN_PASSWORD_HASH', 'DASHBOARD_TOKEN'],
+    when: values => Boolean(values.DASHBOARD_LOGIN_USERNAME || values.DASHBOARD_LOGIN_PASSWORD_HASH),
+    reason: '아이디·비밀번호 로그인에는 아이디, 비밀번호 해시, DASHBOARD_TOKEN이 모두 필요합니다'
   },
   {
     keys: ['DASHBOARD_MOBILE_TOKEN'],
