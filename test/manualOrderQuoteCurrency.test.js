@@ -71,6 +71,26 @@ function authorize(quote, endpoint, body) {
   return { allowed, status };
 }
 
+test('smart buy describes fallback candidates truthfully, including adjusted amounts', async t => {
+  for (const [minScore, amount, fallback, adjusted] of [[100, 12.5, true, false], [0, 12.5, false, false], [100, 200, true, true]]) {
+    const { service } = fixture(t);
+    const result = await service.smartBuy({ totalAmount: amount, minScore, maxCoins: 1 });
+    assert.equal(result.status, 200);
+    assert.equal(result.body.usedFallback, fallback);
+    assert.equal(result.body.amountWasAdjusted, adjusted);
+    assert.equal(result.body.trades.length, 1);
+    if (fallback) {
+      assert.equal(result.body.qualifiedCoins, 0);
+      assert.match(result.body.message, /점수 기준에 맞는 종목이 없어 상위 후보 1종목/);
+      assert.doesNotMatch(result.body.message, /100점 이상/);
+    } else {
+      assert.ok(result.body.qualifiedCoins > 0);
+      assert.match(result.body.message, /점수 0점 이상/);
+    }
+    assert.equal(result.body.message.includes('주문 금액을'), adjusted);
+  }
+});
+
 test('mobile amount admission uses the server quote and keeps KRW thresholds', () => {
   for (const quote of ['USDT', 'USDC']) {
     for (const [endpoint, body] of [

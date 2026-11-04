@@ -8,6 +8,7 @@ import test from 'node:test';
 import createAccountRoutes from '../src/api/routes/account.js';
 import createPortfolioRoutes from '../src/api/routes/portfolio.js';
 import MultiCoinTrader from '../src/trader/multiCoinTrader.js';
+import { inspectMarketQuoteFreshness } from '../src/api/marketQuoteFreshness.js';
 
 async function startReadServer(tradingSystem, getCachedTicker, onSnapshotRequest = null, getCachedTickerWithMetadata = null) {
   const app = express();
@@ -733,4 +734,77 @@ test('overlapping portfolio snapshot writes do not overwrite the first snapshot'
     await stopReadServer(ctx);
     fs.rmSync(storageRoot, { recursive: true, force: true });
   }
+});
+
+
+test('a current exchange ticker values a quiet holding without authorizing stale-trade execution', async () => {
+  const { tradingSystem } = createDryRunTrader();
+  const ticker = { market: 'KRW-BTC', trade_price: 120,
+    trade_timestamp: Date.now() - 600000, timestamp: Date.now() };
+  const ctx = await startReadServer(tradingSystem, async () => [ticker]);
+  try {
+    const account = await (await fetch(`${ctx.baseUrl}/api/account`)).json();
+    assert.equal(account.valuationAvailable, true);
+    assert.equal(account.totalAssets, 1240);
+    assert.equal(account.positions[0].currentValue, 240);
+    assert.equal(inspectMarketQuoteFreshness(ticker).fresh, false);
+    assert.equal(inspectMarketQuoteFreshness(ticker).reason, 'market_source_stale');
+  } finally { await stopReadServer(ctx); }
+});
+
+test('old or future ticker-generation times remain unavailable for valuation', async () => {
+  for (const timestamp of [Date.now() - 600000, Date.now() + 60000]) {
+    const { tradingSystem } = createDryRunTrader();
+    const ctx = await startReadServer(tradingSystem, async () => [{
+      market: 'KRW-BTC', trade_price: 120, trade_timestamp: Date.now(), timestamp
+    }]);
+    try {
+      const account = await (await fetch(`${ctx.baseUrl}/api/account`)).json();
+      assert.equal(account.valuationAvailable, false);
+      assert.equal(account.totalAssets, null);
+    } finally { await stopReadServer(ctx); }
+  }
+});
+
+test('a last-good fallback never becomes a current valuation just because generation time is fresh', async () => {
+  const { tradingSystem } = createDryRunTrader();
+  const tickers = [{ market: 'KRW-BTC', trade_price: 120, trade_timestamp: Date.now() - 600000, timestamp: Date.now() }];
+  const ctx = await startReadServer(tradingSystem, async () => tickers, null,
+    async () => ({ tickers, fetchedAt: new Date().toISOString(), snapshotSource: 'last_good' }));
+  try {
+    const account = await (await fetch(`${ctx.baseUrl}/api/account`)).json();
+    assert.equal(account.valuationAvailable, false);
+    assert.equal(account.totalAssets, null);
+  } finally { await stopReadServer(ctx); }
+});
+
+
+test('a newly confirmed upstream snapshot values a quiet coin while keeping original price times', async () => {
+  const { tradingSystem } = createDryRunTrader();
+  const sourceTime = Date.now() - 600000;
+  const tickers = [{ market: 'KRW-BTC', trade_price: 120, trade_timestamp: sourceTime, timestamp: sourceTime }];
+  const capturedAt = new Date().toISOString();
+  const ctx = await startReadServer(tradingSystem, async () => tickers, null,
+    async () => ({ tickers, fetchedAt: capturedAt, snapshotSource: 'upstream' }));
+  try {
+    const account = await (await fetch(`${ctx.baseUrl}/api/account`)).json();
+    assert.equal(account.valuationAvailable, true);
+    assert.equal(account.totalAssets, 1240);
+    assert.equal(account.sourceAsOf, new Date(sourceTime).toISOString());
+    assert.equal(account.valuationAsOf, capturedAt);
+    assert.equal(inspectMarketQuoteFreshness(tickers[0]).fresh, false);
+  } finally { await stopReadServer(ctx); }
+});
+
+test('old capture metadata cannot revalidate a quiet ticker snapshot', async () => {
+  const { tradingSystem } = createDryRunTrader();
+  const sourceTime = Date.now() - 600000;
+  const tickers = [{ market: 'KRW-BTC', trade_price: 120, trade_timestamp: sourceTime, timestamp: sourceTime }];
+  const ctx = await startReadServer(tradingSystem, async () => tickers, null,
+    async () => ({ tickers, fetchedAt: new Date(sourceTime).toISOString(), snapshotSource: 'upstream' }));
+  try {
+    const account = await (await fetch(`${ctx.baseUrl}/api/account`)).json();
+    assert.equal(account.valuationAvailable, false);
+    assert.equal(account.totalAssets, null);
+  } finally { await stopReadServer(ctx); }
 });

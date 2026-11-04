@@ -132,6 +132,8 @@ export function createSmartBuyUseCase(ctx) {
 
     // 최소 점수 이상인 코인 선택 (maxCoins 제한 적용)
     let selectedCoins = coinScores.filter(c => c.score >= minScore);
+    const qualifiedCoinCount = selectedCoins.length;
+    const usedFallback = qualifiedCoinCount === 0 && coinScores.length > 0;
     // 조건 충족 코인이 없으면 상위 3개 선택 (폴백)
     if (selectedCoins.length === 0) {
       selectedCoins = coinScores.slice(0, 3);
@@ -284,14 +286,17 @@ export function createSmartBuyUseCase(ctx) {
         amountWasAdjusted,
         availableBalance,
         analyzedCoins: coinScores.length,
-        qualifiedCoins: coinScores.filter(c => c.score >= minScore).length,
+        qualifiedCoins: qualifiedCoinCount,
+        usedFallback,
         trades: orders,
         failures: liveFailures,
         message: liveFailures.length > 0
           ? `${orders.length}개 체결 · ${liveFailures.length}개 미체결/실패. 체결되지 않은 주문은 전략 포지션에 반영하지 않았습니다.`
-          : amountWasAdjusted
-          ? `${orders.length}개 코인에 자동 매수 완료 (금액 자동 조절: ${formatQuoteAmount(tradingSystem, originalAmount)} → ${formatQuoteAmount(tradingSystem, totalAmount)})`
-          : `${orders.length}개 코인에 자동 매수 완료 (점수 ${minScore}점 이상)`
+          : `${usedFallback
+            ? `점수 기준에 맞는 종목이 없어 상위 후보 ${orders.length}종목을 매수했습니다.`
+            : `${orders.length}종목 매수 완료 (점수 ${minScore}점 이상)`}${amountWasAdjusted
+            ? ` 주문 금액을 ${formatQuoteAmount(tradingSystem, originalAmount)}에서 ${formatQuoteAmount(tradingSystem, totalAmount)}으로 조정했습니다.`
+            : ''}`
       }
     };
   }
