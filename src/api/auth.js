@@ -124,6 +124,7 @@ const MOBILE_POST_PATHS = new Set([
   '/api/stocks/paper/stop',
   '/api/stocks/live/start',
   '/api/stocks/live/stop',
+  '/api/stocks/paper/reset',
   '/api/horizons/coin/start',
   '/api/horizons/coin/stop',
   '/api/horizons/stock/start',
@@ -401,6 +402,11 @@ function isMobileRequestAllowed(req, quoteAsset = 'KRW') {
   }
   if (requestPathname === '/api/investment-config/update') {
     return hasOnlyKeys(body, new Set(['investmentRatio'])) && isFiniteNumber(body.investmentRatio, 0.01, 1);
+  }
+  if (requestPathname === '/api/stocks/paper/reset') {
+    // 모의 주식 계좌 초기화: 본문 없음(기본 시드) 또는 seedMoney 숫자 하나만 허용
+    return body === undefined || (body && typeof body === 'object' && !Array.isArray(body) &&
+      (Object.keys(body).length === 0 || (hasOnlyKeys(body, new Set(['seedMoney'])) && isFiniteNumber(body.seedMoney, 1000, 10_000_000_000))));
   }
   if (/^\/api\/stocks\/(paper|live)\/(start|stop)$/.test(requestPathname) ||
     /^\/api\/horizons\/(coin|stock)\/(start|stop)$/.test(requestPathname) ||
