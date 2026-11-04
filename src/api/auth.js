@@ -38,6 +38,7 @@ const READ_ONLY_PORTFOLIO_PERIODS = new Set(['24h', '7d', '30d']);
 // native app. A dedicated LIVE setup route can enroll keys, but key retrieval
 // and Socket.IO remain full-token-only.
 const MOBILE_READ_PATHS = new Set([
+  '/api/stocks/status',
   '/api/market/prices/snapshot',
   '/api/positions',
   '/api/target-coins',
@@ -118,6 +119,10 @@ const MOBILE_POST_PATHS = new Set([
   '/api/trade/smart-sell',
   '/api/control/start',
   '/api/control/stop',
+  '/api/stocks/paper/start',
+  '/api/stocks/paper/stop',
+  '/api/stocks/live/start',
+  '/api/stocks/live/stop',
   '/api/live/credentials',
   '/api/investment-config/update',
   '/api/config/update',
@@ -392,7 +397,8 @@ function isMobileRequestAllowed(req, quoteAsset = 'KRW') {
   if (requestPathname === '/api/investment-config/update') {
     return hasOnlyKeys(body, new Set(['investmentRatio'])) && isFiniteNumber(body.investmentRatio, 0.01, 1);
   }
-  if (requestPathname === '/api/control/start' || requestPathname === '/api/control/stop' || requestPathname === '/api/paper-validation/stop' || requestPathname === '/api/portfolio/snapshot' || requestPathname === '/api/optimization/run-now') {
+  if (/^\/api\/stocks\/(paper|live)\/(start|stop)$/.test(requestPathname) ||
+    requestPathname === '/api/control/start' || requestPathname === '/api/control/stop' || requestPathname === '/api/paper-validation/stop' || requestPathname === '/api/portfolio/snapshot' || requestPathname === '/api/optimization/run-now') {
     return body === undefined || (body && typeof body === 'object' &&
       !Array.isArray(body) && Object.keys(body).length === 0);
   }

@@ -42,6 +42,7 @@ export function setupExitHandlers(
   const finalizePaper = options.finalizeActivePaperValidation || finalizeActivePaperValidation;
   const clearTimer = options.clearInterval || clearInterval;
   const runtimeWriterLockStore = options.runtimeWriterLockStore || null;
+  const stockTradingService = options.stockTradingService || null;
   let runtimeWriterLockReleaseStarted = false;
   let shutdownPromise = null;
   let shutdownExitCode = 0;
@@ -195,6 +196,16 @@ export function setupExitHandlers(
         shutdownExitCode = Math.max(shutdownExitCode, 1);
         cleanupSucceeded = false;
         consoleApi.error(`⚠️ paper validation 종료 기록 실패: ${error.message}`);
+      }
+
+      if (stockTradingService) {
+        try {
+          await stockTradingService.stop();
+        } catch (error) {
+          shutdownExitCode = Math.max(shutdownExitCode, 1);
+          cleanupSucceeded = false;
+          consoleApi.error(`⚠️ 주식 자동매매 종료 실패: ${error.message}`);
+        }
       }
 
       if (dashboardServer) {

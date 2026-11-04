@@ -17,6 +17,7 @@ import { assertSupportedNodeVersion } from './runtime/nodeRuntimeRequirement.js'
 import { createConfig, redactConfigForLog, printBanner, printConfig } from './config/runtimeConfig.js';
 import { startBacktestingLoop, startOptimizationLoop } from './runtime/researchLoops.js';
 import { envInt } from './config/envConfig.js';
+import { StockTradingService, createStockConfig } from './stock/stockTradingService.js';
 
 dotenv.config();
 assertSupportedNodeVersion();
@@ -75,6 +76,10 @@ async function main() {
 
   // 설정 로드
   const config = createConfig(env);
+
+  // 주식(토스증권) 모의/실전 자동매매. 코인과 같은 프로세스에서 상시 실행된다.
+  const stockConfig = createStockConfig(env);
+  const stockTradingService = stockConfig.enabled ? new StockTradingService(stockConfig) : null;
 
   // TARGET_COINS=ALL 인 경우 기준통화 마켓 전체 자동 로드
   if (config.analyzeAllCoins || config.targetCoins.length === 0) {
@@ -160,6 +165,7 @@ async function main() {
         optimizationStateDir: config.stateDir,
         manualOrderIdempotencyStore,
         liveCredentialStore,
+        stockTradingService,
         liveCredentialSetupMode: config.liveCredentialSetupMode,
         validateLiveCredentials: async ({ accessKey, secretKey }) => {
           const credentialProbe = createExchangeClient({ ...config, accessKey, secretKey });
@@ -232,7 +238,8 @@ async function main() {
 
         // 종료 핸들러 설정
         exitHandlers = setupExitHandlers(trader, dashboardServer, backtestTimer, optimizationTimer, logger, {
-          runtimeWriterLockStore: runtimeWriterLockOwner
+          runtimeWriterLockStore: runtimeWriterLockOwner,
+          stockTradingService
         });
         activeExitHandlers = exitHandlers;
         runtimeLifecycleInstalled = true;
@@ -291,6 +298,12 @@ async function main() {
       });
       trader.autoRecovery = autoRecovery;
       autoRecovery.start();
+
+      if (stockTradingService) {
+        stockTradingService.start().catch(error => {
+          console.error('❌ 주식 자동매매 시작 실패:', error.message);
+        });
+      }
 
       const startTraderOnBoot = autoRecovery.resolveBootIntent(config.dashboardStartTraderOnBoot);
       const awaitingLiveCredentials = config.liveCredentialSetupMode && !trader.liveCredentialsConfigured;
