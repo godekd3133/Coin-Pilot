@@ -18,6 +18,7 @@ import { createConfig, redactConfigForLog, printBanner, printConfig } from './co
 import { startBacktestingLoop, startOptimizationLoop } from './runtime/researchLoops.js';
 import { envInt } from './config/envConfig.js';
 import { StockTradingService, createStockConfig } from './stock/stockTradingService.js';
+import { createHorizonConfig, createCoinHorizonRuntime } from './portfolio/horizonService.js';
 
 dotenv.config();
 assertSupportedNodeVersion();
@@ -79,7 +80,12 @@ async function main() {
 
   // 주식(토스증권) 모의/실전 자동매매. 코인과 같은 프로세스에서 상시 실행된다.
   const stockConfig = createStockConfig(env);
-  const stockTradingService = stockConfig.enabled ? new StockTradingService(stockConfig) : null;
+  // 차트 분석 기반 기간별 포트폴리오(단기/스윙/중기/장기) 설정 — 코인·주식 공통
+  const horizonConfig = createHorizonConfig(env);
+  const stockTradingService = stockConfig.enabled
+    ? new StockTradingService(stockConfig, { horizonConfig })
+    : null;
+  let coinHorizon = null;
 
   // TARGET_COINS=ALL 인 경우 기준통화 마켓 전체 자동 로드
   if (config.analyzeAllCoins || config.targetCoins.length === 0) {
@@ -151,6 +157,10 @@ async function main() {
       return new MultiCoinTrader(config, { publicMarketDataSource });
     });
     trader = runtime.trader;
+    // 기간별 포트폴리오는 트레이더 시작(거래소 동기화) 전에 만들어 보유 수량 예약을 먼저 등록한다.
+    if (horizonConfig.enabled) {
+      coinHorizon = createCoinHorizonRuntime({ config: horizonConfig, trader, env: process.env });
+    }
     if (!config.enableDashboard && typeof trader?.upbit?.assertRateCoordinatorReady === 'function') {
       await trader.upbit.assertRateCoordinatorReady();
     }
@@ -166,6 +176,7 @@ async function main() {
         manualOrderIdempotencyStore,
         liveCredentialStore,
         stockTradingService,
+        coinHorizon,
         liveCredentialSetupMode: config.liveCredentialSetupMode,
         validateLiveCredentials: async ({ accessKey, secretKey }) => {
           const credentialProbe = createExchangeClient({ ...config, accessKey, secretKey });
@@ -239,7 +250,8 @@ async function main() {
         // 종료 핸들러 설정
         exitHandlers = setupExitHandlers(trader, dashboardServer, backtestTimer, optimizationTimer, logger, {
           runtimeWriterLockStore: runtimeWriterLockOwner,
-          stockTradingService
+          stockTradingService,
+          coinHorizon
         });
         activeExitHandlers = exitHandlers;
         runtimeLifecycleInstalled = true;
@@ -302,6 +314,11 @@ async function main() {
       if (stockTradingService) {
         stockTradingService.start().catch(error => {
           console.error('❌ 주식 자동매매 시작 실패:', error.message);
+        });
+      }
+      if (coinHorizon) {
+        coinHorizon.start().catch(error => {
+          console.error('❌ 코인 기간별 포트폴리오 시작 실패:', error.message);
         });
       }
 

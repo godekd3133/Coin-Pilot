@@ -21,6 +21,7 @@ import createAiRoutes from './routes/ai.js';
 import createResearchRoutes from './routes/research.js';
 import createStatusRoutes from './routes/status.js';
 import createStockRoutes from './routes/stocks.js';
+import createHorizonRoutes from './routes/horizons.js';
 import AIAdvisorService from '../ai/aiAdvisorService.js';
 import MonitoringSessionService from '../ai/monitoringSessionService.js';
 import { createDashboardAuth, createOriginGuard } from './auth.js';
@@ -83,6 +84,7 @@ class DashboardServer {
     this.optimalConfigFile = this.optimizationStoragePaths.optimalConfigFile.absolutePath;
     this.liveCredentialStore = options.liveCredentialStore || null;
     this.stockTradingService = options.stockTradingService || null;
+    this.coinHorizon = options.coinHorizon || null;
     const setupModeFromEnv = ['1', 'true', 'yes', 'on'].includes(
       String(dashboardEnv.DASHBOARD_LIVE_CREDENTIAL_SETUP_MODE || '').trim().toLowerCase()
     );
@@ -394,6 +396,7 @@ class DashboardServer {
     this.app.use('/api', createAiRoutes(this));
     this.app.use('/api', createStatusRoutes(this));
     this.app.use('/api', createStockRoutes(this));
+    this.app.use('/api', createHorizonRoutes(this));
     this.app.use('/api', createResearchRoutes(this, {
       paperForwardCohortRootDir: this.paperForwardCohortRootDir,
       momentumShadowProjectionCacheMs: this.momentumShadowProjectionCacheMs

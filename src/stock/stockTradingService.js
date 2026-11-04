@@ -9,6 +9,7 @@ import path from 'node:path';
 import TossInvestClient, { toNumber } from './tossInvestClient.js';
 import StockMarketSession from './stockMarketSession.js';
 import StockTrader from './stockTrader.js';
+import { createStockHorizonRuntime } from '../portfolio/horizonService.js';
 
 const UNIVERSE_REFRESH_MS = 30 * 60 * 1000;
 
@@ -42,7 +43,7 @@ export function createStockConfig(env = {}) {
 }
 
 export class StockTradingService {
-  constructor(config, { client = null, marketSession = null, now = Date.now, log = console } = {}) {
+  constructor(config, { client = null, marketSession = null, horizonConfig = null, env = process.env, now = Date.now, log = console } = {}) {
     this.config = config;
     this.now = now;
     this.log = log;
@@ -74,6 +75,23 @@ export class StockTradingService {
         now,
         log
       });
+    }
+    // 차트 분석 기반 기간별(스윙/중기 등) 포트폴리오 — 스캘퍼와 같은 계좌·시세 클라이언트 공유
+    this.horizons = {};
+    if (horizonConfig?.enabled) {
+      for (const mode of ['paper', 'live']) {
+        if (!this.traders[mode]) continue;
+        this.horizons[mode] = createStockHorizonRuntime({
+          config: horizonConfig,
+          mode,
+          client: this.client,
+          marketSession: this.marketSession,
+          scalper: this.traders[mode],
+          minPrice: config.minPrice,
+          env,
+          log
+        });
+      }
     }
     this.universe = [];
     this.universeUpdatedAt = 0;
@@ -181,6 +199,9 @@ export class StockTradingService {
       this._timer.unref?.();
     }
     this.tick();
+    for (const horizon of Object.values(this.horizons)) {
+      horizon.start().catch(error => { horizon.manager.lastError = error.message; });
+    }
     return this.getStatus();
   }
 
@@ -188,6 +209,7 @@ export class StockTradingService {
     if (this._timer) clearInterval(this._timer);
     this._timer = null;
     for (const trader of Object.values(this.traders)) trader.stop({ source: 'shutdown', persistIntent: false });
+    for (const horizon of Object.values(this.horizons)) await horizon.stop();
     if (this._tickInFlight) await this._tickInFlight;
   }
 
@@ -219,7 +241,8 @@ export class StockTradingService {
       universeUpdatedAt: this.universeUpdatedAt ? new Date(this.universeUpdatedAt).toISOString() : null,
       universeError: this.lastUniverseError,
       paper: this.traders.paper?.getStatus() ?? null,
-      live: this.traders.live?.getStatus() ?? null
+      live: this.traders.live?.getStatus() ?? null,
+      horizons: Object.fromEntries(Object.entries(this.horizons).map(([mode, runtime]) => [mode, runtime.getStatus()]))
     };
   }
 }

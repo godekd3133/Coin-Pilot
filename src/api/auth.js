@@ -39,6 +39,7 @@ const READ_ONLY_PORTFOLIO_PERIODS = new Set(['24h', '7d', '30d']);
 // and Socket.IO remain full-token-only.
 const MOBILE_READ_PATHS = new Set([
   '/api/stocks/status',
+  '/api/horizons/status',
   '/api/market/prices/snapshot',
   '/api/positions',
   '/api/target-coins',
@@ -123,6 +124,10 @@ const MOBILE_POST_PATHS = new Set([
   '/api/stocks/paper/stop',
   '/api/stocks/live/start',
   '/api/stocks/live/stop',
+  '/api/horizons/coin/start',
+  '/api/horizons/coin/stop',
+  '/api/horizons/stock/start',
+  '/api/horizons/stock/stop',
   '/api/live/credentials',
   '/api/investment-config/update',
   '/api/config/update',
@@ -398,6 +403,7 @@ function isMobileRequestAllowed(req, quoteAsset = 'KRW') {
     return hasOnlyKeys(body, new Set(['investmentRatio'])) && isFiniteNumber(body.investmentRatio, 0.01, 1);
   }
   if (/^\/api\/stocks\/(paper|live)\/(start|stop)$/.test(requestPathname) ||
+    /^\/api\/horizons\/(coin|stock)\/(start|stop)$/.test(requestPathname) ||
     requestPathname === '/api/control/start' || requestPathname === '/api/control/stop' || requestPathname === '/api/paper-validation/stop' || requestPathname === '/api/portfolio/snapshot' || requestPathname === '/api/optimization/run-now') {
     return body === undefined || (body && typeof body === 'object' &&
       !Array.isArray(body) && Object.keys(body).length === 0);

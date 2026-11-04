@@ -43,6 +43,7 @@ export function setupExitHandlers(
   const clearTimer = options.clearInterval || clearInterval;
   const runtimeWriterLockStore = options.runtimeWriterLockStore || null;
   const stockTradingService = options.stockTradingService || null;
+  const coinHorizon = options.coinHorizon || null;
   let runtimeWriterLockReleaseStarted = false;
   let shutdownPromise = null;
   let shutdownExitCode = 0;
@@ -196,6 +197,16 @@ export function setupExitHandlers(
         shutdownExitCode = Math.max(shutdownExitCode, 1);
         cleanupSucceeded = false;
         consoleApi.error(`⚠️ paper validation 종료 기록 실패: ${error.message}`);
+      }
+
+      if (coinHorizon) {
+        try {
+          await coinHorizon.stop();
+        } catch (error) {
+          shutdownExitCode = Math.max(shutdownExitCode, 1);
+          cleanupSucceeded = false;
+          consoleApi.error(`⚠️ 기간별 포트폴리오 종료 실패: ${error.message}`);
+        }
       }
 
       if (stockTradingService) {
