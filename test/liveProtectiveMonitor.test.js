@@ -1152,12 +1152,12 @@ test('manual protection dispatches a protective sell while entries stay paused',
   await trader.prepareManualLiveSession();
 
   const strategy = trader.getStrategy('KRW-BTC');
-  strategy.openPosition(100, 1, 'BUY');
+  strategy.openPosition(100, 100, 'BUY');
   const exits = [];
   trader.executeOrder = async (coin, decision) => { exits.push({ coin, decision }); return 'exit'; };
   trader.getAccountInfo = async () => ([
     { currency: 'KRW', balance: '900000', locked: '0' },
-    { currency: 'BTC', balance: '1', locked: '0', avg_buy_price: '100' }
+    { currency: 'BTC', balance: '100', locked: '0', avg_buy_price: '100' }
   ]);
   trader.riskUpbit.getTicker = async () => [currentTicker('KRW-BTC', 97)];
 
@@ -1269,4 +1269,42 @@ test('LIVE control API starts analysis without a performance report and stops it
   await new Promise(resolve => setTimeout(resolve, 20));
   assert.equal(cycleCount, cyclesAtStop);
   assert.equal(orderCount, 0);
+});
+
+test('a held market without a recent trade is quiet while a reference quote in the same batch is fresh', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'coinpilot-quiet-risk-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const trader = makeLiveTrader(root, { liveManualPrepareOnBoot: true, liveManualRiskProtection: true });
+  trader.upbit.accessKey = 'access';
+  trader.upbit.secretKey = 'secret';
+  trader.targetCoins = ['KRW-BTC', 'KRW-GAS'];
+  trader.syncWithExchange = async () => {
+    trader._liveExchangeStateKnown = true;
+    trader._liveAccountStateKnown = true;
+    trader._liveOrderStateUnknownMarkets.clear();
+    trader._livePendingOrderMarkets.clear();
+    return true;
+  };
+  t.after(() => trader.stopPositionRiskMonitor());
+  await trader.prepareManualLiveSession();
+  trader.getStrategy('KRW-GAS').openPosition(1000, 10, 'BUY');
+  const requested = [];
+  trader.riskUpbit.getTicker = async markets => {
+    requested.push(markets);
+    return [
+      { ...currentTicker('KRW-GAS', 1000), trade_timestamp: Date.now() - 600_000 },
+      currentTicker('KRW-BTC', 100_000_000)
+    ];
+  };
+  trader.executeOrder = async () => 'exit';
+  await trader.monitorOpenPositions();
+  assert.deepEqual(requested[0], ['KRW-GAS', 'KRW-BTC']);
+  assert.equal(trader.riskMonitorState.consecutiveFailures || 0, 0);
+
+  trader.riskUpbit.getTicker = async () => [
+    { ...currentTicker('KRW-GAS', 1000), trade_timestamp: Date.now() - 600_000 },
+    { ...currentTicker('KRW-BTC', 100_000_000), trade_timestamp: Date.now() - 600_000 }
+  ];
+  await trader.monitorOpenPositions();
+  assert.ok((trader.riskMonitorState.consecutiveFailures || 0) >= 1, 'a feed-wide staleness still fails');
 });

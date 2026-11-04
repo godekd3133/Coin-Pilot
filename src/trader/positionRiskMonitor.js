@@ -349,6 +349,18 @@ export class PositionRiskMonitor {
     this.positionRiskTimer = null;
   }
 
+  riskTickerRequestMarkets(monitoredCoins) {
+    const reference = (this.owner.targetCoins || []).find(market => !monitoredCoins.includes(market));
+    return reference ? [...monitoredCoins, reference] : monitoredCoins;
+  }
+
+  reportUnsellableDust(coin, value) {
+    this.reportedDust ||= new Set();
+    if (this.reportedDust.has(coin)) return;
+    this.reportedDust.add(coin);
+    console.log(`\nℹ️  [${coin}] 보유 평가액 ${Math.round(value).toLocaleString()}원은 최소 주문 금액(5,000원) 미만이라 위험 감시 매도를 건너뜁니다.`);
+  }
+
   async monitorOpenPositions(snapshotContext = null) {
     if ((!this.owner.isRunning && !this._riskMonitorProtectiveOnly && !this.owner._manualRiskProtection) ||
       this._riskCheckInProgress || this.owner._orderInProgress) return;
@@ -406,7 +418,9 @@ export class PositionRiskMonitor {
         snapshotContext.tickerMap instanceof Map
         ? [...snapshotContext.tickerMap.values()]
         // Keep protective pricing on its priority-lane exchange client, never the analysis fixture.
-        : await this.riskUpbit.getTicker(monitoredCoins, { priority: 'risk' });
+        // A liquid reference market rides along so a held market without a
+        // recent trade can be told apart from a stale feed (see below).
+        : await this.riskUpbit.getTicker(this.riskTickerRequestMarkets(monitoredCoins), { priority: 'risk' });
       const tickersByMarket = new Map(
         (Array.isArray(tickers) ? tickers : [])
           .filter(ticker => ticker?.market)
@@ -414,6 +428,13 @@ export class PositionRiskMonitor {
       );
       const priceMap = new Map();
       const quoteIssues = [];
+      const quietMarkets = [];
+      // The feed is live when any quote in this same response is fresh. A held
+      // market with no trade since then is quiet: its last trade is still the
+      // latest market price. A feed-wide staleness, a missing market, or an
+      // invalid/future quote still fails closed.
+      const feedLive = [...tickersByMarket.values()].some(ticker =>
+        inspectTraderMarketQuote(ticker, ticker.market, this.owner.maxCandleAgeSeconds).fresh);
       for (const market of monitoredCoins) {
         const ticker = tickersByMarket.get(market);
         const freshness = inspectTraderMarketQuote(
@@ -422,11 +443,17 @@ export class PositionRiskMonitor {
           this.owner.maxCandleAgeSeconds
         );
         if (!freshness.fresh) {
+          if (feedLive && freshness.reason === 'market_source_stale') {
+            quietMarkets.push(market);
+            priceMap.set(market, Number(ticker.trade_price));
+            continue;
+          }
           quoteIssues.push({ market, ...freshness });
           continue;
         }
         priceMap.set(market, Number(ticker.trade_price));
       }
+      this.lastQuietRiskMarkets = quietMarkets;
       if (quoteIssues.length > 0) {
         const staleQuote = quoteIssues.some(issue => issue.reason === 'market_source_stale' ||
           issue.reason === 'market_source_timestamp_in_future');
@@ -458,6 +485,12 @@ export class PositionRiskMonitor {
             this.owner._orderInProgress) break;
           const currentPrice = priceMap.get(coin);
           if (!Number.isFinite(currentPrice) || !strategy.currentPosition) continue;
+          // A balance worth less than the exchange minimum cannot be sold, so
+          // an exit attempt would only repeat every interval. Report it once.
+          if ((this.owner.quoteAsset || 'KRW') === 'KRW' && Number(strategy.currentPosition.amount) * currentPrice < 5000) {
+            this.reportUnsellableDust(coin, Number(strategy.currentPosition.amount) * currentPrice);
+            continue;
+          }
 
           const deferredIntent = this.owner._deferredProtectiveExitIntents.get(coin);
           const positionCheck = deferredIntent
