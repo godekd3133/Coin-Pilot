@@ -121,8 +121,12 @@ export class PublicMarketDataSource {
   #client;
   #inFlightReads = new Map();
   #snapshotStore;
+  #candleStream;
 
-  constructor({ requestTimeoutMs, snapshotStore = null, exchangeClient = null } = {}) {
+  constructor({ requestTimeoutMs, snapshotStore = null, exchangeClient = null, candleStream = null } = {}) {
+    if (candleStream !== null && (typeof candleStream?.read !== 'function' || typeof candleStream?.getStatus !== 'function')) {
+      throw new TypeError('candleStream must provide read and getStatus.');
+    }
     if (snapshotStore !== null && (
       typeof snapshotStore.recordTickers !== 'function' ||
       typeof snapshotStore.getTickerSnapshot !== 'function' ||
@@ -141,6 +145,7 @@ export class PublicMarketDataSource {
     }
     this.#client = exchangeClient ?? new UpbitAPI('', '', { requestTimeoutMs });
     this.#snapshotStore = snapshotStore;
+    this.#candleStream = candleStream;
     publicMarketDataSources.add(this);
     Object.freeze(this);
   }
@@ -192,7 +197,22 @@ export class PublicMarketDataSource {
   }
 
   getMinuteCandles(...args) {
+    const [market, unit, count, options] = args;
+    // 1-minute strategy reads come from the WebSocket cache when it can vouch
+    // for continuity; the stream falls back to this same REST read otherwise.
+    if (this.#candleStream && Number(unit) === 1 && options?.priority !== 'risk' &&
+      !options?.signal && options?.deadlineAt === undefined) {
+      return this.#candleStream.read(market, count, wanted => {
+        const restArgs = [market, unit, wanted];
+        if (args.length > 3) restArgs.push(options);
+        return this.#read('getMinuteCandles', restArgs);
+      });
+    }
     return this.#read('getMinuteCandles', args);
+  }
+
+  getCandleStreamStatus() {
+    return this.#candleStream?.getStatus() ?? { enabled: false };
   }
 
   getLastGoodTickerSnapshot(markets) {
@@ -212,6 +232,7 @@ export class PublicMarketDataSource {
   }
 
   async close() {
+    try { this.#candleStream?.stop?.(); } catch { /* best effort */ }
     if (!this.#snapshotStore) return false;
     if (typeof this.#snapshotStore.close === 'function') {
       await this.#snapshotStore.close();

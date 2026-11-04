@@ -2,6 +2,7 @@ import dotenv from 'dotenv';
 import MultiCoinTrader from './trader/multiCoinTrader.js';
 import DashboardServer from './api/dashboardServer.js';
 import { createPublicMarketDataSource } from './api/publicMarketDataSource.js';
+import { createScalpingCandleStream, startScalpingCandleStream } from './market-data/upbitCandleStream.js';
 import { createPublicMarketSnapshotStore } from './api/publicMarketSnapshotStore.js';
 import { createExchangeClient } from './exchange/exchangeFactory.js';
 import { LiveCredentialStore } from './api/liveCredentialStore.js';
@@ -149,11 +150,14 @@ async function main() {
       const publicMarketSnapshotStore = createPublicMarketSnapshotStore({
         filePath: derivePublicMarketSnapshotFilePath(config.virtualPortfolioFile)
       });
+      const candleStream = createScalpingCandleStream(config);
       publicMarketDataSource = createPublicMarketDataSource({
         requestTimeoutMs: config.upbitRequestTimeoutMs,
         snapshotStore: publicMarketSnapshotStore,
-        exchangeClient: config.exchange === 'binance' ? createExchangeClient(config) : null
+        exchangeClient: config.exchange === 'binance' ? createExchangeClient(config) : null,
+        candleStream
       });
+      startScalpingCandleStream(candleStream, publicMarketDataSource, config.targetCoins);
       return new MultiCoinTrader(config, { publicMarketDataSource });
     });
     trader = runtime.trader;

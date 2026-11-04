@@ -8,6 +8,9 @@ import {
   resolveRateCoordinator
 } from './upbitHttpTransport.js';
 
+/** Public quotation WebSocket (candle stream); kept beside the REST endpoint. */
+export const UPBIT_WEBSOCKET_URL = 'wss://api.upbit.com/websocket/v1';
+
 // Upbit documents progressively longer temporary 418 blocks but does not
 // specify a fixed fallback duration. Keep every lane closed for five minutes
 // when the response omits a trusted duration, and fail the current operation.

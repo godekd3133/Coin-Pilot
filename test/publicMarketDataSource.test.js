@@ -87,7 +87,7 @@ test('the public source creates a blank-credential Upbit client on the shared sc
   assert.equal(isPublicMarketDataSource(source), true);
   assert.deepEqual(
     Object.getOwnPropertyNames(Object.getPrototypeOf(source)).sort(),
-    ['constructor', ...methodNames, 'getLastGoodTickerSnapshot', 'getCachedTickerSnapshot', 'getSnapshotStoreStatus', 'flushSnapshot', 'close'].sort()
+    ['constructor', ...methodNames, 'getLastGoodTickerSnapshot', 'getCachedTickerSnapshot', 'getSnapshotStoreStatus', 'getCandleStreamStatus', 'flushSnapshot', 'close'].sort()
   );
   assert.equal('getAccounts' in source, false);
   assert.equal('placeOrder' in source, false);

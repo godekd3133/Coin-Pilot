@@ -228,6 +228,7 @@ export function createConfig(env) {
     scalpingValidationOutputFile: env.SCALP_VALIDATION_OUTPUT_FILE || 'scalping_validation.json',
     maxScalpMarkets: env.SCALP_MAX_MARKETS || 20,
     upbitRequestTimeoutMs: env.UPBIT_REQUEST_TIMEOUT_MS || 10000,
+    upbitCandleStreamEnabled: env.UPBIT_CANDLE_STREAM_ENABLED === true,
     requireValidationPassForLive: env.SCALP_REQUIRE_VALIDATION_PASS !== false,
     useNews: !isScalpingMode,
 
