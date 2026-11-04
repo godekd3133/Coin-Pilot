@@ -171,6 +171,16 @@ async function main() {
           if (config.liveManualPrepareOnBoot) {
             const prepared = await trader.prepareManualLiveSession();
             trader.liveManualPrepared = prepared.ready === true;
+          } else if (config.dashboardStartTraderOnBoot && !trader.isRunning) {
+            // 상시 자동매매: 앱에서 키를 등록하면 재시작 없이 바로 시작한다.
+            // 운영자가 명시적으로 중지한 상태라면 그 의사를 존중한다.
+            const desiredRunning = trader.autoRecovery?.getStatus?.()?.desiredRunning ?? true;
+            if (desiredRunning) {
+              trader.start().catch(error => {
+                console.error('❌ 키 등록 후 자동매매 시작 실패:', error.message);
+                trader.liveValidationRefresher?.requestRefresh?.('credentials_saved_start_failure');
+              });
+            }
           }
         }
       });
@@ -283,7 +293,10 @@ async function main() {
       autoRecovery.start();
 
       const startTraderOnBoot = autoRecovery.resolveBootIntent(config.dashboardStartTraderOnBoot);
-      if (startTraderOnBoot) {
+      const awaitingLiveCredentials = config.liveCredentialSetupMode && !trader.liveCredentialsConfigured;
+      if (startTraderOnBoot && awaitingLiveCredentials) {
+        console.log('ℹ️  상시 자동매매 대기: 앱에서 실거래 키를 등록하면 자동으로 시작합니다.');
+      } else if (startTraderOnBoot) {
         // 카운트다운
         console.log('\n⏱️  3초 후 자동매매를 시작합니다...');
         await new Promise(resolve => setTimeout(resolve, 1000));

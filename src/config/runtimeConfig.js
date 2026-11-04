@@ -49,9 +49,12 @@ export function createConfig(env) {
   if (liveCredentialSetupMode && env.ENABLE_DASHBOARD === false) {
     throw new Error('DASHBOARD_LIVE_CREDENTIAL_SETUP_MODE requires ENABLE_DASHBOARD=true.');
   }
-  if (liveCredentialSetupMode && (!liveManualPrepareOnBoot || dashboardStartTraderOnBoot)) {
+  // 앱 기반 키 등록 모드는 두 가지 운영 방식을 허용한다.
+  // - 수동 준비(MANUAL_PREPARE_ON_BOOT=true, START_TRADER_ON_BOOT=false)
+  // - 상시 자동매매(START_TRADER_ON_BOOT=true): 키가 등록되면 즉시 자동매매를 시작한다.
+  if (liveCredentialSetupMode && !liveManualPrepareOnBoot && !dashboardStartTraderOnBoot) {
     throw new Error(
-      'DASHBOARD_LIVE_CREDENTIAL_SETUP_MODE requires DASHBOARD_LIVE_MANUAL_PREPARE_ON_BOOT=true and DASHBOARD_START_TRADER_ON_BOOT=false.'
+      'DASHBOARD_LIVE_CREDENTIAL_SETUP_MODE requires DASHBOARD_LIVE_MANUAL_PREPARE_ON_BOOT=true or DASHBOARD_START_TRADER_ON_BOOT=true.'
     );
   }
   if (liveManualPrepareOnBoot && (dryRun || dashboardStartTraderOnBoot)) {

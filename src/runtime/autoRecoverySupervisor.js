@@ -262,6 +262,12 @@ export class AutoRecoverySupervisor {
       return this.getStatus();
     }
 
+    // 앱 키 등록 대기 중인 LIVE 프로필은 키가 저장될 때 시작되므로 개입하지 않는다.
+    if (trader.dryRun === false && trader.config?.liveCredentialSetupMode === true &&
+        trader.liveCredentialsConfigured !== true) {
+      return this.getStatus();
+    }
+
     // 시작/종료/보호 드레이닝 진행 중에는 개입하지 않는다.
     if (trader._startPromise || trader._gracefulShutdownPromise ||
         trader._orderInProgress || trader._riskCheckInProgress ||

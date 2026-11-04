@@ -50,13 +50,14 @@ test('LIVE and other same-host clients share a separate protected coordinator st
   assert.match(rateCoordinatorUnit, /^ExecStartPre=\/usr\/bin\/node .*verifyNodeRuntime\.js$/m);
 });
 
-test('LIVE environment example boots into the manual-only protected profile', () => {
+test('LIVE environment example boots into the always-on automatic profile', () => {
   assert.equal(liveEnvironmentExample.match(/^DRY_RUN=(.+)$/m)?.[1], 'false');
   assert.equal(liveEnvironmentExample.match(/^DASHBOARD_LIVE_CREDENTIAL_SETUP_MODE=(.+)$/m)?.[1], 'true');
-  assert.equal(liveEnvironmentExample.match(/^DASHBOARD_LIVE_MANUAL_PREPARE_ON_BOOT=(.+)$/m)?.[1], 'true');
-  assert.equal(liveEnvironmentExample.match(/^DASHBOARD_LIVE_MANUAL_RISK_PROTECTION=(.+)$/m)?.[1], 'true');
-  assert.equal(liveEnvironmentExample.match(/^DASHBOARD_START_TRADER_ON_BOOT=(.+)$/m)?.[1], 'false',
-    'automatic trading must not start on boot for the manual LIVE profile');
+  assert.equal(liveEnvironmentExample.match(/^DASHBOARD_LIVE_MANUAL_PREPARE_ON_BOOT=(.+)$/m)?.[1], 'false');
+  assert.equal(liveEnvironmentExample.match(/^DASHBOARD_START_TRADER_ON_BOOT=(.+)$/m)?.[1], 'true',
+    'the LIVE profile keeps automatic trading running like the paper profile');
+  assert.doesNotMatch(liveEnvironmentExample, /^DASHBOARD_LIVE_MANUAL_RISK_PROTECTION=true$/m,
+    'manual risk protection requires the manual-prepare profile');
   assert.equal(liveEnvironmentExample.match(/^DASHBOARD_HOST=(.+)$/m)?.[1], '127.0.0.1');
   assert.equal(liveEnvironmentExample.match(/^DASHBOARD_ALLOW_INSECURE=(.+)$/m)?.[1], 'false');
   assert.doesNotMatch(liveEnvironmentExample, /^UPBIT_(?:ACCESS|SECRET)_KEY=/m,
