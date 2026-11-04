@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { envRaw } from '../config/envConfig.js';
+import { redactForLog, scrubSecrets } from '../api/httpHardening.js';
 
 /**
  * Serialize a log payload to a single JSON line.
@@ -64,10 +65,10 @@ class Logger {
     const record = {
       ts: new Date().toISOString(),
       level,
-      msg: message
+      msg: scrubSecrets(message)
     };
     if (data !== null && data !== undefined) {
-      record.data = data;
+      record.data = redactForLog(data);
     }
     return safeJsonLine(record);
   }

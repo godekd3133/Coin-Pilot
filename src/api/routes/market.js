@@ -301,6 +301,7 @@ export default function createMarketRoutes(server) {
   router.get('/market/candles/:coin', async (req, res) => {
     try {
       const coin = req.params.coin;
+      if (!/^[A-Z0-9]{2,10}-[A-Z0-9]{1,20}$/.test(coin)) throw new InvalidCandleQueryError('coin must be a market code such as KRW-BTC.');
       const { unit, count } = parseCandleOptions(req.query);
       const candles = await getMinuteCandles(coin, unit, count);
 

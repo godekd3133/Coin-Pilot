@@ -1,4 +1,5 @@
 import { OrderPushService, createApnsSender } from './orderPushService.js';
+import { createDashboardErrorHandler, scrubServerErrorResponses, securityHeadersMiddleware } from './httpHardening.js';
 import { createNotificationRoutes, manualNotificationMiddleware } from './routes/notifications.js';
 import express from 'express';
 import path from 'path';
@@ -49,6 +50,7 @@ class DashboardServer {
       throw new RangeError(`newsRetentionLimit must be an integer from 1 to ${MAX_NEWS_RETENTION_LIMIT}`);
     }
     this.app = express();
+    this.app.disable('x-powered-by');
     // The production Nginx proxy connects over loopback. Trust only that hop so
     // req.ip reflects the originating client for login throttling without
     // accepting forwarded-address headers from arbitrary peers.
@@ -328,6 +330,8 @@ class DashboardServer {
 
   setupMiddleware() {
     // Read-only credential scope must run before CORS can answer an API preflight.
+    this.app.use(securityHeadersMiddleware);
+    this.app.use('/api', scrubServerErrorResponses);
     this.app.use('/api', this.auth.readOnlyScopeMiddleware);
     this.app.use(this.originGuard.middleware);
     this.app.use(express.json());
@@ -444,28 +448,7 @@ class DashboardServer {
     });
 
     // 전역 에러 핸들러
-    this.app.use((err, req, res, _next) => {
-      const statusCode = err.status || 500;
-      const message = err.message || 'Internal Server Error';
-
-      // 에러 로그 기록
-      this.logger.error(`[${req.method}] ${req.originalUrl} - ${message}`, {
-        statusCode,
-        method: req.method,
-        url: req.originalUrl,
-        ip: req.ip,
-        userAgent: req.get('User-Agent'),
-        body: req.body,
-        stack: err.stack
-      });
-
-      res.status(statusCode).json({
-        success: false,
-        error: message,
-        path: req.originalUrl,
-        timestamp: new Date().toISOString()
-      });
-    });
+    this.app.use(createDashboardErrorHandler(this.logger));
   }
 
   /**
@@ -521,8 +504,8 @@ class DashboardServer {
   emitTradeNotification(tradeInfo) {
     this._notificationMonitor().emitTradeNotification(tradeInfo);
     try {
-      this.orderPush.enqueue(tradeInfo);
-      this.tradingSystem.autoRecovery?.tracking?.record('trade', { type: tradeInfo.type, market: tradeInfo.coin, orderId: tradeInfo.orderId || null });
+      const eventId = this.orderPush.enqueue(tradeInfo);
+      if (this.orderPush.lastEnqueueNew) this.tradingSystem.autoRecovery?.tracking?.record('trade', { eventId, type: tradeInfo.type, market: tradeInfo.coin, orderId: tradeInfo.orderId || null, price: tradeInfo.price || null, volume: tradeInfo.volume || null });
     } catch (error) { this.orderPush.error = error.message; this.logger.error('주문 알림 기록 실패', { error: error.message }); }
   }
 

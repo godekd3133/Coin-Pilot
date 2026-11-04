@@ -79,6 +79,7 @@ export default function createNewsRoutes(server) {
   router.get('/news/:coin', async (req, res) => {
     try {
       const coin = req.params.coin.toUpperCase();
+      if (!/^[A-Z0-9-]{1,32}$/.test(coin)) return res.status(400).json({ error: 'coin must be a market code.' });
       const quotePrefix = `${quoteOfSystem(server.tradingSystem)}-`;
       const market = coin.includes('-') ? coin : `${quotePrefix}${coin}`;
       const limit = parseBoundedIntegerQuery(req.query.limit, API_READ_QUERY_LIMITS.coinNews);
