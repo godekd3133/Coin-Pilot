@@ -56,7 +56,7 @@ export function createApnsSender(env = process.env) {
       const action = event.trade.type === 'BUY' ? '매수' : '매도';
       const coin = event.trade.coin.replace(/^KRW-/, '');
       request.end(JSON.stringify({
-        aps: { alert: { title: `${label} · ${coin} ${action}`, body: `${action} 주문이 체결됐습니다. 앱에서 거래 내역을 확인하세요.` },
+        aps: { alert: { title: `${label} · ${coin} ${action}`, body: `${action} 체결이 확인됐습니다. 앱에서 거래 내역을 확인하세요.` },
           sound: 'default', 'thread-id': `coinpilot-${event.trade.mode}` },
         eventId: event.id, mode: event.trade.mode, market: event.trade.coin
       }));
@@ -110,6 +110,7 @@ export class OrderPushService {
   }
 
   enqueue(trade) {
+    this.lastEnqueueNew = false;
     if (!['BUY', 'SELL'].includes(trade?.type) || !/^[A-Z0-9]+-[A-Z0-9]+$/.test(trade?.coin || '') ||
         (trade.mode && trade.mode !== this.mode)) return null;
     const id = createHash('sha256').update(`${this.mode}|${trade.orderId || trade.eventId || randomUUID()}`).digest('hex');
@@ -128,6 +129,7 @@ export class OrderPushService {
       events.splice(index, 1);
     }
     this.save({ ...this.state, events });
+    this.lastEnqueueNew = true;
     return id;
   }
 
@@ -161,7 +163,8 @@ export class OrderPushService {
           event = this.state.events.find(item => item.id === eventId);
           if (!event) continue;
           const attempts = delivery.attempts + 1;
-          const permanent = [400, 403, 404, 410].includes(result.status) || attempts >= 10;
+          const tokenChanged = this.state.devices[deviceId]?.token !== device?.token && this.state.devices[deviceId]?.enabled;
+          const permanent = !tokenChanged && ([400, 403, 404, 410].includes(result.status) || attempts >= 10);
           const outcome = result.status === 200 ? 'accepted' : permanent ? 'failed' : 'queued';
           const nextDelivery = { status: outcome, attempts, reason: result.reason || null,
             updatedAt: new Date(this.now()).toISOString(), nextAttemptAt: this.now() + Math.min(3600000, 5000 * (2 ** attempts)) };
@@ -180,7 +183,8 @@ export class OrderPushService {
     return { configured: Boolean(this.sender), registeredDevices: Object.values(this.state.devices).filter(device => device.enabled).length,
       events: this.state.events.length, queued: deliveries.filter(d => d.status === 'queued').length,
       accepted: deliveries.filter(d => d.status === 'accepted').length, failed: deliveries.filter(d => d.status === 'failed').length,
-      lastEventAt: this.state.events.at(-1)?.createdAt || null, error: this.error };
+      lastEventAt: this.state.events.at(-1)?.createdAt || null,
+      error: this.error || deliveries.filter(d => d.status === 'failed').at(-1)?.reason || null };
   }
 }
 
@@ -192,7 +196,7 @@ export function manualTradeNotifications(body, request, mode) {
     if (!item || typeof item !== 'object' || depth > 5) return;
     if (Array.isArray(item)) { item.forEach(row => visit(row, side, depth + 1)); return; }
     const market = item.coin || item.market;
-    const type = item.type || item.action || side || request.body?.action || (request.path?.endsWith('/sell') ? 'SELL' : 'BUY');
+    const type = item.type || item.action || side || request.body?.action || (request.path?.endsWith('sell') ? 'SELL' : 'BUY');
     const observed = ['filled', 'partial'].includes(item.fill?.status);
     if (market && (mode === 'LIVE' ? observed : body.success === true && Number(item.volume || item.quantity) > 0)) {
       notifications.push({ type, coin: market, mode, price: item.price || item.fill?.averagePrice,

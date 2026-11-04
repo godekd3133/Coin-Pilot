@@ -5,6 +5,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { OrderPushService, manualTradeNotifications } from '../src/api/orderPushService.js';
 import { AutoRecoverySupervisor, readAutomationIntent } from '../src/runtime/autoRecoverySupervisor.js';
+import MultiCoinTrader from '../src/trader/multiCoinTrader.js';
+import DashboardServer from '../src/api/dashboardServer.js';
 
 function fixture(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'coinpilot-push-state-'));
@@ -66,6 +68,7 @@ test('only observed manual live fills notify; an idempotency retry has the same 
   assert.equal(manualTradeNotifications(body, request, 'LIVE')[0].eventId, manualTradeNotifications(body, request, 'LIVE')[0].eventId);
   assert.deepEqual(manualTradeNotifications({ success: false, coin: 'KRW-BTC', volume: 1 }, request, 'DRY_RUN'), []);
   assert.equal(manualTradeNotifications({ success: true, coin: 'KRW-BTC', volume: 1 }, request, 'DRY_RUN').length, 1);
+  assert.equal(manualTradeNotifications({ success: true, trades: [{ coin: 'KRW-BTC', volume: 1 }] }, { ...request, path: '/trade/smart-sell' }, 'DRY_RUN')[0].type, 'SELL');
 });
 
 test('Paper and LIVE notifications cannot cross profile stores', t => {
@@ -90,6 +93,7 @@ test('last explicit ON overrides boot-OFF; last explicit OFF overrides boot-ON a
   const off = new AutoRecoverySupervisor(trader, { intentFile: file });
   assert.equal(off.resolveBootIntent(true), false);
   assert.equal(off.tracking.state.events.at(-1).type, 'restart');
+  assert.equal(fs.readFileSync(`${file}.tracking.json.events.jsonl`, 'utf8').trim().split('\n').length, 4);
 });
 
 test('failed durable ON write never arms a future automatic start', t => {
@@ -104,15 +108,46 @@ test('failed durable ON write never arms a future automatic start', t => {
 
 test('restart restores historical LIVE risk counters without restoring quote freshness or pending executable positions', t => {
   const file = path.join(fixture(t), 'intent.json');
-  const strategy = { cooldownUntil: Date.now() + 60000, consecutiveLosses: 2, tradeHistory: [{ action: 'CLOSE', profit: -10 }] };
+  const strategy = { cooldownUntil: Date.now() + 60000, consecutiveLosses: 2, tradeHistory: Array.from({ length: 600 }, () => ({ action: 'CLOSE', profit: -10 })) };
   const first = new AutoRecoverySupervisor({ dryRun: false, strategies: new Map([['KRW-BTC', strategy]]), isRunning: false,
-    lossCircuitBreaker: { losses: [] } }, { intentFile: file });
+    lossCircuitBreaker: { losses: [] }, runtimeSignalWindowEntryCounts: new Map([['BTC-current-window', 1]]) }, { intentFile: file });
   first.noteDesiredRunning(false);
   const restored = {};
   const trader = { dryRun: false, strategies: new Map(), isRunning: false, getStrategy: () => restored };
   new AutoRecoverySupervisor(trader, { intentFile: file });
   assert.equal(restored.consecutiveLosses, 2);
+  assert.equal(trader.runtimeSignalWindowEntryCounts.get('BTC-current-window'), 1, 'restart must not permit another entry in the same signal window');
   assert.equal(restored.cooldownUntil, strategy.cooldownUntil);
+  assert.equal(restored.tradeHistory.length, 600, 'all recorded trades must remain available after restart');
   assert.equal(restored.currentPosition, undefined);
   assert.equal(trader.analysisDataHealthState, undefined);
+});
+
+test('committed manual HTTP order notifies once, including an idempotent retry, without any exchange POST', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'coinpilot-push-http-'));
+  const trader = new MultiCoinTrader({ dryRun: true, dryRunSeedMoney: 20000,
+    targetCoins: ['KRW-BTC'], strategyMode: 'oversold_reaction_scalping', useNews: false,
+    positionRiskCheckIntervalMs: 0, virtualPortfolioFile: path.join(root, 'wallet.json'),
+    paperValidationFile: path.join(root, 'paper.json'), liveExecutionEvidenceFile: path.join(root, 'live.jsonl') });
+  trader.upbit = { getTicker: async markets => markets.map(market => ({ market, trade_price: 100, trade_timestamp: Date.now() })),
+    order: async () => { throw new Error('An exchange POST must never occur in this test'); } };
+  const dashboard = new DashboardServer(trader, 0, { env: { ...process.env,
+    DASHBOARD_TOKEN: '', DASHBOARD_READ_ONLY_TOKEN: '', DASHBOARD_MOBILE_TOKEN: '',
+    DASHBOARD_HOST: '127.0.0.1', STAGING_OUTPUT_DIR: path.join(root, 'logs') },
+    optimizationStateDir: root,
+    apnsSender: async () => ({ status: 200 }) });
+  t.after(async () => { await dashboard.stop(); await dashboard.logger.flush(); fs.rmSync(root, { recursive: true, force: true }); });
+  const server = await dashboard.start();
+  dashboard.orderPush.register(device);
+  const url = `http://127.0.0.1:${server.address().port}/api/trade/buy`;
+  for (let i = 0; i < 2; i++) {
+    const response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json',
+      'Idempotency-Key': '12345678-1234-1234-1234-123456789abc' }, body: JSON.stringify({ coin: 'KRW-BTC', amount: 5000 }) });
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).success, true);
+  }
+  await dashboard.orderPush.flush();
+  assert.equal(dashboard.orderPush.summary().events, 1);
+  assert.equal(dashboard.orderPush.summary().accepted, 1);
+  assert.equal(trader.virtualPortfolio.krwBalance, 15000);
 });
