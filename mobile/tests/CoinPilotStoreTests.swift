@@ -1,4 +1,6 @@
 import Foundation
+import Security
+import LocalAuthentication
 import CryptoKit
 
 private actor DeferredCoinPilotAPI: CoinPilotAPIProviding {
@@ -484,8 +486,17 @@ struct CoinPilotStoreTests {
         try await liveCredentialRegistrationRequiresHttpsAndMobileOperatorScope()
         try await signInUsesAndStoresOnlyTheServerToken()
         try await fullOperatorScopeGrantsNativeControl()
+        try await cancelledOrderPreflightKeepsLoggedOutStateClean()
+        try await tokenReplacementClearsPreviousPermissionErrors()
         try liveManualPrepareStatusKeepsAutomationControlAvailable()
         try await automationAcceptanceRemainsVisibleAcrossDashboardAndHistoryRefresh()
+        try await automationAcceptanceRequiresPostRequestStatus()
+        try await opinionRequestsRequireAvailableProviders()
+        try await signalRecordingDoesNotRequireOpinionProviders()
+        try await opinionPreflightCannotCrossServers()
+        keychainOperationsDoNotOpenAuthenticationUI()
+        try await tuningSaveFeedbackSurvivesReload()
+        try await tuningSaveFeedbackDistinguishesReadFailure()
         try await liveStartRejectionKeepsItsReasonAndAllowsRetry()
         try simulatorTokenStoreIsScopedAndVolatile()
         try await simulatorDefaultTokenStoreSupportsReadOnlySignIn()
@@ -539,7 +550,7 @@ struct CoinPilotStoreTests {
         try await managedServerRetryPreservesAuthenticationAndPendingOrders()
         try await managedWorkspaceSwitchDiscardsQueuedConnections()
         try await managedAccountAuthenticationExpiryAllowsRelogin()
-        print("CoinPilotStore: 62 scenarios passed")
+        print("CoinPilotStore: all scenarios passed")
     }
 
     private static func coinDetailPreservesUnknownValuationAndFiniteLosses() throws {
@@ -769,7 +780,21 @@ struct CoinPilotStoreTests {
             results.append(await store.submitSmartBuy(totalAmount: smartBuyAmount, minimumScore: 60, maximumCoins: 2))
             results.append(await store.submitSmartSell(targetAmount: smartSellAmount, strategy: "worst"))
             results.append(await store.submitRecommendation(CoinPilotRecommendation(["coin": coin, "action": "BUY"]), amount: recommendationAmount))
-            results.append(await store.submitBundle(sellCoin: coin, sellAmount: 0.001, buyCoin: buyCoin, buyAmount: bundleAmount))
+            let bundlePath = "/api/trade/execute-bundle"
+            await api.setHeldMutationPaths([bundlePath])
+            await api.setHeldFeaturePaths(["/api/status"])
+            let bundleRequest = Task { await store.submitBundle(sellCoin: coin, sellAmount: 0.001, buyCoin: buyCoin, buyAmount: bundleAmount) }
+            await api.waitForHeldFeaturePath("/api/status")
+            precondition(store.orderMessage == "주문 전 계좌와 시세를 확인하고 있습니다.",
+                         "A new order preflight must replace the previous success result with its current checking state.")
+            await api.setHeldFeaturePaths([])
+            await api.releaseHeldFeaturePath("/api/status", body: ["mode": "DRY_RUN", "isRunning": false,
+                "exchange": isKRW ? "upbit" : "binance", "quoteCurrency": quote])
+            await api.waitForHeldMutation(host: "quote-amount-\(quote.lowercased()).example", path: bundlePath)
+            precondition(store.pendingManualOrder?.displayAmount == CoinPilotFormatting.won(isKRW ? 60_000 : 60),
+                         "Partial bundle requests must display the requested sell quantity's value rather than the full holding value.")
+            await api.releaseHeldMutation(host: "quote-amount-\(quote.lowercased()).example", path: bundlePath)
+            results.append(await bundleRequest.value)
             results.append(await store.updatePaperWallet(amount: depositAmount, deposit: true))
             results.append(await store.updatePaperWallet(amount: withdrawAmount, deposit: false))
             results.append(await store.resetPaperWallet(seedMoney: seedAmount))
@@ -995,6 +1020,24 @@ struct CoinPilotStoreTests {
         let unknownModeReads = await unknownModeAPI.recordedReadPaths()
         precondition(unknownModeReads == ["/api/status"],
                      "A failed mode check must stop before account or other private reads.")
+        precondition(unknownModeStore.dashboardMessage == CoinPilotAPIError.connection.message,
+                     "A transport failure must explain connection failure rather than claim a mode mismatch.")
+        await unknownModeAPI.setFailedPaths([])
+        await unknownModeAPI.setReadResponse(path: "/api/status", body: ["error": "synthetic failure"], statusCode: 503)
+        await unknownModeStore.refresh()
+        precondition(unknownModeStore.dashboardMessage == CoinPilotAPIError.server.message && !unknownModeStore.canOperate,
+                     "A server error must retain the request failure reason and keep controls locked.")
+        await unknownModeAPI.setHeldFeaturePaths(["/api/status"])
+        let recovery = Task { await unknownModeStore.refresh() }
+        await unknownModeAPI.waitForHeldFeaturePath("/api/status")
+        precondition(unknownModeStore.dashboardMessage == CoinPilotAPIError.server.message && !unknownModeStore.canOperate,
+                     "Starting a retry must retain the last failure until a new response confirms recovery.")
+        await unknownModeAPI.setHeldFeaturePaths([])
+        await unknownModeAPI.setReadResponse(path: "/api/status", body: ["mode": "DRY_RUN", "isRunning": false])
+        await unknownModeAPI.releaseHeldFeaturePath("/api/status", body: ["mode": "DRY_RUN", "isRunning": false])
+        await recovery.value
+        precondition(unknownModeStore.dashboardMessage == nil && unknownModeStore.serverModeMatchesWorkspace && unknownModeStore.account != nil,
+                     "A verified healthy response should clear the failure and restore account reads.")
     }
 
     private static func latestMarketDetailRequestWins() async throws {
@@ -2337,10 +2380,10 @@ struct CoinPilotStoreTests {
         precondition(!paperEndpointAcceptedAsLive, "A DRY_RUN endpoint must not connect as LIVE.")
         precondition(paperStore.status?.mode == "DRY_RUN", "The UI should retain the actual mode returned by the server.")
         precondition(paperStore.serverModeMatchesWorkspace == false, "A mode mismatch must keep the workspace locked.")
-        precondition(paperStore.workspaceModeMismatchMessage?.contains("DRY_RUN") == true,
+        precondition(paperStore.workspaceModeMismatchMessage?.contains("모의투자 서버가 연결") == true,
                      "The connection explanation should name the actual server mode.")
-        precondition(paperStore.workspaceModeMismatchMessage?.contains("다른 포트") == true,
-                     "The LIVE connection explanation should tell the user how to share an IP safely.")
+        precondition(paperStore.workspaceModeMismatchMessage?.contains("실거래 서버 주소를 확인") == true,
+                     "A mismatch should tell the user which account connection to correct.")
         precondition(defaults.string(forKey: "coinpilot.dashboardUrl.live") == nil,
                      "A mismatched Paper URL must not be saved as the LIVE profile address.")
 
@@ -2594,6 +2637,154 @@ struct CoinPilotStoreTests {
                      "A prepared, stopped LIVE process must keep the explicit automation controls available.")
     }
 
+    private static func configureTuningReads(_ api: DeferredCoinPilotAPI) async {
+        await api.setReadResponse(path: "/api/investment-config", body: ["investmentRatio": 0.04, "scalping": ["rsiPeriod": 25]])
+        await api.setReadResponse(path: "/api/parameter-ranges", body: ["rsiPeriod": ["min": 2, "max": 100, "step": 1]])
+        await api.setMutationResponse(path: "/api/config/update", body: ["success": true])
+    }
+
+    private static func tuningSaveFeedbackSurvivesReload() async throws {
+        let api = DeferredCoinPilotAPI(statusOverride: ["isRunning": false], isReadOnlyObserver: false)
+        let store = CoinPilotStore(api: api, tokens: MemoryCoinPilotTokens(), configuredDataMode: "server")
+        _ = await store.connect(using: "https://tuning-feedback.example")
+        await configureTuningReads(api)
+        let saved = await store.saveTuning(["rsiPeriod": 25])
+        precondition(saved && store.lastTuningSaveRefreshed && store.tuningMessage == "변경한 설정을 저장했습니다.",
+                     "Refreshing accepted settings must not erase the completion acknowledgement.")
+    }
+
+    private static func tuningSaveFeedbackDistinguishesReadFailure() async throws {
+        let api = DeferredCoinPilotAPI(statusOverride: ["isRunning": false], isReadOnlyObserver: false)
+        let store = CoinPilotStore(api: api, tokens: MemoryCoinPilotTokens(), configuredDataMode: "server")
+        _ = await store.connect(using: "https://tuning-read-failure.example")
+        await configureTuningReads(api)
+        await api.setFailedPaths(["/api/investment-config"])
+        let saved = await store.saveTuning(["rsiPeriod": 25])
+        precondition(saved && !store.lastTuningSaveRefreshed && store.tuningMessage?.contains("저장은 완료됐지만") == true,
+                     "An accepted write with a failed read must not pretend the refreshed values are confirmed.")
+    }
+
+    private static func keychainOperationsDoNotOpenAuthenticationUI() {
+        let query = CoinPilotKeychainOperation.query([kSecClass as String: kSecClassGenericPassword]) as NSDictionary
+        let context = query[kSecUseAuthenticationContext as String] as? LAContext
+        precondition(context?.interactionNotAllowed == true,
+                     "Automatic keychain operations must not request authentication UI.")
+#if os(macOS)
+        var before: DarwinBoolean = true
+        precondition(SecKeychainGetUserInteractionAllowed(&before) == errSecSuccess)
+        let status = CoinPilotKeychainOperation.run {
+            var inside: DarwinBoolean = true
+            precondition(SecKeychainGetUserInteractionAllowed(&inside) == errSecSuccess && !inside.boolValue)
+            return errSecItemNotFound
+        }
+        var after: DarwinBoolean = false
+        precondition(status == errSecItemNotFound && SecKeychainGetUserInteractionAllowed(&after) == errSecSuccess && before.boolValue == after.boolValue,
+                     "A failed noninteractive query must restore the previous process interaction policy.")
+        let item: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: "coinpilot-validation-\(UUID().uuidString)", kSecAttrAccount as String: "synthetic"]
+        var saved = item
+        saved[kSecValueData as String] = Data("synthetic-record".utf8)
+        let added = CoinPilotKeychainOperation.run { SecItemAdd(CoinPilotKeychainOperation.query(saved), nil) }
+        precondition(added == errSecSuccess, "A new, synthetic keychain record must support the no-UI policy.")
+        defer { _ = CoinPilotKeychainOperation.run { SecItemDelete(CoinPilotKeychainOperation.query(item)) } }
+        let updated = CoinPilotKeychainOperation.run {
+            SecItemUpdate(CoinPilotKeychainOperation.query(item), [kSecValueData as String: Data("updated-synthetic".utf8)] as CFDictionary)
+        }
+        precondition(updated == errSecSuccess)
+        var read = item
+        read[kSecReturnData as String] = true
+        read[kSecMatchLimit as String] = kSecMatchLimitOne
+        var data: CFTypeRef?
+        let readStatus = CoinPilotKeychainOperation.run { SecItemCopyMatching(CoinPilotKeychainOperation.query(read), &data) }
+        precondition(readStatus == errSecSuccess && (data as? Data) == Data("updated-synthetic".utf8))
+#endif
+    }
+
+    private static func configureAIReads(_ api: DeferredCoinPilotAPI, enabled: Bool, gptReady: Bool) async {
+        await api.setReadResponse(path: "/api/ai/providers", body: ["enabled": enabled, "providers": [
+            ["id": "gpt", "ready": gptReady, "available": true], ["id": "claude", "ready": false]
+        ]])
+        await api.setReadResponse(path: "/api/ai/monitoring?limit=40", body: ["events": [], "consultations": [], "effectiveness": [:]])
+        await api.setReadResponse(path: "/api/ai/sessions", body: ["sessions": []])
+    }
+
+    private static func opinionRequestsRequireAvailableProviders() async throws {
+        let api = DeferredCoinPilotAPI(isReadOnlyObserver: false)
+        let store = CoinPilotStore(api: api, tokens: MemoryCoinPilotTokens(), configuredDataMode: "server")
+        let connected = await store.connect(using: "https://opinion-availability.example")
+        precondition(connected)
+        await configureAIReads(api, enabled: false, gptReady: true)
+        let disabled = await store.requestAIConsultation(eventId: "event-1", provider: "gpt")
+        precondition(!disabled && store.readyAIProviderIDs.isEmpty)
+        await configureAIReads(api, enabled: true, gptReady: false)
+        let notReady = await store.requestAIConsultation(eventId: "event-1", provider: "gpt")
+        let earlyMutations = await api.recordedMutationPaths()
+        precondition(!notReady && earlyMutations.isEmpty,
+                     "Explicit readiness false and disabled services must not receive opinion requests.")
+        await configureAIReads(api, enabled: true, gptReady: true)
+        await store.loadAIDesk()
+        precondition(store.canRequestAIConsultation(provider: "gpt") && !store.canRequestAIConsultation(provider: "both"))
+        await api.setMutationResponse(path: "/api/ai/consult", body: ["success": true])
+        let accepted = await store.requestAIConsultation(eventId: "event-1", provider: "gpt")
+        let mutations = await api.recordedMutationPaths()
+        precondition(accepted && mutations == ["/api/ai/consult"])
+    }
+
+    private static func signalRecordingDoesNotRequireOpinionProviders() async throws {
+        let api = DeferredCoinPilotAPI(isReadOnlyObserver: false)
+        let store = CoinPilotStore(api: api, tokens: MemoryCoinPilotTokens(), configuredDataMode: "server")
+        _ = await store.connect(using: "https://signal-recording.example")
+        await configureAIReads(api, enabled: false, gptReady: false)
+        await store.loadAIDesk()
+        await api.setMutationResponse(path: "/api/ai/sessions", body: ["success": true])
+        let recorded = await store.createAISession(name: "신호 기록", providers: ["gpt"], eventTypes: ["TRADE_EXECUTED"],
+            autoConsultEventTypes: [], autoConsult: false, coins: "", cooldownSeconds: 300, evaluationMinutes: nil)
+        let autoOpinion = await store.createAISession(name: "자동 의견", providers: ["gpt"], eventTypes: ["TRADE_EXECUTED"],
+            autoConsultEventTypes: ["TRADE_EXECUTED"], autoConsult: true, coins: "", cooldownSeconds: 300, evaluationMinutes: 5)
+        let mutations = await api.recordedMutationPaths()
+        precondition(recorded && !autoOpinion && mutations == ["/api/ai/sessions"],
+                     "Signal recording remains usable without providers, while automatic opinions require them.")
+    }
+
+    private static func opinionPreflightCannotCrossServers() async throws {
+        let api = DeferredCoinPilotAPI(isReadOnlyObserver: false)
+        let store = CoinPilotStore(api: api, tokens: MemoryCoinPilotTokens(), configuredDataMode: "server")
+        _ = await store.connect(using: "https://opinion-first.example")
+        await configureAIReads(api, enabled: true, gptReady: true)
+        await api.setHeldFeaturePaths(["/api/ai/providers"])
+        let request = Task { await store.requestAIConsultation(eventId: "event-1", provider: "gpt") }
+        await api.waitForHeldFeaturePath("/api/ai/providers")
+        _ = await store.connect(using: "https://opinion-second.example")
+        await api.releaseHeldFeaturePath("/api/ai/providers", body: ["enabled": true, "providers": [["id": "gpt", "ready": true]]])
+        let result = await request.value
+        let mutations = await api.recordedMutationPaths()
+        precondition(!result && mutations.isEmpty,
+                     "A late availability response cannot send the previous server's opinion request to another server.")
+    }
+
+    private static func automationAcceptanceRequiresPostRequestStatus() async throws {
+        let api = DeferredCoinPilotAPI(statusOverride: ["mode": "DRY_RUN", "isRunning": false], isReadOnlyObserver: false)
+        let store = CoinPilotStore(api: api, tokens: MemoryCoinPilotTokens(), configuredDataMode: "server")
+        let connected = await store.connect(using: "https://automation-status-race.example")
+        precondition(connected)
+        await api.setHeldFeaturePaths(["/api/status"])
+        let oldRefresh = Task { await store.refresh() }
+        await api.waitForHeldFeaturePath("/api/status")
+        let message = "자동매매 시작을 요청했습니다."
+        await api.setMutationResponse(path: "/api/control/start", body: ["success": true, "message": message], statusCode: 202)
+        let accepted = await store.setAutomationRunning(true)
+        precondition(accepted && store.dashboardMessage == message)
+        await api.releaseHeldFeaturePath("/api/status", body: ["mode": "DRY_RUN", "isRunning": true])
+        await oldRefresh.value
+        precondition(store.dashboardMessage == message,
+                     "A status read started before acceptance cannot confirm that new request.")
+        await api.setHeldFeaturePaths([])
+        await api.setReadResponse(path: "/api/status", body: ["mode": "DRY_RUN", "isRunning": true])
+        await store.refresh()
+        precondition(store.dashboardMessage == nil && store.lastAutomationResponse == message,
+                     "A post-request status read confirms the target and retains the response history.")
+    }
+
     private static func automationAcceptanceRemainsVisibleAcrossDashboardAndHistoryRefresh() async throws {
         let defaults = UserDefaults.standard
         let workspaceKey = "coinpilot.native.activeWorkspace"
@@ -2617,19 +2808,33 @@ struct CoinPilotStoreTests {
         ] {
             await api.setMutationResponse(path: path, body: ["success": true, "message": message], statusCode: 202)
             let accepted = await store.setAutomationRunning(shouldRun)
-            precondition(accepted && store.dashboardMessage == message,
-                         "The immediate dashboard refresh must preserve the accepted control response.")
+            let expectedBanner = shouldRun ? message : nil
+            precondition(accepted && store.dashboardMessage == expectedBanner && store.lastAutomationResponse == message,
+                         "Pending requests stay visible; a fresh matching status moves acceptance into operation details.")
             precondition(store.status?.isRunning == false && !store.isWorking,
                          "An accepted control request must not invent a running state or leave controls busy.")
             await store.refresh()
-            precondition(store.dashboardMessage == message,
-                         "The periodic dashboard refresh must preserve the latest control response.")
+            precondition(store.dashboardMessage == expectedBanner && store.lastAutomationResponse == message,
+                         "Periodic reads must preserve pending feedback and the accepted response history.")
             await store.setHistoryPeriod(.week, force: true)
-            precondition(store.dashboardMessage == message,
-                         "Changing the chart period must not erase the control response.")
+            precondition(store.dashboardMessage == expectedBanner && store.lastAutomationResponse == message,
+                         "Chart period changes must not erase pending feedback or response history.")
         }
-        store.logOut()
+        let pendingMessage = "자동매매 시작을 요청했습니다."
+        await api.setMutationResponse(path: "/api/control/start", body: ["success": true, "message": pendingMessage], statusCode: 202)
+        _ = await store.setAutomationRunning(true)
+        precondition(store.dashboardMessage == pendingMessage && store.status?.isRunning == false,
+                     "Accepting a start cannot hide its pending response before the target is observed.")
+        await api.setReadResponse(path: "/api/status", body: ["mode": "LIVE", "isRunning": true, "exchangeStateKnown": true])
+        await store.refresh()
+        precondition(store.dashboardMessage == nil && store.lastAutomationResponse == pendingMessage && store.status?.isRunning == true,
+                     "A fresh running status must clear the pending banner while preserving the server response.")
+        await api.setReadResponse(path: "/api/status", body: ["mode": "LIVE", "isRunning": false, "exchangeStateKnown": true])
+        await store.refresh()
         precondition(store.dashboardMessage == nil,
+                     "A later state change must not resurrect an old accepted request as a pending warning.")
+        store.logOut()
+        precondition(store.dashboardMessage == nil && store.lastAutomationResponse == nil,
                      "Automation feedback belongs to its authenticated server context and must clear on logout.")
     }
 
@@ -2665,7 +2870,7 @@ struct CoinPilotStoreTests {
         await api.setFailedPaths(["/api/status"])
         await store.refresh()
         precondition(store.dashboardMessage?.contains(reason) == true &&
-                     store.dashboardMessage?.contains("서버 거래 모드를 확인할 수 없어") == true && !store.canOperate,
+                     store.dashboardMessage?.contains(CoinPilotAPIError.connection.message) == true && !store.canOperate,
                      "An unavailable status must keep the control reason visible while locking the unverified server context.")
         await api.setFailedPaths([])
         await store.refresh()
@@ -2717,6 +2922,45 @@ struct CoinPilotStoreTests {
         precondition(store.paperValidationSummary?.cohort.totalStrictProfitComparable == false, "Heterogeneous session P&L must remain non-comparable.")
         let readTokens = await api.recordedReadTokens()
         precondition(readTokens.allSatisfy { $0 == "read-only-token" }, "Each server read should use the saved token.")
+    }
+
+    private static func cancelledOrderPreflightKeepsLoggedOutStateClean() async throws {
+        let timestamp = ISO8601DateFormatter().string(from: Date())
+        let api = DeferredCoinPilotAPI(marketRows: [["coin": "KRW-BTC", "price": 100_000_000,
+            "sourceAsOf": timestamp, "fetchedAt": timestamp]], statusOverride: ["isRunning": false], isReadOnlyObserver: false)
+        let store = CoinPilotStore(api: api, tokens: MemoryCoinPilotTokens(), configuredDataMode: "server")
+        let connected = await store.connect(using: "https://cancelled-preflight.example")
+        precondition(connected && store.manualOrderBlockReason(for: "KRW-BTC") == nil)
+        await api.setHeldFeaturePaths(["/api/status"])
+        let request = Task { await store.submitManualBuy(coin: "KRW-BTC", amount: 10_000) }
+        await api.waitForHeldFeaturePath("/api/status")
+        store.logOut()
+        await api.releaseHeldFeaturePath("/api/status", body: ["mode": "DRY_RUN", "isRunning": false])
+        let submitted = await request.value
+        let mutations = await api.recordedMutationPaths()
+        precondition(!submitted && store.phase == .login && store.orderMessage == nil && mutations.isEmpty,
+                     "An outdated preflight must not submit or add an old order message after logout.")
+    }
+
+    private static func tokenReplacementClearsPreviousPermissionErrors() async throws {
+        let api = DeferredCoinPilotAPI(requiresAuth: true, statusOverride: ["isRunning": false], loginTokenScope: "read_only", isReadOnlyObserver: false)
+        let tokens = MemoryCoinPilotTokens()
+        let store = CoinPilotStore(api: api, tokens: tokens)
+        let connected = await store.connect(using: "http://localhost:39471")
+        precondition(!connected)
+        store.tokenDraft = "synthetic-reader"
+        let signedIn = await store.signIn()
+        precondition(signedIn && !store.canOperate)
+        _ = await store.loadSystemStatus()
+        precondition(store.featureMessages["system"] != nil)
+        await api.setLoginTokenScope("mobile_operator")
+        await api.setReadResponse(path: "/api/system-status", body: ["currentPositions": 0, "recentErrors": []])
+        let message = await store.updateServerToken("synthetic-operator")
+        precondition(message == nil && store.canOperate)
+        precondition(store.featureMessages["system"] == nil,
+                     "Accepted credentials must not retain the previous token's permission error.")
+        precondition(!store.systemStatus.isEmpty,
+                     "Settings must reload system state after a successful permission change.")
     }
 
     private static func fullOperatorScopeGrantsNativeControl() async throws {

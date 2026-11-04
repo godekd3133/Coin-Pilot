@@ -2,6 +2,7 @@ import Combine
 import CoreFoundation
 import Foundation
 import Security
+import LocalAuthentication
 
 enum CoinPilotScreenPhase: Equatable {
     case connecting
@@ -180,7 +181,7 @@ struct CoinPilotOrderReviewPresentation: Equatable {
         }
 
         sectionTitle = "직접 주문"
-        accountTitle = workspace == .live ? "Upbit · 실계정" : "가상 계좌"
+        accountTitle = workspace == .live ? "실거래 계좌" : "가상 계좌"
         buttonTitle = workspace == .live ? "실거래 주문 검토" : "모의 주문 검토"
         isEnabled = draftIsValid && blockReason == nil && !isSubmitting
         showsWalletControls = workspace == .paper
@@ -378,6 +379,40 @@ struct CoinPilotTuningField: Identifiable {
 
     var id: String { key }
     var displayValue: Double? { value.map { $0 * displayMultiplier } }
+}
+
+enum CoinPilotTuningEdits {
+    static func matches(_ field: CoinPilotTuningField, query: String) -> Bool {
+        let key = field.key.replacingOccurrences(of: "([a-z0-9])([A-Z])", with: "$1 $2", options: .regularExpression)
+        return field.label.localizedCaseInsensitiveContains(query) || key.localizedCaseInsensitiveContains(query)
+    }
+
+    static func changes(fields: [CoinPilotTuningField], numeric: [String: String], boolean: [String: Bool]) throws -> [String: Any] {
+        var updates: [String: Any] = [:]
+        for field in fields {
+            if let original = field.booleanValue {
+                if let next = boolean[field.key], next != original { updates[field.key] = next }
+                continue
+            }
+            guard let raw = numeric[field.key] else { continue }
+            guard let displayed = Double(raw), displayed.isFinite else {
+                throw CoinPilotTuningEditError.message("\(field.label) 값을 숫자로 입력해 주세요.")
+            }
+            let multiplier = field.displayMultiplier == 0 ? 1 : field.displayMultiplier
+            let value = displayed / multiplier
+            if value == field.value { continue }
+            guard value.isFinite, field.minimum.map({ value >= $0 }) ?? true, field.maximum.map({ value <= $0 }) ?? true else {
+                throw CoinPilotTuningEditError.message("\(field.label) 값이 허용 범위를 벗어났습니다.")
+            }
+            updates[field.key] = value
+        }
+        return updates
+    }
+}
+
+enum CoinPilotTuningEditError: Error {
+    case message(String)
+    var message: String { switch self { case .message(let value): return value } }
 }
 
 enum CoinPilotPendingOrderRead {
@@ -868,6 +903,32 @@ final class CoinPilotLiveEventStream {
     }
 }
 
+enum CoinPilotKeychainOperation {
+    private static let lock = NSLock()
+
+    static func query(_ values: [String: Any]) -> CFDictionary {
+        var configured = values
+        let context = LAContext()
+        context.interactionNotAllowed = true
+        configured[kSecUseAuthenticationContext as String] = context
+        return configured as CFDictionary
+    }
+
+    static func run(_ operation: () -> OSStatus) -> OSStatus {
+        lock.lock()
+        defer { lock.unlock() }
+#if os(macOS)
+        // Legacy macOS keychains do not honor the modern no-UI query flag.
+        // Fail rather than block the application's main thread on a hidden prompt.
+        var previous: DarwinBoolean = true
+        guard SecKeychainGetUserInteractionAllowed(&previous) == errSecSuccess,
+              SecKeychainSetUserInteractionAllowed(false) == errSecSuccess else { return errSecInteractionNotAllowed }
+        defer { SecKeychainSetUserInteractionAllowed(previous.boolValue) }
+#endif
+        return operation()
+    }
+}
+
 private final class CoinPilotTokenStore: CoinPilotTokenProviding {
     private let service = Bundle.main.bundleIdentifier ?? "com.godekd3133.coinpilot"
 
@@ -880,23 +941,29 @@ private final class CoinPilotTokenStore: CoinPilotTokenProviding {
             kSecMatchLimit as String: kSecMatchLimitOne
         ]
         var result: CFTypeRef?
-        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
+        guard CoinPilotKeychainOperation.run({ SecItemCopyMatching(CoinPilotKeychainOperation.query(query), &result) }) == errSecSuccess,
               let data = result as? Data else { return nil }
         return String(data: data, encoding: .utf8)
     }
 
     func save(_ token: String, for serverURL: URL) -> Bool {
-        delete(for: serverURL)
-        var query: [String: Any] = [
+        let match: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
-            kSecAttrAccount as String: serverURL.absoluteString,
-            kSecValueData as String: Data(token.utf8)
+            kSecAttrAccount as String: serverURL.absoluteString
         ]
-        #if canImport(UIKit)
-        query[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
-        #endif
-        return SecItemAdd(query as CFDictionary, nil) == errSecSuccess
+        let data = Data(token.utf8)
+        let updated = CoinPilotKeychainOperation.run {
+            SecItemUpdate(CoinPilotKeychainOperation.query(match), [kSecValueData as String: data] as CFDictionary)
+        }
+        if updated == errSecSuccess { return true }
+        guard updated == errSecItemNotFound else { return false }
+        var item = match
+        item[kSecValueData as String] = data
+#if canImport(UIKit)
+        item[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+#endif
+        return CoinPilotKeychainOperation.run { SecItemAdd(CoinPilotKeychainOperation.query(item), nil) } == errSecSuccess
     }
 
     func delete(for serverURL: URL) {
@@ -905,7 +972,7 @@ private final class CoinPilotTokenStore: CoinPilotTokenProviding {
             kSecAttrService as String: service,
             kSecAttrAccount as String: serverURL.absoluteString
         ]
-        SecItemDelete(query as CFDictionary)
+        _ = CoinPilotKeychainOperation.run { SecItemDelete(CoinPilotKeychainOperation.query(query)) }
     }
 }
 
@@ -921,24 +988,29 @@ private final class CoinPilotKeychainPendingOrderStore: CoinPilotPendingOrderPro
             kSecMatchLimit as String: kSecMatchLimitOne
         ]
         var result: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        let status = CoinPilotKeychainOperation.run { SecItemCopyMatching(CoinPilotKeychainOperation.query(query), &result) }
         if status == errSecItemNotFound { return .missing }
         guard status == errSecSuccess, let data = result as? Data else { return .unavailable }
         return .saved(data)
     }
 
     func save(_ data: Data, for serverURL: URL) -> Bool {
-        guard clear(for: serverURL) else { return false }
-        var query: [String: Any] = [
+        let match: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
-            kSecAttrAccount as String: serverURL.absoluteString,
-            kSecValueData as String: data
+            kSecAttrAccount as String: serverURL.absoluteString
         ]
-        #if canImport(UIKit)
-        query[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
-        #endif
-        return SecItemAdd(query as CFDictionary, nil) == errSecSuccess
+        let updated = CoinPilotKeychainOperation.run {
+            SecItemUpdate(CoinPilotKeychainOperation.query(match), [kSecValueData as String: data] as CFDictionary)
+        }
+        if updated == errSecSuccess { return true }
+        guard updated == errSecItemNotFound else { return false }
+        var item = match
+        item[kSecValueData as String] = data
+#if canImport(UIKit)
+        item[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+#endif
+        return CoinPilotKeychainOperation.run { SecItemAdd(CoinPilotKeychainOperation.query(item), nil) } == errSecSuccess
     }
 
     func clear(for serverURL: URL) -> Bool {
@@ -947,7 +1019,7 @@ private final class CoinPilotKeychainPendingOrderStore: CoinPilotPendingOrderPro
             kSecAttrService as String: service,
             kSecAttrAccount as String: serverURL.absoluteString
         ]
-        let status = SecItemDelete(query as CFDictionary)
+        let status = CoinPilotKeychainOperation.run { SecItemDelete(CoinPilotKeychainOperation.query(query)) }
         return status == errSecSuccess || status == errSecItemNotFound
     }
 }
@@ -1364,6 +1436,7 @@ struct CoinPilotTrade: Identifiable {
     let profit: Double?
     let price: Double?
     let amount: Double?
+    let quantity: Double?
     let source: String?
 
     init(_ object: [String: Any], index: Int) {
@@ -1373,7 +1446,7 @@ struct CoinPilotTrade: Identifiable {
         let buyCoin = (object["buy"] as? [String: Any])?["coin"] as? String
         if type == "BUNDLE_TRADE", let sellCoin, let buyCoin {
             coin = "\(Self.symbol(sellCoin) ?? sellCoin) → \(Self.symbol(buyCoin) ?? buyCoin)"
-            action = "묶음 거래"
+            action = "종목 교체"
         } else {
             coin = Self.symbol((object["coin"] as? String) ?? "")
             if rawAction.contains("BUY") || rawAction.contains("OPEN") {
@@ -1389,8 +1462,14 @@ struct CoinPilotTrade: Identifiable {
         timestamp = object["timestamp"] as? String ?? (action == "매도" ? exitTime ?? entryTime : entryTime ?? exitTime)
         profit = Self.number(object["profit"])
         price = Self.number(object["price"]) ?? Self.number(object["exitPrice"]) ?? Self.number(object["entryPrice"])
-        amount = Self.number(object["value"]) ?? Self.number(object["total"]) ?? Self.number(object["amount"])
         source = object["source"] as? String
+        let rawAmount = Self.nonnegative(object["amount"])
+        let strategyAmountIsQuantity = source == "strategy" || ["OPEN", "CLOSE", "PARTIAL_CLOSE"].contains(rawAction)
+        let quoteAmountSource = ["smart-buy", "smart-sell"].contains(source ?? "")
+        amount = Self.nonnegative(object["value"]) ?? Self.nonnegative(object["total"]) ??
+            (quoteAmountSource ? rawAmount : nil)
+        quantity = Self.nonnegative(object["volume"]) ?? Self.nonnegative(object["quantity"]) ??
+            (strategyAmountIsQuantity ? rawAmount : nil)
         id = "\(timestamp ?? "trade")-\(coin ?? "")-\(action)-\(index)"
     }
 
@@ -1401,9 +1480,20 @@ struct CoinPilotTrade: Identifiable {
 
     private static func number(_ value: Any?) -> Double? {
         guard let value, !(value is NSNull) else { return nil }
-        if let number = value as? NSNumber { return number.doubleValue }
-        if let string = value as? String { return Double(string) }
-        return nil
+        let parsed: Double?
+        if let number = value as? NSNumber {
+            guard String(cString: number.objCType) != "c" else { return nil }
+            parsed = number.doubleValue
+        } else if let string = value as? String {
+            parsed = Double(string)
+        } else { parsed = nil }
+        guard let parsed, parsed.isFinite else { return nil }
+        return parsed
+    }
+
+    private static func nonnegative(_ value: Any?) -> Double? {
+        guard let parsed = number(value), parsed >= 0 else { return nil }
+        return parsed
     }
 }
 
@@ -1941,6 +2031,7 @@ final class CoinPilotStore: ObservableObject {
     @Published private(set) var tuningRanges: [String: [String: Any]] = [:]
     @Published private(set) var tuningMessage: String?
     @Published private(set) var isSavingTuning = false
+    @Published private(set) var lastTuningSaveRefreshed = false
     @Published private(set) var isLoadingTuning = false
     @Published private(set) var tuningMutationLocked = false
     @Published private(set) var tuningMutationReason: String?
@@ -1999,6 +2090,11 @@ final class CoinPilotStore: ObservableObject {
     private var currentServerURL: URL?
     private var requestGeneration = 0
     private var automationFeedbackMessage: String?
+    private var automationFeedbackTarget: Bool?
+    private var automationFeedbackReachedTarget = false
+    private var automationFeedbackRevision = 0
+
+    var lastAutomationResponse: String? { automationFeedbackMessage }
     private var lastSuccessfulResourceAt: [String: Date] = [:]
     private var bootstrapped = false
     private var shouldInferWorkspaceFromLegacyURL = false
@@ -2304,10 +2400,7 @@ final class CoinPilotStore: ObservableObject {
     var workspaceModeMismatchMessage: String? {
         guard let serverMode = tradingMode, serverMode != activeWorkspace.serverMode else { return nil }
         let actual = serverMode == "LIVE" ? "실거래" : serverMode == "DRY_RUN" ? "모의투자" : "확인 불가"
-        let nextStep = activeWorkspace == .live
-            ? "같은 IP를 쓸 수 있지만 LIVE 서버의 다른 포트나 주소로 연결해야 합니다."
-            : "모의투자 서버 주소를 확인해 주세요."
-        return "현재 주소는 \(actual)(\(serverMode)) 서버입니다. \(activeWorkspace.serverMode) 모드가 필요합니다. \(nextStep)"
+        return "\(activeWorkspace.title) 계좌를 선택했지만 \(actual) 서버가 연결됐습니다. \(activeWorkspace.title) 서버 주소를 확인해 주세요."
     }
 
     var tuningFields: [CoinPilotTuningField] {
@@ -2992,14 +3085,15 @@ final class CoinPilotStore: ObservableObject {
                 throw CoinPilotAPIError.forStatusCode(loginResponse.statusCode)
             }
             let scope = Self.authScope(from: loginResponse)
+            guard tokens.save(token, for: serverURL) else { throw CoinPilotAPIError.keychain }
+            clearMobileFeatureData()
             authenticationScope = scope
             authenticationRequired = true
-            guard tokens.save(token, for: serverURL) else { throw CoinPilotAPIError.keychain }
-
             await refresh()
             guard phase == .dashboard else {
                 return connectionMessage ?? "새 토큰으로 서버 정보를 불러오지 못했습니다. 토큰과 서버 설정을 확인해 주세요."
             }
+            if canOperate { _ = await loadSystemStatus() }
             return nil
         } catch let error as CoinPilotAPIError {
             guard generation == requestGeneration else { return "서버 연결 정보가 변경되었습니다. 다시 시도해 주세요." }
@@ -3049,6 +3143,7 @@ final class CoinPilotStore: ObservableObject {
         stopLiveStream()
         if let currentServerURL { tokens.delete(for: currentServerURL) }
         clearLoadedData()
+        orderMessage = nil
         connectionMessage = nil
         tokenDraft = ""
         authenticationScope = .unauthenticated
@@ -3173,6 +3268,7 @@ final class CoinPilotStore: ObservableObject {
             return
         }
         let generation = requestGeneration
+        let controlRevisionAtReadStart = automationFeedbackRevision
         let serverURL = currentServerURL
         let usesBundledPreview = isBundledPreview
         guard usesBundledPreview || serverURL != nil else {
@@ -3180,7 +3276,6 @@ final class CoinPilotStore: ObservableObject {
             return
         }
         isRefreshing = true
-        updateDashboardRefreshMessage(nil)
         defer {
             if generation == requestGeneration { isRefreshing = false }
         }
@@ -3243,12 +3338,22 @@ final class CoinPilotStore: ObservableObject {
             updateDashboardRefreshMessage(usesBundledPreview
                 ? "앱에 포함된 예시 자료를 불러오지 못했어요."
                 : preflightStatus == nil
-                    ? "서버 거래 모드를 확인할 수 없어 계좌 정보를 불러오지 않았어요."
+                    ? {
+                        if case .failure(let error) = statusResult { return error.message }
+                        if let response = statusResponse, !(200..<300).contains(response.statusCode) {
+                            return CoinPilotAPIError.forStatusCode(response.statusCode).message
+                        }
+                        return CoinPilotAPIError.invalidData.message
+                    }()
                     : workspaceModeMismatchMessage ?? "서버 거래 모드를 확인할 수 없어 화면을 잠갔습니다.")
             return
         }
 
         status = preflightStatus
+        if controlRevisionAtReadStart == automationFeedbackRevision,
+           let target = automationFeedbackTarget, preflightStatus.isRunning == target {
+            automationFeedbackReachedTarget = true
+        }
         serverModeMatchesWorkspace = true
         Task { await self.syncOrderNotifications() }
         rawResponses["status"] = statusResponse
@@ -4610,6 +4715,39 @@ final class CoinPilotStore: ObservableObject {
         return await loadOptimization()
     }
 
+    var readyAIProviderIDs: Set<String> {
+        guard aiProviderStatus["enabled"] as? Bool == true,
+              featureMessages["ai-providers"] == nil,
+              let values = aiProviderStatus["providers"] as? [[String: Any]] else { return [] }
+        return Set(values.compactMap { value in
+            let ready = value["ready"] as? Bool ?? value["available"] as? Bool ?? false
+            guard ready,
+                  let id = (value["id"] as? String ?? value["provider"] as? String)?.lowercased(),
+                  ["gpt", "claude"].contains(id) else { return nil }
+            return id
+        })
+    }
+
+    func canRequestAIConsultation(provider: String?) -> Bool {
+        guard canOperate else { return false }
+        let selected = (provider ?? "both").lowercased()
+        if selected == "both" { return readyAIProviderIDs.isSuperset(of: ["gpt", "claude"]) }
+        return readyAIProviderIDs.contains(selected)
+    }
+
+    private func verifyAIProviders(_ selected: Set<String>) async -> Bool {
+        let generation = requestGeneration
+        let server = currentServerURL
+        let workspace = activeWorkspace
+        await loadAIDesk()
+        guard generation == requestGeneration, server == currentServerURL, workspace == activeWorkspace else { return false }
+        guard canOperate, !selected.isEmpty, readyAIProviderIDs.isSuperset(of: selected) else {
+            featureMessages["ai"] = "선택한 의견 서비스를 사용할 수 없습니다. 연결 상태를 확인해 주세요."
+            return false
+        }
+        return true
+    }
+
     func createAISession(
         name: String,
         providers: [String],
@@ -4631,6 +4769,7 @@ final class CoinPilotStore: ObservableObject {
             featureMessages["ai"] = "의견을 받을 서비스를 하나 이상 선택해 주세요."
             return false
         }
+        if autoConsult, !(await verifyAIProviders(Set(selectedProviders))) { return false }
         var body: [String: Any] = [
             "name": String(name.prefix(80)), "eventTypes": selectedTypes,
             "providers": selectedProviders,
@@ -4659,6 +4798,9 @@ final class CoinPilotStore: ObservableObject {
             aiConsultationMessage = "의견을 요청할 시장 신호를 선택해 주세요."
             return false
         }
+        let choice = (provider ?? "both").lowercased()
+        let selected: Set<String> = choice == "both" ? ["gpt", "claude"] : [choice]
+        guard await verifyAIProviders(selected) else { return false }
         var body: [String: Any] = ["eventId": eventId]
         if let provider, !provider.isEmpty { body["provider"] = provider }
         guard let response = await performFeatureMutation("ai", path: "/api/ai/consult", body: body) else { return false }
@@ -4826,11 +4968,9 @@ final class CoinPilotStore: ObservableObject {
         let requestURL = currentServerURL
         let requestWorkspace = activeWorkspace
         let generation = requestGeneration
+        orderMessage = "주문 전 계좌와 시세를 확인하고 있습니다."
         await refresh()
-        guard requestGeneration == generation, currentServerURL == requestURL, activeWorkspace == requestWorkspace else {
-            orderMessage = "작업공간이 바뀌어 주문을 보내지 않았습니다. 새 화면에서 다시 확인해 주세요."
-            return false
-        }
+        guard requestGeneration == generation, currentServerURL == requestURL, activeWorkspace == requestWorkspace else { return false }
         guard manualOrderBlockReason(for: coin) == nil else {
             orderMessage = manualOrderBlockReason(for: coin)
             return false
@@ -4866,11 +5006,9 @@ final class CoinPilotStore: ObservableObject {
         let requestURL = currentServerURL
         let requestWorkspace = activeWorkspace
         let generation = requestGeneration
+        orderMessage = "주문 전 계좌와 시세를 확인하고 있습니다."
         await refresh()
-        guard requestGeneration == generation, currentServerURL == requestURL, activeWorkspace == requestWorkspace else {
-            orderMessage = "작업공간이 바뀌어 주문을 보내지 않았습니다. 새 화면에서 다시 확인해 주세요."
-            return false
-        }
+        guard requestGeneration == generation, currentServerURL == requestURL, activeWorkspace == requestWorkspace else { return false }
         guard manualOrderBlockReason(for: coin) == nil else {
             orderMessage = manualOrderBlockReason(for: coin)
             return false
@@ -4905,9 +5043,10 @@ final class CoinPilotStore: ObservableObject {
         let requestURL = currentServerURL
         let requestWorkspace = activeWorkspace
         let generation = requestGeneration
+        orderMessage = "주문 전 계좌와 시세를 확인하고 있습니다."
         await refresh()
-        guard requestGeneration == generation, currentServerURL == requestURL, activeWorkspace == requestWorkspace,
-              manualOrderBlockReason == nil else {
+        guard requestGeneration == generation, currentServerURL == requestURL, activeWorkspace == requestWorkspace else { return false }
+        guard manualOrderBlockReason == nil else {
             orderMessage = manualOrderBlockReason ?? "서버 상태가 바뀌어 조건 매수를 보내지 않았습니다."
             return false
         }
@@ -4935,9 +5074,10 @@ final class CoinPilotStore: ObservableObject {
         let requestURL = currentServerURL
         let requestWorkspace = activeWorkspace
         let generation = requestGeneration
+        orderMessage = "주문 전 계좌와 시세를 확인하고 있습니다."
         await refresh()
-        guard requestGeneration == generation, currentServerURL == requestURL, activeWorkspace == requestWorkspace,
-              manualOrderBlockReason == nil else {
+        guard requestGeneration == generation, currentServerURL == requestURL, activeWorkspace == requestWorkspace else { return false }
+        guard manualOrderBlockReason == nil else {
             orderMessage = manualOrderBlockReason ?? "서버 상태가 바뀌어 조건 매도를 보내지 않았습니다."
             return false
         }
@@ -4971,11 +5111,12 @@ final class CoinPilotStore: ObservableObject {
         let requestURL = currentServerURL
         let requestWorkspace = activeWorkspace
         let generation = requestGeneration
+        orderMessage = "주문 전 계좌와 시세를 확인하고 있습니다."
         await refresh()
+        guard requestGeneration == generation, currentServerURL == requestURL, activeWorkspace == requestWorkspace else { return false }
         let refreshedMarketCodes = [sellCoin, buyCoin]
-        guard requestGeneration == generation, currentServerURL == requestURL, activeWorkspace == requestWorkspace,
-              manualOrderBlockReason(forMarkets: refreshedMarketCodes) == nil else {
-            orderMessage = manualOrderBlockReason(forMarkets: refreshedMarketCodes) ?? "서버 상태가 바뀌어 묶음 거래를 보내지 않았습니다."
+        guard manualOrderBlockReason(forMarkets: refreshedMarketCodes) == nil else {
+            orderMessage = manualOrderBlockReason(forMarkets: refreshedMarketCodes) ?? "서버 상태가 바뀌어 종목 교체를 보내지 않았습니다."
             return false
         }
         guard let holding = account?.positions.first(where: { $0.coin == sellCoin }),
@@ -4996,12 +5137,13 @@ final class CoinPilotStore: ObservableObject {
         var body: [String: Any] = ["sellCoin": sellCoin, "buyCoin": buyCoin]
         if let sellAmount { body["sellAmount"] = sellAmount }
         if let buyAmount { body["buyAmount"] = normalizedQuoteAmount(buyAmount) }
-        let sellDisplay = CoinPilotFormatting.won((holding.currentValue ?? 0))
+        let sourcePrice = markets.first(where: { $0.coin == sellCoin })?.price ?? holding.currentPrice
+        let sellDisplay = CoinPilotFormatting.won(sourcePrice.map { (sellAmount ?? available) * $0 })
         return await beginPendingManualOrder(
             endpoint: "/api/trade/execute-bundle",
             body: body,
             market: "\(CoinPilotFormatting.ticker(sellCoin)) → \(CoinPilotFormatting.ticker(buyCoin))",
-            side: "묶음 거래",
+            side: "종목 교체",
             displayAmount: sellDisplay
         )
     }
@@ -5285,6 +5427,9 @@ final class CoinPilotStore: ObservableObject {
         let requestWorkspace = activeWorkspace
         let generation = requestGeneration
         automationFeedbackMessage = nil
+        automationFeedbackTarget = nil
+        automationFeedbackReachedTarget = false
+        automationFeedbackRevision += 1
         dashboardMessage = nil
         isWorking = true
         defer {
@@ -5302,6 +5447,7 @@ final class CoinPilotStore: ObservableObject {
                 return false
             }
             automationFeedbackMessage = Self.message(from: body)
+            automationFeedbackTarget = shouldRun
             updateDashboardRefreshMessage(nil)
             await refresh()
             return true
@@ -5387,6 +5533,8 @@ final class CoinPilotStore: ObservableObject {
             tuningMessage = "변경할 설정 항목을 확인해 주세요."
             return false
         }
+        lastTuningSaveRefreshed = false
+        tuningMessage = nil
         isSavingTuning = true
         let requestURL = serverURL
         let requestWorkspace = activeWorkspace
@@ -5410,8 +5558,12 @@ final class CoinPilotStore: ObservableObject {
                 tuningMessage = Self.message(from: body) ?? CoinPilotAPIError.forStatusCode(response.statusCode).message
                 return false
             }
-            tuningMessage = "설정을 저장했습니다. 서버의 다음 점검부터 반영됩니다."
-            _ = await loadTuning()
+            let refreshed = await loadTuning()
+            guard requestGeneration == generation, currentServerURL == requestURL, activeWorkspace == requestWorkspace else { return false }
+            lastTuningSaveRefreshed = refreshed
+            tuningMessage = refreshed
+                ? "변경한 설정을 저장했습니다."
+                : "설정 저장은 완료됐지만 최신 값을 확인하지 못했습니다. 다시 불러와 주세요."
             return true
         } catch {
             guard requestGeneration == generation, currentServerURL == requestURL, activeWorkspace == requestWorkspace else { return false }
@@ -5505,27 +5657,14 @@ final class CoinPilotStore: ObservableObject {
     }
 
     private func updateDashboardRefreshMessage(_ refreshMessage: String?) {
-        let messages = [automationFeedbackMessage, refreshMessage].compactMap { $0 }
+        // Acknowledgement is not a current warning after a fresh status confirms it.
+        // Keep rejection/connection errors visible; retain the accepted response in details.
+        let controlMessage = automationFeedbackReachedTarget ? nil : automationFeedbackMessage
+        let messages = [controlMessage, refreshMessage].compactMap { $0 }
         dashboardMessage = messages.isEmpty ? nil : messages.joined(separator: "\n\n")
     }
 
-    private func clearLoadedData(preservingAutomationFeedback: Bool = false) {
-        if !preservingAutomationFeedback { automationFeedbackMessage = nil }
-        account = nil
-        status = nil
-        serverExchange = nil
-        quoteCurrency = "KRW"
-        CoinPilotFormatting.quoteSymbol = "₩"
-        CoinPilotFormatting.quoteAssetLabel = "원화"
-        pnl = nil
-        todayRealizedProfit = nil
-        history = []
-        markets = []
-        marketSnapshotMetadata = nil
-        trades = []
-        paperValidationSummary = nil
-        candles = []
-        marketCoinDetail = nil
+    private func clearMobileFeatureData() {
         systemStatus = [:]
         analysisResults = []
         analysisSummary = [:]
@@ -5567,6 +5706,30 @@ final class CoinPilotStore: ObservableObject {
         isRunningFeatureAction = false
         isRecordingSnapshot = false
         rawResponses = [:]
+    }
+
+    private func clearLoadedData(preservingAutomationFeedback: Bool = false) {
+        if !preservingAutomationFeedback {
+            automationFeedbackMessage = nil
+            automationFeedbackTarget = nil
+            automationFeedbackReachedTarget = false
+        }
+        account = nil
+        status = nil
+        serverExchange = nil
+        quoteCurrency = "KRW"
+        CoinPilotFormatting.quoteSymbol = "₩"
+        CoinPilotFormatting.quoteAssetLabel = "원화"
+        pnl = nil
+        todayRealizedProfit = nil
+        history = []
+        markets = []
+        marketSnapshotMetadata = nil
+        trades = []
+        paperValidationSummary = nil
+        candles = []
+        marketCoinDetail = nil
+        clearMobileFeatureData()
         localMarketData = nil
         localMarketDataError = nil
         offlineReplayResult = nil
