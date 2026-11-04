@@ -1,0 +1,139 @@
+/*
+ * CoinPilot design tokens — single source for the web shell.
+ * Colour values are mirrored by the native DesignSystem (CPTokens.swift) and
+ * kept in sync by test/nativeColorTokenParity.test.js. Keep each colour a
+ * six-digit hex inside the first :root block.
+ * Korean market convention: --cp-up (red) = rise/profit, --cp-down (blue) = fall/loss.
+ */
+:root {
+  --cp-paper: #f2f4f6;
+  --cp-surface: #ffffff;
+  --cp-surface2: #f7f8fa;
+  --cp-ink: #191f28;
+  --cp-muted: #66707f;
+  --cp-line: #e5e8eb;
+  --cp-blue: #1b64da;
+  --cp-green: #027648;
+  --cp-red: #a51926;
+  --cp-amber: #96590a;
+  --cp-up: #d2283c;
+  --cp-down: #1b64da;
+
+  --cp-on-accent: #ffffff;
+  --cp-blue-soft: rgba(27, 100, 218, 0.1);
+  --cp-green-soft: rgba(2, 118, 72, 0.1);
+  --cp-red-soft: rgba(165, 25, 38, 0.09);
+  --cp-amber-soft: rgba(150, 89, 10, 0.11);
+  --cp-up-soft: rgba(210, 40, 60, 0.09);
+  --cp-down-soft: rgba(27, 100, 218, 0.09);
+  --cp-scrim: rgba(10, 14, 20, 0.42);
+  --cp-skeleton: #e9ecef;
+  --cp-skeleton-shine: #f6f7f9;
+  --cp-shadow-float: 0 12px 40px rgba(16, 24, 40, 0.16), 0 2px 8px rgba(16, 24, 40, 0.08);
+  --cp-focus: 0 0 0 3px rgba(27, 100, 218, 0.32);
+
+  --cp-space-1: 4px;
+  --cp-space-2: 8px;
+  --cp-space-3: 12px;
+  --cp-space-4: 16px;
+  --cp-space-5: 20px;
+  --cp-space-6: 24px;
+  --cp-space-7: 32px;
+  --cp-space-8: 48px;
+
+  --cp-radius-sm: 10px;
+  --cp-radius-md: 14px;
+  --cp-radius-lg: 20px;
+  --cp-radius-xl: 28px;
+  --cp-radius-pill: 999px;
+
+  --cp-font: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Pretendard", "Noto Sans KR", "Segoe UI", Roboto, sans-serif;
+  --cp-text-display: 700 34px/1.15 var(--cp-font);
+  --cp-text-title: 700 22px/1.3 var(--cp-font);
+  --cp-text-headline: 600 17px/1.4 var(--cp-font);
+  --cp-text-body: 400 15px/1.5 var(--cp-font);
+  --cp-text-caption: 500 13px/1.45 var(--cp-font);
+  --cp-text-micro: 600 11px/1.35 var(--cp-font);
+
+  --cp-motion-fast: 140ms;
+  --cp-motion-base: 260ms;
+  --cp-motion-slow: 420ms;
+  --cp-ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --cp-ease-spring: cubic-bezier(0.34, 1.36, 0.64, 1);
+  --cp-press-scale: 0.97;
+
+  --cp-sidebar-width: 248px;
+  --cp-tabbar-height: 64px;
+  --cp-content-max: 1120px;
+
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --cp-paper: #101114;
+    --cp-surface: #1b1c21;
+    --cp-surface2: #24252b;
+    --cp-ink: #f2f4f6;
+    --cp-muted: #9aa1ac;
+    --cp-line: #2e2f36;
+    --cp-blue: #5a9dff;
+    --cp-green: #34c98a;
+    --cp-red: #ff7b7b;
+    --cp-amber: #f1b552;
+    --cp-up: #ff6b7a;
+    --cp-down: #5a9dff;
+
+    --cp-on-accent: #0b1220;
+    --cp-blue-soft: rgba(90, 157, 255, 0.16);
+    --cp-green-soft: rgba(52, 201, 138, 0.15);
+    --cp-red-soft: rgba(255, 123, 123, 0.15);
+    --cp-amber-soft: rgba(241, 181, 82, 0.16);
+    --cp-up-soft: rgba(255, 107, 122, 0.15);
+    --cp-down-soft: rgba(90, 157, 255, 0.15);
+    --cp-scrim: rgba(0, 0, 0, 0.6);
+    --cp-skeleton: #26272d;
+    --cp-skeleton-shine: #303138;
+    --cp-shadow-float: 0 16px 48px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.4);
+    --cp-focus: 0 0 0 3px rgba(90, 157, 255, 0.42);
+    color-scheme: dark;
+  }
+}
+
+:root[data-theme="dark"] {
+  --cp-paper: #101114;
+  --cp-surface: #1b1c21;
+  --cp-surface2: #24252b;
+  --cp-ink: #f2f4f6;
+  --cp-muted: #9aa1ac;
+  --cp-line: #2e2f36;
+  --cp-blue: #5a9dff;
+  --cp-green: #34c98a;
+  --cp-red: #ff7b7b;
+  --cp-amber: #f1b552;
+  --cp-up: #ff6b7a;
+  --cp-down: #5a9dff;
+
+  --cp-on-accent: #0b1220;
+  --cp-blue-soft: rgba(90, 157, 255, 0.16);
+  --cp-green-soft: rgba(52, 201, 138, 0.15);
+  --cp-red-soft: rgba(255, 123, 123, 0.15);
+  --cp-amber-soft: rgba(241, 181, 82, 0.16);
+  --cp-up-soft: rgba(255, 107, 122, 0.15);
+  --cp-down-soft: rgba(90, 157, 255, 0.15);
+  --cp-scrim: rgba(0, 0, 0, 0.6);
+  --cp-skeleton: #26272d;
+  --cp-skeleton-shine: #303138;
+  --cp-shadow-float: 0 16px 48px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.4);
+  --cp-focus: 0 0 0 3px rgba(90, 157, 255, 0.42);
+  color-scheme: dark;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --cp-motion-fast: 1ms;
+    --cp-motion-base: 120ms;
+    --cp-motion-slow: 160ms;
+    --cp-press-scale: 1;
+  }
+}
