@@ -476,7 +476,7 @@ export function resolveDashboardAuth(env = {}) {
     throw new Error('DASHBOARD_MOBILE_TOKEN must differ from dashboard tokens.');
   }
   const enabled = token.length > 0 || readOnlyToken.length > 0 || mobileToken.length > 0;
-  const passwordLogin = resolvePasswordLogin(env, { token });
+  const passwordLogin = resolvePasswordLogin(env, { token, mobileToken });
   const allowInsecure = isTrue(env.DASHBOARD_ALLOW_INSECURE);
   const requestedHost = String(env.DASHBOARD_HOST || '').trim();
   const corsOrigins = String(env.DASHBOARD_CORS_ORIGINS || '')
@@ -528,10 +528,11 @@ export function resolveDashboardAuth(env = {}) {
 /**
  * Optional username/password sign-in. A correct credential is exchanged for
  * the server's existing bearer token (operator for the web shell, the narrower
- * mobile token for the native app when one is configured), so every guard
+ * mobile token for the native app when one is configured; a mobile-only LIVE
+ * server hands the mobile token to both), so every guard
  * downstream keeps checking exactly the same tokens as before.
  */
-export function resolvePasswordLogin(env = {}, { token = '' } = {}) {
+export function resolvePasswordLogin(env = {}, { token = '', mobileToken = '' } = {}) {
   const username = String(env.DASHBOARD_LOGIN_USERNAME || '').trim();
   const rawHash = String(env.DASHBOARD_LOGIN_PASSWORD_HASH || '').trim();
   if (!username && !rawHash) return null;
@@ -543,8 +544,8 @@ export function resolvePasswordLogin(env = {}, { token = '' } = {}) {
   if (!parsed) {
     throw new Error('DASHBOARD_LOGIN_PASSWORD_HASH 형식이 올바르지 않습니다. npm run auth:hash-password로 만드세요.');
   }
-  if (!token) {
-    throw new Error('아이디·비밀번호 로그인은 DASHBOARD_TOKEN이 설정된 서버에서만 사용할 수 있습니다.');
+  if (!token && !mobileToken) {
+    throw new Error('아이디·비밀번호 로그인은 DASHBOARD_TOKEN 또는 DASHBOARD_MOBILE_TOKEN이 설정된 서버에서만 사용할 수 있습니다.');
   }
   return { username, parsed };
 }
@@ -769,7 +770,7 @@ export function createDashboardAuth(env = {}, options = {}) {
     if (!usernameMatches || !passwordMatches) return rejectLogin(res, key);
     limiter.recordSuccess(key);
     const nativeClient = body.client === 'native';
-    const useMobileToken = nativeClient && resolved.mobileToken.length > 0;
+    const useMobileToken = resolved.mobileToken.length > 0 && (nativeClient || resolved.token.length === 0);
     res.set('Cache-Control', 'no-store');
     return res.json({
       success: true,

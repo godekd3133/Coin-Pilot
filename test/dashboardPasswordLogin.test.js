@@ -68,13 +68,16 @@ test('malformed or oversized hash parameters are rejected', () => {
 test('password login requires both values and a full dashboard token', () => {
   assert.throws(() => resolveDashboardAuth({ DASHBOARD_TOKEN: 'x', DASHBOARD_LOGIN_USERNAME: 'owner' }), /함께 설정/);
   assert.throws(() => resolveDashboardAuth({ DASHBOARD_TOKEN: 'x', DASHBOARD_LOGIN_USERNAME: 'owner', DASHBOARD_LOGIN_PASSWORD_HASH: 'nope' }), /형식/);
-  assert.throws(() => resolveDashboardAuth({ DASHBOARD_MOBILE_TOKEN: 'm', DASHBOARD_LOGIN_USERNAME: 'owner', DASHBOARD_LOGIN_PASSWORD_HASH: HASH }), /DASHBOARD_TOKEN/);
+  assert.throws(() => resolveDashboardAuth({ DASHBOARD_READ_ONLY_TOKEN: 'r', DASHBOARD_LOGIN_USERNAME: 'owner', DASHBOARD_LOGIN_PASSWORD_HASH: HASH }), /DASHBOARD_TOKEN/);
+  assert.ok(resolveDashboardAuth({ DASHBOARD_MOBILE_TOKEN: 'm', DASHBOARD_LOGIN_USERNAME: 'owner', DASHBOARD_LOGIN_PASSWORD_HASH: HASH }).passwordLogin);
   assert.equal(resolveDashboardAuth({ DASHBOARD_TOKEN: 'x' }).passwordLogin, null);
 
   const missing = loadEnv({ DASHBOARD_LOGIN_USERNAME: 'owner' });
   const keys = missing.errors.map(error => error.key);
   assert.ok(keys.includes('DASHBOARD_LOGIN_PASSWORD_HASH'));
   assert.ok(keys.includes('DASHBOARD_TOKEN'));
+  const mobileOnly = loadEnv({ DASHBOARD_LOGIN_USERNAME: 'owner', DASHBOARD_LOGIN_PASSWORD_HASH: HASH, DASHBOARD_MOBILE_TOKEN: 'm' });
+  assert.equal(mobileOnly.errors.some(error => error.key.startsWith('DASHBOARD_')), false);
 });
 
 test('a correct password returns the operator token for the web and the mobile token for the app', async () => {
@@ -99,6 +102,15 @@ test('the app falls back to the operator token when no mobile token exists', asy
   await withDashboard(baseEnv({ DASHBOARD_MOBILE_TOKEN: '' }), async baseUrl => {
     const body = await (await login(baseUrl, { username: 'owner', password: PASSWORD, client: 'native' })).json();
     assert.deepEqual(body, { success: true, tokenScope: 'operator', token: 'operator-secret' });
+  });
+});
+
+test('a mobile-only LIVE server hands the mobile token to the web and the app', async () => {
+  await withDashboard(baseEnv({ DASHBOARD_TOKEN: '' }), async baseUrl => {
+    for (const client of [undefined, 'native']) {
+      const body = await (await login(baseUrl, { username: 'owner', password: PASSWORD, client })).json();
+      assert.deepEqual(body, { success: true, tokenScope: 'mobile_operator', token: 'mobile-secret' });
+    }
   });
 });
 

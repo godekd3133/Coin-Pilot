@@ -528,9 +528,14 @@ export const ENV_REQUIRED_RULES = [
     reason: 'DRY_RUN=false (실전투자)에서는 업비트 API 키가 필수입니다'
   },
   {
-    keys: ['DASHBOARD_LOGIN_USERNAME', 'DASHBOARD_LOGIN_PASSWORD_HASH', 'DASHBOARD_TOKEN'],
+    keys: ['DASHBOARD_LOGIN_USERNAME', 'DASHBOARD_LOGIN_PASSWORD_HASH'],
     when: values => Boolean(values.DASHBOARD_LOGIN_USERNAME || values.DASHBOARD_LOGIN_PASSWORD_HASH),
-    reason: '아이디·비밀번호 로그인에는 아이디, 비밀번호 해시, DASHBOARD_TOKEN이 모두 필요합니다'
+    reason: '아이디·비밀번호 로그인에는 아이디와 비밀번호 해시가 함께 필요합니다'
+  },
+  {
+    keys: ['DASHBOARD_TOKEN'],
+    when: values => Boolean(values.DASHBOARD_LOGIN_USERNAME || values.DASHBOARD_LOGIN_PASSWORD_HASH) && !values.DASHBOARD_MOBILE_TOKEN,
+    reason: '아이디·비밀번호 로그인은 DASHBOARD_TOKEN 또는 DASHBOARD_MOBILE_TOKEN이 발급할 접속 권한으로 필요합니다'
   },
   {
     keys: ['DASHBOARD_MOBILE_TOKEN'],
