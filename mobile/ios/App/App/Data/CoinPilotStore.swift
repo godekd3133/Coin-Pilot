@@ -2668,6 +2668,39 @@ final class CoinPilotStore: ObservableObject {
         }
     }
 
+    /// The server a workspace connects to: the bundled endpoint for a managed
+    /// build, otherwise the address last used for that workspace.
+    private func serverURL(for workspace: CoinPilotWorkspaceMode) -> URL? {
+        let storedURL = UserDefaults.standard.string(forKey: workspace.addressDefaultsKey)
+            .flatMap(URL.init(string:))
+            .flatMap { ServerAddressPolicy.allows($0) ? $0 : nil }
+        return usesManagedServerConnection
+            ? bundledServers.url(for: workspace)
+            : storedURL ?? bundledServers.url(for: workspace)
+    }
+
+    /// One username sign-in covers both workspaces: Paper and LIVE share the
+    /// same account, so the other server's token is fetched now and switching
+    /// workspaces later needs no second login. Best effort — a failure leaves
+    /// that workspace on its own login screen, and that server still decides
+    /// the scope it grants.
+    private func signInOtherWorkspace(username: String, password: String) async {
+        let other: CoinPilotWorkspaceMode = activeWorkspace == .live ? .paper : .live
+        guard let url = serverURL(for: other), url != currentServerURL,
+              let status = try? await api.authenticationStatus(at: url),
+              (200..<300).contains(status.statusCode),
+              let statusBody = try? Self.jsonObject(status.body) as? [String: Any],
+              statusBody["authRequired"] as? Bool == true,
+              statusBody["passwordLogin"] as? Bool == true,
+              let response = try? await api.login(username: username, password: password, at: url),
+              (200..<300).contains(response.statusCode),
+              let body = try? Self.jsonObject(response.body) as? [String: Any],
+              body["success"] as? Bool == true,
+              let issued = body["token"] as? String,
+              !issued.isEmpty, issued.utf8.count <= 4096 else { return }
+        _ = tokens.save(issued, for: url)
+    }
+
     func selectWorkspace(_ workspace: CoinPilotWorkspaceMode) {
         guard !isBundledLocalMarketData else { return }
         guard workspace != activeWorkspace else { return }
@@ -2703,13 +2736,7 @@ final class CoinPilotStore: ObservableObject {
         pendingManualOrderLocked = false
         orderMessage = nil
 
-        let storedURL = UserDefaults.standard.string(forKey: workspace.addressDefaultsKey)
-            .flatMap(URL.init(string:))
-            .flatMap { ServerAddressPolicy.allows($0) ? $0 : nil }
-        let selectedURL = usesManagedServerConnection
-            ? bundledServers.url(for: workspace)
-            : storedURL ?? bundledServers.url(for: workspace)
-        guard let url = selectedURL else {
+        guard let url = serverURL(for: workspace) else {
             currentServerURL = nil
             serverAddress = ""
             serverDraft = ""
@@ -2995,7 +3022,10 @@ final class CoinPilotStore: ObservableObject {
         }
             tokenDraft = ""
             passwordDraft = ""
-        passwordDraft = ""
+        if usesPassword && authRequired {
+            await signInOtherWorkspace(username: username, password: password)
+            guard generation == requestGeneration, currentServerURL == url else { return false }
+        }
         phase = .dashboard
         await refresh()
         return generation == requestGeneration && serverModeMatchesWorkspace
@@ -3215,7 +3245,11 @@ final class CoinPilotStore: ObservableObject {
         orderNotificationMessage = nil
         _ = beginRequestGeneration()
         stopLiveStream()
-        if let currentServerURL { tokens.delete(for: currentServerURL) }
+        // One login covers both workspaces, so logging out ends both.
+        for workspace in CoinPilotWorkspaceMode.allCases {
+            let url = workspace == activeWorkspace ? currentServerURL : serverURL(for: workspace)
+            if let url { tokens.delete(for: url) }
+        }
         clearLoadedData()
         orderMessage = nil
         connectionMessage = nil

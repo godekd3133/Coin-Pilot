@@ -502,6 +502,7 @@ struct CoinPilotStoreTests {
         try await signInUsesAndStoresOnlyTheServerToken()
         try await passwordSignInStoresOnlyTheIssuedToken()
         try await passwordFormFallsBackToTokenWhenServerLacksIt()
+        try await passwordSignInCoversBothWorkspaces()
         try await fullOperatorScopeGrantsNativeControl()
         try await cancelledOrderPreflightKeepsLoggedOutStateClean()
         try await tokenReplacementClearsPreviousPermissionErrors()
@@ -3041,6 +3042,38 @@ struct CoinPilotStoreTests {
         precondition(tokenLogins.isEmpty, "Password sign-in must not send a token login.")
         let readTokens = await api.recordedReadTokens()
         precondition(!readTokens.isEmpty && readTokens.allSatisfy { $0 == "issued-mobile-token" }, "Reads should use the issued token.")
+    }
+
+    private static func passwordSignInCoversBothWorkspaces() async throws {
+        await withCleanConnectionDefaults {
+            let paper = URL(string: "https://one-login.example")!
+            let live = URL(string: "https://one-login.example/live")!
+            let tokens = MemoryCoinPilotTokens()
+            let api = DeferredCoinPilotAPI(requiresAuth: true, isReadOnlyObserver: false,
+                serverModesByAddress: [paper.absoluteString: "DRY_RUN", live.absoluteString: "LIVE"])
+            await api.setPasswordLoginEnabled(true)
+            let store = CoinPilotStore(api: api, tokens: tokens, configuredDataMode: "server",
+                bundledServers: CoinPilotBundledServerConfig(paper: paper, live: live))
+            await store.bootstrap()
+            precondition(store.phase == .login && store.showsPasswordLogin, "A fresh install should offer the username form.")
+            store.usernameDraft = "owner"
+            store.passwordDraft = "correct horse"
+            let signedIn = await store.signIn()
+            precondition(signedIn && store.activeWorkspace == .paper, "The username sign-in should open the paper workspace.")
+            precondition(tokens.token(for: paper) == "issued-mobile-token" && tokens.token(for: live) == "issued-mobile-token",
+                         "One username sign-in must also fetch the LIVE token.")
+            let passwordLogins = await api.recordedPasswordLogins()
+            precondition(passwordLogins.count == 2, "Each server issues its own token for the same account.")
+
+            store.selectWorkspace(.live)
+            await waitForWorkspaceConnection(store)
+            precondition(store.phase == .dashboard && store.activeWorkspace == .live && store.serverModeMatchesWorkspace,
+                         "Switching to LIVE must not ask for a second login.")
+            let tokenLogins = await api.recordedLoginTokens()
+            precondition(tokenLogins.allSatisfy { $0 == "issued-mobile-token" }, "LIVE should verify the token its own server issued.")
+            let mutations = await api.recordedMutationPaths()
+            precondition(mutations.isEmpty, "Signing in must never place an order or start trading.")
+        }
     }
 
     private static func passwordFormFallsBackToTokenWhenServerLacksIt() async throws {
