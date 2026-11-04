@@ -238,6 +238,23 @@ export class TossInvestClient {
     return Array.isArray(result?.candles) ? result.candles : [];
   }
 
+  /** 일봉, 최신순. 200개를 넘으면 nextBefore 커서로 이어서 조회한다. */
+  async getDailyCandles(symbol, count = 200) {
+    const candles = [];
+    let before = null;
+    while (candles.length < count) {
+      const result = await this.request('GET', '/api/v1/candles', {
+        group: 'MARKET_DATA_CHART',
+        query: { symbol, interval: '1d', count: Math.min(200, count - candles.length), before }
+      });
+      const page = Array.isArray(result?.candles) ? result.candles : [];
+      candles.push(...page);
+      if (!result?.nextBefore || page.length === 0) break;
+      before = result.nextBefore;
+    }
+    return candles;
+  }
+
   async getRankings({ type = 'MARKET_TRADING_AMOUNT', duration = 'realtime', count = 100 } = {}) {
     const result = await this.request('GET', '/api/v1/rankings', {
       group: 'RANKING',
