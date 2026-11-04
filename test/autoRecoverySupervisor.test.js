@@ -349,3 +349,31 @@ test('복구 대상 사유 목록은 데이터 공백/미검증만 포함한다'
     'risk_data_gap'
   ]);
 });
+
+test('a quiet market in a live ticker batch does not block the recovery probe', async () => {
+  const trader = createFakeTrader({
+    targetCoins: ['KRW-BTC', 'KRW-QUIET'],
+    riskUpbit: {
+      getTicker: async () => [freshTicker('KRW-BTC'), { market: 'KRW-QUIET', trade_price: 5, trade_timestamp: Date.now() - 600_000 }]
+    }
+  });
+  const { supervisor } = createSupervisor(trader);
+  assert.deepEqual(await supervisor._probeHealth(), { healthy: true });
+});
+
+test('a batch with no fresh quote still fails the recovery probe', async () => {
+  const stale = market => ({ market, trade_price: 5, trade_timestamp: Date.now() - 600_000 });
+  const trader = createFakeTrader({ riskUpbit: { getTicker: async markets => markets.map(stale) } });
+  const { supervisor } = createSupervisor(trader);
+  const probe = await supervisor._probeHealth();
+  assert.equal(probe.healthy, false);
+  assert.match(probe.reason, /market_source_stale/);
+});
+
+test('a missing market in the ticker batch still fails the recovery probe', async () => {
+  const trader = createFakeTrader({ riskUpbit: { getTicker: async () => [freshTicker('KRW-BTC')] } });
+  const { supervisor } = createSupervisor(trader);
+  const probe = await supervisor._probeHealth();
+  assert.equal(probe.healthy, false);
+  assert.match(probe.reason, /^ticker:KRW-ETH:/);
+});

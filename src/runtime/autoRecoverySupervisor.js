@@ -197,8 +197,9 @@ export class AutoRecoverySupervisor {
   }
 
   /**
-   * 분석 사이클과 같은 데이터 경로로 모든 대상 마켓의 ticker 신선도와
-   * 캔들 수량을 확인한다. 한 마켓이라도 실패하면 unhealthy다.
+   * 분석 사이클과 같은 데이터 경로로 대상 마켓의 ticker 신선도와 캔들
+   * 수량을 확인한다. 체결이 뜸한 마켓은 같은 응답에 신선한 시세가 있을 때만
+   * 조용한 마켓으로 보고, 시세 전체가 오래됐거나 누락·무효이면 unhealthy다.
    */
   async _probeHealth() {
     if (this._probeOverride) return this._probeOverride(this.trader);
@@ -215,18 +216,29 @@ export class AutoRecoverySupervisor {
         .filter(ticker => ticker?.market)
         .map(ticker => [ticker.market, ticker])
     );
+    // Same contract as the trading cycle: a stale quote is a quiet market when
+    // the same batch carries fresh quotes; a feed-wide staleness, a missing
+    // market, or an invalid/future quote is still unhealthy.
+    const freshMarkets = [];
+    let firstStale = null;
     for (const market of markets) {
       const freshness = inspectMarketQuoteFreshness(tickersByMarket.get(market), {
         maximumAgeSeconds: this.trader.maxCandleAgeSeconds,
         expectedMarket: market
       });
-      if (!freshness.fresh) {
-        return { healthy: false, reason: `ticker:${market}:${freshness.reason}` };
-      }
+      if (freshness.fresh) freshMarkets.push(market);
+      else if (freshness.reason === 'market_source_stale') firstStale ||= market;
+      else return { healthy: false, reason: `ticker:${market}:${freshness.reason}` };
+    }
+    if (freshMarkets.length === 0) {
+      return { healthy: false, reason: `ticker:${firstStale || markets[0]}:market_source_stale` };
     }
 
+    // Candle reads prove the analysis path on the most liquid active markets
+    // (target order is liquidity-ranked); probing every market of a full KRW
+    // universe each interval would itself exhaust the REST budget.
     const minimumCandleCount = Math.max(50, (Number(this.trader.config?.rsiPeriod) || 14) + 10);
-    for (const market of markets) {
+    for (const market of freshMarkets.slice(0, 5)) {
       const candles = await this.trader.marketDataAdapter.getMinuteCandles(
         market,
         this.trader.candleUnit,
