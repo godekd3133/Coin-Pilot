@@ -1,4 +1,5 @@
 import express from 'express';
+import { latestTradeTimestamp } from '../latestTradeTimestamp.js';
 import path from 'path';
 import { projectReadOnlyPaperPortfolioAnalysis } from '../readOnlyPaperPortfolio.js';
 import { getMarketDataProvider, MARKET_DATA_FRESHNESS } from '../marketDataProvider.js';
@@ -17,11 +18,7 @@ export default function createStatusRoutes(server) {
       const now = new Date();
       const uptime = process.uptime();
 
-      // 마지막 거래 시간 계산
-      let lastTradeTime = null;
-      if (server.tradingSystem.smartTradeHistory?.length > 0) {
-        lastTradeTime = server.tradingSystem.smartTradeHistory[0].timestamp;
-      }
+      const lastTradeTime = latestTradeTimestamp(server.tradingSystem);
 
       // Keep log reads bounded so a large file cannot block the trading loop.
       const logDir = server.logger.logDir;
