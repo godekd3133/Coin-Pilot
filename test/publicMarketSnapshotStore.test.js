@@ -104,3 +104,19 @@ test('public snapshot size and market-count bounds reject invalid writer options
     persistIntervalMs: -1
   }), /persistIntervalMs/);
 });
+
+test('collector retains exchange generation time without rewriting last trade time', async t => {
+  const root = createRoot(t);
+  const filePath = path.join(root, 'snapshot.json');
+  const now = Date.now();
+  const store = new PublicMarketSnapshotStore({ filePath, now: () => now });
+  store.recordTickers([{ market: 'KRW-GAS', trade_price: 1800, trade_timestamp: now - 600000, timestamp: now }], now);
+  await store.flush();
+  const current = store.getTickerSnapshot(['KRW-GAS']).tickers[0];
+  assert.equal(current.timestamp, now);
+  assert.equal(current.trade_timestamp, now - 600000);
+  const restarted = new PublicMarketSnapshotStore({ filePath, now: () => now });
+  assert.equal(restarted.getTickerSnapshot(['KRW-GAS']).tickers[0].timestamp, now);
+  await restarted.close();
+  await store.close();
+});

@@ -51,6 +51,8 @@ function normalizeTicker(ticker, fetchedAt) {
     trade_timestamp: sourceTimestamp,
     fetchedAt
   };
+  const generationTimestamp = normalizeTimestamp(ticker.timestamp);
+  if (generationTimestamp !== null) normalized.timestamp = generationTimestamp;
   for (const field of SNAPSHOT_FIELDS.slice(2, 8)) {
     const value = Number(ticker[field]);
     if (Number.isFinite(value)) normalized[field] = value;
