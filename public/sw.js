@@ -1,11 +1,13 @@
-const CACHE_NAME = 'coinpilot-shell-v208';
+const CACHE_NAME = 'coinpilot-shell-v300';
+// The shell has no build step: every module is fetched network-first so a new
+// deploy is picked up immediately, with the cache as the offline fallback.
 const NETWORK_FIRST_SHELL_PATHS = new Set([
   '/',
   '/index.html',
   '/auth-client.js',
-  '/pilot-redesign.css',
-  '/pilot-redesign.js'
+  '/manifest.webmanifest'
 ]);
+const NETWORK_FIRST_PREFIXES = ['/app/'];
 const APP_SHELL = [
   '/',
   '/index.html',
@@ -15,9 +17,40 @@ const APP_SHELL = [
   '/icon-512.png',
   '/apple-touch-icon.png',
   '/auth-client.js',
-  '/icons.css?v=20261102-1',
-  '/pilot-redesign.css?v=20261104-1',
-  '/pilot-redesign.js?v=20261104-1'
+  '/app/main.js',
+  '/app/ui/tokens.css',
+  '/app/ui/base.css',
+  '/app/ui/components.css',
+  '/app/ui/components.js',
+  '/app/ui/charts.js',
+  '/app/ui/icons.js',
+  '/app/ui/patterns.js',
+  '/app/core/api.js',
+  '/app/core/authPolicy.js',
+  '/app/core/dom.js',
+  '/app/core/format.js',
+  '/app/core/mutations.js',
+  '/app/core/realtime.js',
+  '/app/core/registry.js',
+  '/app/core/resourceCatalog.js',
+  '/app/core/resources.js',
+  '/app/core/router.js',
+  '/app/core/session.js',
+  '/app/core/store.js',
+  '/app/domain/horizons.js',
+  '/app/domain/portfolio.js',
+  '/app/domain/readiness.js',
+  '/app/domain/records.js',
+  '/app/domain/stocks.js',
+  '/app/domain/text.js',
+  '/app/domain/trading.js',
+  '/app/features/home/index.js',
+  '/app/features/coins/index.js',
+  '/app/features/stocks/index.js',
+  '/app/features/portfolios/index.js',
+  '/app/features/activity/index.js',
+  '/app/features/settings/index.js',
+  '/app/features/more/index.js'
 ];
 
 self.addEventListener('install', event => {
@@ -37,24 +70,28 @@ self.addEventListener('activate', event => {
   );
 });
 
+// A waiting worker only activates when the user presses "업데이트".
 self.addEventListener('message', event => {
   if (event.data?.type === 'SKIP_WAITING') self.skipWaiting();
 });
+
+function isNetworkFirst(pathname) {
+  return NETWORK_FIRST_SHELL_PATHS.has(pathname) || NETWORK_FIRST_PREFIXES.some(prefix => pathname.startsWith(prefix));
+}
 
 self.addEventListener('fetch', event => {
   const request = event.request;
   if (request.method !== 'GET') return;
 
   const url = new URL(request.url);
-  // Third-party fonts and assets must keep their own response type. Falling
-  // back to our HTML shell for an offline CDN request breaks font/image fetches.
+  // Third-party requests keep their own response type; never answer them with the HTML shell.
   if (url.origin !== self.location.origin) return;
   if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/socket.io/')) {
     // Trading/account state must never be served from an old shell cache.
     return;
   }
 
-  if (NETWORK_FIRST_SHELL_PATHS.has(url.pathname)) {
+  if (isNetworkFirst(url.pathname)) {
     event.respondWith(
       fetch(request)
         .then(response => {
@@ -65,7 +102,8 @@ self.addEventListener('fetch', event => {
           return response;
         })
         .catch(() => caches.match(request, { ignoreSearch: true })
-          .then(cached => cached || caches.match('/index.html')))
+          .then(cached => cached || (request.mode === 'navigate' ? caches.match('/') : undefined))
+          .then(cached => cached || Response.error()))
     );
     return;
   }
@@ -77,6 +115,6 @@ self.addEventListener('fetch', event => {
         caches.open(CACHE_NAME).then(cache => cache.put(request, copy));
       }
       return response;
-    }).catch(() => caches.match('/index.html')))
+    }).catch(() => (request.mode === 'navigate' ? caches.match('/') : Response.error())))
   );
 });
