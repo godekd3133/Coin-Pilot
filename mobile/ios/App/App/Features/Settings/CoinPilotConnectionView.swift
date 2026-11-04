@@ -2,7 +2,8 @@ import SwiftUI
 
 struct CoinPilotConnectionView: View {
     @ObservedObject var store: CoinPilotStore
-    @FocusState private var tokenFocused: Bool
+    private enum LoginField: Hashable { case username, password, token }
+    @FocusState private var focusedField: LoginField?
 
     var body: some View {
         ScrollView {
@@ -52,22 +53,49 @@ struct CoinPilotConnectionView: View {
 
                 if store.phase == .login {
                     VStack(alignment: .leading, spacing: 10) {
-                        FieldTitle(title: store.usesManagedServerConnection ? "서버 토큰으로 로그인" : "서버 토큰")
-                        SecureField("토큰 입력", text: $store.tokenDraft)
-                            .cpNoAutocapitalization()
-                            .cpNoAutocorrection()
-                            .textFieldStyle(.plain)
-                            .font(.body)
-                            .padding(.horizontal, 15)
-                            .frame(minHeight: 54)
-                            .background(CPColor.surface)
-                            .clipShape(RoundedRectangle(cornerRadius: 12))
-                            .overlay(RoundedRectangle(cornerRadius: 12).stroke(CPColor.line, lineWidth: 1))
-                            .focused($tokenFocused)
-                            .accessibilityLabel("서버 토큰")
-                        Text(tokenStorageNotice)
-                            .font(.footnote)
-                            .foregroundColor(CPColor.secondaryInk)
+                        if store.showsPasswordLogin {
+                            FieldTitle(title: "아이디")
+                            TextField("아이디", text: $store.usernameDraft)
+                                .cpNoAutocapitalization()
+                                .cpNoAutocorrection()
+                                .textContentType(.username)
+                                .modifier(LoginFieldStyle())
+                                .focused($focusedField, equals: .username)
+                                .submitLabel(.next)
+                                .onSubmit { focusedField = .password }
+                                .accessibilityLabel("아이디")
+                            FieldTitle(title: "비밀번호")
+                            SecureField("비밀번호", text: $store.passwordDraft)
+                                .textContentType(.password)
+                                .modifier(LoginFieldStyle())
+                                .focused($focusedField, equals: .password)
+                                .submitLabel(.go)
+                                .onSubmit(submit)
+                                .accessibilityLabel("비밀번호")
+                            Text(passwordStorageNotice)
+                                .font(.footnote)
+                                .foregroundColor(CPColor.secondaryInk)
+                        } else {
+                            FieldTitle(title: store.usesManagedServerConnection ? "서버 토큰으로 로그인" : "서버 토큰")
+                            SecureField("토큰 입력", text: $store.tokenDraft)
+                                .cpNoAutocapitalization()
+                                .cpNoAutocorrection()
+                                .modifier(LoginFieldStyle())
+                                .focused($focusedField, equals: .token)
+                                .accessibilityLabel("서버 토큰")
+                            Text(tokenStorageNotice)
+                                .font(.footnote)
+                                .foregroundColor(CPColor.secondaryInk)
+                        }
+                        if store.passwordLoginAvailable == true {
+                            Button(store.showsPasswordLogin ? "토큰으로 로그인" : "아이디로 로그인") {
+                                store.setLoginUsesPassword(!store.showsPasswordLogin)
+                            }
+                            .font(.footnote.weight(.semibold))
+                            .foregroundColor(CPColor.blue)
+                            .frame(minHeight: 44)
+                            .buttonStyle(.plain)
+                        }
                     }
                 }
 
@@ -79,10 +107,7 @@ struct CoinPilotConnectionView: View {
                         .accessibilityAddTraits(.updatesFrequently)
                 }
 
-                Button {
-                    tokenFocused = false
-                    Task { await store.primaryConnectionAction() }
-                } label: {
+                Button(action: submit) {
                     HStack(spacing: 9) {
                         if store.isWorking { ProgressView().tint(.white) }
                         Text(store.isWorking ? "연결 중" : store.phase == .login ? "로그인" : store.usesManagedServerConnection ? "다시 연결" : store.phase == .setup ? "서버 확인" : "다시 연결")
@@ -129,6 +154,15 @@ struct CoinPilotConnectionView: View {
         }
         .cpReadableWidth()
         .background(CPColor.paper.ignoresSafeArea())
+    }
+
+    private func submit() {
+        focusedField = nil
+        Task { await store.primaryConnectionAction() }
+    }
+
+    private var passwordStorageNotice: String {
+        "로그인하면 서버가 발급한 접속 권한만 이 기기의 보안 저장소에 보관합니다. 비밀번호는 저장하지 않습니다."
     }
 
     private var serverAddressForm: some View {
@@ -178,12 +212,27 @@ struct CoinPilotConnectionView: View {
             return message
         }
         if store.phase == .login {
-            return "연결한 서버에서 발급한 토큰을 입력하세요."
+            return store.showsPasswordLogin
+                ? "서버에 등록한 아이디와 비밀번호로 로그인하세요."
+                : "연결한 서버에서 발급한 토큰을 입력하세요."
         }
         return ""
     }
 
     private var serverAddressHelp: String {
         "\(store.activeWorkspace.title) 계좌의 서버 주소를 입력하세요. 외부에서 연결할 때는 HTTPS 주소를 사용하세요."
+    }
+}
+
+private struct LoginFieldStyle: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .textFieldStyle(.plain)
+            .font(.body)
+            .padding(.horizontal, 15)
+            .frame(minHeight: 54)
+            .background(CPColor.surface)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .overlay(RoundedRectangle(cornerRadius: 12).stroke(CPColor.line, lineWidth: 1))
     }
 }

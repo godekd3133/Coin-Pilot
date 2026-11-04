@@ -246,6 +246,7 @@ struct CoinPilotHTTPResponse: Sendable {
 protocol CoinPilotAPIProviding {
     func authenticationStatus(at serverURL: URL) async throws -> CoinPilotHTTPResponse
     func login(token: String, at serverURL: URL) async throws -> CoinPilotHTTPResponse
+    func login(username: String, password: String, at serverURL: URL) async throws -> CoinPilotHTTPResponse
     func read(path: String, at serverURL: URL, token: String?) async throws -> CoinPilotHTTPResponse
     func mobileRead(path: String, at serverURL: URL, token: String?) async throws -> CoinPilotHTTPResponse
     func registerLiveCredentials(
@@ -512,6 +513,18 @@ final class CoinPilotAPIClient: CoinPilotAPIProviding, @unchecked Sendable {
 
     func login(token: String, at serverURL: URL) async throws -> CoinPilotHTTPResponse {
         try await send(path: "/api/auth/login", method: "POST", at: serverURL, token: nil, body: ["token": token])
+    }
+
+    /// The server answers a correct password with the bearer token the app
+    /// keeps in the Keychain (`client: native` asks for the mobile token).
+    func login(username: String, password: String, at serverURL: URL) async throws -> CoinPilotHTTPResponse {
+        try await send(
+            path: "/api/auth/login",
+            method: "POST",
+            at: serverURL,
+            token: nil,
+            body: ["username": username, "password": password, "client": "native"]
+        )
     }
 
     func read(path: String, at serverURL: URL, token: String?) async throws -> CoinPilotHTTPResponse {
@@ -1997,6 +2010,12 @@ final class CoinPilotStore: ObservableObject {
     @Published private(set) var serverAddress: String
     @Published var serverDraft: String
     @Published var tokenDraft = ""
+    @Published var usernameDraft = UserDefaults.standard.string(forKey: CoinPilotStore.loginUsernameDefaultsKey) ?? ""
+    @Published var passwordDraft = ""
+    /// The login form starts with username/password; a server that does not
+    /// offer it (`passwordLogin=false`) switches the form back to the token.
+    @Published var loginUsesPassword = true
+    @Published private(set) var passwordLoginAvailable: Bool?
     @Published var liveAccessKeyDraft = ""
     @Published var liveSecretKeyDraft = ""
     @Published private(set) var isSubmittingLiveCredentials = false
@@ -2676,6 +2695,7 @@ final class CoinPilotStore: ObservableObject {
         connectionMessage = nil
         dashboardMessage = nil
         tokenDraft = ""
+        passwordDraft = ""
         liveCredentialMessage = nil
         liveAccessKeyDraft = ""
         liveSecretKeyDraft = ""
@@ -2731,6 +2751,7 @@ final class CoinPilotStore: ObservableObject {
         authenticationScope = .unauthenticated
         connectionMessage = nil
         tokenDraft = ""
+        passwordDraft = ""
         clearLoadedData()
         serverModeMatchesWorkspace = true
         phase = .dashboard
@@ -2747,6 +2768,7 @@ final class CoinPilotStore: ObservableObject {
         clearLoadedData()
         connectionMessage = nil
         tokenDraft = ""
+        passwordDraft = ""
         didFinishInitialConnect = true
         guard let currentServerURL else {
             phase = .setup
@@ -2801,6 +2823,7 @@ final class CoinPilotStore: ObservableObject {
                 quoteCurrency: body["quoteCurrency"] as? String
             )
             authenticationRequired = authRequired
+            applyPasswordLoginAvailability(body["passwordLogin"] as? Bool)
             guard authRequired else {
                 authenticationScope = .unauthenticated
                 phase = .dashboard
@@ -2890,10 +2913,21 @@ final class CoinPilotStore: ObservableObject {
             phase = .setup
             return false
         }
+        let usesPassword = showsPasswordLogin
         let token = tokenDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !token.isEmpty, token.utf8.count <= 4096 else {
-            connectionMessage = "서버 토큰을 입력해 주세요."
-            return false
+        let username = usernameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        let password = passwordDraft
+        if usesPassword {
+            guard !username.isEmpty, !password.isEmpty,
+                  username.utf8.count <= 128, password.utf8.count <= 1024 else {
+                connectionMessage = "아이디와 비밀번호를 입력해 주세요."
+                return false
+            }
+        } else {
+            guard !token.isEmpty, token.utf8.count <= 4096 else {
+                connectionMessage = "서버 토큰을 입력해 주세요."
+                return false
+            }
         }
 
         let changed = isBundledPreview || url.absoluteString != currentServerURL?.absoluteString
@@ -2922,20 +2956,46 @@ final class CoinPilotStore: ObservableObject {
                 quoteCurrency: statusBody["quoteCurrency"] as? String
             )
             authenticationRequired = authRequired
+            applyPasswordLoginAvailability(statusBody["passwordLogin"] as? Bool)
         if authRequired {
-            let loginResponse = try await api.login(token: token, at: url)
+            if usesPassword && statusBody["passwordLogin"] as? Bool != true {
+                phase = .login
+                connectionMessage = "이 서버는 아이디 로그인을 쓰지 않아요. 서버 토큰으로 로그인해 주세요."
+                return false
+            }
+            let loginResponse = usesPassword
+                ? try await api.login(username: username, password: password, at: url)
+                : try await api.login(token: token, at: url)
             guard generation == requestGeneration, currentServerURL == url else { return false }
+            if usesPassword && loginResponse.statusCode == 401 {
+                phase = .login
+                connectionMessage = "아이디 또는 비밀번호가 맞지 않습니다."
+                return false
+            }
             guard (200..<300).contains(loginResponse.statusCode),
                   let loginBody = try? Self.jsonObject(loginResponse.body) as? [String: Any],
                   loginBody["success"] as? Bool == true else {
                 throw CoinPilotAPIError.forStatusCode(loginResponse.statusCode)
             }
+            let acceptedToken: String
+            if usesPassword {
+                guard let issued = loginBody["token"] as? String,
+                      !issued.isEmpty, issued.utf8.count <= 4096 else {
+                    throw CoinPilotAPIError.forStatusCode(loginResponse.statusCode)
+                }
+                acceptedToken = issued
+                UserDefaults.standard.set(username, forKey: Self.loginUsernameDefaultsKey)
+            } else {
+                acceptedToken = token
+            }
             authenticationScope = Self.authScope(from: loginResponse)
-            guard tokens.save(token, for: url) else { throw CoinPilotAPIError.keychain }
+            guard tokens.save(acceptedToken, for: url) else { throw CoinPilotAPIError.keychain }
         } else {
             authenticationScope = .unauthenticated
         }
             tokenDraft = ""
+            passwordDraft = ""
+        passwordDraft = ""
         phase = .dashboard
         await refresh()
         return generation == requestGeneration && serverModeMatchesWorkspace
@@ -3160,6 +3220,7 @@ final class CoinPilotStore: ObservableObject {
         orderMessage = nil
         connectionMessage = nil
         tokenDraft = ""
+        passwordDraft = ""
         authenticationScope = .unauthenticated
         serverModeMatchesWorkspace = true
         phase = currentServerURL == nil ? .setup : .login
@@ -5627,6 +5688,27 @@ final class CoinPilotStore: ObservableObject {
               (200..<300).contains(response.statusCode),
               let object = try? Self.jsonObject(response.body) as? [[String: Any]] else { return nil }
         return object
+    }
+
+    static let loginUsernameDefaultsKey = "coinpilot.loginUsername"
+
+    /// Toggles the login form between username/password and server token.
+    func setLoginUsesPassword(_ usesPassword: Bool) {
+        loginUsesPassword = usesPassword && passwordLoginAvailable == true
+        connectionMessage = nil
+    }
+
+    /// Password fields appear only after the server confirmed it offers them.
+    var showsPasswordLogin: Bool { loginUsesPassword && passwordLoginAvailable == true }
+
+    private func applyPasswordLoginAvailability(_ available: Bool?) {
+        let previous = passwordLoginAvailable
+        passwordLoginAvailable = available ?? false
+        if available == true {
+            if previous != true { loginUsesPassword = true }
+        } else {
+            loginUsesPassword = false
+        }
     }
 
     private static func authScope(from response: CoinPilotHTTPResponse) -> CoinPilotAuthScope {

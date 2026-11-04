@@ -31,6 +31,8 @@ private actor DeferredCoinPilotAPI: CoinPilotAPIProviding {
     private var loginURLs: [String] = []
     private var rejectedLoginTokens: Set<String> = []
     private var authenticationUnavailable = false
+    private var passwordLoginEnabled = false
+    private var passwordLogins: [[String: String]] = []
     private let serverModesByAddress: [String: String]
     private var readTokens: [String?] = []
     private var readPaths: [String] = []
@@ -73,7 +75,18 @@ private actor DeferredCoinPilotAPI: CoinPilotAPIProviding {
         networkCalls += 1
         authenticationURLs.append(serverURL.absoluteString)
         if authenticationUnavailable { throw CoinPilotAPIError.connection }
-        return Self.response(["success": true, "authRequired": requiresAuth])
+        return Self.response(["success": true, "authRequired": requiresAuth, "passwordLogin": passwordLoginEnabled])
+    }
+
+    func login(username: String, password: String, at serverURL: URL) async throws -> CoinPilotHTTPResponse {
+        networkCalls += 1
+        passwordLogins.append(["username": username, "password": password])
+        loginURLs.append(serverURL.absoluteString)
+        guard passwordLoginEnabled else { return Self.response(["success": false], statusCode: 400) }
+        guard username == "owner", password == "correct horse" else {
+            return Self.response(["success": false], statusCode: 401)
+        }
+        return Self.response(["success": true, "tokenScope": "mobile_operator", "token": "issued-mobile-token"])
     }
 
     func login(token: String, at serverURL: URL) async throws -> CoinPilotHTTPResponse {
@@ -237,6 +250,8 @@ private actor DeferredCoinPilotAPI: CoinPilotAPIProviding {
     func recordedCredentialSubmissionURLs() -> [String] { credentialSubmissionURLs }
     func recordedCredentialSubmissionTokens() -> [String?] { credentialSubmissionTokens }
     func setLoginTokenScope(_ scope: String?) { loginTokenScope = scope }
+    func setPasswordLoginEnabled(_ enabled: Bool) { passwordLoginEnabled = enabled }
+    func recordedPasswordLogins() -> [[String: String]] { passwordLogins }
     func setFailedPaths(_ paths: Set<String>) { failedPaths = paths }
     func setCancelledPaths(_ paths: Set<String>) { cancelledPaths = paths }
     func setHeldHosts(_ hosts: Set<String>) { heldHosts = hosts }
@@ -485,6 +500,8 @@ struct CoinPilotStoreTests {
         try await liveCredentialRegistrationUsesEphemeralKeysAndWaitsForSync()
         try await liveCredentialRegistrationRequiresHttpsAndMobileOperatorScope()
         try await signInUsesAndStoresOnlyTheServerToken()
+        try await passwordSignInStoresOnlyTheIssuedToken()
+        try await passwordFormFallsBackToTokenWhenServerLacksIt()
         try await fullOperatorScopeGrantsNativeControl()
         try await cancelledOrderPreflightKeepsLoggedOutStateClean()
         try await tokenReplacementClearsPreviousPermissionErrors()
@@ -2993,6 +3010,49 @@ struct CoinPilotStoreTests {
         precondition(store.paperValidationSummary?.cohort.totalStrictProfitComparable == false, "Heterogeneous session P&L must remain non-comparable.")
         let readTokens = await api.recordedReadTokens()
         precondition(readTokens.allSatisfy { $0 == "read-only-token" }, "Each server read should use the saved token.")
+    }
+
+    private static func passwordSignInStoresOnlyTheIssuedToken() async throws {
+        let api = DeferredCoinPilotAPI(requiresAuth: true)
+        await api.setPasswordLoginEnabled(true)
+        let tokens = MemoryCoinPilotTokens()
+        let store = CoinPilotStore(api: api, tokens: tokens)
+        let serverURL = URL(string: "https://password.example")!
+        let connected = await store.connect(using: serverURL.absoluteString)
+        precondition(!connected && store.phase == .login, "A server without a saved token should ask for a login.")
+        precondition(store.showsPasswordLogin, "A server that offers password login should show the password form.")
+
+        store.usernameDraft = "owner"
+        store.passwordDraft = "wrong"
+        let rejected = await store.signIn()
+        precondition(!rejected && store.phase == .login, "A wrong password must keep the login screen.")
+        precondition(store.connectionMessage == "아이디 또는 비밀번호가 맞지 않습니다.", "A wrong password needs its own message.")
+        precondition(tokens.token(for: serverURL) == nil, "A rejected password must not store anything.")
+
+        store.passwordDraft = "correct horse"
+        let signedIn = await store.signIn()
+        precondition(signedIn && store.phase == .dashboard, "A correct password should reach the dashboard.")
+        precondition(tokens.token(for: serverURL) == "issued-mobile-token", "Only the token issued by the server is stored.")
+        precondition(store.passwordDraft.isEmpty, "The password must not stay in memory after sign-in.")
+        precondition(store.authenticationScope == .mobileOperator, "The issued scope should be applied.")
+        let logins = await api.recordedPasswordLogins()
+        precondition(logins.count == 2 && logins.last?["username"] == "owner", "Both attempts should reach the server.")
+        let tokenLogins = await api.recordedLoginTokens()
+        precondition(tokenLogins.isEmpty, "Password sign-in must not send a token login.")
+        let readTokens = await api.recordedReadTokens()
+        precondition(!readTokens.isEmpty && readTokens.allSatisfy { $0 == "issued-mobile-token" }, "Reads should use the issued token.")
+    }
+
+    private static func passwordFormFallsBackToTokenWhenServerLacksIt() async throws {
+        let api = DeferredCoinPilotAPI(requiresAuth: true)
+        let store = CoinPilotStore(api: api, tokens: MemoryCoinPilotTokens())
+        _ = await store.connect(using: "https://token-only.example")
+        precondition(!store.showsPasswordLogin, "A server without password login should show the token form.")
+        store.setLoginUsesPassword(true)
+        precondition(!store.showsPasswordLogin, "The form cannot switch to a login the server does not offer.")
+        store.tokenDraft = "read-only-token"
+        let signedIn = await store.signIn()
+        precondition(signedIn, "Token sign-in must keep working.")
     }
 
     private static func cancelledOrderPreflightKeepsLoggedOutStateClean() async throws {
