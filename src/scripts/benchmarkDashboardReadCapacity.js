@@ -11,7 +11,6 @@ import { MarketDataProvider } from '../api/marketDataProvider.js';
 
 const SCRIPT_PATH = fileURLToPath(import.meta.url);
 const PROJECT_ROOT = path.resolve(path.dirname(SCRIPT_PATH), '..', '..');
-const CORE_REFRESH_SOURCE = path.join(PROJECT_ROOT, 'public', 'pilot-redesign.js');
 const RESULT_PREFIX = 'DASHBOARD_READ_CAPACITY_RESULT=';
 const SYNTHETIC_DASHBOARD_TOKEN = 'synthetic-dashboard-read-capacity-token';
 const MAX_CLIENTS_PER_PROFILE = 32;
@@ -41,22 +40,25 @@ const FIXTURE_MARKETS = Object.freeze([
 const FIXTURE_SOURCE_AS_OF = '2026-09-29T00:00:00.000Z';
 const FIXTURE_FETCHED_AT = '2026-09-29T00:00:01.000Z';
 
+// The web shell's home screen first load (public/app/features/home resources,
+// resolved through public/app/core/resourceCatalog.js) plus the research
+// screen's momentum-shadow read, which is the heaviest projection the shell
+// polls. assertCurrentCoreRefreshContract() fails when the shell changes it.
 const EXPECTED_CORE_REFRESH_REQUESTS = Object.freeze({
   status: '/status',
   account: '/account',
   pnl: '/cumulative-pnl',
   today: '/today-summary',
-  statistics: '/statistics',
-  validation: '/scalping-validation',
-  strategyReadiness: '/strategy-readiness',
-  paper: '/paper-validation',
-  momentumShadow: '/momentum-shadow',
-  portfolioAnalysis: '/portfolio-analysis',
   history: '/portfolio/history?period=${period}',
-  trades: '/trades?limit=12',
-  marketPrices: '/market/prices/snapshot',
-  targetCoins: '/target-coins'
+  trades: '/trades?limit=50',
+  stocks: '/stocks/status',
+  horizons: '/horizons/status',
+  paper: '/paper-validation',
+  prices: '/market/prices/snapshot',
+  readiness: '/strategy-readiness',
+  momentumShadow: '/momentum-shadow'
 });
+const CORE_REFRESH_EXTRA_RESOURCES = Object.freeze(['momentumShadow']);
 
 const CORE_REFRESH_ROUTES = Object.freeze(
   Object.entries(EXPECTED_CORE_REFRESH_REQUESTS)
@@ -206,40 +208,32 @@ function parseWorkerArguments(argv) {
   return options;
 }
 
-function extractCurrentCoreRefreshRequests(source) {
-  const loadCoreIndex = source.indexOf('async function loadCore(');
-  if (loadCoreIndex < 0) throw new Error('Could not find the PWA loadCore function.');
-
-  const requestStart = source.indexOf('const requests = {', loadCoreIndex);
-  if (requestStart < 0) throw new Error('Could not find the PWA core refresh request object.');
-  const bodyStart = source.indexOf('{', requestStart) + 1;
-  const bodyEnd = source.indexOf('};', bodyStart);
-  if (bodyEnd < 0) throw new Error('Could not find the end of the PWA core refresh request object.');
-
-  const body = source.slice(bodyStart, bodyEnd);
+async function extractCurrentCoreRefreshRequests() {
+  const { RESOURCE_CATALOG } = await import('../../public/app/core/resourceCatalog.js');
+  const { default: home } = await import('../../public/app/features/home/index.js');
+  const names = [...new Set([...(home.resources || []), ...CORE_REFRESH_EXTRA_RESOURCES])];
   const requests = {};
-  const propertyPattern = /(?:^|,)\s*([A-Za-z][\w]*)\s*:\s*(?:'([^']*)'|"([^"]*)"|`([^`]*)`)\s*(?=,|$)/g;
-  let match;
-  while ((match = propertyPattern.exec(body)) !== null) {
-    requests[match[1]] = match[2] ?? match[3] ?? match[4];
-  }
-
-  const propertyCount = (body.match(/(?:^|,)\s*[A-Za-z][\w]*\s*:/g) || []).length;
-  if (Object.keys(requests).length !== propertyCount) {
-    throw new Error('The PWA core refresh request object has an unsupported expression or formatting change.');
+  for (const name of names) {
+    const definition = RESOURCE_CATALOG[name];
+    if (!definition) throw new Error(`The web shell references an unknown resource: ${name}`);
+    const paths = [];
+    const recordingApi = { get: async route => { paths.push(route); return route.startsWith('/market/prices/snapshot') ? { prices: [] } : {}; } };
+    const params = definition.defaultParams === '24h' ? '${period}' : definition.defaultParams;
+    await definition.fetch(recordingApi, params);
+    if (paths.length !== 1) throw new Error(`Resource ${name} issues ${paths.length} reads; the benchmark expects one.`);
+    requests[name] = paths[0].replace('%24%7Bperiod%7D', '${period}');
   }
   return requests;
 }
 
-function assertCurrentCoreRefreshContract() {
-  const source = fs.readFileSync(CORE_REFRESH_SOURCE, 'utf8');
-  const requests = extractCurrentCoreRefreshRequests(source);
+async function assertCurrentCoreRefreshContract() {
+  const requests = await extractCurrentCoreRefreshRequests();
   assert.deepEqual(
     requests,
     EXPECTED_CORE_REFRESH_REQUESTS,
-    'Update this benchmark when public/pilot-redesign.js changes the core refresh request set.'
+    'Update this benchmark when the web shell home screen changes its first-load resource set.'
   );
-  assert.equal(CORE_REFRESH_ROUTES.length, 14);
+  assert.equal(CORE_REFRESH_ROUTES.length, 12);
   assert.equal(CORE_REFRESH_ROUTES.find(route => route.name === 'momentumShadow')?.path, '/api/momentum-shadow');
   assert(CORE_REFRESH_ROUTES.every(route => route.path.startsWith('/api/')));
   return requests;
@@ -958,7 +952,7 @@ function assertBoundedMomentumShadowFixtureReads(readSummary, expectedFileCount,
 }
 
 async function runWorker(profile, options) {
-  assertCurrentCoreRefreshContract();
+  await assertCurrentCoreRefreshContract();
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'coinpilot-dashboard-read-capacity-'));
   const fixtureRoot = path.join(tempRoot, 'fixtures');
   const paperForwardCohortRootDir = path.join(fixtureRoot, 'paper-forward-cohort');
@@ -1172,7 +1166,7 @@ function buildFinalReport(options, profiles) {
       targetThresholdsDefined: false
     },
     coreRefreshSet: {
-      source: 'public/pilot-redesign.js loadCore() requests object',
+      source: 'public/app/features/home resources via public/app/core/resourceCatalog.js, plus the research momentum-shadow read',
       currentRequestCount: Object.keys(EXPECTED_CORE_REFRESH_REQUESTS).length,
       measuredRequestCount: measuredRequests.length,
       measuredRequests,
@@ -1189,8 +1183,8 @@ function buildFinalReport(options, profiles) {
 }
 
 function assertSelfCheckReport(report) {
-  assert.equal(report.coreRefreshSet.currentRequestCount, 14);
-  assert.equal(report.coreRefreshSet.measuredRequestCount, 14);
+  assert.equal(report.coreRefreshSet.currentRequestCount, 12);
+  assert.equal(report.coreRefreshSet.measuredRequestCount, 12);
   assert.deepEqual(report.coreRefreshSet.omittedRequests, []);
   assert.deepEqual(report.profiles.map(profile => profile.clients), [1]);
   const profile = report.profiles[0];
@@ -1241,7 +1235,7 @@ async function main() {
     return;
   }
 
-  assertCurrentCoreRefreshContract();
+  await assertCurrentCoreRefreshContract();
   const options = parseParentArguments(process.argv.slice(2));
   const profiles = [];
   for (const clientCount of options.profiles) {

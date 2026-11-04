@@ -72,10 +72,10 @@ function main() {
     /<svg\b[^>]*\bwidth=["']512["'][^>]*\bheight=["'][^>]*\bviewBox=["']0 0 512 512["']/.test(svgIconSource),
   'SVG install icon declares explicit 512x512 geometry');
 
-  const scriptAsset = indexSource.match(/<script\s+src=["'](\/pilot-redesign\.js\?v=[^"']+)["']/)?.[1];
-  const styleAsset = indexSource.match(/<link\s+rel=["']stylesheet["']\s+href=["'](\/pilot-redesign\.css\?v=[^"']+)["']/)?.[1];
-  check('index-redesign-script-version', Boolean(scriptAsset), scriptAsset || 'missing');
-  check('index-redesign-style-version', Boolean(styleAsset), styleAsset || 'missing');
+  const scriptAsset = indexSource.match(/<script\s+type=["']module["']\s+src=["'](\/app\/main\.js)["']/)?.[1];
+  const styleAssets = [...indexSource.matchAll(/<link\s+rel=["']stylesheet["']\s+href=["'](\/app\/ui\/[a-z]+\.css)["']/g)].map(match => match[1]);
+  check('index-app-module-entry', Boolean(scriptAsset), scriptAsset || 'missing');
+  check('index-app-design-tokens', styleAssets.includes('/app/ui/tokens.css'), styleAssets.join(', ') || 'missing');
   check('index-mobile-web-app-capable',
     /<meta\s+name=["']mobile-web-app-capable["']\s+content=["']yes["']/i.test(indexSource),
     'Android install metadata declares mobile web app capability');
@@ -100,8 +100,9 @@ function main() {
     '/icon-192.png',
     '/icon-512.png',
     '/apple-touch-icon.png',
+    '/auth-client.js',
     scriptAsset,
-    styleAsset
+    ...styleAssets
   ].filter(Boolean);
   for (const asset of shellAssets) {
     const file = asset === '/' ? indexFile : safePublicFile(asset.split('?')[0]);
@@ -119,8 +120,10 @@ function main() {
   check('service-worker-shell-network-first', /NETWORK_FIRST_SHELL_PATHS/.test(serviceWorkerSource) &&
     /fetch\(request\)[\s\S]*ignoreSearch: true/.test(serviceWorkerSource),
   'online shell assets refresh from the network and fall back to cache offline');
-  check('redesign-service-worker-registration', /navigator\.serviceWorker\.register\(['"]\/sw\.js['"]\)/.test(read(path.join(publicRoot, 'pilot-redesign.js'))),
-    'redesign owns service worker registration');
+  check('service-worker-app-prefix-network-first', /NETWORK_FIRST_PREFIXES = \[['"]\/app\/['"]\]/.test(serviceWorkerSource),
+    'shell modules under /app/ refresh from the network first');
+  check('app-service-worker-registration', /navigator\.serviceWorker\.register\(['"]\/sw\.js['"]/.test(read(path.join(publicRoot, 'app', 'main.js'))),
+    'the web shell entry owns service worker registration');
 
   const valid = checks.every(item => item.passed);
   console.log(JSON.stringify({ valid, projectRoot, checks }, null, 2));

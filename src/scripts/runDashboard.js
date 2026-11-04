@@ -304,15 +304,224 @@ export function createMockTrader() {
   return trader;
 }
 
+
+// ---------------------------------------------------------------------------
+// Deterministic demo data for `npm run dashboard` only. The server-side
+// contracts mirror StockTradingService / HorizonRuntime getStatus() so the web
+// shell's stock and portfolio screens can be smoke-tested without any broker.
+// createMockTrader() above stays minimal because many tests depend on it.
+
+const DEMO_MARKETS = {
+  'KRW-BTC': 98_450_000, 'KRW-ETH': 4_812_000, 'KRW-XRP': 3_215, 'KRW-SOL': 241_300, 'KRW-DOGE': 412,
+  'KRW-ADA': 1_087, 'KRW-AVAX': 52_400, 'KRW-LINK': 28_950, 'KRW-DOT': 11_230, 'KRW-ETC': 38_120
+};
+
+function seededWave(seed, index) {
+  return Math.sin(index / 7 + seed) * 0.006 + Math.sin(index / 23 + seed * 2) * 0.012 + Math.cos(index / 3 + seed) * 0.002;
+}
+
+export function seedMockDashboardData(trader, now = Date.now()) {
+  const markets = Object.keys(DEMO_MARKETS);
+  const changeOf = market => (markets.indexOf(market) % 3 === 0 ? 0.018 : markets.indexOf(market) % 3 === 1 ? -0.011 : 0.004) * (1 + markets.indexOf(market) / 10);
+  const upbit = trader.upbit;
+  trader.targetCoins = markets;
+  trader.upbit = {
+    ...upbit,
+    async getMarkets() {
+      return markets.map(market => ({ market, korean_name: market.replace('KRW-', ''), english_name: market.replace('KRW-', '') }));
+    },
+    async getTicker(requested) {
+      const selected = (Array.isArray(requested) ? requested : [requested]).filter(Boolean);
+      return selected.map(market => {
+        const price = DEMO_MARKETS[market] || 1_000;
+        const rate = changeOf(market);
+        return {
+          market,
+          trade_price: price,
+          trade_timestamp: Date.now(),
+          signed_change_rate: rate,
+          signed_change_price: Math.round(price * rate),
+          acc_trade_price_24h: 30_000_000_000 / (1 + markets.indexOf(market)),
+          acc_trade_volume_24h: 1_000,
+          high_price: price * 1.024,
+          low_price: price * 0.979
+        };
+      });
+    },
+    async getMinuteCandles(market, unit = 1, count = 120) {
+      const base = DEMO_MARKETS[market] || 1_000;
+      const seed = markets.indexOf(market) + 1;
+      return Array.from({ length: Math.min(count, 200) }, (_, index) => {
+        const close = base * (1 + seededWave(seed, index));
+        const open = base * (1 + seededWave(seed, index + 1));
+        return {
+          market,
+          candle_date_time_utc: new Date(Date.now() - index * unit * 60_000).toISOString().slice(0, 19),
+          candle_date_time_kst: new Date(Date.now() - index * unit * 60_000 + 9 * 3_600_000).toISOString().slice(0, 19),
+          opening_price: open,
+          high_price: Math.max(open, close) * 1.0015,
+          low_price: Math.min(open, close) * 0.9985,
+          trade_price: close,
+          candle_acc_trade_volume: 120 + (index % 9) * 11
+        };
+      });
+    }
+  };
+  trader.virtualPortfolio = {
+    krwBalance: 612_400,
+    holdings: new Map([
+      ['KRW-BTC', { amount: 0.0021, avgPrice: 96_100_000, entryTime: new Date(now - 26 * 3_600_000).toISOString() }],
+      ['KRW-SOL', { amount: 0.72, avgPrice: 246_000, entryTime: new Date(now - 5 * 3_600_000).toISOString() }]
+    ])
+  };
+  trader.smartTradeHistory = [
+    { coin: 'KRW-SOL', type: 'BUY', volume: 0.72, price: 246_000, grossAmount: 177_120, timestamp: new Date(now - 5 * 3_600_000).toISOString(), source: 'smart_buy' },
+    { coin: 'KRW-XRP', type: 'SELL', volume: 40, price: 3_180, grossAmount: 127_200, profit: 3_420, timestamp: new Date(now - 9 * 3_600_000).toISOString(), source: 'manual' },
+    { coin: 'KRW-BTC', type: 'BUY', volume: 0.0021, price: 96_100_000, grossAmount: 201_810, timestamp: new Date(now - 26 * 3_600_000).toISOString(), source: 'manual' }
+  ];
+  if (trader.portfolioHistoryFile) {
+    const history = Array.from({ length: 96 }, (_, index) => ({
+      timestamp: new Date(now - (95 - index) * 15 * 60_000).toISOString(),
+      totalAssets: Math.round(1_000_000 * (1 + index * 0.00028 + seededWave(3, index) * 0.6))
+    }));
+    fs.writeFileSync(trader.portfolioHistoryFile, JSON.stringify(history));
+  }
+  return trader;
+}
+
+function mockStockTrader(mode, now) {
+  const paper = mode === 'paper';
+  const state = {
+    running: paper,
+    desiredRunning: paper,
+    cash: paper ? 7_412_300 : null,
+    initialSeedMoney: 10_000_000,
+    positions: paper ? [
+      { symbol: '005930', quantity: 20, entryPrice: 71_200, lastPrice: 72_100, entryTime: new Date(now - 95 * 60_000).toISOString(), unrealizedProfit: 18_000 },
+      { symbol: '000660', quantity: 6, entryPrice: 198_500, lastPrice: 196_000, entryTime: new Date(now - 40 * 60_000).toISOString(), unrealizedProfit: -15_000 }
+    ] : [],
+    trades: paper ? [
+      { action: 'SELL', symbol: '035420', quantity: 4, price: 187_300, profit: 9_240, profitPercent: 1.24, reason: 'TAKE_PROFIT', at: new Date(now - 3 * 3_600_000).toISOString() },
+      { action: 'BUY', symbol: '000660', quantity: 6, price: 198_500, reason: '과매도 반등', at: new Date(now - 40 * 60_000).toISOString() },
+      { action: 'BUY', symbol: '005930', quantity: 20, price: 71_200, reason: '과매도 반등', at: new Date(now - 95 * 60_000).toISOString() }
+    ] : []
+  };
+  return {
+    state,
+    getStatus() {
+      const positionsValue = state.positions.reduce((sum, position) => sum + position.lastPrice * position.quantity, 0);
+      const sells = state.trades.filter(trade => trade.action === 'SELL');
+      return {
+        mode, running: state.running, desiredRunning: state.desiredRunning, entriesPaused: false, pauseReason: null, pendingOrders: 0,
+        market: { open: true, canEnter: true, mustFlatten: false, reason: 'regular_session' },
+        lastCycleAt: state.running ? new Date().toISOString() : null, lastError: null,
+        cash: state.cash, initialSeedMoney: state.initialSeedMoney,
+        totalAssets: state.cash !== null ? Math.round(state.cash + positionsValue) : null,
+        positions: state.positions, maxPositions: 5,
+        statistics: { totalTrades: sells.length, winningTrades: sells.filter(trade => trade.profit > 0).length, winRate: sells.length ? 100 : 0, totalProfit: sells.reduce((sum, trade) => sum + trade.profit, 0) },
+        recentTrades: state.trades,
+        recentSignals: paper ? [{ symbol: '051910', reason: 'RSI 과매도 반등', valid: false, rejection: '현금 부족 (1주 412,000원)', at: new Date(now - 12 * 60_000).toISOString() }] : []
+      };
+    },
+    start() { state.running = true; state.desiredRunning = true; return this.getStatus(); },
+    stop() { state.running = false; state.desiredRunning = false; return this.getStatus(); },
+    resetPaper(seed) {
+      if (!paper) throw new Error('실전 계좌는 초기화할 수 없습니다.');
+      if (state.positions.length) throw new Error('보유 포지션이 있어 초기화할 수 없습니다.');
+      state.cash = Math.max(0, Number(seed) || 10_000_000);
+      state.initialSeedMoney = state.cash;
+      state.trades = [];
+      return this.getStatus();
+    }
+  };
+}
+
+function mockHorizonRuntime(assetClass, mode, now) {
+  const sleeves = assetClass === 'coin'
+    ? [['short', '단기 (1~3일)', '60m', true, 1.8, -6.2], ['swing', '스윙 (~1주)', '240m', true, 4.1, -9.8], ['mid', '중기 (1~3개월)', '1d', false, -2.3, -18.4], ['long', '장기 (3개월+)', '1w', true, 7.9, -14.1]]
+    : [['short', '단기 (1~3일)', '1d', false, -0.8, -4.9], ['swing', '스윙 (~1주)', '1d', true, 2.6, -7.3], ['mid', '중기 (1~3개월)', '1d', true, 5.2, -11.2], ['long', '장기 (3개월+)', '1w', false, 1.1, -21.5]];
+  const passed = sleeves.filter(item => item[3]);
+  const weightEach = passed.length ? 100 / passed.length : 0;
+  const state = { running: mode === 'paper', cash: assetClass === 'coin' ? 2_104_000 : 3_880_000 };
+  const positions = assetClass === 'coin'
+    ? [{ sleeve: 'swing', symbol: 'KRW-ETH', quantity: 0.12, entryPrice: 4_690_000, lastPrice: 4_812_000, cost: 562_800, stopPrice: 4_420_000, score: 64, barsHeld: 9, entryTime: new Date(now - 36 * 3_600_000).toISOString(), unrealizedProfit: 14_640, stuckBelowMinimum: false },
+      { sleeve: 'long', symbol: 'KRW-BTC', quantity: 0.006, entryPrice: 91_200_000, lastPrice: 98_450_000, cost: 547_200, stopPrice: 84_000_000, score: 71, barsHeld: 3, entryTime: new Date(now - 20 * 86_400_000).toISOString(), unrealizedProfit: 43_500, stuckBelowMinimum: false }]
+    : [{ sleeve: 'mid', symbol: '005380', quantity: 3, entryPrice: 241_000, lastPrice: 248_500, cost: 723_000, stopPrice: 226_000, score: 58, barsHeld: 12, entryTime: new Date(now - 17 * 86_400_000).toISOString(), unrealizedProfit: 22_500, stuckBelowMinimum: false }];
+  const trades = [{ action: 'SELL', sleeve: 'short', symbol: assetClass === 'coin' ? 'KRW-SOL' : '035720', quantity: assetClass === 'coin' ? 1.1 : 12, price: assetClass === 'coin' ? 239_000 : 47_100, profit: 6_310, returnPercent: 2.4, reason: 'TRAILING_STOP', at: new Date(now - 30 * 3_600_000).toISOString() }];
+  const manager = {
+    async start() { state.running = true; },
+    stop() { state.running = false; }
+  };
+  return {
+    manager,
+    getStatus() {
+      const positionsValue = positions.reduce((sum, position) => sum + position.lastPrice * position.quantity, 0);
+      return {
+        assetClass, mode, running: state.running, desiredRunning: state.running, entriesPaused: false, pauseReason: null, pendingOrders: 0,
+        lastCycleAt: state.running ? new Date(now - 4 * 60_000).toISOString() : null, lastError: null, gate: null,
+        capitalRatio: 0.3, paramsValidated: true, paramsSource: new Date(now - 2 * 86_400_000).toISOString(),
+        cash: mode === 'paper' ? state.cash : null, initialSeedMoney: 3_000_000,
+        totalAssets: mode === 'paper' ? Math.round(state.cash + positionsValue) : null,
+        sleeves: Object.fromEntries(sleeves.map(([key, label, interval, ok]) => [key, {
+          label, enabled: ok, weight: ok ? Math.round(weightEach * 10) / 10 : 0, interval,
+          positions: positions.filter(position => position.sleeve === key).length,
+          realizedProfit: trades.filter(trade => trade.sleeve === key).reduce((sum, trade) => sum + trade.profit, 0),
+          trades: trades.filter(trade => trade.sleeve === key).length, winRate: trades.some(trade => trade.sleeve === key) ? 100 : 0,
+          lastAnalysis: { barStart: new Date(now - 3_600_000).toISOString(), benchmarkRegime: 'uptrend', top: [{ symbol: assetClass === 'coin' ? 'KRW-BTC' : '005930', score: 71, regime: 'uptrend', rsi: 58, atrPercent: 2.1 }] }
+        }])),
+        positions,
+        recentTrades: trades,
+        research: {
+          generatedAt: new Date(now - 2 * 86_400_000).toISOString(), method: 'expanding_walk_forward_3fold', markets: assetClass === 'coin' ? 20 : 30,
+          sleeves: sleeves.map(([key, , interval, ok, oos, dd]) => ({ horizon: key, interval, passed: ok, outOfSampleReturnPercent: oos, worstDrawdownPercent: dd, trades: 14 + key.length, params: null })),
+          scheduler: { running: false, lastRunAt: new Date(now - 2 * 86_400_000).toISOString(), lastError: null, paramsFile: `horizon_${assetClass}.json` }
+        }
+      };
+    }
+  };
+}
+
+export function createMockStockTradingService(now = Date.now()) {
+  const traders = { paper: mockStockTrader('paper', now) };
+  const horizons = { paper: mockHorizonRuntime('stock', 'paper', now) };
+  return {
+    traders,
+    horizons,
+    credentialsConfigured: true,
+    getTrader(mode) {
+      const trader = traders[mode];
+      if (!trader) throw Object.assign(new Error(`주식 ${mode} 트레이더가 활성화되지 않았습니다.`), { status: 404 });
+      return trader;
+    },
+    async startTrader(mode) { return this.getTrader(mode).start(); },
+    stopTrader(mode) { return this.getTrader(mode).stop(); },
+    getStatus() {
+      return {
+        enabled: true, provider: 'tossinvest', credentialsConfigured: true,
+        universe: ['005930', '000660', '035420', '005380', '051910', '035720'], universeUpdatedAt: new Date(now - 20 * 60_000).toISOString(), universeError: null,
+        paper: traders.paper.getStatus(), live: null,
+        horizons: Object.fromEntries(Object.entries(horizons).map(([mode, runtime]) => [mode, runtime.getStatus()]))
+      };
+    }
+  };
+}
+
+export function createMockCoinHorizon(now = Date.now()) {
+  return mockHorizonRuntime('coin', 'paper', now);
+}
+
 export async function main() {
   console.log('\n🌐 대시보드 서버 시작...\n');
 
   const port = envNumber('DASHBOARD_PORT', NaN) || 3000;
 
   // 대시보드 전용 모드 (실제 트레이딩은 하지 않음)
-  const mockTrader = createMockTrader();
+  const mockTrader = seedMockDashboardData(createMockTrader());
 
-  const server = new DashboardServer(mockTrader, port);
+  const server = new DashboardServer(mockTrader, port, {
+    stockTradingService: createMockStockTradingService(),
+    coinHorizon: createMockCoinHorizon()
+  });
   await server.start();
 
   console.log('\n📊 대시보드에 접속하세요:');
