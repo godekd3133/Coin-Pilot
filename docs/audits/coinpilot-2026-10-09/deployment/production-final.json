@@ -1,0 +1,68 @@
+{
+  "live": {
+    "/ready": {
+      "http": 200,
+      "ready": true
+    },
+    "/api/system-status": {
+      "http": 200,
+      "mode": "LIVE",
+      "isRunning": true,
+      "currentPositions": 0,
+      "runtimeState": "RUNNING"
+    },
+    "/api/account": {
+      "http": 200,
+      "mode": "LIVE",
+      "valuationAvailable": true,
+      "valuationStatus": "available"
+    },
+    "/api/positions": {
+      "http": 200,
+      "mode": "LIVE",
+      "valuationAvailable": true,
+      "valuationStatus": "available"
+    },
+    "/api/optimization/settings": {
+      "http": 200,
+      "isRunning": false
+    },
+    "/api/strategy-readiness": {
+      "http": 200,
+      "status": "NOT_REQUIRED"
+    }
+  },
+  "paper": {
+    "/ready": {
+      "http": 200,
+      "ready": true
+    },
+    "/api/system-status": {
+      "http": 200,
+      "mode": "DRY_RUN",
+      "isRunning": true,
+      "currentPositions": 0,
+      "runtimeState": "RUNNING"
+    },
+    "/api/account": {
+      "http": 200,
+      "mode": "DRY_RUN",
+      "valuationAvailable": true,
+      "valuationStatus": "available"
+    },
+    "/api/positions": {
+      "http": 200,
+      "mode": "DRY_RUN",
+      "valuationAvailable": true,
+      "valuationStatus": "available"
+    },
+    "/api/optimization/settings": {
+      "http": 200,
+      "isRunning": false
+    },
+    "/api/strategy-readiness": {
+      "http": 200,
+      "status": "BLOCKED"
+    }
+  }
+}

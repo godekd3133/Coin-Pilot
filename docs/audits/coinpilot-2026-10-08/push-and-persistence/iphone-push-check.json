@@ -1,0 +1,22 @@
+{
+  "checkedAt": "2026-10-08T08:10:49.364Z",
+  "userReportedUpdate": "TestFlight 1.0 (22), notifications allowed",
+  "registeredDevices": {
+    "LIVE": 1,
+    "DRY_RUN": 1
+  },
+  "connectionCheckNotifications": [
+    {
+      "mode": "LIVE",
+      "environment": "production",
+      "status": 200
+    },
+    {
+      "mode": "DRY_RUN",
+      "environment": "production",
+      "status": 200
+    }
+  ],
+  "realOrdersFromVerification": 0,
+  "iphoneReceiptConfirmed": false
+}

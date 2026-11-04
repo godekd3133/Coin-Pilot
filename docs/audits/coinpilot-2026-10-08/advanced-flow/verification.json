@@ -1,0 +1,78 @@
+{
+  "recordedAt": "2026-10-09T08:04:29.849844+00:00",
+  "goalStatus": "active",
+  "environment": "synthetic native QA, port 39471",
+  "productionDeployment": "not-run",
+  "realOrders": "not-run",
+  "realAIRequests": "not-run",
+  "checks": {
+    "nativeStateScenarios": {
+      "status": "passed",
+      "count": 70,
+      "log": "store-tests.log"
+    },
+    "backendRegressions": {
+      "status": "passed",
+      "count": 21,
+      "log": "backend-tests.log"
+    },
+    "macQA": {
+      "status": "passed",
+      "log": "mac-memory-build.log"
+    },
+    "iosSimulatorBuild": {
+      "status": "passed",
+      "log": "ios-build.log"
+    },
+    "iosCurrentVisual": {
+      "status": "blocked",
+      "reason": "CUA does not resolve Simulator app"
+    },
+    "macRegular": {
+      "status": "passed",
+      "log": "mac-regular-build.log"
+    },
+    "usefulness": {
+      "status": "passed",
+      "log": "usefulness-tests.log",
+      "count": 5
+    },
+    "diffCheck": "passed"
+  },
+  "sourceSHA256": {
+    "mobile/ios/App/App/CoinPilotStore.swift": "4dcaa084bbb6ae19610188149ba31fc496312e2b83c4ddee2d7c4dc29f7b2ae7",
+    "mobile/ios/App/App/CoinPilotViews.swift": "78328c23b9531d4f3c9f0f4ccea73a724225e24f29068f22725770b1e0326069",
+    "mobile/scripts/runNativeQA.mjs": "72dd47bc98c221aad60e9d8f7b4148913fe982f5fb30805d1b7b5a5e047a33f3",
+    "mobile/tests/CoinPilotStoreTests.swift": "b1992abfc6ce8f59e688e1783892fcfbc01f3e6f3c54d30b2fdbe70db9579d8d",
+    "mobile/tests/CoinPilotUsefulnessTests.swift": "a52066f3fae9b88db387b1091d8c89c7d5742e8f348150d7e7ab928bae030356",
+    "src/api/latestTradeTimestamp.js": "3c066fb80c03c1379b3c1f01a1b0a1ee089cc906d3385c5e3a03cddd76e1f49a",
+    "src/api/optimizationScheduler.js": "aea2fcb0a69b0e44ef7b1b957d3e10b70f2acb3bc2485491e24ffd068459cbea",
+    "src/api/routes/config.js": "a90816c28d8721ae75c76795da66685b321e4ae568aa85b4cabff71faa3d6818",
+    "src/api/routes/status.js": "059c957fa96b1d9d5fbe32c45e488ad5fb805ae099c2583ebfba6508c53de0d9",
+    "test/latestTradeTimestamp.test.js": "c1ea466c99a9652e647fa18cacba86947881771e6b90664837d0ddb3891b62d9",
+    "test/optimizationOutcome.test.js": "f59e5a18842878e387b8f30a4dc92bfd5bb40bf18ff53727707dccb2ba8f0690",
+    "test/presetPreservation.test.js": "63dd439eebaa56303f2e939088e9005f69fd5e775dc7a986c660ed1358ee9e73"
+  },
+  "acceptedScreenshotsInspected": [
+    "04-menu-after.png",
+    "06-consultation-after.png",
+    "09-presets-after.png",
+    "17-tuning-saved-after.png",
+    "20-optimization-insufficient-after.png",
+    "24-token-replacement-after.png",
+    "25-keychain-startup-after.png",
+    "26-news-permission-recovery-after.png",
+    "27-token-replacement-stays-after.png",
+    "28-news-filter-count-after.png",
+    "05-news-after.png",
+    "13-tuning-after.png",
+    "18-last-trade-after.png"
+  ],
+  "remaining": [
+    "Token change -> automatic news reload timing",
+    "Combined universe and numeric settings save",
+    "Partially available consultation providers",
+    "Workspace/server mode mismatch",
+    "Current iPhone layout, Dynamic Type, VoiceOver"
+  ]
+}

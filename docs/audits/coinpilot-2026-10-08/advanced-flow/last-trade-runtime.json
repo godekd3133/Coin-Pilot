@@ -1,0 +1,25 @@
+{
+  "synthetic": true,
+  "mode": "DRY_RUN",
+  "buy": {
+    "success": true,
+    "mode": "DRY_RUN",
+    "coin": "KRW-BTC",
+    "amount": 10000,
+    "fee": 5,
+    "price": 100000000,
+    "volume": 9.995e-05,
+    "fill": null
+  },
+  "trade": {
+    "coin": "KRW-BTC",
+    "action": "OPEN",
+    "type": "BUY",
+    "entryPrice": 100000000,
+    "amount": 9.995e-05,
+    "entryTime": "2026-10-09T06:04:46.350Z",
+    "id": 1791525886350,
+    "source": "strategy"
+  },
+  "systemLastTradeTime": "2026-10-09T06:04:46.350Z"
+}

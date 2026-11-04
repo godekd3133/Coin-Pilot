@@ -1,0 +1,183 @@
+{
+  "checkedAt": "2026-10-08T08:02:42.577884+00:00",
+  "profiles": {
+    "LIVE": {
+      "/service-ready": {
+        "httpStatus": 200,
+        "body": {
+          "ready": true,
+          "runtimeState": null,
+          "analysisFresh": null
+        }
+      },
+      "/ready": {
+        "httpStatus": 200,
+        "body": {
+          "ready": true,
+          "runtimeState": "RUNNING",
+          "analysisFresh": true
+        }
+      },
+      "/api/status": {
+        "httpStatus": 200,
+        "body": {
+          "mode": "LIVE",
+          "isRunning": true,
+          "runtimeState": "RUNNING",
+          "stopReason": null,
+          "exchangeStateKnown": true,
+          "autoRecovery": {
+            "enabled": true,
+            "active": true,
+            "armed": false,
+            "stopReason": null,
+            "desiredRunning": true,
+            "incidentSince": null,
+            "healthyProbes": 0,
+            "requiredHealthyProbes": 2,
+            "nextAttemptAt": null,
+            "lastProbeAt": null,
+            "lastProbeError": null,
+            "lastStartAttemptAt": null,
+            "lastStartError": null,
+            "resumeAttempts": 0,
+            "resumeCount": 0,
+            "lastResumedAt": null,
+            "intentWriteError": null,
+            "tracking": {
+              "available": true,
+              "savedAt": "2026-10-08T08:02:28.055Z",
+              "eventCount": 135,
+              "error": null
+            },
+            "validationRefresh": {
+              "enabled": true,
+              "eligible": false,
+              "active": false,
+              "running": false,
+              "queued": false,
+              "runCount": 0,
+              "lastRunStartedAt": null,
+              "lastRunFinishedAt": null,
+              "lastRunReason": null,
+              "lastExitCode": null,
+              "lastError": null,
+              "lastReport": null,
+              "reportFile": "scalping_validation.json"
+            }
+          }
+        }
+      },
+      "/api/notifications/status": {
+        "httpStatus": 200,
+        "body": {
+          "configured": true,
+          "registeredDevices": 1,
+          "events": 0,
+          "queued": 0,
+          "accepted": 0,
+          "failed": 0,
+          "lastEventAt": null,
+          "error": null
+        }
+      },
+      "/api/automation/history": {
+        "httpStatus": 200,
+        "body": {
+          "available": true,
+          "persistence": {
+            "available": true,
+            "savedAt": "2026-10-08T08:02:28.055Z",
+            "eventCount": 135,
+            "error": null
+          },
+          "eventCount": 135,
+          "latestRunning": true,
+          "latestObservedAt": "2026-10-08T08:02:28.055Z"
+        }
+      }
+    },
+    "PAPER": {
+      "/service-ready": {
+        "httpStatus": 200,
+        "body": {
+          "ready": true,
+          "runtimeState": null,
+          "analysisFresh": null
+        }
+      },
+      "/ready": {
+        "httpStatus": 200,
+        "body": {
+          "ready": true,
+          "runtimeState": "RUNNING",
+          "analysisFresh": true
+        }
+      },
+      "/api/status": {
+        "httpStatus": 200,
+        "body": {
+          "mode": "DRY_RUN",
+          "isRunning": true,
+          "runtimeState": "RUNNING",
+          "stopReason": null,
+          "exchangeStateKnown": null,
+          "autoRecovery": {
+            "enabled": true,
+            "active": true,
+            "armed": false,
+            "stopReason": null,
+            "desiredRunning": true,
+            "incidentSince": null,
+            "healthyProbes": 0,
+            "requiredHealthyProbes": 2,
+            "nextAttemptAt": null,
+            "lastProbeAt": null,
+            "lastProbeError": null,
+            "lastStartAttemptAt": null,
+            "lastStartError": null,
+            "resumeAttempts": 0,
+            "resumeCount": 0,
+            "lastResumedAt": null,
+            "intentWriteError": null,
+            "tracking": {
+              "available": true,
+              "savedAt": "2026-10-08T08:02:42.958Z",
+              "eventCount": 102,
+              "error": null
+            },
+            "validationRefresh": null
+          }
+        }
+      },
+      "/api/notifications/status": {
+        "httpStatus": 200,
+        "body": {
+          "configured": true,
+          "registeredDevices": 1,
+          "events": 0,
+          "queued": 0,
+          "accepted": 0,
+          "failed": 0,
+          "lastEventAt": null,
+          "error": null
+        }
+      },
+      "/api/automation/history": {
+        "httpStatus": 200,
+        "body": {
+          "available": true,
+          "persistence": {
+            "available": true,
+            "savedAt": "2026-10-08T08:02:42.958Z",
+            "eventCount": 102,
+            "error": null
+          },
+          "eventCount": 102,
+          "latestRunning": true,
+          "latestObservedAt": "2026-10-08T08:02:42.958Z"
+        }
+      }
+    }
+  }
+}

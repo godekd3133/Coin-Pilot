@@ -1,0 +1,30 @@
+{
+  "recordedAt": "2026-10-09T09:02:12.155462+00:00",
+  "goalStatus": "active",
+  "checks": {
+    "bundleConfirmation": "passed",
+    "syntheticBundleExecution": "passed",
+    "conditionalBuy": "passed",
+    "prioritySell": "passed",
+    "partialBundleQuoteCurrencies": "passed",
+    "storeScenarios": 70,
+    "macQA": "passed",
+    "macRegular": "passed",
+    "iosSimulatorBuild": "passed",
+    "actualDeviceVisual": "blocked",
+    "realOrders": "not-run"
+  },
+  "sourceSHA256": {
+    "mobile/ios/App/App/CoinPilotViews.swift": "649da84f919565db4af95a9bf6ab40ef97eb901bc38c6bdb765d6b1f8ab8e207",
+    "mobile/ios/App/App/CoinPilotStore.swift": "2b3a5f233c8ea4119e8bf6601f703fd8ec51d43fb4cd8d052e42d93956297471",
+    "mobile/tests/CoinPilotStoreTests.swift": "9091fe69ef0c89a144f66cd0a5d36461938cc2c939bce82779cd7492ddc1ed77",
+    "mobile/scripts/runNativeQA.mjs": "5030b9bab50f4f3a9c0d1aee5bca8faa6321078e42630a0cec644aa2e0101019"
+  },
+  "remaining": [
+    "Empty recommendation results wording",
+    "Prior success display while preflighting new request",
+    "Terminology consistency",
+    "Current device QA build, physical visuals, Dynamic Type, VoiceOver",
+    "Whole-goal completion audit"
+  ]
+}

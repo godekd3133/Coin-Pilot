@@ -1,0 +1,10 @@
+{
+  "synthetic": true,
+  "id": "0123560d-247f-4901-9c36-f96a041209fc",
+  "autoConsult": false,
+  "status": "RUNNING",
+  "providers": [
+    "claude",
+    "gpt"
+  ]
+}

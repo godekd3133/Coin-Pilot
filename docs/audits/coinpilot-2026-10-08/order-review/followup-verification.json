@@ -1,0 +1,29 @@
+{
+  "recordedAt": "2026-10-09T09:29:34.521042+00:00",
+  "goalStatus": "active",
+  "checks": {
+    "storeRegression": "passed - all scenarios",
+    "namedScenarioCalls": 70,
+    "cancelledPreflightRegression": "failed before, passed after",
+    "emptyRecommendationsUI": "passed",
+    "consistentBundleTerminology": "passed",
+    "newOrderCheckingUI": "passed",
+    "macQA": "passed",
+    "iosSimulatorBuild": "passed",
+    "diffCheck": "passed",
+    "realOrders": "not-run",
+    "physicalUI": "blocked",
+    "deviceQABuild": "passed",
+    "deviceQAInstallUpdate": "blocked - physical device unavailable"
+  },
+  "sourceSHA256": {
+    "mobile/ios/App/App/CoinPilotStore.swift": "ca9dc2fc9808f0aed87c31f3d71be2fe7f63df0e1aa4668b0c5090e8ab8a0ab1",
+    "mobile/ios/App/App/CoinPilotViews.swift": "b9b7b75bafe5ffd561227c61546a85482222f8793051443cca5d44eae193f6bd",
+    "mobile/tests/CoinPilotStoreTests.swift": "327699247be6ccbf58abd903077915de958126243d9e9a04bba9c13270bc51eb"
+  },
+  "remaining": [
+    "Smart-buy fallback and result-message accuracy",
+    "Current physical QA display, Dynamic Type, VoiceOver",
+    "Whole-goal completion audit"
+  ]
+}

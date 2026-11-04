@@ -1,0 +1,37 @@
+{
+  "checkedAt": "2026-10-08T09:11:21.306010+00:00",
+  "endpoints": {
+    "/api/account": {
+      "valuationAvailable": true,
+      "valuationStatus": "available",
+      "sourceAsOf": "2026-10-08T09:08:49.885Z",
+      "fetchedAt": "2026-10-08T09:11:21.845Z",
+      "staleMarkets": [],
+      "unavailableMarkets": [],
+      "displayedHoldingCount": 1
+    },
+    "/api/positions": {
+      "valuationAvailable": true,
+      "valuationStatus": "available",
+      "sourceAsOf": "2026-10-08T09:08:49.885Z",
+      "fetchedAt": "2026-10-08T09:11:21.845Z",
+      "staleMarkets": [],
+      "unavailableMarkets": [],
+      "displayedHoldingCount": 1
+    },
+    "/api/cumulative-pnl": {
+      "valuationAvailable": true,
+      "valuationStatus": "available",
+      "sourceAsOf": "2026-10-08T09:08:49.885Z",
+      "fetchedAt": "2026-10-08T09:11:21.845Z",
+      "staleMarkets": [],
+      "unavailableMarkets": []
+    },
+    "/api/status": {
+      "mode": "LIVE",
+      "isRunning": true,
+      "runtimeState": "RUNNING",
+      "stopReason": null
+    }
+  }
+}

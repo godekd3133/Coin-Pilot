@@ -1,0 +1,25 @@
+{
+  "recordedAt": "2026-10-09T10:53:48.199706+00:00",
+  "goalStatus": "active",
+  "checks": {
+    "syntheticHTTPSetup": "passed",
+    "setupToSettings": "passed",
+    "syntheticLiveWriteRejection": "passed",
+    "macQA": "passed",
+    "iosSimulatorBuild": "passed",
+    "diffCheck": "passed",
+    "actualKeys": "not-run",
+    "actualRegistration": "not-run",
+    "realOrders": "not-run",
+    "eligibleHTTPSFormVisual": "unverified"
+  },
+  "sourceSHA256": {
+    "mobile/ios/App/App/CoinPilotViews.swift": "2752f54ba8130011e0697342a674286d2747f0ce946f24a472b139e5d633d466",
+    "mobile/scripts/runNativeQA.mjs": "31cec6d74da9121ade9c4cafce77c3658c9850174111053fc899df1b02c98437"
+  },
+  "remaining": [
+    "Eligible HTTPS credential form render",
+    "Current physical iPhone, keyboard, safe area, Dynamic Type and VoiceOver",
+    "Full completion audit"
+  ]
+}

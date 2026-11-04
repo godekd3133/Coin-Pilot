@@ -1,0 +1,128 @@
+[
+  {
+    "profile": "live",
+    "path": "src/api/dashboardServer.js",
+    "originalSha256": "498ae9bc174cc8cc056d95c8d39288ae234b9c92335cb2b09af74ef39085e043",
+    "newSha256": "e49270ecac5c576f98a056d4c62eb59c7f6e670031a87f553e8133fe9b167d71"
+  },
+  {
+    "profile": "live",
+    "path": "src/api/optimizationScheduler.js",
+    "originalSha256": "461fe415c2e5905cee90b2db26b95239ea329fb1ba79476de646d98ee14e5685",
+    "newSha256": "aea2fcb0a69b0e44ef7b1b957d3e10b70f2acb3bc2485491e24ffd068459cbea"
+  },
+  {
+    "profile": "live",
+    "path": "src/api/routes/config.js",
+    "originalSha256": "047e8ec01a16c2fe8433952dea0dea03e6a183cf4a12ce9d4807c62630b9961f",
+    "newSha256": "a90816c28d8721ae75c76795da66685b321e4ae568aa85b4cabff71faa3d6818"
+  },
+  {
+    "profile": "live",
+    "path": "src/api/routes/status.js",
+    "originalSha256": "55816bb11088855ddc50341aaec5aab11a39d1bfee2cc38869be25b8a4ca45da",
+    "newSha256": "059c957fa96b1d9d5fbe32c45e488ad5fb805ae099c2583ebfba6508c53de0d9"
+  },
+  {
+    "profile": "live",
+    "path": "src/api/latestTradeTimestamp.js",
+    "originalSha256": null,
+    "newSha256": "3c066fb80c03c1379b3c1f01a1b0a1ee089cc906d3385c5e3a03cddd76e1f49a"
+  },
+  {
+    "profile": "live",
+    "path": "public/index.html",
+    "originalSha256": "e8e0176da6e9d0c1af3c2c0cf899747ab6449b9622d3e908ebf001353af08b77",
+    "newSha256": "225bebedeb328b66727278d805c5fd88ea7ac99f23ba8c3eebc6df18a7763eff"
+  },
+  {
+    "profile": "live",
+    "path": "public/auth-client.js",
+    "originalSha256": "73a98ca92959fa84b9efe45448fa4906a9f641d04436d479d416fca342b9b598",
+    "newSha256": "2ba9610c71234d456d394e44d76213f343e4bb8de27a4a444000a317e79149cf"
+  },
+  {
+    "profile": "live",
+    "path": "public/pilot-redesign.css",
+    "originalSha256": "287bd521ad46ba8b295ec406760d7fc74785ff641449b81084febbebb6fddb73",
+    "newSha256": "33313d4de31cb1f6c8d8dde49663cedc4325f6afd6959f24ffd25dbe4773aace"
+  },
+  {
+    "profile": "live",
+    "path": "public/pilot-redesign.js",
+    "originalSha256": "2733f54fc57a6a91303cf65c26742c41cf64a2554f63a825058293a55bfd7a8e",
+    "newSha256": "48aeb66089c816e948f663c26ddd2c6b1627707eeafd155b32daa4da36ba3889"
+  },
+  {
+    "profile": "live",
+    "path": "public/sw.js",
+    "originalSha256": "7634b291248db7e1eebf1e5fa08793ade0babfca6bc3c5e1764879d64d65d872",
+    "newSha256": "7d9d7dc82052a77962945035c6a8ec820778c9e7480e0cf8a740b4c5643c038f"
+  },
+  {
+    "profile": "paper",
+    "path": "public/index.html",
+    "originalSha256": "e8e0176da6e9d0c1af3c2c0cf899747ab6449b9622d3e908ebf001353af08b77",
+    "newSha256": "225bebedeb328b66727278d805c5fd88ea7ac99f23ba8c3eebc6df18a7763eff"
+  },
+  {
+    "profile": "paper",
+    "path": "public/auth-client.js",
+    "originalSha256": "73a98ca92959fa84b9efe45448fa4906a9f641d04436d479d416fca342b9b598",
+    "newSha256": "2ba9610c71234d456d394e44d76213f343e4bb8de27a4a444000a317e79149cf"
+  },
+  {
+    "profile": "paper",
+    "path": "public/pilot-redesign.css",
+    "originalSha256": "287bd521ad46ba8b295ec406760d7fc74785ff641449b81084febbebb6fddb73",
+    "newSha256": "33313d4de31cb1f6c8d8dde49663cedc4325f6afd6959f24ffd25dbe4773aace"
+  },
+  {
+    "profile": "paper",
+    "path": "public/pilot-redesign.js",
+    "originalSha256": "2733f54fc57a6a91303cf65c26742c41cf64a2554f63a825058293a55bfd7a8e",
+    "newSha256": "48aeb66089c816e948f663c26ddd2c6b1627707eeafd155b32daa4da36ba3889"
+  },
+  {
+    "profile": "paper",
+    "path": "public/sw.js",
+    "originalSha256": "7634b291248db7e1eebf1e5fa08793ade0babfca6bc3c5e1764879d64d65d872",
+    "newSha256": "7d9d7dc82052a77962945035c6a8ec820778c9e7480e0cf8a740b4c5643c038f"
+  },
+  {
+    "profile": "paper",
+    "path": "src/api/latestTradeTimestamp.js",
+    "originalSha256": null,
+    "newSha256": "3c066fb80c03c1379b3c1f01a1b0a1ee089cc906d3385c5e3a03cddd76e1f49a"
+  },
+  {
+    "profile": "paper",
+    "path": "src/api/routes/config.js",
+    "originalSha256": "0cb16953126c647d87e0e07d3c55a3d3c9cd7ee06e9a13961d3751a47578c059",
+    "newSha256": "7110291bbbacf041ea554f092130cde135a86c1c7071e6ea7cdfef10a017327c"
+  },
+  {
+    "profile": "paper",
+    "path": "src/api/dashboardServer.js",
+    "originalSha256": "c4fe98fd442e838b2ddd388ee14da62ed119fd1a00868f3844c4bc01aa1c36af",
+    "newSha256": "65854bd62c3b9bd76c97037a91b9e462f3b76bccfda413a90ebdad1660f7d159"
+  },
+  {
+    "profile": "paper",
+    "path": "src/api/marketValuation.js",
+    "originalSha256": "76ac8e61cdbfacdd8953311382277ef74d0d30e6ef5600f9bea4662046ab28dd",
+    "newSha256": "ca9dcdce3c277d034303ad2184e9efc44caffbb82b54b8c0033d1ddf4295782f"
+  },
+  {
+    "profile": "paper",
+    "path": "src/api/publicMarketSnapshotStore.js",
+    "originalSha256": "2f53379906d1d187f17ece2c8f043883e819e01370c730f8c8b8659005127b04",
+    "newSha256": "52188673fa760f880e3e3d5b9221b0efc0038586a8f92e7ddee4c6bcd0933cc3"
+  },
+  {
+    "profile": "live",
+    "path": "src/api/manualOrderLegs.js",
+    "originalSha256": "a08764b44578da467d56f1cda63dad96d4528c280558be4edbaf729509ec3152",
+    "newSha256": "b2415d46cbb58ac408dd692fafa7ff2edd80719f5983351eb9cffc9ae83a0948"
+  }
+]

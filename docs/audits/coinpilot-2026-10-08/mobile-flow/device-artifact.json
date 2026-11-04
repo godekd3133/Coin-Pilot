@@ -1,0 +1,7 @@
+{
+  "bundleIdentifier": "com.godekd3133.coinpilot.uxdevice",
+  "displayName": "CoinPilot QA",
+  "localSecretsEmbedded": false,
+  "pushEntitlementsIncluded": false,
+  "tokenStorage": "process memory QA only"
+}

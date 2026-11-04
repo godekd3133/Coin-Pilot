@@ -1,0 +1,29 @@
+{
+  "recordedAt": "2026-10-09T08:47:13.144015+00:00",
+  "goalStatus": "active",
+  "checks": {
+    "deviceQABuild": "passed",
+    "deviceQAInstall": "passed",
+    "distinctBundleIdentifier": "passed",
+    "embeddedCredentials": "none",
+    "pushEntitlement": "absent - not tested in this QA build",
+    "newsPeriodicRuntime": "passed",
+    "physicalDeviceVisual": "blocked - mirroring timed out and requires phone lock",
+    "dynamicType": "not-run",
+    "voiceOver": "not-run"
+  },
+  "device": "iPhone 15 Pro Max",
+  "bundleIdentifier": "com.godekd3133.coinpilot.uxdevice",
+  "sourceSHA256": {
+    "mobile/ios/App/App/CoinPilotStore.swift": "72dfbf4db46a1b43c62d7fc5abd1419b9ea2fc01d4d23975378e52cc0a2436c3",
+    "mobile/ios/App/App/CoinPilotViews.swift": "70a3a08b3495a8070d09c079659efc745f52bbc756a23377253b511c3500e75d",
+    "mobile/ios/App/App/Info.plist": "aa342babdf76242fd953d9192adb06dcc5f1fd531f9013baa7dd285360fcad78",
+    "mobile/scripts/runNativeQA.mjs": "2c2c4a1b3ae359bfe397f11d9ccccfd130d42770e27439aa88f278e9faf79f5c"
+  },
+  "remaining": [
+    "Physical QA display and interactive flow",
+    "Larger text and VoiceOver",
+    "Populated conditional-order and bundle flows",
+    "Whole-goal completion audit"
+  ]
+}

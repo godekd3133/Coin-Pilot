@@ -1,0 +1,13 @@
+{
+  "recordedAt": "2026-10-09T09:29:34.523037+00:00",
+  "bundleIdentifier": "com.godekd3133.coinpilot.uxdevice",
+  "latestBuild": "passed",
+  "latestInstall": "blocked",
+  "reason": "CoreDevice 4016; physical iPhone unavailable",
+  "installedVersionClaim": "Historical initial installation predates latest UI changes; current installation update unverified",
+  "pushVerification": "not-run - QA entitlement excluded",
+  "sourceSHA256": {
+    "mobile/ios/App/App/CoinPilotStore.swift": "ca9dc2fc9808f0aed87c31f3d71be2fe7f63df0e1aa4668b0c5090e8ab8a0ab1",
+    "mobile/ios/App/App/CoinPilotViews.swift": "b9b7b75bafe5ffd561227c61546a85482222f8793051443cca5d44eae193f6bd"
+  }
+}

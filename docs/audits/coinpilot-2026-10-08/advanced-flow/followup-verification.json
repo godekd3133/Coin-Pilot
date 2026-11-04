@@ -1,0 +1,51 @@
+{
+  "recordedAt": "2026-10-09T08:17:20.067941+00:00",
+  "goalStatus": "active",
+  "sourceSHA256": {
+    "mobile/ios/App/App/CoinPilotStore.swift": "1c3f0c626778e11d152a4a8e8e1ef3eea8ed3ce8a8265ff3e249a0dd0fadd984",
+    "mobile/ios/App/App/CoinPilotViews.swift": "1b7d08ba4243ea11dab51c1e9fbf961a7153e1e403ed6df6c3af2438b00352a3",
+    "mobile/tests/CoinPilotStoreTests.swift": "df02fe711f77be8c5221811290070844ab1f778c3583fb246e2b091b61553430",
+    "mobile/scripts/runNativeQA.mjs": "72dd47bc98c221aad60e9d8f7b4148913fe982f5fb30805d1b7b5a5e047a33f3"
+  },
+  "checks": {
+    "storeRegression": {
+      "status": "passed",
+      "count": 70,
+      "log": "store-tests.log"
+    },
+    "optimizationRegression": {
+      "status": "passed",
+      "count": 9,
+      "log": "optimization-regression.log"
+    },
+    "macRegular": "passed",
+    "macQA": "passed",
+    "iosSimulatorBuild": "passed",
+    "diffCheck": "passed",
+    "realOrders": "not-run",
+    "productionDeployment": "not-run",
+    "currentIPhoneVisual": "blocked"
+  },
+  "runtime": {
+    "combinedSave": "passed: ratio 0.04, target KRW-BTC, maxPositions 2",
+    "tokenReplacementThenNewsReturn": "passed: automatic article load without refresh button",
+    "modeMismatch": "passed: selected LIVE with DRY_RUN fixture is blocked",
+    "modeRecovery": "passed: select paper reconnects and loads news",
+    "newsFreshnessPolicySeconds": 300,
+    "periodicNewsRenewal": "not-run"
+  },
+  "screenshotsInspected": [
+    "29-combined-tuning-saved.png",
+    "30-news-auto-reload-after.png",
+    "31-mode-mismatch-before.png",
+    "32-connection-setup-after.png",
+    "33-mode-mismatch-after.png",
+    "34-mode-recovery-news-after.png"
+  ],
+  "remaining": [
+    "Partially available consultation providers and error flow",
+    "Network failure and retry",
+    "Actual iPhone, Dynamic Type and VoiceOver",
+    "Periodic news renewal request trace"
+  ]
+}

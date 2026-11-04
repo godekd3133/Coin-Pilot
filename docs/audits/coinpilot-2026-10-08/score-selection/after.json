@@ -1,0 +1,30 @@
+{
+  "success": true,
+  "mode": "DRY_RUN",
+  "totalAmount": 10000,
+  "totalInvested": 10000,
+  "originalAmount": 10000,
+  "amountWasAdjusted": false,
+  "availableBalance": 1000000,
+  "analyzedCoins": 2,
+  "qualifiedCoins": 0,
+  "usedFallback": true,
+  "trades": [
+    {
+      "coin": "KRW-BTC",
+      "amount": 10000,
+      "price": 100000000,
+      "volume": 0.00009995,
+      "fee": 5,
+      "score": 50,
+      "rsi": "-",
+      "change24h": "0.10",
+      "type": "BUY",
+      "source": "smart-buy",
+      "timestamp": "2026-10-09T09:32:52.879Z",
+      "fill": null
+    }
+  ],
+  "failures": [],
+  "message": "점수 기준에 맞는 종목이 없어 상위 후보 1종목을 매수했습니다."
+}

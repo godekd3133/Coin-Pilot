@@ -1,0 +1,78 @@
+{
+  "recordedAt": "2026-10-09T10:38:24.570082+00:00",
+  "goalStatus": "active",
+  "lastTurnClassification": "progress",
+  "requirements": [
+    {
+      "requirement": "사용자 관점 관찰, 목표와 니즈 분석, 계획, 구현, 검증의 반복",
+      "status": "proved for completed loops",
+      "evidence": [
+        "ux-refinement/README.md",
+        "connected-flow/README.md",
+        "advanced-flow/README.md",
+        "resilience-flow/README.md",
+        "order-review/README.md",
+        "score-selection/README.md"
+      ]
+    },
+    {
+      "requirement": "처음 연결부터 모든 흐름의 신뢰와 편의, 유용성",
+      "status": "partial",
+      "evidence": "Mac synthetic journeys, state regressions, backend regressions",
+      "missing": [
+        "Current iPhone journeys, keyboard and safe area",
+        "Rendered LIVE credential setup branch",
+        "Complete large-text and VoiceOver journey"
+      ]
+    },
+    {
+      "requirement": "완성도와 자연스러운 디자인 및 문구",
+      "status": "partial",
+      "evidence": "Current-run main tabs, menus, activity, order confirmations and error/recovery screenshots",
+      "missing": [
+        "Current iPhone rendered quality and larger text"
+      ]
+    },
+    {
+      "requirement": "정보 과노출과 추론 가능한 설명 지양",
+      "status": "Mac reviewed and refined; mobile unverified",
+      "evidence": "Advanced content disclosure, concise menus, removed repeated errors and redundant introductions"
+    },
+    {
+      "requirement": "점 기호로 연결한 UI 대신 구조로 표현",
+      "status": "own native text source and observed Mac screens verified",
+      "evidence": "MetadataLine uses separate HStack/VStack children; original bullet only remains in input-normalization code, not output rendering"
+    },
+    {
+      "requirement": "검증 후 전체 목표의 완료 판단",
+      "status": "not achieved",
+      "evidence": "The missing mobile and onboarding branch evidence prevents a whole-goal completion claim"
+    }
+  ],
+  "checks": {
+    "finalBackendRegressions": {
+      "status": "passed",
+      "count": 37
+    },
+    "macQA": "passed",
+    "iosSimulatorBuild": "passed",
+    "diffCheck": "passed",
+    "compactControlFrame": "minimum 44 by 44 points in label style; Mac outer-margin click verified",
+    "signalSessionPause": "passed in synthetic environment",
+    "currentPhysicalDevice": "unavailable",
+    "actualMobileVisual": "blocked",
+    "actualVoiceOver": "not-run",
+    "realOrders": "not-run",
+    "deployment": "not-run"
+  },
+  "sourceSHA256": {
+    "mobile/ios/App/App/CoinPilotViews.swift": "971bb8ae33ff27c10e2a3c2e295f66de35ffbb8ac6469376c5340ae71b120bdd",
+    "mobile/ios/App/App/CoinPilotStore.swift": "ca9dc2fc9808f0aed87c31f3d71be2fe7f63df0e1aa4668b0c5090e8ab8a0ab1",
+    "src/api/manualOrderSmartBuy.js": "d7b541868f67616ad24455bd06ba6f15e8098c82d6ed4fce9cc31bb0978f9405"
+  },
+  "remaining": [
+    "Synthetic LIVE credential setup rendering",
+    "Actual iPhone, keyboard, safe area, larger text and VoiceOver",
+    "Recheck whole-goal requirements against final evidence"
+  ]
+}

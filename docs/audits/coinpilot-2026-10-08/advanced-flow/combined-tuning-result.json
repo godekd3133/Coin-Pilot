@@ -1,0 +1,9 @@
+{
+  "synthetic": true,
+  "mode": "DRY_RUN",
+  "investmentRatio": 0.04,
+  "maxPositions": 2,
+  "targetCoins": [
+    "KRW-BTC"
+  ]
+}

@@ -1,0 +1,7574 @@
+import SwiftUI
+
+private enum CoinPilotColors {
+    static let paper = Color(red: 249 / 255, green: 250 / 255, blue: 251 / 255)
+    static let surface = Color.white
+    static let ink = Color(red: 25 / 255, green: 31 / 255, blue: 40 / 255)
+    static let secondaryInk = Color(red: 102 / 255, green: 112 / 255, blue: 127 / 255)
+    static let line = Color(red: 229 / 255, green: 232 / 255, blue: 235 / 255)
+    // Shared with the PWA: small status text and white button labels need AA contrast.
+    static let blue = Color(red: 27 / 255, green: 100 / 255, blue: 218 / 255)
+    static let green = Color(red: 2 / 255, green: 118 / 255, blue: 72 / 255)
+    static let red = Color(red: 165 / 255, green: 25 / 255, blue: 38 / 255)
+    static let amber = Color(red: 150 / 255, green: 89 / 255, blue: 10 / 255)
+}
+
+private enum CoinPilotShapes {
+    static let cardCornerRadius: CGFloat = 20
+}
+
+struct CoinPilotNativeRootView: View {
+    @StateObject private var store = CoinPilotStore(api: CredentialViewAPI(), tokens: CoinPilotSimulatorTokenStore(), configuredDataMode: "server", bundledServers: CoinPilotBundledServerConfig(paper: URL(string: "https://fixture.invalid/paper"), live: URL(string: "https://fixture.invalid/live")))
+    @Environment(\.scenePhase) private var scenePhase
+
+    var body: some View {
+        Group {
+            if store.isBundledLocalMarketData {
+                CoinPilotNavigationHost {
+                    CoinPilotLocalMarketView(store: store)
+                        .navigationTitle("시장")
+                        .cpInlineTitle()
+                }
+            } else if store.phase == .dashboard && store.serverModeMatchesWorkspace {
+                CoinPilotTabView(store: store)
+            } else if !store.didFinishInitialConnect {
+                CoinPilotStartupView()
+            } else {
+                CoinPilotConnectionView(store: store)
+            }
+        }
+        .cpReadableWidth()
+        .background(CoinPilotColors.paper.ignoresSafeArea())
+        .preferredColorScheme(.light)
+        .tint(CoinPilotColors.blue)
+        .animation(.easeInOut(duration: 0.2), value: store.phase)
+        .task { await store.bootstrap() }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("CoinPilotPushDeviceToken"))) { _ in
+            Task { await store.syncOrderNotifications() }
+        }
+        .task(id: scenePhase) {
+            guard scenePhase == .active, !store.isBundledLocalMarketData else { return }
+            if store.phase == .dashboard { await store.refresh() }
+            while !Task.isCancelled {
+                do {
+                    try await Task.sleep(nanoseconds: 30_000_000_000)
+                } catch {
+                    return
+                }
+                guard store.phase == .dashboard else { continue }
+                await store.refresh()
+            }
+        }
+    }
+}
+
+private struct CoinPilotVisibleFeatureRefreshModifier: ViewModifier {
+    @Environment(\.scenePhase) private var scenePhase
+
+    let enabled: Bool
+    let refresh: () async -> Void
+
+    func body(content: Content) -> some View {
+        content.task(id: enabled && scenePhase == .active) {
+            guard enabled, scenePhase == .active else { return }
+            while !Task.isCancelled {
+                await refresh()
+                do {
+                    try await Task.sleep(nanoseconds: 30_000_000_000)
+                } catch {
+                    return
+                }
+            }
+        }
+    }
+}
+
+private extension View {
+    func refreshFeatureWhenVisible(
+        enabled: Bool = true,
+        _ refresh: @escaping () async -> Void
+    ) -> some View {
+        modifier(CoinPilotVisibleFeatureRefreshModifier(enabled: enabled, refresh: refresh))
+    }
+}
+
+private struct CoinPilotFeatureFreshnessLine: View {
+    let lastSuccessfulAt: Date?
+    let error: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            MetadataLine(text: lastSuccessfulAt.map {
+                "확인 \(CoinPilotFormatting.localDateTime($0))"
+            } ?? "자료 확인 전")
+                .font(.caption2)
+                .foregroundColor(CoinPilotColors.secondaryInk)
+            if let error, !error.isEmpty {
+                Text(error)
+                    .font(.caption2)
+                    .foregroundColor(CoinPilotColors.amber)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
+private struct CoinPilotStartupView: View {
+    var body: some View {
+        VStack(spacing: 14) {
+            Text("CoinPilot")
+                .font(.title2.weight(.bold))
+                .foregroundColor(CoinPilotColors.blue)
+            ProgressView()
+                .progressViewStyle(CircularProgressViewStyle(tint: CoinPilotColors.blue))
+            Text("계좌 화면을 준비하고 있어요")
+                .font(.body.weight(.medium))
+                .foregroundColor(CoinPilotColors.secondaryInk)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(CoinPilotColors.paper.ignoresSafeArea())
+    }
+}
+
+private struct CoinPilotConnectionView: View {
+    @ObservedObject var store: CoinPilotStore
+    @FocusState private var tokenFocused: Bool
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 22) {
+                HStack {
+                    Text("CoinPilot")
+                        .font(.headline.weight(.bold))
+                        .foregroundColor(CoinPilotColors.blue)
+                    Spacer()
+                }
+
+                HStack(alignment: .center, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(connectionTitle)
+                            .font(.title.weight(.bold))
+                            .foregroundColor(CoinPilotColors.ink)
+                        if !connectionExplanation.isEmpty {
+                            Text(connectionExplanation)
+                                .font(.body)
+                                .foregroundColor(CoinPilotColors.secondaryInk)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
+
+                VStack(alignment: .leading, spacing: 9) {
+                    Text("사용할 계좌")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundColor(CoinPilotColors.ink)
+                    CoinPilotWorkspaceSelector(store: store)
+                    Text(store.activeWorkspace == .paper
+                         ? "가상 자금으로 거래합니다."
+                         : "주문 시 실제 자금이 사용됩니다.")
+                        .font(.footnote)
+                        .foregroundColor(CoinPilotColors.secondaryInk)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                if !store.usesManagedServerConnection {
+                    if store.phase == .login {
+                        DisclosureGroup("연결 서버") { serverAddressForm.padding(.top, 10) }
+                            .font(.subheadline)
+                    } else {
+                        serverAddressForm
+                    }
+                }
+
+                if store.phase == .login {
+                    VStack(alignment: .leading, spacing: 10) {
+                        FieldTitle(title: store.usesManagedServerConnection ? "서버 토큰으로 로그인" : "서버 토큰")
+                        SecureField("토큰 입력", text: $store.tokenDraft)
+                            .cpNoAutocapitalization()
+                            .cpNoAutocorrection()
+                            .textFieldStyle(.plain)
+                            .font(.body)
+                            .padding(.horizontal, 15)
+                            .frame(minHeight: 54)
+                            .background(CoinPilotColors.surface)
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                            .overlay(RoundedRectangle(cornerRadius: 12).stroke(CoinPilotColors.line, lineWidth: 1))
+                            .focused($tokenFocused)
+                            .accessibilityLabel("서버 토큰")
+                        Text(tokenStorageNotice)
+                            .font(.footnote)
+                            .foregroundColor(CoinPilotColors.secondaryInk)
+                    }
+                }
+
+                if let message = store.connectionMessage {
+                    Text(message)
+                        .font(.subheadline.weight(.medium))
+                        .foregroundColor(CoinPilotColors.red)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityAddTraits(.updatesFrequently)
+                }
+
+                Button {
+                    tokenFocused = false
+                    Task { await store.primaryConnectionAction() }
+                } label: {
+                    HStack(spacing: 9) {
+                        if store.isWorking { ProgressView().tint(.white) }
+                        Text(store.isWorking ? "연결 중" : store.phase == .login ? "로그인" : store.usesManagedServerConnection ? "다시 연결" : store.phase == .setup ? "서버 확인" : "다시 연결")
+                            .font(.headline.weight(.semibold))
+                    }
+                    .frame(maxWidth: .infinity)
+                    .frame(minHeight: 54)
+                    .foregroundColor(.white)
+                    .background(CoinPilotColors.blue)
+                    .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+                }
+                .buttonStyle(PlainButtonStyle())
+                .disabled(store.isWorking)
+
+                if store.canUseBundledPreview {
+                    Button {
+                        store.useBundledPreview()
+                    } label: {
+                        HStack(spacing: 8) {
+                            Text("예시 데이터로 둘러보기")
+                                .font(.body.weight(.semibold))
+                            Image(systemName: "arrow.right")
+                                .font(.footnote.weight(.semibold))
+                        }
+                        .foregroundColor(CoinPilotColors.blue)
+                        .frame(minHeight: 44)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                }
+
+                Label(store.usesManagedServerConnection
+                      ? "계좌에 맞는 서버로 자동 연결됩니다. 거래소 API 키는 서버에만 보관합니다."
+                      : "거래소 API 키는 서버에만 보관합니다.", systemImage: "lock.shield")
+                    .font(.footnote)
+                    .foregroundColor(CoinPilotColors.secondaryInk)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.horizontal, 22)
+            .padding(.top, 20)
+            .padding(.bottom, 36)
+            .frame(maxWidth: 560)
+            .frame(maxWidth: .infinity)
+        }
+        .cpReadableWidth()
+        .background(CoinPilotColors.paper.ignoresSafeArea())
+    }
+
+    private var serverAddressForm: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            FieldTitle(title: "서버 주소")
+            TextField("https://example.com", text: $store.serverDraft)
+                .cpKeyboardURL()
+                .cpNoAutocapitalization()
+                .cpNoAutocorrection()
+                .textFieldStyle(.plain)
+                .font(.body)
+                .padding(.horizontal, 15)
+                .frame(minHeight: 54)
+                .background(CoinPilotColors.surface)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .overlay(RoundedRectangle(cornerRadius: 12).stroke(CoinPilotColors.line, lineWidth: 1))
+                .accessibilityLabel("서버 주소")
+            Text(serverAddressHelp)
+                .font(.footnote)
+                .foregroundColor(CoinPilotColors.secondaryInk)
+        }
+    }
+
+    private var tokenStorageNotice: String {
+#if targetEnvironment(simulator) || COINPILOT_TEST_SIMULATOR_TOKEN_STORE
+        return "검증 환경에서는 앱이 실행되는 동안만 임시 보관됩니다. 앱을 다시 열면 토큰을 입력해 주세요."
+#else
+        return "토큰은 이 기기의 보안 저장소에 보관됩니다."
+#endif
+    }
+
+    private var connectionTitle: String {
+        if store.workspaceModeMismatchMessage != nil { return "다른 모드의 서버가 연결됐어요" }
+        if store.phase == .dashboard && !store.serverModeMatchesWorkspace { return "서버 연결을 확인해 주세요" }
+        if store.phase == .login { return "내 계좌에 로그인하세요" }
+        if store.usesManagedServerConnection {
+            return store.isWorking ? "내 계좌에 연결하고 있어요" : "계좌 연결을 확인해 주세요"
+        }
+        return "계좌 연결"
+    }
+
+    private var connectionExplanation: String {
+        if let message = store.workspaceModeMismatchMessage { return message }
+        if store.phase == .dashboard,
+           !store.serverModeMatchesWorkspace,
+           let message = store.dashboardMessage {
+            return message
+        }
+        if store.phase == .login {
+            return "연결한 서버에서 발급한 토큰을 입력하세요."
+        }
+        return ""
+    }
+
+    private var serverAddressHelp: String {
+        "\(store.activeWorkspace.title) 계좌의 서버 주소를 입력하세요. 외부에서 연결할 때는 HTTPS 주소를 사용하세요."
+    }
+}
+
+private struct FieldTitle: View {
+    let title: String
+
+    var body: some View {
+        Text(title)
+            .font(.body.weight(.semibold))
+            .foregroundColor(CoinPilotColors.ink)
+    }
+}
+
+private struct CoinPilotTabBarContentInset: ViewModifier {
+    func body(content: Content) -> some View {
+        content.safeAreaInset(edge: .bottom, spacing: 0) {
+            Color.clear
+                .frame(height: 56)
+                .accessibilityHidden(true)
+        }
+    }
+}
+
+private struct CoinPilotTabView: View {
+    @ObservedObject var store: CoinPilotStore
+    @AppStorage("coinpilot.native.selectedTab.v2") private var selectedTab = 0
+
+    var body: some View {
+        TabView(selection: $selectedTab) {
+            CoinPilotNavigationHost {
+                CoinPilotHomeView(store: store)
+                    .navigationTitle("홈")
+                    .cpInlineTitle()
+                    .toolbar { refreshToolbar }
+            }
+            .toolbar { workspaceToolbar }
+            .modifier(CoinPilotTabBarContentInset())
+            .tabItem { Label("홈", systemImage: "house") }
+            .tag(0)
+
+            CoinPilotNavigationHost {
+                CoinPilotTradingView(store: store)
+                    .navigationTitle("주문")
+                    .cpInlineTitle()
+                    .toolbar { refreshToolbar }
+            }
+            .toolbar { workspaceToolbar }
+            .modifier(CoinPilotTabBarContentInset())
+            .tabItem { Label("주문", systemImage: "arrow.left.arrow.right") }
+            .tag(1)
+
+            CoinPilotNavigationHost {
+                CoinPilotAssetsView(store: store)
+                    .navigationTitle("보유 자산")
+                    .cpInlineTitle()
+                    .toolbar { refreshToolbar }
+            }
+            .toolbar { workspaceToolbar }
+            .modifier(CoinPilotTabBarContentInset())
+            .tabItem { Label("자산", systemImage: "chart.pie") }
+            .tag(2)
+
+            CoinPilotNavigationHost {
+                CoinPilotDiscoverView(store: store)
+                    .navigationTitle("시장")
+                    .cpInlineTitle()
+                    .toolbar { refreshToolbar }
+            }
+            .toolbar { workspaceToolbar }
+            .modifier(CoinPilotTabBarContentInset())
+            .tabItem { Label("시장", systemImage: "chart.xyaxis.line") }
+            .tag(3)
+
+            CoinPilotNavigationHost {
+                CoinPilotMoreView(store: store)
+                    .navigationTitle("전체 기능")
+                    .cpInlineTitle()
+            }
+            .toolbar { workspaceToolbar }
+            .modifier(CoinPilotTabBarContentInset())
+            .tabItem { Label("더보기", systemImage: "square.grid.2x2") }
+            .tag(4)
+        }
+    }
+
+    private var refreshToolbar: some ToolbarContent {
+        ToolbarItem(placement: .cpTrailing) {
+            Button {
+                Task { await store.refresh() }
+            } label: {
+                Image(systemName: "arrow.clockwise")
+            }
+            .disabled(store.isRefreshing)
+            .accessibilityLabel("새로고침")
+        }
+    }
+
+    private var workspaceToolbar: some ToolbarContent {
+        ToolbarItem(placement: .cpLeading) {
+            Menu {
+                ForEach(CoinPilotWorkspaceMode.allCases) { mode in
+                    Button {
+                        store.selectWorkspace(mode)
+                    } label: {
+                        if mode == store.activeWorkspace {
+                            Label(mode.title, systemImage: "checkmark")
+                        } else {
+                            Text(mode.title)
+                        }
+                    }
+                }
+            } label: {
+                let exchangeSuffix = store.isBundledPreview || store.isBundledLocalMarketData
+                    ? "" : " (\(store.exchangeDisplayName))"
+                Label("\(store.isBundledPreview ? "예시 데이터" : store.activeWorkspace.title)\(exchangeSuffix)", systemImage: "arrow.left.arrow.right")
+                    .labelStyle(.titleAndIcon)
+                    .font(.caption.weight(.semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+            }
+            .accessibilityLabel("현재 \(store.activeWorkspace.title) 작업공간. 전환")
+        }
+    }
+}
+
+private enum CoinPilotTradeSide: String, CaseIterable, Identifiable, Equatable {
+    case buy
+    case sell
+
+    var id: String { rawValue }
+    var title: String { self == .buy ? "매수" : "매도" }
+}
+
+private enum CoinPilotWalletAction: String, Identifiable, Equatable {
+    case deposit
+    case withdraw
+    case reset
+
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .deposit: return "모의 지갑 입금"
+        case .withdraw: return "모의 지갑 출금"
+        case .reset: return "모의 계좌 초기화"
+        }
+    }
+}
+
+private enum CoinPilotSmartOrderSide: String, CaseIterable, Identifiable {
+    case buy
+    case sell
+
+    var id: String { rawValue }
+    var title: String { self == .buy ? "조건 매수" : "우선순위 매도" }
+}
+
+private struct CoinPilotTradingView: View {
+    @ObservedObject var store: CoinPilotStore
+    @State private var side: CoinPilotTradeSide = .buy
+    @State private var usesConditionalOrder = false
+    @State private var market = ""
+    @State private var buyAmount = ""
+    @State private var sellQuantity = ""
+    @State private var showingOrderConfirmation = false
+    @State private var walletAmount = ""
+    @State private var resetSeedMoney = ""
+    @State private var walletAction: CoinPilotWalletAction?
+    @State private var smartSide: CoinPilotSmartOrderSide = .buy
+    @State private var smartAmount = ""
+    @State private var smartMinimumScore = "60"
+    @State private var smartMaximumCoins = "10"
+    @State private var smartSellStrategy = "worst"
+    @State private var showingMarketPicker = false
+    @State private var requestedSmartSide: CoinPilotSmartOrderSide?
+    @State private var requestedRecommendation: CoinPilotRecommendation?
+    @State private var requestedBundle: [String: Any]?
+
+    private var availableMarkets: [String] {
+        let values = side == .buy
+            ? store.markets.compactMap(\.coin)
+            : (store.account?.positions.compactMap(\.coin) ?? [])
+        return Array(Set(values)).sorted()
+    }
+
+    private var selectedPosition: CoinPilotPosition? {
+        store.account?.positions.first(where: { $0.coin == market })
+    }
+
+    private func restoreAvailableMarket() {
+        guard !availableMarkets.contains(market) else { return }
+        market = availableMarkets.contains(store.selectedMarket)
+            ? store.selectedMarket : (availableMarkets.first ?? "")
+    }
+
+    private var currentPrice: Double? {
+        if store.isBundledPreview { return store.markets.first { $0.coin == market }?.price }
+        return store.freshMarketPrice(for: market)
+    }
+
+    private var orderReviewPresentation: CoinPilotOrderReviewPresentation {
+        CoinPilotOrderReviewPresentation(
+            isBundledPreview: store.isBundledPreview,
+            workspace: store.activeWorkspace,
+            draftIsValid: orderDraftIsValid,
+            blockReason: store.manualOrderBlockReason(for: market),
+            isSubmitting: store.isSubmittingManualOrder
+        )
+    }
+
+    private var parsedBuyAmount: Double? {
+        Double(buyAmount.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+
+    private var parsedSellQuantity: Double? {
+        Double(sellQuantity.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+
+    private func quoteInputText(_ amount: Double) -> String {
+        store.quoteCurrency == "KRW" ? String(format: "%.0f", amount.rounded(.down)) : String(amount)
+    }
+
+    private func confirmationQuoteAmountText(_ amount: Double?, unavailable: String = "금액 미제공") -> String {
+        guard let amount, amount.isFinite else { return unavailable }
+        let submittedAmount = store.quoteCurrency == "KRW" ? amount.rounded(.down) : amount
+        return CoinPilotFormatting.won(submittedAmount, unavailable: unavailable)
+    }
+
+    private func resetCurrencyDrafts() {
+        buyAmount = ""
+        walletAmount = ""
+        smartAmount = quoteInputText(store.quoteCurrency == "KRW" ? 100_000 : 100)
+        resetSeedMoney = quoteInputText(store.quoteCurrency == "KRW" ? 10_000_000 : 1_000)
+    }
+
+    private var conditionalOrderDraftIsValid: Bool {
+        guard let amount = Double(smartAmount), amount.isFinite,
+              amount >= (smartSide == .buy ? store.minimumOrderAmount : store.minimumSmartSellAmount) else { return false }
+        guard smartSide == .buy else { return true }
+        guard let score = Int(smartMinimumScore), (0...100).contains(score),
+              let count = Int(smartMaximumCoins), (1...30).contains(count),
+              let balance = store.account?.krwBalance, balance.isFinite, amount <= balance else { return false }
+        return true
+    }
+
+    private var conditionalOrderConfirmationMessage: String {
+        let requestedSide = requestedSmartSide ?? smartSide
+        let amount = confirmationQuoteAmountText(Double(smartAmount))
+        var lines = ["\(store.activeWorkspace.title) \(requestedSide.title)"]
+        if requestedSide == .buy {
+            lines.append("총 투자 금액 \(amount)")
+            lines.append("신호 점수 기준 \(smartMinimumScore)점\n최대 \(smartMaximumCoins)종목")
+            lines.append("기준에 맞는 종목이 없으면 점수가 낮은 상위 후보를 주문할 수 있습니다.")
+        } else {
+            let priority: String
+            switch smartSellStrategy {
+            case "worst": priority = "손실이 큰 순서"
+            case "best": priority = "수익이 큰 순서"
+            case "overbought": priority = "과매수 신호 우선"
+            default: priority = "선택한 우선순위"
+            }
+            lines.append("목표 매도 금액 \(amount)")
+            lines.append("매도 우선순위: \(priority)")
+        }
+        if store.activeWorkspace == .live {
+            lines.append("여러 종목에 실제 주문이 전송될 수 있습니다. 응답이 끊기면 새 주문은 잠기며, 같은 요청으로만 결과를 확인할 수 있습니다.")
+        } else {
+            lines.append("모의 계좌에만 반영되며 실제 자금은 이동하지 않습니다.")
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    private var bundleConfirmationMessage: String {
+        guard let bundle = requestedBundle,
+              let sell = bundle["sell"] as? [String: Any],
+              let buy = bundle["buy"] as? [String: Any],
+              let sellCoin = sell["coin"] as? String,
+              let buyCoin = buy["coin"] as? String else { return "" }
+        let quantity = (sell["amount"] as? NSNumber)?.doubleValue
+        let amount = (buy["suggestedAmount"] as? NSNumber)?.doubleValue
+        let sellDetail = quantity.map { "\(CoinPilotFormatting.quantity($0))개" } ?? "보유량 전체"
+        let buyDetail = amount.map { confirmationQuoteAmountText($0) }
+            ?? "수수료를 뺀 매도 대금의 95%"
+        var lines = ["\(store.activeWorkspace.title) 종목 교체",
+                     "매도  \(CoinPilotFormatting.ticker(sellCoin)) \(sellDetail)",
+                     "매수  \(CoinPilotFormatting.ticker(buyCoin)) \(buyDetail)"]
+        if store.activeWorkspace == .live {
+            lines.append("매도와 매수는 각각 처리되므로 일부 주문만 체결될 수 있습니다.")
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    private var conditionalOrderValidationMessages: [String] {
+        var messages: [String] = []
+        if !smartAmount.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            let minimum = smartSide == .buy ? store.minimumOrderAmount : store.minimumSmartSellAmount
+            if let amount = Double(smartAmount), amount.isFinite {
+                if amount < minimum {
+                    messages.append("\(smartSide == .buy ? "총 투자 금액" : "목표 매도 금액")은 \(CoinPilotFormatting.won(minimum)) 이상 입력해 주세요.")
+                } else if smartSide == .buy {
+                    if let balance = store.account?.krwBalance, balance.isFinite {
+                        if amount > balance {
+                            messages.append("총 투자 금액이 주문 가능 잔액 \(CoinPilotFormatting.won(balance))을 넘었습니다.")
+                        }
+                    } else {
+                        messages.append("주문 가능 잔액을 확인하지 못했습니다. 계좌 정보를 새로고침해 주세요.")
+                    }
+                }
+            } else {
+                messages.append("금액을 올바른 숫자로 입력해 주세요.")
+            }
+        }
+        if smartSide == .buy {
+            if !smartMinimumScore.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+               Int(smartMinimumScore).map({ !(0...100).contains($0) }) ?? true {
+                messages.append("신호 점수 기준은 0~100 사이의 정수로 입력해 주세요.")
+            }
+            if !smartMaximumCoins.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+               Int(smartMaximumCoins).map({ !(1...30).contains($0) }) ?? true {
+                messages.append("최대 매수 종목 수는 1~30 사이의 정수로 입력해 주세요.")
+            }
+        }
+        return messages
+    }
+
+    private var walletDraftIsValid: Bool {
+        guard let amount = Double(walletAmount), amount.isFinite else { return false }
+        return amount >= store.minimumWalletAmount
+    }
+
+    private var withdrawalDraftIsValid: Bool {
+        guard walletDraftIsValid, let amount = Double(walletAmount),
+              let balance = store.account?.krwBalance, balance.isFinite else { return false }
+        return amount <= balance
+    }
+
+    private var seedDraftIsValid: Bool {
+        guard let amount = Double(resetSeedMoney), amount.isFinite else { return false }
+        return amount >= store.minimumSeedAmount
+    }
+
+    /// 매도 시 보유 포지션의 평단·평가액·손익을 한 줄로 요약합니다. 값이 없는 항목은 생략합니다.
+    private func sellPositionSummary(_ position: CoinPilotPosition) -> String {
+        var parts: [String] = []
+        if position.entryPrice != nil {
+            parts.append("평단 \(CoinPilotFormatting.price(position.entryPrice))")
+        }
+        if position.currentValue != nil {
+            parts.append("평가 \(CoinPilotFormatting.won(position.currentValue))")
+        }
+        if position.profit != nil {
+            parts.append("손익 \(CoinPilotFormatting.signedWon(position.profit)) (\(CoinPilotFormatting.percent(position.profitPercent)))")
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    private var orderDraftIsValid: Bool {
+        guard !market.isEmpty else { return false }
+        if side == .buy {
+            guard let amount = parsedBuyAmount, amount.isFinite, amount >= store.minimumOrderAmount,
+                  let balance = store.account?.krwBalance, balance.isFinite, amount <= balance else { return false }
+            return true
+        }
+        guard let quantity = parsedSellQuantity, quantity.isFinite, quantity > 0,
+              let held = selectedPosition?.amount, held.isFinite, quantity <= held else { return false }
+        return true
+    }
+
+    private var confirmationTitle: String {
+        "\(store.activeWorkspace.title) \(CoinPilotFormatting.symbol(market)) \(side.title)"
+    }
+
+    private var confirmationDetail: String {
+        let amount = side == .buy
+            ? confirmationQuoteAmountText(parsedBuyAmount, unavailable: "금액 확인 필요")
+            : "\(sellQuantity)개\n예상 \(CoinPilotFormatting.won(currentPrice.map { $0 * (parsedSellQuantity ?? 0) }, unavailable: "평가 불가"))"
+        if store.activeWorkspace == .live {
+            return "\(store.exchangeDisplayName) 실계정으로 시장가 주문을 보냅니다.\n\(amount)\n서버의 계좌 동기화·주문 안전 검사가 통과해야 접수됩니다."
+        }
+        return "모의 서버의 가상 계좌에서만 처리합니다.\n\(amount)\n실제 거래소로 주문을 보내지 않습니다."
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                if let message = store.dashboardMessage {
+                    InlineNotice(text: message, color: CoinPilotColors.amber)
+                }
+                if let safetyMessage = store.runtimeSafetyMessage {
+                    InlineNotice(text: safetyMessage, color: CoinPilotColors.amber)
+                }
+                if store.pendingManualOrderLocked { pendingOrderCard }
+                if let message = store.orderMessage {
+                    InlineNotice(text: message, color: store.pendingManualOrderLocked ? CoinPilotColors.amber : CoinPilotColors.secondaryInk)
+                }
+                if store.supportsAmountCurrency {
+                    if store.isBundledPreview {
+                        InlineNotice(text: "예시 주문 화면입니다. 주문은 실행되지 않습니다.", color: CoinPilotColors.blue, symbol: "info.circle.fill")
+                    }
+                    Picker("주문 방법", selection: $usesConditionalOrder) {
+                        Text("직접 주문").tag(false)
+                        Text("조건 주문").tag(true)
+                    }
+                    .pickerStyle(SegmentedPickerStyle())
+                    if usesConditionalOrder { conditionalOrderEntry }
+                    else { orderEntry }
+                    if !store.isBundledPreview {
+                        NativeDisclosureCard(title: "분석과 종목 교체") { recommendationSection }
+                        CoinPilotAutomationControl(store: store)
+                        if store.activeWorkspace == .paper {
+                            NativeDisclosureCard(title: "모의 자금 관리") { paperWallet }
+                        }
+                    }
+                } else {
+                    InlineNotice(text: store.manualOrderBlockReason ?? "\(store.quoteCurrency) 기준 통화는 조회만 지원합니다.", color: CoinPilotColors.amber)
+                }
+            }
+            .padding(.horizontal, 18)
+            .padding(.top, 10)
+            .padding(.bottom, 34)
+        }
+        .cpReadableWidth()
+        .background(CoinPilotColors.paper.ignoresSafeArea())
+        .refreshable { await store.refresh() }
+        .cpScrollDismissesKeyboard()
+        .cpKeyboardDoneToolbar()
+        .onChange(of: side) { _ in
+            market = availableMarkets.first ?? ""
+            sellQuantity = ""
+        }
+        .onChange(of: store.activeWorkspace) { _ in
+            market = ""
+            buyAmount = ""
+            sellQuantity = ""
+        }
+        .onChange(of: store.selectedMarket) { newValue in
+            if availableMarkets.contains(newValue) { market = newValue }
+        }
+        .onChange(of: availableMarkets) { _ in restoreAvailableMarket() }
+        .onChange(of: store.quoteCurrency) { _ in resetCurrencyDrafts() }
+        .onAppear {
+            restoreAvailableMarket()
+            if smartAmount.isEmpty && resetSeedMoney.isEmpty { resetCurrencyDrafts() }
+        }
+        .confirmationDialog(confirmationTitle, isPresented: $showingOrderConfirmation, titleVisibility: .visible) {
+            if side == .buy {
+                Button(store.activeWorkspace == .live ? "실거래 매수 전송" : "모의 매수 실행", role: store.activeWorkspace == .live ? .destructive : nil) {
+                    Task { _ = await store.submitManualBuy(coin: market, amount: parsedBuyAmount ?? 0) }
+                }
+            } else {
+                Button(store.activeWorkspace == .live ? "실거래 매도 전송" : "모의 매도 실행", role: store.activeWorkspace == .live ? .destructive : nil) {
+                    Task { _ = await store.submitManualSell(coin: market, quantity: parsedSellQuantity ?? 0) }
+                }
+            }
+            Button("취소", role: .cancel) {}
+        } message: {
+            Text(confirmationDetail)
+        }
+        .confirmationDialog(walletAction?.title ?? "모의 지갑", isPresented: Binding(
+            get: { walletAction != nil },
+            set: { if !$0 { walletAction = nil } }
+        ), titleVisibility: .visible) {
+            if let walletAction {
+                Button(walletAction == .reset ? "초기화하고 다시 시작" : walletAction.title,
+                       role: walletAction == .reset ? .destructive : nil) {
+                    let action = walletAction
+                    self.walletAction = nil
+                    Task {
+                        switch action {
+                        case .deposit:
+                            _ = await store.updatePaperWallet(amount: Double(walletAmount) ?? 0, deposit: true)
+                            walletAmount = ""
+                        case .withdraw:
+                            _ = await store.updatePaperWallet(amount: Double(walletAmount) ?? 0, deposit: false)
+                            walletAmount = ""
+                        case .reset:
+                            _ = await store.resetPaperWallet(seedMoney: Double(resetSeedMoney) ?? 0)
+                        }
+                    }
+                }
+            }
+            Button("취소", role: .cancel) { walletAction = nil }
+        } message: {
+            Text(walletAction == .reset
+                 ? "가상 잔액을 \(confirmationQuoteAmountText(Double(resetSeedMoney)))으로 바꿉니다. 현재 모의 보유량과 매매 기록이 삭제됩니다."
+                 : "\(confirmationQuoteAmountText(Double(walletAmount)))을 모의 계좌에서 \(walletAction == .deposit ? "입금" : "출금")합니다. 실제 자금은 이동하지 않습니다.")
+        }
+        .confirmationDialog(
+            requestedSmartSide?.title ?? "조건 주문",
+            isPresented: Binding(get: { requestedSmartSide != nil }, set: { if !$0 { requestedSmartSide = nil } }),
+            titleVisibility: .visible
+        ) {
+            if let requestedSmartSide {
+                Button(store.activeWorkspace == .live ? "실거래 조건 주문 전송" : "모의 조건 주문 실행",
+                       role: store.activeWorkspace == .live ? .destructive : nil) {
+                    self.requestedSmartSide = nil
+                    Task {
+                        if requestedSmartSide == .buy {
+                            _ = await store.submitSmartBuy(
+                                totalAmount: Double(smartAmount) ?? 0,
+                                minimumScore: Int(smartMinimumScore) ?? 60,
+                                maximumCoins: Int(smartMaximumCoins) ?? 10
+                            )
+                        } else {
+                            _ = await store.submitSmartSell(
+                                targetAmount: Double(smartAmount) ?? 0,
+                                strategy: smartSellStrategy
+                            )
+                        }
+                    }
+                }
+            }
+            Button("취소", role: .cancel) { requestedSmartSide = nil }
+        } message: {
+            Text(conditionalOrderConfirmationMessage)
+        }
+        .confirmationDialog(
+            "추천 주문을 확인해 주세요",
+            isPresented: Binding(get: { requestedRecommendation != nil }, set: { if !$0 { requestedRecommendation = nil } }),
+            titleVisibility: .visible
+        ) {
+            if let recommendation = requestedRecommendation {
+                Button(store.activeWorkspace == .live ? "실거래 추천 주문 전송" : "모의 추천 주문 실행",
+                       role: store.activeWorkspace == .live ? .destructive : nil) {
+                    requestedRecommendation = nil
+                    Task { _ = await store.submitRecommendation(recommendation) }
+                }
+            }
+            Button("취소", role: .cancel) { requestedRecommendation = nil }
+        } message: {
+            Text(requestedRecommendation.map { recommendation in
+                let detail = recommendation.action == "BUY"
+                    ? "매수 \(confirmationQuoteAmountText(recommendation.suggestedAmount ?? store.buyAmountPresets[1]))"
+                    : "보유량 전체 매도"
+                return "\(CoinPilotFormatting.ticker(recommendation.coin)) \(detail)\n분석 결과는 참고 정보이며, 주문 전 서버의 거래 안전 검사를 다시 확인합니다."
+            } ?? "")
+        }
+        .confirmationDialog(
+            "종목 교체",
+            isPresented: Binding(get: { requestedBundle != nil }, set: { if !$0 { requestedBundle = nil } }),
+            titleVisibility: .visible
+        ) {
+            if let bundle = requestedBundle,
+               let sell = bundle["sell"] as? [String: Any],
+               let buy = bundle["buy"] as? [String: Any],
+               let sellCoin = sell["coin"] as? String,
+               let buyCoin = buy["coin"] as? String {
+                Button(store.activeWorkspace == .live ? "실거래 종목 교체 전송" : "모의 종목 교체 실행",
+                       role: store.activeWorkspace == .live ? .destructive : nil) {
+                    requestedBundle = nil
+                    let sellAmount = (sell["amount"] as? NSNumber)?.doubleValue
+                    let buyAmount = (buy["suggestedAmount"] as? NSNumber)?.doubleValue
+                    Task { _ = await store.submitBundle(sellCoin: sellCoin, sellAmount: sellAmount, buyCoin: buyCoin, buyAmount: buyAmount) }
+                }
+            }
+            Button("취소", role: .cancel) { requestedBundle = nil }
+        } message: {
+            Text(bundleConfirmationMessage)
+        }
+        .sheet(isPresented: $showingMarketPicker) {
+            CoinPilotMarketPickerSheet(
+                store: store,
+                side: side,
+                availableMarkets: availableMarkets,
+                selected: market
+            ) { selected in
+                market = selected
+                showingMarketPicker = false
+            }
+        }
+        .task {
+            if store.buyRecommendations.isEmpty && store.sellRecommendations.isEmpty { await store.loadRecommendations() }
+            if store.bundleSuggestions.isEmpty { await store.loadBundleSuggestions() }
+        }
+    }
+
+    private var conditionalOrderEntry: some View {
+        NativeCard {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    SectionHeading(title: "조건 주문")
+                    Spacer()
+                    Text(store.isBundledPreview ? "예시 계좌" : store.activeWorkspace.title)
+                        .font(.caption.weight(.semibold))
+                        .foregroundColor(store.activeWorkspace == .live ? CoinPilotColors.red : CoinPilotColors.blue)
+                }
+                Picker("주문 방식", selection: $smartSide) {
+                    ForEach(CoinPilotSmartOrderSide.allCases) { value in Text(value.title).tag(value) }
+                }
+                .pickerStyle(SegmentedPickerStyle())
+                FieldTitle(title: smartSide == .buy ? "총 투자 금액 (\(store.quoteCurrency))" : "목표 매도 금액 (\(store.quoteCurrency))")
+                TextField("금액 입력", text: $smartAmount)
+                    .cpKeyboardDecimalPad()
+                    .textFieldStyle(.roundedBorder)
+                    .accessibilityLabel(smartSide == .buy ? "조건 매수 총 투자 금액" : "조건 매도 목표 금액")
+                if smartSide == .buy {
+                    HStack(spacing: 12) {
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text("신호 점수 기준").font(.caption).foregroundColor(CoinPilotColors.secondaryInk)
+                            TextField("60", text: $smartMinimumScore)
+                                .cpKeyboardNumberPad().textFieldStyle(.roundedBorder)
+                                .accessibilityLabel("신호 점수 기준")
+                        }
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text("최대 종목 수").font(.caption).foregroundColor(CoinPilotColors.secondaryInk)
+                            TextField("10", text: $smartMaximumCoins)
+                                .cpKeyboardNumberPad().textFieldStyle(.roundedBorder)
+                                .accessibilityLabel("최대 매수 종목 수")
+                        }
+                    }
+                    Text("서버가 거래량 상위 종목을 분석해 잔액 범위 안에서 나눠 주문합니다. 조건을 충족한 종목이 없을 때는 서버 기준의 상위 후보가 사용될 수 있습니다.")
+                        .font(.caption)
+                        .foregroundColor(CoinPilotColors.secondaryInk)
+                } else {
+                    Picker("매도 우선순위", selection: $smartSellStrategy) {
+                        Text("손실이 큰 순서").tag("worst")
+                        Text("수익이 큰 순서").tag("best")
+                        Text("과매수 신호 우선").tag("overbought")
+                    }
+                    .pickerStyle(MenuPickerStyle())
+                }
+                if !conditionalOrderValidationMessages.isEmpty {
+                    InlineNotice(text: conditionalOrderValidationMessages.joined(separator: "\n"), color: CoinPilotColors.amber)
+                }
+                Button(smartSide.title) { requestedSmartSide = smartSide }
+                    .buttonStyle(CoinPilotSecondaryButtonStyle())
+                    .disabled(!conditionalOrderDraftIsValid || store.manualOrderBlockReason != nil || store.pendingManualOrderLocked)
+            }
+        }
+    }
+
+    private var recommendationSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            NativeCard {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack {
+                        SectionHeading(title: "매수·매도 검토")
+                        Spacer()
+                        Button(store.loadingFeatures.contains("recommendations") ? "분석 중" : "새로 분석") { Task { await store.loadRecommendations() } }
+                            .font(.caption.weight(.semibold))
+                            .disabled(store.loadingFeatures.contains("recommendations"))
+                    }
+                    if let message = store.featureMessages["recommendations"] {
+                        EmptyMessage(text: message)
+                    } else if store.buyRecommendations.isEmpty && store.sellRecommendations.isEmpty {
+                        EmptyMessage(text: store.loadingFeatures.contains("recommendations") ? "분석 중" : "현재 검토할 종목이 없습니다.")
+                    }
+                    let recommendations = Array((store.buyRecommendations + store.sellRecommendations).prefix(8))
+                    ForEach(recommendations) { recommendation in
+                        let actionTint: Color = recommendation.action == "BUY" ? CoinPilotColors.blue : CoinPilotColors.red
+                        VStack(alignment: .leading, spacing: 7) {
+                            HStack(spacing: 7) {
+                                Text(CoinPilotFormatting.ticker(recommendation.coin))
+                                    .font(.subheadline.weight(.semibold))
+                                Text(recommendation.action == "BUY" ? "매수 검토" : "매도 검토")
+                                    .font(.caption2.weight(.bold))
+                                    .foregroundColor(actionTint)
+                                    .padding(.horizontal, 7)
+                                    .padding(.vertical, 3)
+                                    .background(actionTint.opacity(0.10))
+                                    .clipShape(Capsule())
+                                Spacer()
+                                if let confidence = recommendation.confidence {
+                                    Text("점수 \(Int(confidence))")
+                                        .font(.caption.weight(.semibold))
+                                        .monospacedDigit()
+                                        .foregroundColor(CoinPilotColors.secondaryInk)
+                                }
+                            }
+                            if let reason = recommendation.reason {
+                                Text(reason).font(.caption).foregroundColor(CoinPilotColors.secondaryInk)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            HStack {
+                                Text(CoinPilotFormatting.won(recommendation.price, unavailable: "현재가 미제공"))
+                                    .font(.caption)
+                                    .monospacedDigit()
+                                Spacer()
+                                Button(recommendation.action == "BUY" ? "매수 검토" : "보유량 전체 매도") {
+                                    requestedRecommendation = recommendation
+                                }
+                                .buttonStyle(CoinPilotCompactButtonStyle(tint: actionTint))
+                                .disabled(store.manualOrderBlockReason(for: recommendation.coin) != nil || store.pendingManualOrderLocked)
+                            }
+                        }
+                        .padding(.vertical, 8)
+                        if recommendation.id != recommendations.last?.id { Divider().overlay(CoinPilotColors.line) }
+                    }
+                }
+            }
+            NativeCard {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack {
+                        SectionHeading(title: "종목 교체 제안")
+                        Spacer()
+                        Button(store.loadingFeatures.contains("bundles") ? "분석 중" : "새로 분석") { Task { await store.loadBundleSuggestions() } }
+                            .font(.caption.weight(.semibold))
+                            .disabled(store.loadingFeatures.contains("bundles"))
+                    }
+                    if let message = store.featureMessages["bundles"] {
+                        EmptyMessage(text: message)
+                    } else if store.bundleSuggestions.isEmpty {
+                        EmptyMessage(text: "현재 표시할 종목 교체 제안이 없습니다.")
+                    }
+                    ForEach(Array(store.bundleSuggestions.prefix(5).enumerated()), id: \.offset) { entry in
+                        let bundle = entry.element
+                        let sell = bundle["sell"] as? [String: Any] ?? [:]
+                        let buy = bundle["buy"] as? [String: Any] ?? [:]
+                        let sellCoin = sell["coin"] as? String ?? "보유 종목"
+                        let buyCoin = buy["coin"] as? String ?? "매수 종목"
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("\(CoinPilotFormatting.ticker(sellCoin)) → \(CoinPilotFormatting.ticker(buyCoin))")
+                                .font(.subheadline.weight(.semibold))
+                            Text(bundle["rationale"] as? String ?? bundle["summary"] as? String ?? "종목 교체 제안")
+                                .font(.caption)
+                                .foregroundColor(CoinPilotColors.secondaryInk)
+                                .fixedSize(horizontal: false, vertical: true)
+                            HStack {
+                                Spacer()
+                                Button("종목 교체 검토") { requestedBundle = bundle }
+                                    .buttonStyle(CoinPilotCompactButtonStyle(tint: CoinPilotColors.blue))
+                                    .disabled(store.manualOrderBlockReason(forMarkets: [sellCoin, buyCoin]) != nil || store.pendingManualOrderLocked)
+                            }
+                        }
+                        .padding(.vertical, 8)
+                    }
+                }
+            }
+        }
+    }
+
+    private var orderEntry: some View {
+        NativeCard {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack {
+                    SectionHeading(title: orderReviewPresentation.sectionTitle)
+                    Spacer()
+                    MetadataLine(text: orderReviewPresentation.accountTitle)
+                        .font(.caption.weight(.semibold))
+                        .foregroundColor(!store.isBundledPreview && store.activeWorkspace == .live
+                                         ? CoinPilotColors.red
+                                         : CoinPilotColors.blue)
+                }
+                Picker("매수 또는 매도", selection: $side) {
+                    ForEach(CoinPilotTradeSide.allCases) { option in
+                        Text(option.title).tag(option)
+                    }
+                }
+                .pickerStyle(SegmentedPickerStyle())
+                if availableMarkets.isEmpty {
+                    EmptyMessage(text: side == .buy ? "시세 종목을 불러오면 매수할 수 있습니다." : "매도할 보유 자산이 없습니다.")
+                } else {
+                    HStack {
+                        Button {
+                            showingMarketPicker = true
+                        } label: {
+                            HStack(spacing: 6) {
+                                if !market.isEmpty {
+                                    CoinAvatar(coin: market, size: 24)
+                                }
+                                Text(market.isEmpty ? "종목 선택" : CoinPilotFormatting.symbol(market))
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundColor(CoinPilotColors.ink)
+                                if !market.isEmpty {
+                                    Text(CoinPilotFormatting.ticker(market))
+                                        .font(.caption)
+                                        .foregroundColor(CoinPilotColors.secondaryInk)
+                                }
+                                Image(systemName: "chevron.down")
+                                    .font(.caption2.weight(.bold))
+                                    .foregroundColor(CoinPilotColors.secondaryInk)
+                            }
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 9)
+                            .background(CoinPilotColors.paper)
+                            .clipShape(RoundedRectangle(cornerRadius: 11))
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                        .accessibilityLabel("주문 종목 선택")
+                        if !store.isBundledPreview && !store.isBundledLocalMarketData,
+                           market.range(of: "^[A-Z0-9]{2,10}-[A-Z0-9]{2,15}$", options: .regularExpression) != nil {
+                            NavigationLink(destination: CoinPilotMarketDetailView(store: store, coin: market)) {
+                                Label("시세", systemImage: "chart.line.uptrend.xyaxis")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundColor(CoinPilotColors.blue)
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 6)
+                                    .background(CoinPilotColors.blue.opacity(0.08))
+                                    .clipShape(Capsule())
+                            }
+                            .buttonStyle(PlainButtonStyle())
+                        }
+                    }
+
+                    HStack {
+                        Text(store.isBundledPreview ? "예시 가격" : "현재가")
+                            .font(.subheadline)
+                            .foregroundColor(CoinPilotColors.secondaryInk)
+                        Spacer()
+                        Text(CoinPilotFormatting.won(currentPrice, unavailable: "시세 확인 불가"))
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundColor(CoinPilotColors.ink)
+                    }
+
+                    if side == .buy {
+                        FieldTitle(title: "매수 금액 (\(store.quoteCurrency))")
+                        TextField("최소 \(CoinPilotFormatting.won(store.minimumOrderAmount))", text: $buyAmount)
+                            .cpKeyboardDecimalPad()
+                            .textFieldStyle(.plain)
+                            .padding(.horizontal, 14)
+                            .frame(minHeight: 50)
+                            .background(CoinPilotColors.paper)
+                            .clipShape(RoundedRectangle(cornerRadius: 11))
+                            .accessibilityLabel("매수 금액 \(store.quoteCurrency)")
+                        HStack(spacing: 8) {
+                            ForEach(store.buyAmountPresets, id: \.self) { amount in
+                                Button(CoinPilotFormatting.won(amount)) { buyAmount = quoteInputText(amount) }
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundColor(CoinPilotColors.blue)
+                            }
+                        }
+                        if let balance = store.account?.krwBalance, balance >= store.minimumOrderAmount {
+                            HStack(spacing: 8) {
+                                Text("잔고")
+                                    .font(.caption)
+                                    .foregroundColor(CoinPilotColors.secondaryInk)
+                                ForEach([25.0, 50.0, 100.0], id: \.self) { percent in
+                                    Button("\(Int(percent))%") {
+                                        buyAmount = quoteInputText(percent == 100 ? balance : balance * percent / 100)
+                                    }
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundColor(CoinPilotColors.blue)
+                                }
+                            }
+                        }
+                        MetadataLine(text: "사용 가능 잔액 · \(CoinPilotFormatting.won(store.account?.krwBalance, unavailable: "확인 불가"))")
+                            .font(.caption)
+                            .foregroundColor(CoinPilotColors.secondaryInk)
+                        if let amount = parsedBuyAmount, amount.isFinite, amount >= store.minimumOrderAmount,
+                           let price = currentPrice, price.isFinite, price > 0 {
+                            MetadataLine(text: "수수료 전 예상 수량 약 \(CoinPilotFormatting.quantity(amount / price))개 · 실제 체결가와 수수료에 따라 달라집니다.")
+                                .font(.caption)
+                                .foregroundColor(CoinPilotColors.secondaryInk)
+                        }
+                    } else {
+                        FieldTitle(title: "매도 수량")
+                        TextField("보유 수량", text: $sellQuantity)
+                            .cpKeyboardDecimalPad()
+                            .textFieldStyle(.plain)
+                            .padding(.horizontal, 14)
+                            .frame(minHeight: 50)
+                            .background(CoinPilotColors.paper)
+                            .clipShape(RoundedRectangle(cornerRadius: 11))
+                            .accessibilityLabel("매도 수량")
+                        HStack(spacing: 14) {
+                            Text("보유 \(CoinPilotFormatting.quantity(selectedPosition?.amount))")
+                                .font(.caption)
+                                .foregroundColor(CoinPilotColors.secondaryInk)
+                            Spacer()
+                            ForEach([25.0, 50.0, 100.0], id: \.self) { percent in
+                                Button("\(Int(percent))%") {
+                                    guard let amount = selectedPosition?.amount else { return }
+                                    sellQuantity = CoinPilotFormatting.editableNumber(percent == 100 ? amount : amount * percent / 100)
+                                }
+                                .font(.caption.weight(.semibold))
+                                .foregroundColor(CoinPilotColors.blue)
+                            }
+                        }
+                        if let position = selectedPosition, !sellPositionSummary(position).isEmpty {
+                            MetadataLine(text: sellPositionSummary(position))
+                                .font(.caption)
+                                .foregroundColor(CoinPilotColors.secondaryInk)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+
+                    if !store.isBundledPreview, !store.isRefreshing, let blockReason = store.manualOrderBlockReason(for: market) {
+                        InlineNotice(text: blockReason, color: CoinPilotColors.amber)
+                    }
+                    Button {
+                        showingOrderConfirmation = true
+                    } label: {
+                        HStack {
+                            Spacer()
+                            if store.isSubmittingManualOrder { ProgressView().tint(.white) }
+                            Text(orderReviewPresentation.buttonTitle)
+                                .font(.headline.weight(.semibold))
+                            Spacer()
+                        }
+                        .frame(minHeight: 56)
+                        .foregroundColor(orderReviewPresentation.isEnabled
+                                         ? .white
+                                         : CoinPilotColors.secondaryInk)
+                        .background(orderReviewPresentation.isEnabled
+                                    ? (store.activeWorkspace == .live ? CoinPilotColors.red : CoinPilotColors.blue)
+                                    : CoinPilotColors.line)
+                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    }
+                    .disabled(!orderReviewPresentation.isEnabled)
+                    if !store.isBundledPreview {
+                        Text(store.activeWorkspace == .live
+                             ? "주문 전 종목·금액을 다시 확인합니다. 거래소 API 키는 서버에만 보관됩니다."
+                             : "모의 주문은 선택한 모의투자 서버의 가상 자산만 바꿉니다.")
+                            .font(.footnote)
+                            .foregroundColor(CoinPilotColors.secondaryInk)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+        }
+    }
+
+    private var paperWallet: some View {
+        NativeCard {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    SectionHeading(title: store.isBundledPreview ? "예시 계좌" : "모의 계좌")
+                    Spacer()
+                    Text(CoinPilotFormatting.won(store.account?.krwBalance, unavailable: "잔액 확인 중"))
+                        .font(.caption.weight(.semibold))
+                        .foregroundColor(CoinPilotColors.ink)
+                }
+                Text(store.isBundledPreview
+                     ? "앱에 포함된 예시 잔액이며 변경되지 않습니다."
+                     : "모의투자 서버의 가상 잔액만 변경됩니다. 현재 연결된 실거래 계좌에는 영향을 주지 않습니다.")
+                    .font(.footnote)
+                    .foregroundColor(CoinPilotColors.secondaryInk)
+                    .fixedSize(horizontal: false, vertical: true)
+                if !store.isBundledPreview {
+                    TextField("입금·출금 금액 (\(store.quoteCurrency))", text: $walletAmount)
+                        .cpKeyboardDecimalPad()
+                        .textFieldStyle(.plain)
+                        .padding(.horizontal, 14)
+                        .frame(minHeight: 46)
+                        .background(CoinPilotColors.paper)
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                        .accessibilityLabel("모의 계좌 입금·출금 금액")
+                    HStack(spacing: 10) {
+                        Button("입금") { walletAction = .deposit }
+                            .buttonStyle(CoinPilotSecondaryButtonStyle())
+                            .disabled(store.paperWalletBlockReason != nil || !walletDraftIsValid)
+                        Button("출금") { walletAction = .withdraw }
+                            .buttonStyle(CoinPilotSecondaryButtonStyle())
+                            .disabled(store.paperWalletBlockReason != nil || !withdrawalDraftIsValid)
+                    }
+                    Divider().overlay(CoinPilotColors.line)
+                    TextField("초기 잔액 (\(store.quoteCurrency))", text: $resetSeedMoney)
+                        .cpKeyboardDecimalPad()
+                        .textFieldStyle(.plain)
+                        .padding(.horizontal, 14)
+                        .frame(minHeight: 46)
+                        .background(CoinPilotColors.paper)
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                        .accessibilityLabel("모의 계좌 초기 잔액")
+                    Button("모의 계좌 초기화", role: .destructive) { walletAction = .reset }
+                        .frame(maxWidth: .infinity, minHeight: 42, alignment: .leading)
+                        .disabled(store.paperWalletBlockReason != nil || !seedDraftIsValid)
+                    if let reason = store.paperWalletBlockReason {
+                        Text(reason)
+                            .font(.caption)
+                            .foregroundColor(CoinPilotColors.amber)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+        }
+    }
+
+    private var pendingOrderCard: some View {
+        NativeCard {
+            VStack(alignment: .leading, spacing: 10) {
+                SectionHeading(title: "미확정 주문")
+                if let pending = store.pendingManualOrder {
+                    MetadataLine(text: "\(pending.mode == "LIVE" ? "실거래" : "모의투자") · \(CoinPilotFormatting.ticker(pending.market)) \(pending.side) · \(pending.displayAmount)")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundColor(CoinPilotColors.ink)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    Text("기기에 저장된 주문 확인 기록을 읽지 못했습니다. 새 주문을 보내지 말고 서버 주문 기록을 먼저 확인하세요.")
+                        .font(.subheadline)
+                        .foregroundColor(CoinPilotColors.secondaryInk)
+                }
+                if store.pendingManualOrder != nil, store.canOperate {
+                    Button {
+                        Task { _ = await store.retryPendingManualOrder() }
+                    } label: {
+                        Text(store.isSubmittingManualOrder ? "같은 요청 확인 중" : "같은 요청으로 결과 확인")
+                            .frame(maxWidth: .infinity, minHeight: 46)
+                    }
+                    .buttonStyle(CoinPilotSecondaryButtonStyle())
+                    .disabled(store.isSubmittingManualOrder)
+                }
+            }
+        }
+    }
+}
+
+/// 주문 종목 선택 시트 — 검색과 시세/보유량을 함께 보여주는 전체 화면 목록.
+/// MenuPickerStyle 드롭다운보다 수백 개 시장을 고르기 쉽다.
+private struct CoinPilotMarketPickerSheet: View {
+    @ObservedObject var store: CoinPilotStore
+    let side: CoinPilotTradeSide
+    let availableMarkets: [String]
+    let selected: String
+    let onSelect: (String) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var search = ""
+
+    private var rows: [String] {
+        let base = availableMarkets.filter { coin in
+            search.isEmpty ||
+              coin.localizedCaseInsensitiveContains(search) ||
+              CoinPilotFormatting.symbol(coin).localizedCaseInsensitiveContains(search) ||
+              CoinPilotFormatting.ticker(coin).localizedCaseInsensitiveContains(search)
+        }
+        if side == .buy {
+            // 매수는 거래대금 순으로 — 유동성이 높은 종목이 먼저 보인다.
+            var volumeByCoin: [String: Double] = [:]
+            for marketRow in store.markets {
+                if let coin = marketRow.coin {
+                    volumeByCoin[coin] = marketRow.volumeKrw ?? 0
+                }
+            }
+            return base.sorted { (volumeByCoin[$0] ?? 0) > (volumeByCoin[$1] ?? 0) }
+        }
+        return base
+    }
+
+    private func position(for coin: String) -> CoinPilotPosition? {
+        store.account?.positions.first(where: { $0.coin == coin })
+    }
+
+    private func marketPrice(for coin: String) -> CoinPilotMarketPrice? {
+        store.markets.first(where: { $0.coin == coin })
+    }
+
+    var body: some View {
+        CoinPilotNavigationHost {
+            List {
+                ForEach(rows, id: \.self) { coin in
+                    Button {
+                        onSelect(coin)
+                    } label: {
+                        HStack {
+                            CoinAvatar(coin: coin, size: 34)
+                            VStack(alignment: .leading, spacing: 2) {
+                                HStack(spacing: 6) {
+                                    Text(CoinPilotFormatting.symbol(coin))
+                                        .font(.subheadline.weight(.semibold))
+                                        .foregroundColor(CoinPilotColors.ink)
+                                    Text(CoinPilotFormatting.ticker(coin))
+                                        .font(.caption)
+                                        .foregroundColor(CoinPilotColors.secondaryInk)
+                                    if coin == selected {
+                                        Image(systemName: "checkmark.circle.fill")
+                                            .font(.caption)
+                                            .foregroundColor(CoinPilotColors.blue)
+                                    }
+                                }
+                                if side == .sell, let position = position(for: coin) {
+                                    MetadataLine(text: "보유 \(CoinPilotFormatting.quantity(position.amount))개 · 평단 \(CoinPilotFormatting.price(position.entryPrice))")
+                                        .font(.caption)
+                                        .foregroundColor(CoinPilotColors.secondaryInk)
+                                }
+                            }
+                            Spacer()
+                            if let price = marketPrice(for: coin) {
+                                VStack(alignment: .trailing, spacing: 2) {
+                                    Text(CoinPilotFormatting.won(price.price, unavailable: "-"))
+                                        .font(.subheadline.weight(.medium))
+                                        .foregroundColor(CoinPilotColors.ink)
+                                    if let change = price.change {
+                                        Text(CoinPilotFormatting.percent(change))
+                                            .font(.caption)
+                                            .foregroundColor(profitColor(change))
+                                    }
+                                }
+                            }
+                        }
+                        .padding(.vertical, 4)
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                }
+            }
+            .listStyle(PlainListStyle())
+            .navigationTitle(side == .buy ? "매수 종목 선택" : "매도 종목 선택")
+            .cpInlineTitle()
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("닫기") { dismiss() }.keyboardShortcut(.cancelAction)
+                }
+            }
+            .cpSearchableSheet(text: $search, prompt: "종목 검색")
+        }
+        .cpEditorSheetFrame()
+    }
+}
+
+private struct CoinPilotAutomationControl: View {
+    @ObservedObject var store: CoinPilotStore
+    @State private var requestedStart: Bool?
+
+    private var presentation: CoinPilotAutomationPresentation {
+        CoinPilotAutomationPresentation(
+            isBundledPreview: store.isBundledPreview,
+            isRunning: store.status?.isRunning
+        )
+    }
+
+    private var isRunning: Bool? { store.isBundledPreview ? nil : store.status?.isRunning }
+
+    private var isEnabled: Bool {
+        guard !store.isBundledPreview, store.canOperate, store.status?.mode == store.activeWorkspace.serverMode,
+              let isRunning else { return false }
+        return isRunning || store.status?.runtimeState != "PROTECTIVE_ONLY"
+    }
+
+    var body: some View {
+        NativeCard {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 5) {
+                        SectionHeading(title: presentation.sectionTitle)
+                        if isRunning == nil {
+                            Text(presentation.explanation)
+                                .font(.footnote)
+                                .foregroundColor(CoinPilotColors.secondaryInk)
+                        }
+                    }
+                    Spacer()
+                    Text(presentation.stateLabel)
+                        .font(.caption.weight(.semibold))
+                        .foregroundColor(!store.isBundledPreview && isRunning == true
+                                         ? CoinPilotColors.green
+                                         : CoinPilotColors.secondaryInk)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 5)
+                        .background((!store.isBundledPreview && isRunning == true
+                                     ? CoinPilotColors.green
+                                     : CoinPilotColors.secondaryInk).opacity(0.10))
+                        .clipShape(Capsule())
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("\(store.isBundledPreview ? "자동매매 예시" : "운영 상태") · \(presentation.stateLabel). \(presentation.explanation)")
+                if store.activeWorkspace == .live && !store.isBundledPreview {
+                    Text("시작하면 실제 주문이 발생할 수 있습니다. 중지 후에도 보유 자산의 위험 감시는 계속될 수 있습니다.")
+                        .font(.footnote)
+                        .foregroundColor(CoinPilotColors.secondaryInk)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if presentation.showsControls {
+                    Button(isRunning == true ? "자동매매 중지" : "자동매매 시작") {
+                        requestedStart = isRunning != true
+                    }
+                    .buttonStyle(CoinPilotPrimaryButtonStyle())
+                    .disabled(!isEnabled || store.isWorking)
+                    if !isEnabled {
+                        Text(!store.canOperate
+                             ? "현재 권한으로는 조회만 할 수 있어요. 주문과 설정 권한은 더보기의 설정에서 확인하세요."
+                             : isRunning == nil
+                                ? "서버의 실행 상태를 확인한 뒤 사용할 수 있어요."
+                                : "보유 포지션의 보호가 끝나야 다시 시작할 수 있어요. 주문 전 점검에서 현재 상태를 확인하세요.")
+                            .font(.caption)
+                            .foregroundColor(CoinPilotColors.secondaryInk)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                if !store.isBundledPreview {
+                    DisclosureGroup("운용 상세") {
+                        VStack(alignment: .leading, spacing: 10) {
+                            if let response = store.lastAutomationResponse {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("최근 요청 응답").font(.caption.weight(.semibold))
+                                    Text(response).font(.caption).fixedSize(horizontal: false, vertical: true)
+                                }
+                                .foregroundColor(CoinPilotColors.secondaryInk)
+                            }
+                            if store.isBundledPreview {
+                                EmptyView()
+                            } else if store.activeWorkspace == .live {
+                                Text("실거래 시작 후 서버의 검증을 통과하면 자동 주문이 나갈 수 있습니다. 중지 요청 후에도 보유 포지션의 위험 감시는 계속될 수 있습니다.")
+                                    .font(.footnote)
+                                    .foregroundColor(CoinPilotColors.secondaryInk)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                if store.status?.liveManualPrepareOnBoot == true {
+                                    if store.status?.liveManualPrepared == true {
+                                        Label("실거래 계좌 확인 완료", systemImage: "checkmark.circle.fill")
+                                            .font(.footnote.weight(.semibold))
+                                            .foregroundColor(CoinPilotColors.green)
+                                    } else {
+                                        Text("서버는 자동매매를 시작하지 않은 상태로 계좌와 대상 주문을 확인하고 있습니다. 확인이 끝날 때까지 주문이 잠겨 있습니다.")
+                                            .font(.footnote)
+                                            .foregroundColor(CoinPilotColors.secondaryInk)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                    }
+                                }
+                            } else {
+                                Text("모의투자 서버의 가상 계좌만 사용합니다. 실거래 서버의 상태와 자산은 이 작업공간에 섞이지 않습니다.")
+                                    .font(.footnote)
+                                    .foregroundColor(CoinPilotColors.secondaryInk)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            if !store.isBundledPreview {
+                                HStack(spacing: 6) {
+                                    Circle()
+                                        .fill(store.liveEventsConnected ? CoinPilotColors.green : CoinPilotColors.secondaryInk)
+                                        .frame(width: 7, height: 7)
+                                        .accessibilityHidden(true)
+                                    Text(store.liveEventsConnected
+                                         ? "서버 알림을 실시간으로 받고 있어요"
+                                         : "앱을 보는 동안 30초마다 상태를 확인해요")
+                                        .font(.caption2)
+                                        .foregroundColor(CoinPilotColors.secondaryInk)
+                                }
+                                .accessibilityElement(children: .combine)
+                            }
+                            if let desired = store.status?.desiredAutomationRunning {
+                                Text(desired ? "자동매매 켜짐 선택이 저장돼 있어요. 서버 재시작 후 계좌와 시세를 확인하고 재개합니다."
+                                     : "자동매매 꺼짐 선택이 저장돼 있어요. 서버가 재시작돼도 자동으로 켜지지 않아요.")
+                                    .font(.caption).foregroundColor(CoinPilotColors.secondaryInk)
+                                if let savedAt = store.status?.automationTrackingSavedAt {
+                                    MetadataLine(text: "진행 기록 저장 · \(savedAt)")
+                                        .font(.caption2).foregroundColor(CoinPilotColors.secondaryInk)
+                                }
+                            }
+                            if let message = store.orderNotificationMessage {
+                                Text(message).font(.caption).foregroundColor(CoinPilotColors.secondaryInk)
+                            }
+                            if !store.isBundledPreview {
+                                NavigationLink(destination: CoinPilotResearchDeskView(store: store)) {
+                                    HStack(spacing: 12) {
+                                        VStack(alignment: .leading, spacing: 3) {
+                                            Text("주문 전 점검")
+                                                .font(.subheadline.weight(.semibold))
+                                                .foregroundColor(CoinPilotColors.blue)
+                                            Text("서버 연결과 투자 전략 자료 확인")
+                                                .font(.caption)
+                                                .foregroundColor(CoinPilotColors.secondaryInk)
+                                                .fixedSize(horizontal: false, vertical: true)
+                                        }
+                                        Spacer(minLength: 8)
+                                        Image(systemName: "chevron.right")
+                                            .font(.caption.weight(.semibold))
+                                            .foregroundColor(CoinPilotColors.secondaryInk)
+                                            .accessibilityHidden(true)
+                                    }
+                                    .frame(minHeight: 44)
+                                    .contentShape(Rectangle())
+                                }
+                                .buttonStyle(PlainButtonStyle())
+                                .accessibilityHint("실거래 주문 조건과 서버의 안전 상태를 확인합니다. 이 화면에서는 주문을 보내지 않습니다.")
+                            }
+                        }.padding(.top, 8)
+                    }
+                    .font(.subheadline)
+                    .frame(minHeight: 44)
+                }
+            }
+        }
+        .confirmationDialog(
+            requestedStart == true ? "자동매매를 시작할까요?" : "자동매매 중지를 요청할까요?",
+            isPresented: Binding(get: { requestedStart != nil }, set: { if !$0 { requestedStart = nil } }),
+            titleVisibility: .visible
+        ) {
+            if let startRequest = requestedStart {
+                Button(startRequest
+                       ? (store.activeWorkspace == .live ? "실거래 자동매매 시작" : "모의투자 시작")
+                       : "자동매매 중지 요청",
+                       role: startRequest && store.activeWorkspace == .live ? .destructive : nil) {
+                    let shouldStart = startRequest
+                    requestedStart = nil
+                    Task { _ = await store.setAutomationRunning(shouldStart) }
+                }
+            }
+            Button("취소", role: .cancel) { requestedStart = nil }
+        } message: {
+            Text(requestedStart == true && store.activeWorkspace == .live
+                 ? "서버의 시작 조건을 통과해야 자동매매가 시작됩니다. 시작 후에는 서버에서 실제 주문이 발생할 수 있습니다."
+                 : requestedStart == false && store.activeWorkspace == .live
+                    ? "신규 자동 진입을 중지합니다. 보유 포지션 위험 감시는 서버 상태에 따라 계속될 수 있습니다."
+                    : "모의투자 서버의 가상 계좌에만 영향을 줍니다.")
+        }
+    }
+}
+
+private struct CoinPilotWorkspaceSelector: View {
+    @ObservedObject var store: CoinPilotStore
+
+    private var selection: Binding<CoinPilotWorkspaceMode> {
+        Binding(
+            get: { store.activeWorkspace },
+            set: { store.selectWorkspace($0) }
+        )
+    }
+
+    var body: some View {
+        Picker("작업공간", selection: selection) {
+            ForEach(CoinPilotWorkspaceMode.allCases) { mode in
+                Text(mode.title).tag(mode)
+            }
+        }
+        .pickerStyle(SegmentedPickerStyle())
+        .accessibilityLabel("실거래 또는 모의투자 작업공간")
+    }
+}
+
+private struct CoinPilotLiveCredentialSetupView: View {
+    @ObservedObject var store: CoinPilotStore
+
+    var body: some View {
+        NativeCard {
+            VStack(alignment: .leading, spacing: 13) {
+                SectionHeading(title: "\(store.exchangeDisplayName) API 키 등록")
+                if store.canUseLiveCredentialRegistration {
+                    Text("\(store.exchangeDisplayName) Open API에서 발급한 키를 입력하세요.")
+                        .font(.subheadline).foregroundColor(CoinPilotColors.secondaryInk)
+                    DisclosureGroup("발급과 권한 설정") {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("자산조회, 주문조회, 주문하기 권한을 선택하세요. 출금 권한은 필요하지 않습니다.")
+                            Text("허용 IP에는 거래 서버가 외부 통신에 사용하는 고정 공인 IP를 등록하세요.")
+                        }
+                        .font(.footnote).foregroundColor(CoinPilotColors.secondaryInk)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.top, 6)
+                    }.font(.footnote).frame(minHeight: 44)
+                    VStack(alignment: .leading, spacing: 7) {
+                        FieldTitle(title: "Access Key")
+                        SecureField("Access Key 입력", text: $store.liveAccessKeyDraft)
+                            .cpNoAutocapitalization()
+                            .cpNoAutocorrection()
+                            .textFieldStyle(.plain)
+                            .font(.body)
+                            .padding(.horizontal, 14)
+                            .frame(minHeight: 50)
+                            .background(CoinPilotColors.surface)
+                            .clipShape(RoundedRectangle(cornerRadius: 11))
+                            .overlay(RoundedRectangle(cornerRadius: 11).stroke(CoinPilotColors.line, lineWidth: 1))
+                            .accessibilityLabel("\(store.exchangeDisplayName) Access Key")
+                    }
+
+                    VStack(alignment: .leading, spacing: 7) {
+                        FieldTitle(title: "Secret Key")
+                        SecureField("Secret Key 입력", text: $store.liveSecretKeyDraft)
+                            .cpNoAutocapitalization()
+                            .cpNoAutocorrection()
+                            .textFieldStyle(.plain)
+                            .font(.body)
+                            .padding(.horizontal, 14)
+                            .frame(minHeight: 50)
+                            .background(CoinPilotColors.surface)
+                            .clipShape(RoundedRectangle(cornerRadius: 11))
+                            .overlay(RoundedRectangle(cornerRadius: 11).stroke(CoinPilotColors.line, lineWidth: 1))
+                            .accessibilityLabel("\(store.exchangeDisplayName) Secret Key")
+                    }
+
+                    Button {
+                        Task { _ = await store.submitLiveCredentials() }
+                    } label: {
+                        HStack(spacing: 8) {
+                            if store.isSubmittingLiveCredentials { ProgressView().tint(.white) }
+                            Text(store.isSubmittingLiveCredentials ? "키 등록 중" : "실거래 서버에 키 등록")
+                                .font(.subheadline.weight(.semibold))
+                        }
+                        .frame(maxWidth: .infinity)
+                        .frame(minHeight: 48)
+                        .foregroundColor(.white)
+                        .background(CoinPilotColors.blue)
+                        .clipShape(RoundedRectangle(cornerRadius: 11))
+                    }
+                    .disabled(!store.canSubmitLiveCredentials)
+                    .opacity(store.canSubmitLiveCredentials ? 1 : 0.45)
+                    Text("키는 서버에만 저장되며 등록 시도 뒤 입력란을 비웁니다.")
+                        .font(.caption).foregroundColor(CoinPilotColors.secondaryInk)
+                } else {
+                    Text(store.currentLiveCredentialTransportIsSecure == false
+                         ? "키를 등록하려면 HTTPS 서버를 연결해 주세요."
+                         : "키를 등록하려면 운영 토큰을 연결해 주세요.")
+                        .font(.subheadline).foregroundColor(CoinPilotColors.secondaryInk)
+                    NavigationLink(destination: CoinPilotSettingsView(store: store)) {
+                        Text("연결 설정")
+                    }.buttonStyle(CoinPilotSecondaryButtonStyle())
+                }
+            }
+        }
+    }
+}
+
+private struct CoinPilotHomeView: View {
+    @ObservedObject var store: CoinPilotStore
+    @ScaledMetric(relativeTo: .title) private var totalAssetFontSize: CGFloat = 34
+    @AppStorage("coinpilot.native.selectedTab.v2") private var selectedTab = 0
+    @State private var cohortDetailsExpanded = false
+    @State private var homeDetailsExpanded = false
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                workspaceIdentity
+                if store.isBundledPreview {
+                    InlineNotice(text: "앱에 포함된 예시 자료예요. 실제 계좌 정보가 아닙니다.", color: CoinPilotColors.blue, symbol: "info.circle.fill")
+                }
+                if let message = store.dashboardMessage {
+                    InlineNotice(text: message, color: CoinPilotColors.amber)
+                }
+                if let mismatchMessage = store.workspaceModeMismatchMessage,
+                   mismatchMessage != store.dashboardMessage {
+                    InlineNotice(text: mismatchMessage, color: CoinPilotColors.amber)
+                }
+                credentialStatusSection
+                if let message = store.liveCredentialMessage {
+                    InlineNotice(text: message, color: store.isLiveCredentialSetupReady
+                                 ? CoinPilotColors.green
+                                 : CoinPilotColors.amber)
+                }
+                if !store.showsLiveCredentialSetup && !store.showsLiveCredentialSyncPending {
+                    assetSummary
+                    quickActions
+                    if needsAttention { currentFocus }
+                    if !store.isBundledPreview { CoinPilotAutomationControl(store: store) }
+                    historySection
+                    recentActivitySection
+                    paperValidationSafetyStatus
+                    marketSection
+
+                    DisclosureGroup(isExpanded: $homeDetailsExpanded) {
+                        paperValidationSection.padding(.top, 10)
+                    } label: {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("모의투자 성과 자세히 보기")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundColor(CoinPilotColors.ink)
+                        }
+                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                        .contentShape(Rectangle())
+                    }
+                    .tint(CoinPilotColors.blue)
+                }
+            }
+            .padding(.horizontal, 18)
+            .padding(.top, 8)
+            .padding(.bottom, 30)
+        }
+        .cpReadableWidth()
+        .background(CoinPilotColors.paper.ignoresSafeArea())
+        .refreshable { await store.refresh() }
+    }
+
+    private var workspaceIdentity: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text("CoinPilot")
+                    .font(.headline.weight(.semibold))
+                    .foregroundColor(CoinPilotColors.blue)
+                Text(store.isBundledPreview ? "예시 데이터" : store.activeWorkspace.title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundColor(CoinPilotColors.ink)
+                Spacer(minLength: 0)
+            }
+        }
+        .accessibilityElement(children: .contain)
+    }
+
+    @ViewBuilder
+    private var credentialStatusSection: some View {
+        if store.showsLiveCredentialSetup {
+            CoinPilotLiveCredentialSetupView(store: store)
+        } else if store.showsLiveCredentialSyncPending {
+            NativeCard {
+                VStack(alignment: .leading, spacing: 8) {
+                    SectionHeading(title: "실거래 계좌 확인 중")
+                    Text("\(store.exchangeDisplayName) 키가 등록됐어요. 서버가 잔고와 미체결 주문을 확인할 때까지 실거래 주문은 잠겨 있습니다.")
+                        .font(.footnote)
+                        .foregroundColor(CoinPilotColors.secondaryInk)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var paperValidationSafetyStatus: some View {
+        if let summary = store.paperValidationSummary,
+           summary.available || summary.cohort.available,
+           summary.continuityEligible == false || summary.analysisContinuityEligible == false ||
+            summary.riskContinuityEligible == false || summary.configSnapshotComplete == false ||
+            summary.configurationConsistent == false || store.isResourceStale("paper-validation-summary") ||
+            (summary.cohort.available && (!summary.cohort.complete || !summary.cohort.fresh)) {
+            VStack(alignment: .leading, spacing: 2) {
+                if store.isResourceStale("paper-validation-summary") {
+                    InlineNotice(text: store.freshnessLabel(for: "paper-validation-summary"), color: CoinPilotColors.amber)
+                }
+                if summary.continuityEligible == false || summary.analysisContinuityEligible == false ||
+                    summary.riskContinuityEligible == false {
+                    InlineNotice(text: "기록이 끊겨 이어진 성과로 판단할 수 없어요.", color: CoinPilotColors.amber)
+                }
+                if summary.configSnapshotComplete == false || summary.configurationConsistent == false {
+                    InlineNotice(text: "전략 설정 기록이 완전하지 않아 이 결과를 같은 조건의 비교로 볼 수 없어요.", color: CoinPilotColors.amber)
+                }
+                if summary.cohort.available && !summary.cohort.complete {
+                    InlineNotice(text: "일부 기록을 읽지 못해 전체 집계를 사용할 수 없어요.", color: CoinPilotColors.amber)
+                } else if summary.cohort.available && !summary.cohort.fresh {
+                    InlineNotice(text: "전체 집계가 오래돼 최신 상태로 볼 수 없어요.", color: CoinPilotColors.amber)
+                }
+            }
+        }
+    }
+
+    private var assetSummary: some View {
+        NativeCard {
+            VStack(alignment: .leading, spacing: 15) {
+                HStack(alignment: .top, spacing: 10) {
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text("총자산")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundColor(CoinPilotColors.secondaryInk)
+                        MetadataLine(text: store.freshnessLabel(for: "account"))
+                            .font(.caption2)
+                            .foregroundColor(CoinPilotColors.secondaryInk)
+                    }
+                    Spacer()
+                    Text(accountModeLabel)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundColor(CoinPilotColors.blue)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 6)
+                        .background(CoinPilotColors.blue.opacity(0.10))
+                        .clipShape(Capsule())
+                }
+                Text(CoinPilotFormatting.won(
+                    store.account?.valuationAvailable == false ? nil : store.totalAssets,
+                    unavailable: store.account?.valuationAvailable == false ? "평가액 확인 불가" : "평가액 미제공"
+                ))
+                    .font(.system(size: totalAssetFontSize, weight: .bold, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundColor(CoinPilotColors.ink)
+                    .minimumScaleFactor(0.68)
+                    .lineLimit(1)
+                HStack(alignment: .firstTextBaseline, spacing: 7) {
+                    Text(store.totalProfitLabel)
+                        .font(.caption.weight(.medium))
+                        .foregroundColor(CoinPilotColors.secondaryInk)
+                    Text(CoinPilotFormatting.signedWon(store.totalProfit))
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundColor(profitColor(store.totalProfit))
+                    if let percent = store.totalProfitPercent {
+                        Text(CoinPilotFormatting.percent(percent))
+                            .font(.caption.weight(.medium))
+                            .foregroundColor(profitColor(store.totalProfit))
+                    }
+                }
+                Rectangle()
+                    .fill(CoinPilotColors.line)
+                    .frame(height: 1)
+                HStack(alignment: .top, spacing: 20) {
+                    assetBreakdown(store.quoteAssetLabel, value: store.account?.krwBalance)
+                    assetBreakdown("보유 코인 평가액", value: store.account?.completePositionsValue)
+                }
+                HStack {
+                    Text(store.isObserverAccount ? "평가 기준 시각" : "오늘 실현 손익")
+                        .font(.caption)
+                        .foregroundColor(CoinPilotColors.secondaryInk)
+                    Spacer()
+                    Text(todaySummaryValue)
+                        .font(.caption.weight(.semibold))
+                        .foregroundColor(CoinPilotColors.ink)
+                        .lineLimit(1)
+                }
+            }
+        }
+    }
+
+    private func assetBreakdown(_ title: String, value: Double?) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(title).font(.caption).foregroundColor(CoinPilotColors.secondaryInk)
+            Text(CoinPilotFormatting.won(value, unavailable: "확인 필요"))
+                .font(.subheadline.weight(.semibold))
+                .monospacedDigit()
+                .foregroundColor(CoinPilotColors.ink)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
+    }
+
+    private var accountNeedsRefresh: Bool {
+        guard !store.isBundledPreview else { return false }
+        return !store.hasLoadedResource("account") || store.isResourceStale("account")
+    }
+
+    private var needsAttention: Bool {
+        store.runtimeSafetyMessage != nil || accountNeedsRefresh ||
+        store.account?.valuationAvailable == false || (store.account?.unvaluedPositionCount ?? 0) > 0
+    }
+
+    private var currentFocus: some View {
+        NativeCard {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("지금 확인할 내용")
+                    .font(.caption.weight(.semibold))
+                    .foregroundColor(CoinPilotColors.blue)
+                if let safetyMessage = store.runtimeSafetyMessage {
+                    focusDescription("자동매매 상태를 확인해 주세요", detail: safetyMessage)
+                    NavigationLink("주문 전 점검 보기", destination: CoinPilotResearchDeskView(store: store))
+                        .buttonStyle(CoinPilotSecondaryButtonStyle())
+                } else if store.isRefreshing && !store.hasLoadedResource("account") {
+                    focusDescription("자산 정보를 확인하고 있어요", detail: "계좌를 불러오면 보유 비중과 손익을 보여드릴게요.")
+                    ProgressView().tint(CoinPilotColors.blue)
+                } else if accountNeedsRefresh {
+                    focusDescription("자산 정보를 다시 확인해 주세요", detail: "최신 계좌 정보를 불러오지 못했어요. 마지막으로 확인한 정보가 표시될 수 있습니다.")
+                    refreshAction
+                } else if store.account?.valuationAvailable == false || (store.account?.unvaluedPositionCount ?? 0) > 0 {
+                    focusDescription("일부 코인의 시세를 확인해야 해요", detail: "시세가 없는 코인은 평가액과 손익을 계산하지 않았어요. 보유 자산에서 확인할 수 있습니다.")
+                    Button("보유 자산 확인") { selectedTab = 2 }
+                        .buttonStyle(CoinPilotSecondaryButtonStyle())
+                } else if store.account?.hasPositionsField == true, store.account?.positions.isEmpty == true {
+                    focusDescription("아직 보유한 코인이 없어요", detail: "시장 화면에서 가격과 최근 흐름을 살펴보세요. 보유 코인이 생기면 여기에서 자산 변화를 확인할 수 있어요.")
+                    Button("시장 둘러보기") { selectedTab = 3 }
+                        .buttonStyle(CoinPilotSecondaryButtonStyle())
+                } else {
+                    focusDescription(store.isBundledPreview ? "예시 자산의 구성을 살펴보세요" : "내 자산이 어떻게 나뉘어 있는지 확인하세요",
+                                     detail: "보유 비중과 코인별 손익을 함께 보면 전체 자산의 변화를 이해하기 쉬워요.")
+                    Button("보유 비중과 손익 보기") { selectedTab = 2 }
+                        .buttonStyle(CoinPilotSecondaryButtonStyle())
+                }
+            }
+        }
+    }
+
+    private func focusDescription(_ title: String, detail: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title).font(.headline.weight(.semibold)).foregroundColor(CoinPilotColors.ink)
+            Text(detail).font(.footnote).foregroundColor(CoinPilotColors.secondaryInk)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var refreshAction: some View {
+        Button(store.isRefreshing ? "확인 중" : "새로고침") {
+            Task { await store.refresh() }
+        }
+        .buttonStyle(CoinPilotSecondaryButtonStyle())
+        .disabled(store.isRefreshing)
+    }
+
+    /// 토스식 빠른 액션 — 가장 많이 쓰는 화면으로 바로 이동.
+    private var quickActions: some View {
+        HStack(spacing: 10) {
+            HomeQuickAction(title: "주문", symbol: "arrow.left.arrow.right", tint: CoinPilotColors.blue) {
+                selectedTab = 1
+            }
+            HomeQuickAction(title: "보유 자산", symbol: "chart.pie.fill", tint: CoinPilotColors.green) {
+                selectedTab = 2
+            }
+            HomeQuickAction(title: "시장", symbol: "chart.line.uptrend.xyaxis", tint: CoinPilotColors.amber) {
+                selectedTab = 3
+            }
+            NavigationLink(destination: CoinPilotActivityView(store: store)) {
+                HomeQuickActionContent(title: "내역", symbol: "list.bullet.rectangle", tint: CoinPilotColors.secondaryInk)
+            }
+            .buttonStyle(PlainButtonStyle())
+        }
+        .accessibilityElement(children: .contain)
+    }
+
+    private var paperValidationSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            SectionHeading(title: "모의투자 성과 점검")
+            if let summary = store.paperValidationSummary, summary.available || summary.cohort.available {
+                NativeCard {
+                    VStack(alignment: .leading, spacing: 9) {
+                        if summary.available {
+                        HStack(alignment: .top) {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(summary.active == true ? "모의 실행 중" : "모의 실행 기록")
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundColor(CoinPilotColors.ink)
+                                MetadataLine(text: "마지막 기록 · \(CoinPilotFormatting.dateTime(summary.heartbeatAt))")
+                                    .font(.caption2)
+                                    .foregroundColor(CoinPilotColors.secondaryInk)
+                            }
+                            Spacer(minLength: 8)
+                            MetadataLine(text: store.freshnessLabel(for: "paper-validation-summary"))
+                                .font(.caption2.weight(.medium))
+                                .foregroundColor(CoinPilotColors.secondaryInk)
+                                .multilineTextAlignment(.trailing)
+                                .lineLimit(2)
+                        }
+
+                        Rectangle()
+                            .fill(CoinPilotColors.line)
+                            .frame(height: 1)
+
+                        Text("모의 장부")
+                            .font(.caption.weight(.semibold))
+                            .foregroundColor(CoinPilotColors.secondaryInk)
+                        PaperEvidenceRow(
+                            title: "청산 표본",
+                            value: tradeCountLabel(summary.strict.closedTradeCount),
+                            tint: CoinPilotColors.ink
+                        )
+                        PaperEvidenceRow(
+                            title: "기록 손익",
+                            value: realizedProfitLabel(
+                                summary.strict.realizedProfitKrw,
+                                tradeCount: summary.strict.closedTradeCount
+                            ),
+                            tint: profitColor(summary.strict.realizedProfitKrw)
+                        )
+                        if let openCount = summary.strict.openPositionCount, openCount > 0 {
+                            PaperEvidenceRow(
+                                title: "열린 모의 포지션",
+                                value: "\(openCount)건",
+                                tint: CoinPilotColors.amber
+                            )
+                        }
+
+                        if summary.costAudit.available {
+                            Rectangle()
+                                .fill(CoinPilotColors.line)
+                                .frame(height: 1)
+                            PaperEvidenceRow(
+                                title: "가격 차이 반영 민감도",
+                                value: realizedProfitLabel(
+                                    summary.costAudit.costStressedNetPnlKrw,
+                                    tradeCount: summary.costAudit.evaluatedTradeCount
+                                ),
+                                tint: profitColor(summary.costAudit.costStressedNetPnlKrw)
+                            )
+                            if let unmodeled = summary.costAudit.unmodeledExecutionTradeCount, unmodeled > 0 {
+                                MetadataLine(text: "설정 가격 차이 추가 가정 · \(unmodeled)건")
+                                    .font(.caption2)
+                                    .foregroundColor(CoinPilotColors.secondaryInk)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            } else if let modeled = summary.costAudit.modeledExecutionTradeCount, modeled > 0 {
+                                MetadataLine(text: "기록된 모의 비용 모델 포함 · \(modeled)건")
+                                    .font(.caption2)
+                                    .foregroundColor(CoinPilotColors.secondaryInk)
+                            }
+                        } else {
+                            Text("비용 민감도를 계산할 설정이나 청산 표본이 아직 없습니다.")
+                                .font(.caption)
+                                .foregroundColor(CoinPilotColors.secondaryInk)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+
+                        if let count = summary.diagnostic.shadowClosedTradeCount {
+                            Rectangle()
+                                .fill(CoinPilotColors.line)
+                                .frame(height: 1)
+                            MetadataLine(text: "비교용 가상 장부 · 모의 장부 손익과 별도")
+                                .font(.caption.weight(.semibold))
+                                .foregroundColor(CoinPilotColors.secondaryInk)
+                            PaperEvidenceRow(
+                                title: "청산 \(count)건",
+                                value: realizedProfitLabel(
+                                    summary.diagnostic.shadowRealizedProfitKrw,
+                                    tradeCount: count
+                                ),
+                                tint: profitColor(summary.diagnostic.shadowRealizedProfitKrw)
+                            )
+                        }
+                        } else {
+                            Text("현재 모의 실행은 없어요. 이전 실행의 전체 검증 집계를 표시합니다.")
+                                .font(.caption)
+                                .foregroundColor(CoinPilotColors.secondaryInk)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+
+                        if summary.cohort.available {
+                            Rectangle()
+                                .fill(CoinPilotColors.line)
+                                .frame(height: 1)
+                            DisclosureGroup(isExpanded: $cohortDetailsExpanded) {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    PaperEvidenceRow(
+                                        title: "전체 집계 시각",
+                                        value: CoinPilotFormatting.dateTime(summary.cohort.capturedAt),
+                                        tint: CoinPilotColors.secondaryInk
+                                    )
+                                    PaperEvidenceRow(
+                                        title: "전체 모의 청산",
+                                        value: cohortTradeSummary(summary.cohort),
+                                        tint: CoinPilotColors.ink
+                                    )
+                                    PaperEvidenceRow(
+                                        title: "적격 수익성 거래",
+                                        value: tradeCountLabel(summary.cohort.profitabilityEvidenceTradeCount),
+                                        tint: (summary.cohort.profitabilityEvidenceTradeCount ?? 0) > 0
+                                            ? CoinPilotColors.green
+                                            : CoinPilotColors.amber
+                                    )
+                                    if let evidenceProfit = summary.cohort.profitabilityEvidenceProfitKrw,
+                                       (summary.cohort.profitabilityEvidenceTradeCount ?? 0) > 0 {
+                                        PaperEvidenceRow(
+                                            title: "비용 점검 손익",
+                                            value: CoinPilotFormatting.signedWon(evidenceProfit),
+                                            tint: profitColor(evidenceProfit)
+                                        )
+                                    } else if (summary.cohort.profitabilityEvidenceTradeCount ?? 0) > 0 {
+                                        Text("적격 거래는 있지만, 설정별로 나뉘어 손익 합계는 표시하지 않아요.")
+                                            .font(.caption2)
+                                            .foregroundColor(CoinPilotColors.secondaryInk)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                    } else if (summary.cohort.strictTradeCount ?? 0) > 0 {
+                                        Text("기록은 있지만, 전체 조건을 통과한 수익성 표본은 아직 없어요.")
+                                            .font(.caption2)
+                                            .foregroundColor(CoinPilotColors.secondaryInk)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                    }
+                                    if let unverified = summary.cohort.strictCostUnverifiedTradeCount, unverified > 0 {
+                                        PaperEvidenceRow(
+                                            title: "비용 확인이 안 된 거래",
+                                            value: "\(unverified)건",
+                                            tint: CoinPilotColors.amber
+                                        )
+                                    }
+                                    if let shortDays = summary.cohort.sessionsBelowMinimumObservationDays, shortDays > 0 {
+                                        PaperEvidenceRow(
+                                            title: "관측 기간 기준 미달",
+                                            value: "\(shortDays)회",
+                                            tint: CoinPilotColors.secondaryInk
+                                        )
+                                    }
+                                    if let shortTrades = summary.cohort.sessionsBelowMinimumTradeCount, shortTrades > 0 {
+                                        PaperEvidenceRow(
+                                            title: "최소 거래 수 기준 미달",
+                                            value: "\(shortTrades)회",
+                                            tint: CoinPilotColors.secondaryInk
+                                        )
+                                    }
+                                    if summary.cohort.totalStrictProfitComparable == false {
+                                        Text("조건이 다른 실행의 기록 손익은 하나로 합산하지 않아요.")
+                                            .font(.caption2)
+                                            .foregroundColor(CoinPilotColors.secondaryInk)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                    }
+                                }
+                                .padding(.top, 8)
+                            } label: {
+                                HStack(spacing: 8) {
+                                    Text("전체 수익 검증")
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundColor(CoinPilotColors.ink)
+                                    Spacer(minLength: 4)
+                                    Text(cohortEvidenceLabel(summary.cohort))
+                                        .font(.caption2.weight(.semibold))
+                                        .foregroundColor(CoinPilotColors.amber)
+                                        .lineLimit(1)
+                                }
+                            }
+                            .tint(CoinPilotColors.blue)
+                        }
+
+                        Label("실제 체결·정산 자료 없음", systemImage: "info.circle.fill")
+                            .font(.caption2.weight(.medium))
+                            .foregroundColor(CoinPilotColors.blue)
+                    }
+                }
+            } else {
+                NativeCard {
+                    EmptyMessage(text: store.hasLoadedResource("paper-validation-summary")
+                        ? store.emptyResourceMessage(
+                            for: "paper-validation-summary",
+                            whenLoadedEmpty: "연결된 서버에 아직 모의투자 기록이 없어요."
+                        )
+                        : store.emptyResourceMessage(
+                            for: "paper-validation-summary",
+                            whenLoadedEmpty: "모의투자 기록을 확인할 수 없어요."
+                        ))
+                }
+            }
+        }
+    }
+
+    private func tradeCountLabel(_ count: Int?) -> String {
+        guard let count else { return "표본 미제공" }
+        return "\(count)건"
+    }
+
+    private func realizedProfitLabel(_ profit: Double?, tradeCount: Int?) -> String {
+        guard let tradeCount else { return "손익 미제공" }
+        guard tradeCount > 0 else { return "청산 표본 없음" }
+        return CoinPilotFormatting.signedWon(profit)
+    }
+
+    private func cohortTradeSummary(_ cohort: CoinPilotPaperForwardCohortSummary) -> String {
+        guard let trades = cohort.strictTradeCount,
+              let sessions = cohort.strictTradeSessionCount else { return "표본 미제공" }
+        return "\(trades)건 (\(sessions)회 실행)"
+    }
+
+    private func cohortEvidenceLabel(_ cohort: CoinPilotPaperForwardCohortSummary) -> String {
+        guard cohort.complete, let trades = cohort.strictTradeCount,
+              let eligible = cohort.eligibleStrictTradeCount else {
+            return cohort.available ? "확인 필요" : "미제공"
+        }
+        guard trades > 0 else { return "기록 없음" }
+        return "\(eligible) / \(trades)건 적격"
+    }
+
+    private var historySection: some View {
+        CoinPilotHistoryCard(store: store)
+    }
+
+    private var marketSection: some View {
+        NativeCard {
+            VStack(alignment: .leading, spacing: 9) {
+                HStack(alignment: .firstTextBaseline) {
+                    SectionHeading(title: "주요 시세")
+                    Spacer()
+                    VStack(alignment: .trailing, spacing: 3) {
+                        MetadataLine(text: store.freshnessLabel(for: "market-prices"))
+                            .font(.caption2)
+                            .foregroundColor(CoinPilotColors.secondaryInk)
+                        Text(CoinPilotFormatting.marketTimestamp(
+                            store.marketSnapshotFetchedAt,
+                            label: store.isBundledPreview ? "예시 수집" : "서버 시세 수집"
+                        ))
+                        .font(.caption2)
+                        .foregroundColor(CoinPilotColors.secondaryInk)
+                        .multilineTextAlignment(.trailing)
+                    }
+                }
+                let visibleMarkets = prioritizedMarkets
+                if visibleMarkets.isEmpty {
+                    EmptyMessage(text: store.emptyResourceMessage(for: "market-prices", whenLoadedEmpty: "표시할 시세가 없습니다."),
+                                 actionTitle: store.isBundledPreview ? nil : "시세 다시 확인", isActionDisabled: store.isRefreshing) {
+                        Task { await store.refresh() }
+                    }
+                } else {
+                    VStack(spacing: 0) {
+                        ForEach(visibleMarkets) { market in
+                            MarketRow(
+                                market: market,
+                                isBundledPreview: store.isBundledPreview,
+                                maximumAgeSeconds: store.marketPriceMaximumAgeSeconds
+                            )
+                            if market.id != visibleMarkets.last?.id {
+                                Divider().overlay(CoinPilotColors.line)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private var recentActivitySection: some View {
+        NativeCard {
+            VStack(alignment: .leading, spacing: 9) {
+                HStack(alignment: .firstTextBaseline) {
+                    SectionHeading(title: "최근 거래")
+                    Spacer()
+                    NavigationLink(destination: CoinPilotActivityView(store: store)) {
+                        Text("전체 보기")
+                            .font(.subheadline.weight(.medium))
+                            .foregroundColor(CoinPilotColors.blue)
+                            .frame(minHeight: 44)
+                    }
+                }
+                MetadataLine(text: store.freshnessLabel(for: "trades"))
+                    .font(.caption2)
+                    .foregroundColor(CoinPilotColors.secondaryInk)
+                if store.trades.isEmpty {
+                    EmptyMessage(text: store.emptyResourceMessage(for: "trades", whenLoadedEmpty: "아직 거래 내역이 없어요."), image: "CoinPilotEmptyTrades",
+                                 actionTitle: store.hasLoadedResource("trades") ? "시장 둘러보기" : "다시 불러오기",
+                                 isActionDisabled: store.isRefreshing) {
+                        if store.hasLoadedResource("trades") { selectedTab = 3 }
+                        else { Task { await store.refresh() } }
+                    }
+                } else {
+                    VStack(spacing: 0) {
+                        ForEach(Array(store.trades.prefix(3))) { trade in
+                            TradeRow(trade: trade)
+                            if trade.id != store.trades.prefix(3).last?.id {
+                                Divider().overlay(CoinPilotColors.line)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private var prioritizedMarkets: [CoinPilotMarketPrice] {
+        let symbols = ["KRW-BTC", "KRW-ETH", "KRW-XRP"]
+        let selected = symbols.compactMap { symbol in store.markets.first(where: { $0.coin == symbol }) }
+        return Array((selected.isEmpty ? Array(store.markets.prefix(3)) : selected).prefix(3))
+    }
+
+    private var todaySummaryValue: String {
+        if store.isObserverAccount {
+            if let value = store.account?.valuationAsOf {
+                return CoinPilotFormatting.dateTime(value)
+            }
+            return "시각 미제공"
+        }
+        return CoinPilotFormatting.signedWon(store.todayRealizedProfit)
+    }
+
+    private var accountModeLabel: String {
+        if store.isBundledPreview { return "예시" }
+        if store.isObserverAccount { return "조회 전용" }
+        switch store.tradingMode {
+        case "DRY_RUN": return "모의투자"
+        case "LIVE": return "실거래"
+        default: return "상태 확인 중"
+        }
+    }
+
+}
+
+private struct CoinPilotHistoryCard: View {
+    @ObservedObject var store: CoinPilotStore
+
+    var body: some View {
+        NativeCard {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(alignment: .firstTextBaseline) {
+                    SectionHeading(title: "자산 기록")
+                    Spacer()
+                    MetadataLine(text: store.freshnessLabel(for: "portfolio-history"))
+                        .font(.caption2)
+                        .foregroundColor(store.isResourceStale("portfolio-history") ? CoinPilotColors.amber : CoinPilotColors.secondaryInk)
+                }
+                Picker("자산 기록 기간", selection: Binding(
+                    get: { store.historyPeriod },
+                    set: { period in Task { await store.setHistoryPeriod(period) } }
+                )) {
+                    ForEach(CoinPilotHistoryPeriod.allCases) { period in
+                        Text(period.title).tag(period)
+                    }
+                }
+                .pickerStyle(SegmentedPickerStyle())
+                CoinPilotHistoryChart(
+                    points: store.history,
+                    reference: store.account?.initialSeedMoney,
+                    period: store.historyPeriod,
+                    emptyMessage: store.history.isEmpty
+                        ? store.emptyResourceMessage(for: "portfolio-history", whenLoadedEmpty: "이 기간에 저장된 자산 기록이 없습니다.")
+                        : "저장된 기록의 평가액을 확인할 수 없습니다."
+                )
+                if store.history.contains(where: { $0.valuationStatus == "unknown_legacy" }) {
+                    Text("일부 이전 기록은 당시 시세 평가 근거를 확인할 수 없어요.")
+                        .font(.footnote)
+                        .foregroundColor(CoinPilotColors.amber)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+    }
+}
+
+private struct CoinPilotHistoryChart: View {
+    let points: [CoinPilotHistoryPoint]
+    var reference: Double? = nil
+    var period: CoinPilotHistoryPeriod = .day
+    var emptyMessage: String = "이 기간에 저장된 자산 기록이 없습니다."
+
+    @State private var inspectedIndex: Int?
+
+    /// 평가액이 있는 포인트만 원래 인덱스와 함께 모읍니다.
+    /// 빈 포인트가 끼어 있으면 선을 잇지 않고 끊어서 결측 구간이 보이게 합니다.
+    private var valuedPoints: [(index: Int, point: CoinPilotHistoryPoint, value: Double)] {
+        points.enumerated().compactMap { offset, point in
+            guard let value = point.totalAssets, value.isFinite else { return nil }
+            return (index: offset, point: point, value: value)
+        }
+    }
+
+    private var segments: [[(index: Int, value: Double)]] {
+        var result: [[(index: Int, value: Double)]] = []
+        for item in valuedPoints {
+            if result.last?.last?.index == item.index - 1 {
+                result[result.count - 1].append((index: item.index, value: item.value))
+            } else {
+                result.append([(index: item.index, value: item.value)])
+            }
+        }
+        return result
+    }
+
+    private var values: [Double] { valuedPoints.map(\.value) }
+
+    var body: some View {
+        Group {
+            if valuedPoints.count >= 2 {
+                graph
+                    .frame(height: 152)
+            } else if let record = valuedPoints.first {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("이 기간의 자산 기록 1개")
+                        .font(.footnote)
+                        .foregroundColor(CoinPilotColors.secondaryInk)
+                    Text(CoinPilotFormatting.won(record.value))
+                        .font(.title2.weight(.bold).monospacedDigit())
+                        .foregroundColor(CoinPilotColors.ink)
+                    Text(CoinPilotFormatting.dateTime(record.point.timestamp))
+                        .font(.footnote)
+                        .foregroundColor(CoinPilotColors.secondaryInk)
+                    Text("기록이 더 쌓이면 자산 변화를 그래프로 볼 수 있어요.")
+                        .font(.footnote)
+                        .foregroundColor(CoinPilotColors.secondaryInk)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 4)
+            } else {
+                Label(emptyMessage, systemImage: "chart.line.uptrend.xyaxis")
+                    .font(.footnote)
+                    .foregroundColor(CoinPilotColors.secondaryInk)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 8)
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(valuedPoints.count >= 2 ? "자산 기록 그래프" : "자산 기록")
+        .accessibilityValue(accessibilitySummary)
+        .accessibilityHint(valuedPoints.count >= 2
+            ? "길게 누른 뒤 좌우로 움직이면 각 시점의 총자산을 확인할 수 있습니다."
+            : "")
+    }
+
+    private var graph: some View {
+        VStack(spacing: 6) {
+            GeometryReader { geometry in
+                if values.count >= 2 {
+                    let bounds = valueBounds(values)
+                    ZStack(alignment: .topLeading) {
+                        VStack(spacing: 0) {
+                            ForEach(0..<3, id: \.self) { _ in
+                                Divider().overlay(CoinPilotColors.line.opacity(0.7))
+                                Spacer(minLength: 0)
+                            }
+                        }
+                        .padding(.vertical, 8)
+                        ForEach(Array(segments.enumerated()), id: \.offset) { segment in
+                            filledPath(segment: segment.element, bounds: bounds, size: geometry.size)
+                                .fill(CoinPilotColors.green.opacity(0.08))
+                            linePath(segment: segment.element, bounds: bounds, size: geometry.size)
+                                .stroke(CoinPilotColors.blue, style: StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
+                        }
+                        if let reference, reference.isFinite,
+                           reference > bounds.lowerBound, reference < bounds.upperBound {
+                            let referenceY = yPosition(reference, bounds: bounds, height: geometry.size.height)
+                            Path { path in
+                                path.move(to: CGPoint(x: 0, y: referenceY))
+                                path.addLine(to: CGPoint(x: geometry.size.width, y: referenceY))
+                            }
+                            .stroke(CoinPilotColors.secondaryInk.opacity(0.55), style: StrokeStyle(lineWidth: 1, dash: [4, 4]))
+                            Text("기준 \(CoinPilotFormatting.compactWon(reference))")
+                                .font(.caption2)
+                                .foregroundColor(CoinPilotColors.secondaryInk)
+                                .padding(.horizontal, 4)
+                                .padding(.vertical, 1)
+                                .background(CoinPilotColors.surface.opacity(0.85))
+                                .clipShape(RoundedRectangle(cornerRadius: 3))
+                                .position(x: geometry.size.width - 34, y: referenceY - 9)
+                        }
+                        if let lastPoint = valuedPoints.last {
+                            Circle()
+                                .fill(CoinPilotColors.blue)
+                                .frame(width: 7, height: 7)
+                                .overlay(Circle().stroke(CoinPilotColors.surface, lineWidth: 2))
+                                .position(
+                                    x: min(max(xPosition(lastPoint.index, width: geometry.size.width), 4), geometry.size.width - 4),
+                                    y: yPosition(lastPoint.value, bounds: bounds, height: geometry.size.height)
+                                )
+                        }
+                        if let inspectedIndex,
+                           let inspected = valuedPoints.first(where: { $0.index == inspectedIndex }) {
+                            let inspectedX = xPosition(inspected.index, width: geometry.size.width)
+                            Path { path in
+                                path.move(to: CGPoint(x: inspectedX, y: 0))
+                                path.addLine(to: CGPoint(x: inspectedX, y: geometry.size.height))
+                            }
+                            .stroke(CoinPilotColors.secondaryInk.opacity(0.45), style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
+                            Circle()
+                                .fill(CoinPilotColors.blue)
+                                .frame(width: 9, height: 9)
+                                .overlay(Circle().stroke(CoinPilotColors.surface, lineWidth: 2))
+                                .position(
+                                    x: min(max(inspectedX, 5), geometry.size.width - 5),
+                                    y: yPosition(inspected.value, bounds: bounds, height: geometry.size.height)
+                                )
+                            MetadataLine(text: "\(CoinPilotFormatting.won(inspected.value)) · \(CoinPilotFormatting.historyAxisLabel(inspected.point.timestamp, period: period))")
+                                .font(.caption2.weight(.semibold).monospacedDigit())
+                                .foregroundColor(CoinPilotColors.ink)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(CoinPilotColors.surface)
+                                .clipShape(Capsule())
+                                .overlay(Capsule().stroke(CoinPilotColors.line, lineWidth: 1))
+                                .position(x: min(max(inspectedX, 76), geometry.size.width - 76), y: 11)
+                        }
+                        VStack(alignment: .leading, spacing: 0) {
+                            Text(CoinPilotFormatting.compactWon(values.max()))
+                                .font(.caption2.monospacedDigit())
+                                .foregroundColor(CoinPilotColors.secondaryInk)
+                            Spacer(minLength: 0)
+                            Text(CoinPilotFormatting.compactWon(values.min()))
+                                .font(.caption2.monospacedDigit())
+                                .foregroundColor(CoinPilotColors.secondaryInk)
+                        }
+                        .padding(4)
+                        if inspectedIndex == nil, let lastValue = values.last {
+                            Text("최근 \(CoinPilotFormatting.compactWon(lastValue))")
+                                .font(.caption2.weight(.semibold).monospacedDigit())
+                                .foregroundColor(CoinPilotColors.ink)
+                                .frame(maxWidth: .infinity, alignment: .topTrailing)
+                                .padding(4)
+                        }
+                    }
+                    .contentShape(Rectangle())
+                    .gesture(
+                        LongPressGesture(minimumDuration: 0.25)
+                            .sequenced(before: DragGesture(minimumDistance: 0))
+                            .onChanged { value in
+                                if case .second(true, let drag) = value, let location = drag?.location {
+                                    inspectedIndex = nearestValuedIndex(x: location.x, width: geometry.size.width)
+                                }
+                            }
+                            .onEnded { _ in inspectedIndex = nil }
+                    )
+                }
+            }
+            if valuedPoints.count >= 2 {
+                HStack {
+                    Text(CoinPilotFormatting.historyAxisLabel(valuedPoints.first?.point.timestamp, period: period))
+                    Spacer()
+                    Text(CoinPilotFormatting.historyAxisLabel(valuedPoints.last?.point.timestamp, period: period))
+                }
+                .font(.caption2)
+                .foregroundColor(CoinPilotColors.secondaryInk)
+            }
+        }
+    }
+
+    private func nearestValuedIndex(x: CGFloat, width: CGFloat) -> Int? {
+        guard width > 0, !valuedPoints.isEmpty else { return nil }
+        return valuedPoints.min(by: {
+            abs(xPosition($0.index, width: width) - x) < abs(xPosition($1.index, width: width) - x)
+        })?.index
+    }
+
+    private var accessibilitySummary: String {
+        guard let first = values.first, let last = values.last else {
+            return emptyMessage
+        }
+        if valuedPoints.count == 1, let record = valuedPoints.first {
+            return "이 기간의 자산 기록 1개. 총자산 \(CoinPilotFormatting.won(record.value)), \(CoinPilotFormatting.dateTime(record.point.timestamp))."
+        }
+        var summary = "첫 기록 총자산 \(CoinPilotFormatting.won(first)), 최근 기록 총자산 \(CoinPilotFormatting.won(last))"
+        if let minimum = values.min(), let maximum = values.max() {
+            summary += ", 최저 \(CoinPilotFormatting.won(minimum)), 최고 \(CoinPilotFormatting.won(maximum))"
+        }
+        if segments.count > 1 {
+            summary += ", 평가액이 없는 구간 \(segments.count - 1)곳"
+        }
+        if points.contains(where: { $0.valuationStatus == "unknown_legacy" }) {
+            summary += ". 일부 과거 기록의 평가 근거를 확인할 수 없습니다."
+        }
+        return summary
+    }
+
+    private func xPosition(_ index: Int, width: CGFloat) -> CGFloat {
+        width * CGFloat(index) / CGFloat(max(points.count - 1, 1))
+    }
+
+    private func yPosition(_ value: Double, bounds: ClosedRange<Double>, height: CGFloat) -> CGFloat {
+        let spread = max(bounds.upperBound - bounds.lowerBound, 1)
+        return height - 10 - CGFloat((value - bounds.lowerBound) / spread) * max(height - 20, 1)
+    }
+
+    private func linePath(segment: [(index: Int, value: Double)], bounds: ClosedRange<Double>, size: CGSize) -> Path {
+        var path = Path()
+        for (position, point) in segment.enumerated() {
+            let x = xPosition(point.index, width: size.width)
+            let y = yPosition(point.value, bounds: bounds, height: size.height)
+            if position == 0 { path.move(to: CGPoint(x: x, y: y)) }
+            else { path.addLine(to: CGPoint(x: x, y: y)) }
+        }
+        return path
+    }
+
+    private func filledPath(segment: [(index: Int, value: Double)], bounds: ClosedRange<Double>, size: CGSize) -> Path {
+        var path = linePath(segment: segment, bounds: bounds, size: size)
+        if let last = segment.last {
+            path.addLine(to: CGPoint(x: xPosition(last.index, width: size.width), y: size.height))
+        }
+        if let first = segment.first {
+            path.addLine(to: CGPoint(x: xPosition(first.index, width: size.width), y: size.height))
+        }
+        path.closeSubpath()
+        return path
+    }
+
+    private func valueBounds(_ values: [Double]) -> ClosedRange<Double> {
+        let minimum = values.min() ?? 0
+        let maximum = values.max() ?? 0
+        if minimum == maximum { return (minimum - 1)...(maximum + 1) }
+        let padding = (maximum - minimum) * 0.06
+        return (minimum - padding)...(maximum + padding)
+    }
+}
+
+private struct CoinPilotAllocationSlice: Identifiable {
+    let label: String
+    let weight: Double
+    let value: Double?
+    let tint: Color
+
+    var id: String { label }
+}
+
+private struct CoinPilotAllocationBar: View {
+    let slices: [CoinPilotAllocationSlice]
+
+    private static let assetTints: [Color] = [
+        Color(red: 27 / 255, green: 100 / 255, blue: 218 / 255),
+        Color(red: 69 / 255, green: 146 / 255, blue: 252 / 255),
+        Color(red: 143 / 255, green: 181 / 255, blue: 245 / 255),
+        Color(red: 195 / 255, green: 215 / 255, blue: 250 / 255)
+    ]
+    private static let krwTint = Color(red: 176 / 255, green: 184 / 255, blue: 193 / 255)
+    private static let otherTint = Color(red: 139 / 255, green: 149 / 255, blue: 161 / 255)
+
+    /// 원화 + 평가액이 확인된 보유 코인을 총자산 비중 순으로 정리합니다.
+    /// 시세를 확인하지 못한 코인 수를 반환해 범례에서 따로 표시합니다.
+    static func slices(
+        krwBalance: Double?,
+        positions: [CoinPilotPosition],
+        totalAssets: Double?
+    ) -> (slices: [CoinPilotAllocationSlice], unvaluedCount: Int) {
+        guard let total = totalAssets, total.isFinite, total > 0 else { return ([], 0) }
+        var slices: [CoinPilotAllocationSlice] = []
+        if let krw = krwBalance, krw.isFinite, krw > 0 {
+            slices.append(CoinPilotAllocationSlice(
+                label: CoinPilotFormatting.quoteAssetLabel, weight: krw / total * 100, value: krw, tint: krwTint
+            ))
+        }
+        let valued = positions
+            .filter { ($0.currentValue ?? 0) > 0 }
+            .sorted { ($0.currentValue ?? 0) > ($1.currentValue ?? 0) }
+        let unvaluedCount = positions.count - valued.count
+        let shown = Array(valued.prefix(assetTints.count))
+        let rest = valued.dropFirst(assetTints.count)
+        for (index, position) in shown.enumerated() {
+            slices.append(CoinPilotAllocationSlice(
+                label: CoinPilotFormatting.ticker(position.coin),
+                weight: (position.currentValue ?? 0) / total * 100,
+                value: position.currentValue,
+                tint: assetTints[index]
+            ))
+        }
+        let restValue = rest.reduce(0) { $0 + ($1.currentValue ?? 0) }
+        if restValue > 0 {
+            slices.append(CoinPilotAllocationSlice(
+                label: "기타 \(rest.count)개", weight: restValue / total * 100, value: restValue, tint: otherTint
+            ))
+        }
+        return (slices, unvaluedCount)
+    }
+
+    /// 서버 포트폴리오 분석 응답의 비중 필드로 자산 배분을 그립니다.
+    static func slices(summary: [String: Any], holdings: [[String: Any]]) -> [CoinPilotAllocationSlice] {
+        func number(_ value: Any?) -> Double? {
+            guard let value, !(value is NSNull) else { return nil }
+            if let number = value as? NSNumber { return number.doubleValue }
+            if let string = value as? String { return Double(string) }
+            return nil
+        }
+        var slices: [CoinPilotAllocationSlice] = []
+        if let krwWeight = number(summary["krwWeight"]), krwWeight > 0 {
+            slices.append(CoinPilotAllocationSlice(
+                label: CoinPilotFormatting.quoteAssetLabel, weight: krwWeight, value: number(summary["krwBalance"]), tint: krwTint
+            ))
+        }
+        let valued = holdings
+            .filter { (number($0["weight"]) ?? 0) > 0 }
+            .sorted { (number($0["weight"]) ?? 0) > (number($1["weight"]) ?? 0) }
+        let shown = Array(valued.prefix(assetTints.count))
+        let rest = valued.dropFirst(assetTints.count)
+        for (index, holding) in shown.enumerated() {
+            slices.append(CoinPilotAllocationSlice(
+                label: CoinPilotFormatting.ticker(holding["coin"] as? String),
+                weight: number(holding["weight"]) ?? 0,
+                value: number(holding["currentValue"]),
+                tint: assetTints[index]
+            ))
+        }
+        let restWeight = rest.reduce(0) { $0 + (number($1["weight"]) ?? 0) }
+        let restValue = rest.reduce(0) { $0 + (number($1["currentValue"]) ?? 0) }
+        if restWeight > 0 {
+            slices.append(CoinPilotAllocationSlice(
+                label: "기타 \(rest.count)개", weight: restWeight, value: restValue > 0 ? restValue : nil, tint: otherTint
+            ))
+        }
+        return slices
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            GeometryReader { geometry in
+                let spacing: CGFloat = 2
+                HStack(spacing: spacing) {
+                    ForEach(slices) { slice in
+                        if slice.weight > 0 {
+                            Rectangle()
+                                .fill(slice.tint)
+                                .frame(width: max(2, geometry.size.width * CGFloat(slice.weight / 100) - spacing))
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("자산 배분")
+                .accessibilityValue(slices.map { "\($0.label) \(Int($0.weight.rounded()))%" }.joined(separator: ", "))
+            }
+            .frame(height: 14)
+            VStack(spacing: 7) {
+                ForEach(slices) { slice in
+                    HStack(spacing: 8) {
+                        Circle()
+                            .fill(slice.tint)
+                            .frame(width: 8, height: 8)
+                        Text(slice.label)
+                            .font(.caption.weight(.medium))
+                            .foregroundColor(CoinPilotColors.ink)
+                        Spacer(minLength: 8)
+                        Text(CoinPilotFormatting.percent(slice.weight, signed: false, unavailable: "비중 미제공"))
+                            .font(.caption.weight(.semibold))
+                            .monospacedDigit()
+                            .foregroundColor(CoinPilotColors.secondaryInk)
+                        Text(CoinPilotFormatting.won(slice.value, unavailable: "평가액 미제공"))
+                            .font(.caption.weight(.semibold))
+                            .monospacedDigit()
+                            .foregroundColor(CoinPilotColors.ink)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.75)
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct CoinPilotAssetsView: View {
+    @ObservedObject var store: CoinPilotStore
+    @AppStorage("coinpilot.native.selectedTab.v2") private var selectedTab = 0
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                if store.isBundledPreview {
+                    InlineNotice(text: "앱에 포함된 예시 자료예요. 실제 계좌 정보가 아닙니다.", color: CoinPilotColors.blue, symbol: "info.circle.fill")
+                }
+                if let message = store.dashboardMessage {
+                    InlineNotice(text: message, color: CoinPilotColors.amber)
+                }
+                NativeCard {
+                    VStack(alignment: .leading, spacing: 15) {
+                        VStack(alignment: .leading, spacing: 7) {
+                            Text("총자산")
+                                .font(.subheadline.weight(.medium))
+                                .foregroundColor(CoinPilotColors.secondaryInk)
+                            MetadataLine(text: store.freshnessLabel(for: "account"))
+                                .font(.caption2)
+                                .foregroundColor(CoinPilotColors.secondaryInk)
+                            Text(CoinPilotFormatting.won(
+                                store.account?.valuationAvailable == false ? nil : store.totalAssets,
+                                unavailable: store.account?.valuationAvailable == false ? "평가액 확인 불가" : "평가액 미제공"
+                            ))
+                                .font(.title2.weight(.bold))
+                                .monospacedDigit()
+                                .foregroundColor(CoinPilotColors.ink)
+                                .minimumScaleFactor(0.72)
+                                .lineLimit(1)
+                        }
+                        Divider().overlay(CoinPilotColors.line)
+                        HStack {
+                            SectionHeading(title: store.quoteAssetLabel)
+                            Spacer()
+                            Text(CoinPilotFormatting.won(store.account?.krwBalance, unavailable: "잔액 미제공"))
+                                .font(.body.weight(.semibold))
+                                .foregroundColor(CoinPilotColors.ink)
+                        }
+                        HStack(alignment: .firstTextBaseline, spacing: 7) {
+                            Text(store.totalProfitLabel)
+                                .font(.subheadline.weight(.medium))
+                                .foregroundColor(CoinPilotColors.secondaryInk)
+                            Spacer()
+                            Text(CoinPilotFormatting.signedWon(store.totalProfit))
+                                .font(.body.weight(.semibold))
+                                .foregroundColor(profitColor(store.totalProfit))
+                            if let percent = store.totalProfitPercent {
+                                Text(CoinPilotFormatting.percent(percent))
+                                    .font(.caption.weight(.medium))
+                                    .foregroundColor(profitColor(store.totalProfit))
+                            }
+                        }
+                    }
+                }
+                if store.hasLoadedResource("account"), store.account != nil {
+                    allocationSection
+                }
+                NativeCard {
+                    VStack(alignment: .leading, spacing: 7) {
+                        HStack(alignment: .firstTextBaseline) {
+                            SectionHeading(title: "보유 코인")
+                            Spacer()
+                            if !sortedPositions.isEmpty {
+                                MetadataLine(text: holdingsSummary)
+                                    .font(.caption)
+                                    .foregroundColor(CoinPilotColors.secondaryInk)
+                                    .monospacedDigit()
+                                    .multilineTextAlignment(.trailing)
+                            }
+                        }
+                        if !store.hasLoadedResource("account") {
+                            EmptyMessage(text: store.emptyResourceMessage(for: "account", whenLoadedEmpty: "보유 중인 코인이 없습니다."),
+                                         actionTitle: "다시 불러오기", isActionDisabled: store.isRefreshing) {
+                                Task { await store.refresh() }
+                            }
+                        } else if store.account?.hasPositionsField != true {
+                            EmptyMessage(text: "보유 자산을 확인할 수 없어요.", image: "CoinPilotEmptyHoldings",
+                                         actionTitle: "다시 확인", isActionDisabled: store.isRefreshing) {
+                                Task { await store.refresh() }
+                            }
+                        } else if store.account?.positions.isEmpty != false {
+                            EmptyMessage(text: "아직 보유한 코인이 없어요. 시장에서 관심 있는 코인의 가격과 흐름을 살펴보세요.", image: "CoinPilotEmptyHoldings",
+                                         actionTitle: "시장 둘러보기") { selectedTab = 3 }
+                        } else {
+                            VStack(spacing: 0) {
+                                ForEach(sortedPositions) { position in
+                                    PositionRow(position: position, store: store)
+                                    if position.id != sortedPositions.last?.id {
+                                        Divider().overlay(CoinPilotColors.line)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                CoinPilotHistoryCard(store: store)
+                if !store.isBundledPreview {
+                    NativeCard {
+                        VStack(alignment: .leading, spacing: 10) {
+                            SectionHeading(title: "자산 기록 저장")
+                            Text("현재 계좌 평가를 기록해 자산 흐름에 추가합니다.")
+                                .font(.caption).foregroundColor(CoinPilotColors.secondaryInk)
+                            Button(store.isRecordingSnapshot ? "기록 저장 중" : "현재 자산 기록 저장") {
+                                Task { _ = await store.recordPortfolioSnapshot() }
+                            }
+                            .buttonStyle(CoinPilotSecondaryButtonStyle())
+                            .disabled(!store.canOperate || store.isRecordingSnapshot)
+                            if let message = store.featureMessages["snapshot"] {
+                                Text(message).font(.caption).foregroundColor(CoinPilotColors.secondaryInk)
+                            }
+                        }
+                    }
+                }
+                NavigationLink(destination: CoinPilotAccountAnalyticsView(store: store)) {
+                    FeatureMenuRow(title: "포트폴리오 분석", detail: "", symbol: "chart.pie")
+                        .padding(.horizontal, 4)
+                }
+                if store.isBundledPreview, let observerDate = store.account?.valuationAsOf {
+                    MetadataLine(text: "예시 자료 · 평가 기준 시각 \(CoinPilotFormatting.dateTime(observerDate, unavailable: "평가 시각 미제공"))")
+                        .font(.footnote)
+                        .foregroundColor(CoinPilotColors.secondaryInk)
+                } else if store.isObserverAccount, let observerDate = store.account?.valuationAsOf {
+                    MetadataLine(text: "조회 전용 계좌 · 평가 기준 시각 \(CoinPilotFormatting.dateTime(observerDate, unavailable: "평가 시각 미제공"))")
+                        .font(.footnote)
+                        .foregroundColor(CoinPilotColors.secondaryInk)
+                }
+                if store.account?.valuationAvailable == false {
+                    Text("현재 시세를 확인하지 못해 손익을 표시하지 않았어요.")
+                        .font(.footnote)
+                        .foregroundColor(CoinPilotColors.secondaryInk)
+                }
+            }
+            .padding(.horizontal, 18)
+            .padding(.top, 10)
+            .padding(.bottom, 34)
+        }
+        .cpReadableWidth()
+        .background(CoinPilotColors.paper.ignoresSafeArea())
+        .refreshable { await store.refresh() }
+    }
+
+    private var holdingsSummary: String {
+        let count = sortedPositions.count
+        if let value = store.account?.completePositionsValue {
+            return "\(count)종목 · 평가 \(CoinPilotFormatting.won(value))"
+        }
+        let missing = store.account?.unvaluedPositionCount ?? count
+        return missing > 0 ? "\(count)종목 · \(missing)종목 시세 확인 필요" : "\(count)종목 · 평가액 확인 필요"
+    }
+
+    /// 평가액이 확인된 코인부터 큰 순서로 보여줍니다. 평가 불가 항목은 아래로 내립니다.
+    private var sortedPositions: [CoinPilotPosition] {
+        (store.account?.positions ?? []).sorted {
+            ($0.currentValue ?? -1) > ($1.currentValue ?? -1)
+        }
+    }
+
+    private var allocationSection: some View {
+        let allocation = CoinPilotAllocationBar.slices(
+            krwBalance: store.account?.krwBalance,
+            positions: store.account?.positions ?? [],
+            totalAssets: store.totalAssets
+        )
+        return NativeCard {
+            VStack(alignment: .leading, spacing: 10) {
+                SectionHeading(title: "자산 배분")
+                if store.account?.valuationAvailable == false {
+                    EmptyMessage(text: "시세를 확인하지 못해 비중을 계산할 수 없어요.")
+                } else if allocation.slices.isEmpty {
+                    EmptyMessage(text: allocation.unvaluedCount > 0
+                        ? "보유 코인의 평가액을 확인할 수 없어 비중을 나눌 수 없어요."
+                        : "비중을 계산할 자산이 없습니다.")
+                } else {
+                    CoinPilotAllocationBar(slices: allocation.slices)
+                    if allocation.unvaluedCount > 0 {
+                        Text("시세를 확인하지 못한 코인 \(allocation.unvaluedCount)개는 비중에서 제외했어요.")
+                            .font(.caption2)
+                            .foregroundColor(CoinPilotColors.amber)
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct CoinPilotActivityView: View {
+    @ObservedObject var store: CoinPilotStore
+    @AppStorage("coinpilot.native.selectedTab.v2") private var selectedTab = 0
+    @State private var actionFilter = "전체"
+    @State private var period: CoinPilotTradePeriod = .all
+    @State private var search = ""
+
+    private var filteredTrades: [CoinPilotTrade] {
+        let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
+        let now = Date()
+        return store.trades.filter { trade in
+            (actionFilter == "전체" || trade.action == actionFilter) &&
+                period.includes(trade.timestamp, at: now) &&
+                (query.isEmpty || (trade.coin ?? "").localizedCaseInsensitiveContains(query))
+        }.sorted {
+            (CoinPilotMarketSnapshotMetadata.parseDate($0.timestamp) ?? .distantPast) >
+                (CoinPilotMarketSnapshotMetadata.parseDate($1.timestamp) ?? .distantPast)
+        }
+    }
+
+    private struct TradeDay: Identifiable {
+        let date: Date?
+        let trades: [CoinPilotTrade]
+        var id: String { date.map { String($0.timeIntervalSince1970) } ?? "unknown" }
+        var title: String {
+            guard let date else { return "거래 시각 미제공" }
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "ko_KR")
+            formatter.dateFormat = "M월 d일 EEEE"
+            let label = formatter.string(from: date)
+            return Calendar.current.isDateInToday(date) ? "오늘  \(label)" : label
+        }
+    }
+
+    private var groupedTrades: [TradeDay] {
+        let groups = Dictionary(grouping: filteredTrades) { trade in
+            CoinPilotMarketSnapshotMetadata.parseDate(trade.timestamp).map { Calendar.current.startOfDay(for: $0) }
+        }
+        return groups.map { TradeDay(date: $0.key, trades: $0.value) }
+            .sorted { ($0.date ?? .distantPast) > ($1.date ?? .distantPast) }
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                if let message = store.dashboardMessage {
+                    InlineNotice(text: message, color: CoinPilotColors.amber)
+                }
+                if store.isBundledPreview {
+                    InlineNotice(text: "예시 거래 내역", color: CoinPilotColors.blue, symbol: "info.circle.fill")
+                }
+                MetadataLine(text: store.freshnessLabel(for: "trades"))
+                    .font(.caption)
+                    .foregroundColor(CoinPilotColors.secondaryInk)
+                if store.trades.isEmpty {
+                    NativeCard {
+                        EmptyMessage(text: store.emptyResourceMessage(for: "trades", whenLoadedEmpty: "아직 거래 내역이 없어요. 거래가 생기면 날짜별로 확인할 수 있습니다."),
+                                     image: "CoinPilotEmptyTrades",
+                                     actionTitle: store.hasLoadedResource("trades") ? "시장 둘러보기" : "다시 불러오기",
+                                     isActionDisabled: store.isRefreshing) {
+                            if store.hasLoadedResource("trades") { selectedTab = 3 }
+                            else { Task { await store.refresh() } }
+                        }
+                    }
+                } else {
+                    filters
+                    activitySummary
+                    if filteredTrades.isEmpty {
+                        NativeCard {
+                            EmptyMessage(text: "선택한 조건의 거래가 없어요. 기간이나 종목을 바꿔서 다시 확인해 보세요.",
+                                         actionTitle: "필터 초기화") {
+                                actionFilter = "전체"
+                                period = .all
+                                search = ""
+                            }
+                        }
+                    } else {
+                        ForEach(groupedTrades) { group in
+                            NativeCard {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(group.title)
+                                        .font(.subheadline.weight(.semibold))
+                                        .foregroundColor(CoinPilotColors.ink)
+                                    ForEach(group.trades) { trade in
+                                        TradeRow(trade: trade)
+                                        if trade.id != group.trades.last?.id {
+                                            Divider().overlay(CoinPilotColors.line)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 18)
+            .padding(.top, 10)
+            .padding(.bottom, 34)
+        }
+        .cpReadableWidth()
+        .background(CoinPilotColors.paper.ignoresSafeArea())
+        .navigationTitle("거래 내역")
+        .cpInlineTitle()
+        .refreshable { await store.refresh() }
+    }
+
+    private var filters: some View {
+        VStack(spacing: 12) {
+            Picker("거래 기간", selection: $period) {
+                ForEach(CoinPilotTradePeriod.allCases) { Text($0.rawValue).tag($0) }
+            }
+            .pickerStyle(SegmentedPickerStyle())
+            Picker("거래 종류", selection: $actionFilter) {
+                ForEach(["전체", "매수", "매도"], id: \.self) { Text($0).tag($0) }
+            }
+            .pickerStyle(SegmentedPickerStyle())
+            HStack(spacing: 9) {
+                Image(systemName: "magnifyingglass").foregroundColor(CoinPilotColors.secondaryInk)
+                TextField("거래한 종목 검색", text: $search)
+                    .cpAutocapitalizeCharacters()
+                    .cpNoAutocorrection()
+                    .textFieldStyle(.plain)
+                    .accessibilityLabel("거래한 종목 검색")
+                if !search.isEmpty {
+                    Button { search = "" } label: {
+                        Image(systemName: "xmark.circle.fill").foregroundColor(CoinPilotColors.secondaryInk)
+                    }
+                    .frame(minWidth: 44, minHeight: 44)
+                    .accessibilityLabel("거래 종목 검색어 지우기")
+                }
+            }
+            .padding(.horizontal, 14)
+            .frame(minHeight: 48)
+            .background(CoinPilotColors.surface)
+            .clipShape(RoundedRectangle(cornerRadius: 11))
+        }
+    }
+
+    private var activitySummary: some View {
+        let profits = filteredTrades.compactMap(\.profit)
+        return NativeCard {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .top, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text("조회 기록").font(.caption).foregroundColor(CoinPilotColors.secondaryInk)
+                        Text("\(filteredTrades.count)건").font(.title3.weight(.semibold)).monospacedDigit()
+                    }
+                    Spacer()
+                    VStack(alignment: .trailing, spacing: 5) {
+                        Text("기록된 실현 손익").font(.caption).foregroundColor(CoinPilotColors.secondaryInk)
+                        Text(profits.isEmpty ? "—" : CoinPilotFormatting.signedWon(profits.reduce(0, +)))
+                            .font(.title3.weight(.semibold)).monospacedDigit()
+                            .foregroundColor(profits.isEmpty ? CoinPilotColors.secondaryInk : profitColor(profits.reduce(0, +)))
+                        if !profits.isEmpty {
+                            Text("손익 제공 \(profits.count)건").font(.caption2).foregroundColor(CoinPilotColors.secondaryInk)
+                        }
+                    }
+                }
+                DisclosureGroup("집계 기준") {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("불러온 \(store.trades.count)건에 필터를 적용한 결과입니다. 전체 누적 손익과 다를 수 있습니다.")
+                        if store.trades.contains(where: { $0.source == "strategy" }) {
+                            Text("주문 기록과 전략 기록이 함께 포함됩니다.")
+                        }
+                        Text("손익이 제공된 거래만 합산합니다. 거래소의 최종 체결·정산 내역과 다를 수 있습니다.")
+                        if period != .all { Text("기간은 기기 시간 기준으로 오늘을 포함합니다.") }
+                    }.padding(.top, 6)
+                }
+                .font(.caption)
+                .foregroundColor(CoinPilotColors.secondaryInk)
+                .frame(minHeight: 44)
+            }
+        }
+    }
+
+}
+
+private struct CoinPilotSettingsView: View {
+    @ObservedObject var store: CoinPilotStore
+    @State private var showingServerEditor = false
+    @State private var showingTokenEditor = false
+    @State private var showingLogoutConfirmation = false
+    @State private var showingTuningEditor = false
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                NativeCard {
+                    VStack(alignment: .leading, spacing: 14) {
+                        SectionHeading(title: "데이터 출처")
+                        if store.isBundledPreview {
+                            SettingsRow(title: "자료", value: "앱에 포함된 예시 데이터", symbol: "internaldrive")
+                            Text("실제 계좌·시세·체결 정보가 아닌 화면 미리보기입니다.")
+                                .font(.subheadline)
+                                .foregroundColor(CoinPilotColors.secondaryInk)
+                            Button("실제 서버 연결") { store.useServerMode() }
+                                .font(.body.weight(.semibold))
+                                .foregroundColor(CoinPilotColors.blue)
+                                .padding(.top, 2)
+                        } else {
+                            if store.usesManagedServerConnection {
+                                SettingsRow(title: "계좌 연결", value: "\(store.activeWorkspace.title) 서버 자동 연결", symbol: "network")
+                                Button("연결 다시 확인") {
+                                    Task { await store.primaryConnectionAction() }
+                                }
+                                .font(.body.weight(.semibold))
+                                .foregroundColor(CoinPilotColors.blue)
+                                .disabled(store.isWorking)
+                            } else {
+                                SettingsRow(
+                                    title: "서버 주소",
+                                    value: store.serverAddress.isEmpty ? "설정되지 않음" : store.serverAddress,
+                                    symbol: "network"
+                                )
+                                Button("서버 주소 변경") { showingServerEditor = true }
+                                    .accessibilityLabel("서버 주소 변경")
+                                    .frame(minHeight: 44)
+                                    .font(.body.weight(.semibold))
+                                    .foregroundColor(CoinPilotColors.blue)
+                                    .padding(.top, 2)
+                            }
+                            if store.authenticationRequired {
+                                Button("서버 토큰 입력 또는 변경") { showingTokenEditor = true }
+                                    .accessibilityLabel("서버 토큰 입력 또는 변경")
+                                    .frame(minHeight: 44)
+                                    .font(.body.weight(.semibold))
+                                    .foregroundColor(CoinPilotColors.blue)
+                            }
+                            if store.canUseBundledPreview {
+                                Button("예시 데이터로 보기") { store.useBundledPreview() }
+                                    .font(.body.weight(.semibold))
+                                    .foregroundColor(CoinPilotColors.blue)
+                            }
+                        }
+                    }
+                }
+
+                NativeCard {
+                    VStack(alignment: .leading, spacing: 14) {
+                        SectionHeading(title: store.isObserverAccount ? "계좌 권한" : "자동매매 상태")
+                        SettingsRow(title: "거래 모드", value: modeName(store.tradingMode), symbol: "arrow.left.arrow.right")
+                        SettingsRow(title: "앱 권한", value: accessScope, symbol: operatesWithCurrentAccess ? "slider.horizontal.3" : "eye")
+                        if operatesWithCurrentAccess {
+                            SettingsRow(title: store.isObserverAccount ? "권한 상태" : "실행 상태", value: engineState, symbol: store.isObserverAccount ? "eye" : "antenna.radiowaves.left.and.right")
+                        }
+                        if !engineExplanation.isEmpty {
+                            Text(engineExplanation)
+                                .font(.subheadline)
+                                .foregroundColor(CoinPilotColors.secondaryInk)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
+
+                if !store.isBundledPreview {
+                    NativeCard {
+                        VStack(alignment: .leading, spacing: 14) {
+                            HStack {
+                                SectionHeading(title: "서버 상태")
+                                Spacer()
+                                Button {
+                                    Task { await store.loadSystemStatus() }
+                                } label: {
+                                    Image(systemName: "arrow.clockwise")
+                                        .font(.callout.weight(.semibold))
+                                        .foregroundColor(CoinPilotColors.blue)
+                                        .frame(minWidth: 44, minHeight: 44)
+                                        .contentShape(Rectangle())
+                                }
+                                .accessibilityLabel("서버 상태 다시 확인")
+                            }
+                            if let error = store.featureMessages["system"] {
+                                EmptyMessage(text: error)
+                            } else if store.systemStatus.isEmpty {
+                                Text("서버 가동 상태를 확인하는 중입니다.")
+                                    .font(.subheadline).foregroundColor(CoinPilotColors.secondaryInk)
+                            } else {
+                                SettingsRow(
+                                    title: "거래소",
+                                    value: "\(store.exchangeDisplayName) (\(store.quoteCurrency) 기준)",
+                                    symbol: "building.columns"
+                                )
+                                SettingsRow(
+                                    title: "가동 시간",
+                                    value: (store.systemStatus["uptimeFormatted"] as? String) ?? "확인 불가",
+                                    symbol: "timer"
+                                )
+                                SettingsRow(
+                                    title: "감시 시장 / 열린 포지션",
+                                    value: "\(systemStatusCount(store.systemStatus["targetCoinsCount"])) / \(systemStatusCount(store.systemStatus["currentPositions"]))",
+                                    symbol: "binoculars"
+                                )
+                                SettingsRow(
+                                    title: "마지막 거래",
+                                    value: systemStatusTimestamp(store.systemStatus["lastTradeTime"]),
+                                    symbol: "clock.arrow.2.circlepath"
+                                )
+                                let recentErrors = (store.systemStatus["recentErrors"] as? [[String: Any]] ?? [])
+                                    .compactMap { $0["message"] as? String }
+                                if store.systemStatus["recentErrors"] as? [[String: Any]] == nil {
+                                    SettingsRow(title: "최근 오류", value: "확인 불가", symbol: "questionmark.circle")
+                                } else if recentErrors.isEmpty {
+                                    SettingsRow(title: "최근 오류", value: "없음", symbol: "checkmark.circle")
+                                } else {
+                                    VStack(alignment: .leading, spacing: 6) {
+                                        SettingsRow(title: "최근 오류", value: "\(recentErrors.count)건", symbol: "exclamationmark.triangle")
+                                        ForEach(Array(recentErrors.prefix(3).enumerated()), id: \.offset) { _, message in
+                                            Text(message)
+                                                .font(.caption2)
+                                                .foregroundColor(CoinPilotColors.amber)
+                                                .lineLimit(2)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    .task { await store.loadSystemStatus() }
+
+                    NativeCard {
+                        VStack(alignment: .leading, spacing: 12) {
+                            SectionHeading(title: "전략·위험 튜닝")
+                            Text(store.tuningBlockReason ?? "현재 작업공간 서버의 투자 비율과 위험 보호값을 불러와 조정합니다.")
+                                .font(.subheadline)
+                                .foregroundColor(store.tuningBlockReason == nil ? CoinPilotColors.secondaryInk : CoinPilotColors.amber)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Button {
+                                showingTuningEditor = true
+                            } label: {
+                                HStack {
+                                    Text("튜닝값 설정")
+                                    Spacer()
+                                    Image(systemName: "chevron.right")
+                                }
+                                .font(.body.weight(.semibold))
+                                .foregroundColor(CoinPilotColors.blue)
+                                .frame(minHeight: 40)
+                                .contentShape(Rectangle())
+                            }
+                            .accessibilityLabel("튜닝값 설정")
+                        .frame(minHeight: 44)
+                        .disabled(!store.canViewTuning)
+                        }
+                    }
+
+                }
+
+                NativeCard {
+                    VStack(alignment: .leading, spacing: 14) {
+                        SectionHeading(title: "앱 정보")
+                        SettingsRow(title: "버전", value: appVersion, symbol: "iphone")
+                        SettingsRow(title: "마지막 확인", value: CoinPilotFormatting.time(store.lastCheckedAt), symbol: "clock")
+                    }
+                }
+
+                if store.authenticationRequired && !store.usesManagedServerConnection {
+                    Button(role: .destructive) {
+                        showingLogoutConfirmation = true
+                    } label: {
+                        Text("이 기기에서 로그아웃")
+                            .font(.body.weight(.semibold))
+                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                            .contentShape(Rectangle())
+                    }
+                    .accessibilityLabel("이 기기에서 로그아웃")
+                    .buttonStyle(PlainButtonStyle())
+                    .foregroundColor(CoinPilotColors.red)
+                }
+            }
+            .padding(.horizontal, 18)
+            .padding(.top, 10)
+            .padding(.bottom, 35)
+        }
+        .cpReadableWidth()
+        .background(CoinPilotColors.paper.ignoresSafeArea())
+        .sheet(isPresented: $showingServerEditor) {
+            CoinPilotServerEditor(store: store)
+        }
+        .sheet(isPresented: $showingTokenEditor) {
+            CoinPilotTokenEditor(store: store)
+        }
+        .sheet(isPresented: $showingTuningEditor) {
+            CoinPilotTuningEditor(store: store)
+        }
+        .confirmationDialog("이 기기에서 로그아웃할까요?", isPresented: $showingLogoutConfirmation, titleVisibility: .visible) {
+            Button("로그아웃", role: .destructive) { store.logOut() }
+            Button("취소", role: .cancel) {}
+        } message: {
+            Text("이 기기에 저장된 서버 토큰을 삭제합니다. 서버 주소는 유지됩니다.")
+        }
+    }
+
+    /// 인증이 꺼진 개인 서버는 토큰 없이도 운영 자격을 가진다.
+    private var operatesWithCurrentAccess: Bool {
+        !store.authenticationRequired || store.authenticationScope.canOperate
+    }
+
+    private func systemStatusCount(_ value: Any?) -> String {
+        guard let number = value as? NSNumber, String(cString: number.objCType) != "c",
+              number.doubleValue.isFinite, number.doubleValue >= 0,
+              number.doubleValue.rounded(.down) == number.doubleValue else { return "—" }
+        return "\(number.stringValue)개"
+    }
+
+    /// /api/system-status의 lastTradeTime은 ISO 문자열 또는 epoch(ms/s)일 수 있다.
+    private func systemStatusTimestamp(_ value: Any?) -> String {
+        if let text = value as? String, !text.isEmpty { return CoinPilotFormatting.dateTime(text) }
+        if let number = value as? NSNumber, number.doubleValue > 0 {
+            let seconds = number.doubleValue > 1e12 ? number.doubleValue / 1000 : number.doubleValue
+            return CoinPilotFormatting.localDateTime(Date(timeIntervalSince1970: seconds))
+        }
+        return "기록된 거래 없음"
+    }
+
+    private var engineState: String {
+        if !operatesWithCurrentAccess { return "조회 전용" }
+        if !store.serverModeMatchesWorkspace { return "서버 모드 불일치" }
+        if store.status?.runtimeState == "SYNC_REQUIRED" || store.status?.exchangeStateKnown == false {
+            return "계좌 확인 중"
+        }
+        if store.runtimeSafetyMessage != nil { return "위험 감시 전용" }
+        if store.isObserverAccount { return "조회 전용" }
+        switch store.status?.isRunning {
+        case true: return "실행 중"
+        case false: return "중지"
+        case nil: return "확인할 수 없음"
+        }
+    }
+
+    private var engineExplanation: String {
+        if !operatesWithCurrentAccess {
+            return "주문이나 설정 변경에는 운영 토큰이 필요합니다."
+        }
+        if let mismatch = store.workspaceModeMismatchMessage { return mismatch }
+        if let safetyMessage = store.runtimeSafetyMessage { return safetyMessage }
+        if store.isObserverAccount { return "이 계좌는 조회 전용입니다. 앱에서는 주문을 실행하지 않습니다." }
+        switch store.status?.isRunning {
+        case true: return "앱을 닫아도 서버에서 계속 실행됩니다."
+        case false: return ""
+        case nil: return "자동매매 상태를 확인하지 못했습니다."
+        }
+    }
+
+    private var accessScope: String {
+        switch store.authenticationScope {
+        case .operatorFull: return "전체 대시보드"
+        case .mobileOperator: return "모바일 운영"
+        case .readOnly: return "조회 전용"
+        case .unauthenticated: return store.authenticationRequired ? "인증되지 않음" : "인증 불필요"
+        }
+    }
+
+    private var appVersion: String {
+        let info = Bundle.main.infoDictionary ?? [:]
+        let version = info["CFBundleShortVersionString"] as? String ?? "—"
+        let build = info["CFBundleVersion"] as? String ?? "—"
+        return "\(version) (\(build))"
+    }
+
+    private func modeName(_ mode: String?) -> String {
+        switch mode {
+        case "DRY_RUN": return "모의투자"
+        case "LIVE": return "실거래"
+        default: return "확인할 수 없음"
+        }
+    }
+}
+
+private enum CoinPilotMarketSort: String, CaseIterable {
+    case volume, change, price, name
+
+    var title: String {
+        switch self {
+        case .volume: return "거래대금"
+        case .change: return "등락률"
+        case .price: return "가격"
+        case .name: return "이름"
+        }
+    }
+}
+
+private struct CoinPilotDiscoverView: View {
+    @ObservedObject var store: CoinPilotStore
+    @State private var search = ""
+    @State private var sort: CoinPilotMarketSort = .volume
+    @State private var visibleLimit = 30
+
+    private var visibleMarkets: [CoinPilotMarketPrice] {
+        let source = store.markets.filter { market in
+            guard let coin = market.coin else { return false }
+            return search.isEmpty || coin.localizedCaseInsensitiveContains(search)
+        }
+        switch sort {
+        case .volume: return source.sorted { ($0.volumeKrw ?? 0) > ($1.volumeKrw ?? 0) }
+        case .change: return source.sorted { ($0.change ?? -.greatestFiniteMagnitude) > ($1.change ?? -.greatestFiniteMagnitude) }
+        case .price: return source.sorted { ($0.price ?? 0) > ($1.price ?? 0) }
+        case .name: return source.sorted { CoinPilotFormatting.symbol($0.coin) < CoinPilotFormatting.symbol($1.coin) }
+        }
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                if !store.canOperate && !store.isBundledPreview {
+                    InlineNotice(text: "시장 분석·뉴스·AI 자문은 운영 토큰으로 로그인하면 사용할 수 있습니다.", color: CoinPilotColors.amber)
+                }
+                NativeCard {
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack(alignment: .firstTextBaseline) {
+                            SectionHeading(title: "시장 관찰")
+                            Spacer()
+                            MetadataLine(text: store.freshnessLabel(for: "market-prices"))
+                                .font(.caption2)
+                                .foregroundColor(CoinPilotColors.secondaryInk)
+                        }
+                        HStack(spacing: 8) {
+                            Image(systemName: "magnifyingglass")
+                                .font(.subheadline)
+                                .foregroundColor(CoinPilotColors.secondaryInk)
+                            TextField("종목 검색", text: $search)
+                                .cpAutocapitalizeCharacters()
+                                .cpNoAutocorrection()
+                                .textFieldStyle(.plain)
+                            if !search.isEmpty {
+                                Button {
+                                    search = ""
+                                } label: {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .foregroundColor(CoinPilotColors.secondaryInk)
+                                }
+                                .accessibilityLabel("검색어 지우기")
+                            }
+                        }
+                        .padding(.horizontal, 14)
+                        .frame(minHeight: 44)
+                        .background(CoinPilotColors.paper)
+                        .clipShape(RoundedRectangle(cornerRadius: 11))
+                        HStack {
+                            Picker("정렬", selection: $sort) {
+                                ForEach(CoinPilotMarketSort.allCases, id: \.self) { option in
+                                    Text(option.title).tag(option)
+                                }
+                            }
+                            .pickerStyle(MenuPickerStyle())
+                            .font(.caption.weight(.semibold))
+                            .accessibilityLabel("시장 정렬 기준")
+                            Spacer()
+                            Text(visibleMarkets.count > visibleLimit
+                                 ? "\(visibleLimit) / \(visibleMarkets.count)개"
+                                 : "\(visibleMarkets.count)개 시장")
+                                .font(.caption)
+                                .foregroundColor(CoinPilotColors.secondaryInk)
+                        }
+                        if visibleMarkets.isEmpty {
+                            EmptyMessage(text: search.isEmpty
+                                         ? store.emptyResourceMessage(for: "market-prices", whenLoadedEmpty: "표시할 종목이 없습니다.")
+                                         : "'\(search)' 검색 결과가 없습니다.",
+                                         image: "CoinPilotAnalysisHero",
+                                         actionTitle: search.isEmpty ? "시세 다시 확인" : "검색어 지우기",
+                                         isActionDisabled: store.isRefreshing) {
+                                if search.isEmpty { Task { await store.refresh() } }
+                                else { search = "" }
+                            }
+                        } else {
+                            VStack(spacing: 0) {
+                                ForEach(Array(visibleMarkets.prefix(visibleLimit).enumerated()), id: \.element.id) { item in
+                                    if let coin = item.element.coin {
+                                        NavigationLink(destination: CoinPilotMarketDetailView(store: store, coin: coin)) {
+                                            MarketRow(
+                                                market: item.element,
+                                                isBundledPreview: store.isBundledPreview,
+                                                maximumAgeSeconds: store.marketPriceMaximumAgeSeconds,
+                                                rank: sort == .volume ? item.offset + 1 : nil
+                                            )
+                                        }
+                                        .buttonStyle(PlainButtonStyle())
+                                        if item.element.id != visibleMarkets.prefix(visibleLimit).last?.id {
+                                            Divider().overlay(CoinPilotColors.line)
+                                        }
+                                    }
+                                }
+                            }
+                            if visibleMarkets.count > visibleLimit {
+                                Button("종목 더 보기 (\(visibleMarkets.count - visibleLimit))") {
+                                    visibleLimit += 30
+                                }
+                                .buttonStyle(CoinPilotSecondaryButtonStyle())
+                            }
+                        }
+                    }
+                }
+                if !store.isBundledPreview {
+                    NativeCard {
+                        VStack(alignment: .leading, spacing: 12) {
+                            SectionHeading(title: "분석 도구")
+                            NavigationLink(destination: CoinPilotAnalysisView(store: store)) {
+                                FeatureMenuRow(title: "전략 분석", detail: "신호 점수와 판단 근거", symbol: "waveform.path.ecg")
+                            }
+                            Divider().overlay(CoinPilotColors.line)
+                            NavigationLink(destination: CoinPilotNewsView(store: store)) {
+                                FeatureMenuRow(title: "뉴스", detail: "", symbol: "newspaper")
+                            }
+                            Divider().overlay(CoinPilotColors.line)
+                            NavigationLink(destination: CoinPilotAIDeskView(store: store)) {
+                                FeatureMenuRow(title: "시장 자문", detail: "관심 신호 기록과 의견 확인", symbol: "text.bubble")
+                            }
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 18)
+            .padding(.top, 10)
+            .padding(.bottom, 34)
+        }
+        .buttonStyle(PlainButtonStyle())
+        .cpReadableWidth()
+        .background(CoinPilotColors.paper.ignoresSafeArea())
+        .refreshable { await store.refresh() }
+        .onChange(of: search) { _ in visibleLimit = 30 }
+        .onChange(of: sort) { _ in visibleLimit = 30 }
+    }
+}
+
+private struct CoinPilotLocalMarketView: View {
+    @ObservedObject var store: CoinPilotStore
+    @State private var search = ""
+
+    private var visibleMarkets: [CoinPilotBundledMarketData.Market] {
+        (store.localMarketData?.markets ?? []).filter { market in
+            search.isEmpty || market.market.localizedCaseInsensitiveContains(search)
+        }
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                NativeCard {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Label("오프라인 시세", systemImage: "internaldrive")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundColor(CoinPilotColors.blue)
+                        Text("앱에 저장된 고정 시세로 가격 흐름을 보고 과거 구간을 계산해요. 출처와 최신 여부는 온라인에서 확인하지 않으며, 계좌 연결이나 주문 기능은 없습니다.")
+                            .font(.subheadline)
+                            .foregroundColor(CoinPilotColors.secondaryInk)
+                            .fixedSize(horizontal: false, vertical: true)
+                        MetadataLine(text: store.freshnessLabel(for: "market-prices"))
+                            .font(.caption)
+                            .foregroundColor(CoinPilotColors.secondaryInk)
+                            .textSelection(.enabled)
+                    }
+                }
+
+                if let recoveryMessage = store.offlineReplaySessionRecoveryMessage {
+                    NativeCard {
+                        VStack(alignment: .leading, spacing: 10) {
+                            SectionHeading(title: "과거 재생 상태 복구 필요")
+                            Text(recoveryMessage)
+                                .font(.footnote)
+                                .foregroundColor(CoinPilotColors.secondaryInk)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Button("저장된 재생 상태 지우기") {
+                                Task { _ = await store.resetOfflineReplaySession() }
+                            }
+                            .buttonStyle(CoinPilotSecondaryButtonStyle())
+                        }
+                    }
+                }
+
+                NativeCard {
+                    VStack(alignment: .leading, spacing: 12) {
+                        SectionHeading(title: "원화 시장")
+                        if let error = store.localMarketDataError {
+                            EmptyMessage(text: error)
+                        } else if store.localMarketData == nil {
+                            ProgressView("시세 자료 불러오는 중")
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        } else {
+                            HStack(spacing: 8) {
+                                Image(systemName: "magnifyingglass")
+                                    .font(.subheadline)
+                                    .foregroundColor(CoinPilotColors.secondaryInk)
+                                TextField("시장 검색", text: $search)
+                                    .cpAutocapitalizeCharacters()
+                                    .cpNoAutocorrection()
+                                    .textFieldStyle(.plain)
+                                if !search.isEmpty {
+                                    Button {
+                                        search = ""
+                                    } label: {
+                                        Image(systemName: "xmark.circle.fill")
+                                            .foregroundColor(CoinPilotColors.secondaryInk)
+                                    }
+                                    .accessibilityLabel("검색어 지우기")
+                                }
+                            }
+                            .padding(.horizontal, 14)
+                            .frame(minHeight: 44)
+                            .background(CoinPilotColors.paper)
+                            .clipShape(RoundedRectangle(cornerRadius: 11))
+                            if visibleMarkets.isEmpty {
+                                EmptyMessage(text: "검색 결과가 없습니다.")
+                            } else {
+                                VStack(spacing: 0) {
+                                    ForEach(visibleMarkets) { market in
+                                        NavigationLink(destination: CoinPilotLocalMarketDetailView(store: store, marketCode: market.market)) {
+                                            localMarketRow(market)
+                                        }
+                                        .buttonStyle(PlainButtonStyle())
+                                        if market.id != visibleMarkets.last?.id {
+                                            Divider().overlay(CoinPilotColors.line)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 18)
+            .padding(.top, 12)
+            .padding(.bottom, 30)
+        }
+        .cpReadableWidth()
+        .background(CoinPilotColors.paper.ignoresSafeArea())
+    }
+
+    private func localMarketRow(_ market: CoinPilotBundledMarketData.Market) -> some View {
+        let latest = store.localMarketLatestCandle(for: market.market)
+        let windowCandles = market.candles
+            .filter { $0.intervalMinutes == (latest?.intervalMinutes ?? -1) }
+            .sorted(by: { $0.timestamp < $1.timestamp })
+        let windowChange: Double? = {
+            guard let first = windowCandles.first?.open, let last = windowCandles.last?.close,
+                  first.isFinite, last.isFinite, first > 0 else { return nil }
+            return (last - first) / first * 100
+        }()
+        return VStack(alignment: .leading, spacing: 7) {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(CoinPilotFormatting.symbol(market.market))
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundColor(CoinPilotColors.ink)
+                    MetadataLine(text: "\(market.market) · \(latest.map { "\($0.intervalMinutes)분 캔들" } ?? "캔들 자료 없음")")
+                        .font(.caption)
+                        .foregroundColor(CoinPilotColors.secondaryInk)
+                }
+                Spacer(minLength: 8)
+                VStack(alignment: .trailing, spacing: 4) {
+                    Text(CoinPilotFormatting.price(latest?.close))
+                        .font(.subheadline.weight(.semibold))
+                        .monospacedDigit()
+                        .foregroundColor(CoinPilotColors.ink)
+                    if let windowChange {
+                        Text("구간 \(CoinPilotFormatting.percent(windowChange))")
+                            .font(.caption2.weight(.medium))
+                            .monospacedDigit()
+                            .foregroundColor(profitColor(windowChange))
+                    }
+                }
+            }
+            if let latest {
+                Text(store.localMarketTimestampLabel(for: market.market, interval: latest.intervalMinutes))
+                    .font(.caption2)
+                    .foregroundColor(CoinPilotColors.secondaryInk)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .textSelection(.enabled)
+            }
+        }
+        .contentShape(Rectangle())
+        .padding(.vertical, 10)
+    }
+}
+
+private struct CoinPilotLocalMarketDetailView: View {
+    @ObservedObject var store: CoinPilotStore
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var showsOfflineReplayResult = false
+    let marketCode: String
+
+    private var intervals: [Int] { store.localMarketIntervals(for: marketCode) }
+
+    private var selectedInterval: Int {
+        intervals.contains(store.selectedCandleInterval) ? store.selectedCandleInterval : (intervals.first ?? 5)
+    }
+
+    private var latestCandle: CoinPilotBundledMarketData.Candle? {
+        store.localMarketLatestCandle(for: marketCode, interval: selectedInterval)
+    }
+
+    private var offlineReplayBlockReason: String? {
+        store.offlineReplayBlockReason(forMarket: marketCode, intervalMinutes: selectedInterval)
+    }
+
+    private var sessionMatchesSelection: Bool {
+        guard let checkpoint = store.offlineReplaySessionCheckpoint else { return true }
+        return checkpoint.market == marketCode && checkpoint.intervalMinutes == selectedInterval
+    }
+
+    private var playbackTaskID: String {
+        "\(scenePhase == .active)-\(store.offlineReplaySessionPlaybackTaskID(forMarket: marketCode, intervalMinutes: selectedInterval))"
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                if let error = store.localMarketDataError {
+                    NativeCard { EmptyMessage(text: error) }
+                } else {
+                    playbackSessionSection
+
+                    NativeCard {
+                        VStack(alignment: .leading, spacing: 12) {
+                            HStack(alignment: .firstTextBaseline) {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(CoinPilotFormatting.symbol(marketCode))
+                                        .font(.title2.weight(.bold))
+                                        .foregroundColor(CoinPilotColors.ink)
+                                    MetadataLine(text: "\(marketCode) · 앱에 저장된 고정 시세")
+                                        .font(.caption)
+                                        .foregroundColor(CoinPilotColors.secondaryInk)
+                                }
+                                Spacer()
+                                Text(CoinPilotFormatting.price(latestCandle?.close))
+                                    .font(.title3.weight(.bold))
+                                    .monospacedDigit()
+                            }
+                            let visibleLows = store.candles.compactMap(\.low)
+                            let visibleHighs = store.candles.compactMap(\.high)
+                            if let low = visibleLows.min(), let high = visibleHighs.max(),
+                               let last = latestCandle?.close, high > low {
+                                CoinPilotPriceRangeBar(
+                                    low: low, high: high, price: last,
+                                    lowLabel: "표시 구간 저가", highLabel: "표시 구간 고가"
+                                )
+                            }
+                            Text(store.localMarketTimestampLabel(for: marketCode, interval: selectedInterval))
+                                .font(.caption2)
+                                .foregroundColor(CoinPilotColors.secondaryInk)
+                                .textSelection(.enabled)
+                        }
+                    }
+
+                    NativeCard {
+                        VStack(alignment: .leading, spacing: 12) {
+                            HStack {
+                                SectionHeading(title: "캔들 기록")
+                                Spacer()
+                                Text("캔들 시각은 UTC")
+                                    .font(.caption)
+                                    .foregroundColor(CoinPilotColors.secondaryInk)
+                            }
+                            if !intervals.isEmpty {
+                                Picker("캔들 간격", selection: Binding(
+                                    get: { selectedInterval },
+                                    set: { value in
+                                        Task {
+                                            await store.pauseOfflineReplaySessionForInterruption()
+                                            await store.loadMarketDetail(coin: marketCode, interval: value)
+                                        }
+                                    }
+                                )) {
+                                    ForEach(intervals, id: \.self) { interval in
+                                        Text(interval == 60 ? "1시간" : "\(interval)분").tag(interval)
+                                    }
+                                }
+                                .pickerStyle(SegmentedPickerStyle())
+                            }
+                            if let message = store.featureMessages["market"] {
+                                EmptyMessage(text: message)
+                            } else if store.candles.count < 2 {
+                                EmptyMessage(text: "차트를 표시할 가격 기록이 충분하지 않습니다.")
+                            } else {
+                                CoinPilotCandleChart(candles: store.candles)
+                                    .frame(height: 228)
+                                if let windowLabel = store.localMarketChartWindowLabel(for: marketCode, interval: selectedInterval) {
+                                    Text(windowLabel)
+                                        .font(.caption2)
+                                        .foregroundColor(CoinPilotColors.secondaryInk)
+                                        .textSelection(.enabled)
+                                }
+                            }
+                            CoinPilotCandleDataDisclosure(candles: store.candles)
+                            Text(store.localMarketTimestampLabel(for: marketCode, interval: selectedInterval))
+                                .font(.caption2)
+                                .foregroundColor(CoinPilotColors.secondaryInk)
+                                .textSelection(.enabled)
+                            Text("출처와 최신 여부는 온라인으로 확인하지 않습니다.")
+                                .font(.caption2)
+                                .foregroundColor(CoinPilotColors.secondaryInk)
+                            if let generatedAt = store.localMarketData?.generatedAt {
+                                MetadataLine(text: "시세 자료 생성 시각 · \(CoinPilotFormatting.utcMarketTimestamp(generatedAt))")
+                                    .font(.caption2)
+                                    .foregroundColor(CoinPilotColors.secondaryInk)
+                                    .textSelection(.enabled)
+                            }
+                        }
+                    }
+
+                    NativeCard {
+                        VStack(alignment: .leading, spacing: 10) {
+                            SectionHeading(title: "과거 시세 재생")
+                            Text("선택한 간격의 전체 캔들로 기본 전략을 계산해요. 결과는 이 기기에 저장하고 주문은 보내지 않습니다.")
+                                .font(.subheadline)
+                                .foregroundColor(CoinPilotColors.secondaryInk)
+                                .fixedSize(horizontal: false, vertical: true)
+
+                            Button {
+                                Task {
+                                    if await store.runBundledOfflineReplay(
+                                        marketCode: marketCode,
+                                        intervalMinutes: selectedInterval
+                                    ) {
+                                        showsOfflineReplayResult = true
+                                    }
+                                }
+                            } label: {
+                                HStack(spacing: 8) {
+                                    if store.isRunningOfflineReplay {
+                                        ProgressView()
+                                            .progressViewStyle(CircularProgressViewStyle(tint: CoinPilotColors.blue))
+                                    } else {
+                                        Image(systemName: "play.fill")
+                                            .accessibilityHidden(true)
+                                    }
+                                    Text(store.isRunningOfflineReplay ? "과거 시세를 살펴보고 있어요" : "과거 구간 돌려보기")
+                                }
+                                .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(CoinPilotPrimaryButtonStyle())
+                            .disabled(store.isLoadingLocalMarketData || store.localMarketDataError != nil ||
+                                      store.isRunningOfflineReplay || offlineReplayBlockReason != nil)
+                            .accessibilityHint("선택한 시장과 간격의 전체 캔들을 사용합니다.")
+
+                            if let message = store.offlineReplayMessage {
+                                InlineNotice(text: message, color: CoinPilotColors.amber)
+                            } else if store.isRunningOfflineReplay {
+                                Text("자료와 시간 간격을 확인한 뒤 결과를 계산합니다.")
+                                    .font(.caption)
+                                    .foregroundColor(CoinPilotColors.secondaryInk)
+                            } else if let offlineReplayBlockReason {
+                                Text(offlineReplayBlockReason)
+                                    .font(.caption)
+                                    .foregroundColor(CoinPilotColors.amber)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            if let message = store.offlineReplayPersistenceMessage {
+                                Text(message)
+                                    .font(.caption)
+                                    .foregroundColor(CoinPilotColors.amber)
+                            }
+                            if let previousResult = store.offlineReplayResults.first(where: {
+                                $0.metadata.market == marketCode && $0.metadata.intervalMinutes == selectedInterval
+                            }) {
+                                Button {
+                                    store.selectOfflineReplayResult(previousResult)
+                                    showsOfflineReplayResult = true
+                                } label: {
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        HStack {
+                                            Text("저장된 결과")
+                                                .font(.caption)
+                                                .foregroundColor(CoinPilotColors.secondaryInk)
+                                            Spacer(minLength: 8)
+                                            Text(CoinPilotFormatting.percent(previousResult.summary.totalReturnPercent))
+                                                .font(.caption.weight(.semibold))
+                                                .monospacedDigit()
+                                                .foregroundColor(profitColor(previousResult.summary.totalReturnPercent))
+                                        }
+                                        MetadataLine(text: "자료 생성 \(utcReplayTimestampFromISO8601(previousResult.metadata.generatedAt)) · 캔들 \(previousResult.metadata.rowCount)개")
+                                            .font(.caption2)
+                                            .foregroundColor(CoinPilotColors.secondaryInk)
+                                            .multilineTextAlignment(.leading)
+                                    }
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                }
+                                .buttonStyle(PlainButtonStyle())
+                                .accessibilityHint("이 시장과 간격의 저장된 과거 재생 결과를 엽니다.")
+                            }
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 18)
+            .padding(.top, 12)
+            .padding(.bottom, 30)
+        }
+        .cpReadableWidth()
+        .background(CoinPilotColors.paper.ignoresSafeArea())
+        .navigationTitle(CoinPilotFormatting.ticker(marketCode))
+        .cpInlineTitle()
+        .task { await store.loadMarketDetail(coin: marketCode, interval: selectedInterval) }
+        .task(id: playbackTaskID) {
+            guard scenePhase == .active,
+                  let delay = store.offlineReplaySessionDelayNanoseconds(
+                    forMarket: marketCode,
+                    intervalMinutes: selectedInterval
+                  ) else { return }
+            do {
+                try await Task.sleep(nanoseconds: delay)
+            } catch {
+                return
+            }
+            guard !Task.isCancelled, scenePhase == .active else { return }
+            _ = await store.advanceOfflineReplaySession(marketCode: marketCode, intervalMinutes: selectedInterval)
+        }
+        .onChange(of: scenePhase) { phase in
+            if phase != .active {
+                Task { await store.pauseOfflineReplaySessionForInterruption() }
+            }
+        }
+        .onDisappear {
+            Task { await store.pauseOfflineReplaySessionForInterruption() }
+        }
+        .sheet(isPresented: $showsOfflineReplayResult) {
+            if let result = store.offlineReplayResult {
+                CoinPilotNavigationHost {
+                    CoinPilotOfflineReplayResultView(result: result)
+                        .navigationTitle("과거 시세 재생")
+                        .cpInlineTitle()
+                        .toolbar {
+                            ToolbarItem(placement: .cpTrailing) {
+                                Button("닫기") { showsOfflineReplayResult = false }
+                            }
+                        }
+                }
+            }
+        }
+    }
+
+    private var playbackSessionSection: some View {
+        NativeCard {
+            VStack(alignment: .leading, spacing: 10) {
+                SectionHeading(title: "빠른 과거 재생")
+                Text("앱에 저장된 고정 캔들을 순서대로 살펴봅니다. 종가와 가상 잔액은 과거 시뮬레이션 값이며 현재 시세·계좌·체결이 아닙니다.")
+                    .font(.footnote)
+                    .foregroundColor(CoinPilotColors.secondaryInk)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Picker("재생 속도", selection: Binding(
+                    get: { store.offlineReplayPlaybackSpeed },
+                    set: { speed in Task { _ = await store.setOfflineReplayPlaybackSpeed(speed) } }
+                )) {
+                    ForEach(CoinPilotOfflineReplayPlaybackSpeed.allCases) { speed in
+                        Text(speed.title).tag(speed)
+                    }
+                }
+                .pickerStyle(SegmentedPickerStyle())
+
+                Text("비정상 종료 뒤에는 마지막 저장 시점부터 최대 1초 구간이 다시 재생될 수 있습니다. 재생 위치는 한 번에 한 캔들씩 이어집니다.")
+                    .font(.caption2)
+                    .foregroundColor(CoinPilotColors.secondaryInk)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if let recoveryMessage = store.offlineReplaySessionRecoveryMessage {
+                    InlineNotice(text: recoveryMessage, color: CoinPilotColors.amber)
+                    Button("저장된 재생 상태 지우기") {
+                        Task { _ = await store.resetOfflineReplaySession() }
+                    }
+                    .buttonStyle(CoinPilotSecondaryButtonStyle())
+                } else if !sessionMatchesSelection {
+                    Text("다른 시장 또는 간격의 재생 기록이 있습니다. 처음부터 다시 설정한 뒤 시작하세요.")
+                        .font(.footnote)
+                        .foregroundColor(CoinPilotColors.amber)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Button("기록을 지우고 처음부터") {
+                        Task { _ = await store.resetOfflineReplaySession() }
+                    }
+                    .buttonStyle(CoinPilotSecondaryButtonStyle())
+                    .disabled(store.isUpdatingOfflineReplaySession)
+                } else {
+                    sessionPlaybackState
+                    if let message = store.offlineReplaySessionMessage {
+                        InlineNotice(text: message, color: CoinPilotColors.amber)
+                    }
+                    sessionPlaybackControls
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var sessionPlaybackState: some View {
+        if let checkpoint = store.offlineReplaySessionCheckpoint {
+            HStack {
+                Text(sessionStatusTitle(checkpoint.status))
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundColor(CoinPilotColors.ink)
+                Spacer()
+                Text("\(checkpoint.nextCandleIndex) / \(checkpoint.candleCount) 캔들")
+                    .font(.caption.monospacedDigit())
+                    .foregroundColor(CoinPilotColors.secondaryInk)
+            }
+            ProgressView(value: Double(checkpoint.nextCandleIndex), total: Double(max(checkpoint.candleCount, 1)))
+                .tint(CoinPilotColors.blue)
+                .accessibilityLabel("재생 진행률")
+                .accessibilityValue("\(checkpoint.nextCandleIndex)/\(checkpoint.candleCount) 캔들")
+            if let frame = store.offlineReplaySessionFrame {
+                VStack(alignment: .leading, spacing: 5) {
+                    MetadataLine(text: "당시 캔들 종가 · \(utcReplayTimestamp(frame.timestampMilliseconds))")
+                        .font(.caption)
+                        .foregroundColor(CoinPilotColors.secondaryInk)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(CoinPilotFormatting.price(frame.historicalClose))
+                        .font(.title3.weight(.semibold))
+                        .monospacedDigit()
+                        .foregroundColor(CoinPilotColors.ink)
+                    if let equity = frame.historicalSimulationEquity {
+                        MetadataLine(text: "과거 가상 잔액 · \(CoinPilotFormatting.price(equity))")
+                            .font(.caption.weight(.medium))
+                            .foregroundColor(CoinPilotColors.secondaryInk)
+                    } else {
+                        Text("전략 계산 준비 구간")
+                            .font(.caption)
+                            .foregroundColor(CoinPilotColors.secondaryInk)
+                    }
+                }
+                .accessibilityElement(children: .combine)
+            }
+        } else {
+            HStack {
+                Text("정지")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundColor(CoinPilotColors.ink)
+                Spacer()
+                Text("0 / \(store.localMarketData?.markets.first(where: { $0.market == marketCode })?.candles.filter { $0.intervalMinutes == selectedInterval }.count ?? 0) 캔들")
+                    .font(.caption.monospacedDigit())
+                    .foregroundColor(CoinPilotColors.secondaryInk)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var sessionPlaybackControls: some View {
+        let status = store.offlineReplaySessionCheckpoint?.status ?? .stopped
+        switch status {
+        case .stopped:
+            Button(store.isPreparingOfflineReplaySession ? "준비 중" : "과거 캔들 재생") {
+                Task { _ = await store.startOfflineReplaySession(marketCode: marketCode, intervalMinutes: selectedInterval) }
+            }
+            .buttonStyle(CoinPilotPrimaryButtonStyle())
+            .disabled(store.isPreparingOfflineReplaySession || store.isUpdatingOfflineReplaySession || offlineReplayBlockReason != nil)
+        case .playing:
+            HStack(spacing: 10) {
+                Button("일시정지") { Task { _ = await store.pauseOfflineReplaySession() } }
+                    .buttonStyle(CoinPilotSecondaryButtonStyle())
+                    .disabled(store.isUpdatingOfflineReplaySession)
+                Button("처음부터") { Task { _ = await store.resetOfflineReplaySession() } }
+                    .buttonStyle(CoinPilotSecondaryButtonStyle())
+                    .disabled(store.isUpdatingOfflineReplaySession)
+            }
+        case .paused:
+            HStack(spacing: 10) {
+                Button("계속 재생") { Task { _ = await store.resumeOfflineReplaySession() } }
+                    .buttonStyle(CoinPilotPrimaryButtonStyle())
+                    .disabled(store.isUpdatingOfflineReplaySession)
+                Button("처음부터") { Task { _ = await store.resetOfflineReplaySession() } }
+                    .buttonStyle(CoinPilotSecondaryButtonStyle())
+                    .disabled(store.isUpdatingOfflineReplaySession)
+            }
+        case .completed:
+            HStack(spacing: 10) {
+                Button("처음부터 재생") {
+                    Task {
+                        if await store.resetOfflineReplaySession() {
+                            _ = await store.startOfflineReplaySession(marketCode: marketCode, intervalMinutes: selectedInterval)
+                        }
+                    }
+                }
+                .buttonStyle(CoinPilotPrimaryButtonStyle())
+                Button("전체 결과 보기") { showsOfflineReplayResult = store.offlineReplayResult != nil }
+                    .buttonStyle(CoinPilotSecondaryButtonStyle())
+                    .disabled(store.offlineReplayResult == nil)
+            }
+        }
+    }
+
+    private func sessionStatusTitle(_ status: CoinPilotOfflineReplaySessionStatus) -> String {
+        switch status {
+        case .stopped: return "정지"
+        case .playing: return "재생 중"
+        case .paused: return "일시정지"
+        case .completed: return "완료"
+        }
+    }
+}
+
+private struct CoinPilotOfflineReplayResultView: View {
+    let result: CoinPilotOfflineReplay.Result
+
+    private var metadata: CoinPilotOfflineReplay.Metadata { result.metadata }
+    private var summary: CoinPilotOfflineReplay.Summary { result.summary }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                NativeCard {
+                    VStack(alignment: .leading, spacing: 10) {
+                        MetadataLine(text: "\(CoinPilotFormatting.symbol(metadata.market)) · \(intervalTitle(metadata.intervalMinutes))")
+                            .font(.title3.weight(.bold))
+                            .foregroundColor(CoinPilotColors.ink)
+                        MetadataLine(text: "앱에 저장된 고정 시세 · 캔들 \(metadata.rowCount)개")
+                            .font(.caption)
+                            .foregroundColor(CoinPilotColors.secondaryInk)
+                        Text("출처와 최신 여부는 온라인으로 확인하지 않습니다.")
+                            .font(.caption2)
+                            .foregroundColor(CoinPilotColors.secondaryInk)
+                        Text("\(utcReplayTimestamp(metadata.startTimestampMilliseconds)) – \(utcReplayTimestamp(metadata.endTimestampMilliseconds))")
+                            .font(.caption2)
+                            .foregroundColor(CoinPilotColors.secondaryInk)
+                            .textSelection(.enabled)
+                        Divider().overlay(CoinPilotColors.line)
+                        Text("시뮬레이션 후 잔액")
+                            .font(.caption)
+                            .foregroundColor(CoinPilotColors.secondaryInk)
+                        Text(CoinPilotFormatting.price(summary.finalBalance))
+                            .font(.largeTitle.weight(.bold))
+                            .monospacedDigit()
+                            .foregroundColor(CoinPilotColors.ink)
+                        HStack(spacing: 14) {
+                            Text("수익률 \(CoinPilotFormatting.percent(summary.totalReturnPercent))")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundColor(profitColor(summary.totalReturnPercent))
+                            Text("완료 거래 \(summary.completedTradeCount)건")
+                                .font(.caption.weight(.medium))
+                                .foregroundColor(CoinPilotColors.secondaryInk)
+                        }
+                    }
+                }
+
+                if !result.equityCurve.isEmpty {
+                    NativeCard {
+                        VStack(alignment: .leading, spacing: 10) {
+                            SectionHeading(title: "잔액 흐름")
+                            CoinPilotOfflineReplayEquityChart(
+                                points: result.equityCurve,
+                                returnPercent: summary.totalReturnPercent
+                            )
+                            .frame(height: 118)
+                            HStack {
+                                Text(CoinPilotFormatting.price(summary.initialBalance))
+                                Spacer()
+                                Text(CoinPilotFormatting.price(summary.finalBalance))
+                            }
+                            .font(.caption2.monospacedDigit())
+                            .foregroundColor(CoinPilotColors.secondaryInk)
+                            Text("각 시점은 캔들 종가로 계산했고, 마지막 금액에는 구간 종료 비용을 반영했습니다.")
+                                .font(.caption2)
+                                .foregroundColor(CoinPilotColors.secondaryInk)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
+
+                NativeCard {
+                    VStack(alignment: .leading, spacing: 10) {
+                        SectionHeading(title: "거래 기록")
+                        if result.trades.isEmpty {
+                            EmptyMessage(text: "이 구간에서 기본 전략 조건을 만족한 거래가 없습니다.")
+                        } else {
+                            ForEach(Array(result.trades.suffix(20).reversed().enumerated()), id: \.offset) { item in
+                                let trade = item.element
+                                VStack(alignment: .leading, spacing: 5) {
+                                    HStack {
+                                        Text(exitReasonTitle(trade.reason))
+                                            .font(.subheadline.weight(.semibold))
+                                            .foregroundColor(CoinPilotColors.ink)
+                                        Spacer()
+                                        Text(CoinPilotFormatting.percent(trade.profitPercent))
+                                            .font(.subheadline.weight(.semibold))
+                                            .monospacedDigit()
+                                            .foregroundColor(profitColor(trade.profitPercent))
+                                    }
+                                    Text("진입 \(utcReplayTimestamp(trade.entryTimestampMilliseconds))")
+                                    Text("청산 \(utcReplayTimestamp(trade.exitTimestampMilliseconds))")
+                                    MetadataLine(text: "손익 \(CoinPilotFormatting.signedWon(trade.netProfit)) · 수수료 \(CoinPilotFormatting.price(trade.buyFee + trade.sellFee))")
+                                }
+                                .font(.caption2)
+                                .foregroundColor(CoinPilotColors.secondaryInk)
+                                .textSelection(.enabled)
+                                if item.offset < min(result.trades.count, 20) - 1 {
+                                    Divider().overlay(CoinPilotColors.line)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                NativeCard {
+                    VStack(alignment: .leading, spacing: 8) {
+                        SectionHeading(title: "계산 기준")
+                        PaperEvidenceRow(title: "시작 금액", value: CoinPilotFormatting.price(summary.initialBalance), tint: CoinPilotColors.ink)
+                        PaperEvidenceRow(title: "거래 수수료", value: CoinPilotFormatting.price(summary.fees), tint: CoinPilotColors.ink)
+                        PaperEvidenceRow(title: "자료 생성", value: utcReplayTimestampFromISO8601(metadata.generatedAt), tint: CoinPilotColors.secondaryInk)
+                        Text("매수와 매도에 각각 수수료 0.05%, 슬리피지 0.10%를 적용했습니다.")
+                        Text("같은 캔들에서 손절과 목표가가 함께 닿으면 손절을 먼저 적용하고, 시가가 손절가보다 낮으면 시가로 계산했습니다.")
+                        Text("분봉만으로 체결 시점을 알 수 없어 다음 캔들이 시작한 가격으로 진입했다고 계산했습니다. 실제 거래 결과와 다를 수 있습니다.")
+                    }
+                    .font(.caption)
+                    .foregroundColor(CoinPilotColors.secondaryInk)
+                    .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(.horizontal, 18)
+            .padding(.top, 12)
+            .padding(.bottom, 30)
+        }
+        .cpReadableWidth()
+        .background(CoinPilotColors.paper.ignoresSafeArea())
+    }
+}
+
+private struct CoinPilotOfflineReplayEquityChart: View {
+    let points: [CoinPilotOfflineReplay.EquityPoint]
+    let returnPercent: Double
+
+    private var sampledValues: [Double] {
+        let values = points.map(\.equity).filter(\.isFinite)
+        guard values.count > 600 else { return values }
+        return (0..<600).map { sampleIndex in
+            let sourceIndex = Int((Double(sampleIndex) * Double(values.count - 1) / 599).rounded())
+            return values[sourceIndex]
+        }
+    }
+
+    var body: some View {
+        GeometryReader { geometry in
+            let values = sampledValues
+            let minimum = values.min() ?? 0
+            let maximum = values.max() ?? minimum
+            let spread = max(maximum - minimum, 1)
+            let width = geometry.size.width
+            let height = geometry.size.height
+
+            ZStack(alignment: .topLeading) {
+                Path { path in
+                    guard values.count > 1 else { return }
+                    for (index, value) in values.enumerated() {
+                        let x = width * CGFloat(index) / CGFloat(values.count - 1)
+                        let y = maximum == minimum
+                            ? height / 2
+                            : height - (CGFloat(value - minimum) / CGFloat(spread)) * height
+                        if index == 0 { path.move(to: CGPoint(x: x, y: y)) }
+                        else { path.addLine(to: CGPoint(x: x, y: y)) }
+                    }
+                }
+                .stroke(profitColor(returnPercent), style: StrokeStyle(lineWidth: 2.2, lineCap: .round, lineJoin: .round))
+                if values.count > 1 {
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text(CoinPilotFormatting.compactWon(maximum))
+                            .font(.caption2.monospacedDigit())
+                        Spacer(minLength: 0)
+                        Text(CoinPilotFormatting.compactWon(minimum))
+                            .font(.caption2.monospacedDigit())
+                    }
+                    .foregroundColor(CoinPilotColors.secondaryInk)
+                    .padding(3)
+                    if let lastValue = values.last {
+                        let lastY = maximum == minimum
+                            ? height / 2
+                            : height - (CGFloat(lastValue - minimum) / CGFloat(spread)) * height
+                        Circle()
+                            .fill(profitColor(returnPercent))
+                            .frame(width: 6, height: 6)
+                            .overlay(Circle().stroke(CoinPilotColors.surface, lineWidth: 1.5))
+                            .position(x: max(width - 4, 0), y: lastY)
+                    }
+                }
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("과거 구간 잔액 흐름")
+            .accessibilityValue("시작 \(CoinPilotFormatting.price(points.first?.equity)) · 마지막 \(CoinPilotFormatting.price(points.last?.equity)) · 최저 \(CoinPilotFormatting.price(minimum)) · 최고 \(CoinPilotFormatting.price(maximum))")
+        }
+    }
+}
+
+private func intervalTitle(_ interval: Int) -> String {
+    interval == 60 ? "1시간 캔들" : "\(interval)분 캔들"
+}
+
+private func utcReplayTimestamp(_ milliseconds: Int64) -> String {
+    let formatter = DateFormatter()
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    formatter.timeZone = TimeZone(secondsFromGMT: 0)
+    formatter.dateFormat = "yyyy. MM. dd. HH:mm:ss 'UTC'"
+    return formatter.string(from: Date(timeIntervalSince1970: Double(milliseconds) / 1_000))
+}
+
+private func utcReplayTimestampFromISO8601(_ value: String) -> String {
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    if let date = formatter.date(from: value) {
+        return utcReplayTimestamp(Int64((date.timeIntervalSince1970 * 1_000).rounded()))
+    }
+    formatter.formatOptions = [.withInternetDateTime]
+    guard let date = formatter.date(from: value) else { return "시각 미제공" }
+    return utcReplayTimestamp(Int64((date.timeIntervalSince1970 * 1_000).rounded()))
+}
+
+private func exitReasonTitle(_ reason: String) -> String {
+    switch reason {
+    case "TAKE_PROFIT": return "목표 가격 도달"
+    case "STOP_LOSS": return "손절 기준 도달"
+    case "MAX_HOLD_TIME": return "보유 시간 종료"
+    case "BACKTEST_END": return "자료 구간 종료"
+    default: return "청산"
+    }
+}
+
+private struct CoinPilotMarketDetailView: View {
+    @ObservedObject var store: CoinPilotStore
+    @AppStorage("coinpilot.native.selectedTab.v2") private var selectedTab = 0
+    let coin: String
+
+    private var market: CoinPilotMarketPrice? { store.markets.first(where: { $0.coin == coin }) }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                NativeCard {
+                    VStack(alignment: .leading, spacing: 12) {
+                        let quoteIssue = store.marketQuoteFreshnessIssue(for: coin)
+                        let isExampleData = store.isBundledLocalMarketData || store.isBundledPreview
+                        HStack(alignment: .top) {
+                            CoinAvatar(coin: coin, size: 44)
+                                .padding(.top, 2)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(CoinPilotFormatting.symbol(coin)).font(.title2.weight(.bold)).foregroundColor(CoinPilotColors.ink)
+                                Text(isExampleData ? "예시·로컬 시세" : "\(store.exchangeDisplayName) \(store.quoteCurrency) 시장")
+                                    .font(.caption).foregroundColor(CoinPilotColors.secondaryInk)
+                            }
+                            Spacer()
+                            VStack(alignment: .trailing, spacing: 5) {
+                                Text(CoinPilotFormatting.price(market?.price)).font(.title3.weight(.bold)).monospacedDigit()
+                                Text(CoinPilotFormatting.percent(market?.change)).font(.caption.weight(.semibold)).foregroundColor(profitColor(market?.change))
+                            }
+                        }
+                        Divider().overlay(CoinPilotColors.line)
+                        if let low = market?.low, let high = market?.high, let price = market?.price,
+                           low.isFinite, high.isFinite, price.isFinite, high > low {
+                            CoinPilotPriceRangeBar(low: low, high: high, price: price)
+                        } else {
+                            HStack(spacing: 10) {
+                                marketMetric("24시간 고가", market?.high)
+                                marketMetric("24시간 저가", market?.low)
+                            }
+                        }
+                        Text(CoinPilotFormatting.marketTimestamp(market?.sourceAsOf, label: "최근 체결"))
+                            .font(.caption2).foregroundColor(CoinPilotColors.secondaryInk)
+                        if isExampleData || quoteIssue != nil {
+                            HStack(spacing: 6) {
+                                Image(systemName: isExampleData
+                                      ? "info.circle"
+                                      : quoteIssue == nil ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                                    .accessibilityHidden(true)
+                                Text(store.marketQuoteFreshnessMessage(for: coin))
+                            }
+                            .font(.caption2)
+                            .foregroundColor(isExampleData
+                                             ? CoinPilotColors.secondaryInk
+                                             : quoteIssue == nil ? CoinPilotColors.green : CoinPilotColors.amber)
+                        }
+                        if !isExampleData {
+                            Text(CoinPilotFormatting.marketTimestamp(market?.fetchedAt, label: "서버 수집"))
+                                .font(.caption2).foregroundColor(CoinPilotColors.secondaryInk)
+                        }
+                    }
+                }
+                NativeCard {
+                    VStack(alignment: .leading, spacing: 12) {
+                        let orderBlockReason = store.manualOrderBlockReason(for: coin)
+                        HStack {
+                            SectionHeading(title: "가격 흐름")
+                            Spacer()
+                            Text("완료된 분봉").font(.caption).foregroundColor(CoinPilotColors.secondaryInk)
+                        }
+                        Picker("캔들 간격", selection: Binding(
+                            get: { store.selectedCandleInterval },
+                            set: { value in Task { await store.loadMarketDetail(coin: coin, interval: value) } }
+                        )) {
+                            Text("1분").tag(1)
+                            Text("5분").tag(5)
+                            Text("15분").tag(15)
+                            Text("1시간").tag(60)
+                        }
+                        .pickerStyle(SegmentedPickerStyle())
+                        if let message = store.featureMessages["market"] {
+                            EmptyMessage(text: message)
+                            if store.canOperate {
+                                Button("다시 불러오기") {
+                                    Task { await store.loadMarketDetail(coin: coin, interval: store.selectedCandleInterval) }
+                                }
+                                .font(.body.weight(.semibold))
+                                .foregroundColor(CoinPilotColors.blue)
+                                .frame(minHeight: 44)
+                                .accessibilityHint("선택한 종목과 캔들 간격의 가격 흐름을 다시 요청합니다.")
+                            }
+                        } else if store.loadingFeatures.contains("market") && store.candles.isEmpty {
+                            ProgressView("캔들 자료를 불러오는 중")
+                                .frame(maxWidth: .infinity, minHeight: 190)
+                        } else if store.candles.count < 2 {
+                            EmptyMessage(text: "차트를 표시할 가격 기록이 충분하지 않습니다.")
+                        } else {
+                            CoinPilotCandleChart(candles: store.candles)
+                                .frame(height: 228)
+                            MetadataLine(text: store.marketCandleOriginLabel(candleCount: store.candles.count))
+                                .font(.caption2).foregroundColor(CoinPilotColors.secondaryInk)
+                            if store.loadingFeatures.contains("market") {
+                                Text("가격 흐름을 새로 확인하고 있어요.")
+                                    .font(.caption2).foregroundColor(CoinPilotColors.secondaryInk)
+                            }
+                        }
+                        CoinPilotCandleDataDisclosure(candles: store.candles)
+                        Button {
+                            store.selectedMarket = coin
+                            selectedTab = 1
+                        } label: {
+                            Label("이 종목 주문 열기", systemImage: "arrow.left.arrow.right")
+                                .frame(maxWidth: .infinity, minHeight: 45)
+                        }
+                        .buttonStyle(CoinPilotSecondaryButtonStyle())
+                        .disabled(orderBlockReason != nil)
+                        if let orderBlockReason {
+                            InlineNotice(text: orderBlockReason, color: CoinPilotColors.amber)
+                        }
+                    }
+                }
+                if let detail = store.marketCoinDetail, detail.coin == coin,
+                   !store.isBundledPreview, !store.isBundledLocalMarketData {
+                    NativeCard {
+                        VStack(alignment: .leading, spacing: 12) {
+                            HStack {
+                                SectionHeading(title: "종목과 주문 정보")
+                                Spacer()
+                                Button {
+                                    Task { await store.loadMarketDetail(coin: coin) }
+                                } label: {
+                                    Image(systemName: "arrow.clockwise")
+                                        .font(.callout.weight(.semibold))
+                                        .foregroundColor(CoinPilotColors.blue)
+                                        .frame(minWidth: 44, minHeight: 30)
+                                        .contentShape(Rectangle())
+                                }
+                                .accessibilityLabel("종목 상세 다시 불러오기")
+                            }
+                            HStack(spacing: 12) {
+                                detailRow("현재가", CoinPilotFormatting.price(detail.currentPrice))
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text("24시간 등락")
+                                        .font(.caption2)
+                                        .foregroundColor(CoinPilotColors.secondaryInk)
+                                    Text(CoinPilotFormatting.percent(detail.change24hPercent))
+                                        .font(.subheadline.weight(.semibold))
+                                        .monospacedDigit()
+                                        .foregroundColor(profitColor(detail.change24hPercent))
+                                }
+                            }
+                            HStack(spacing: 12) {
+                                detailRow("24시간 고가", CoinPilotFormatting.price(detail.high24h))
+                                detailRow("24시간 저가", CoinPilotFormatting.price(detail.low24h))
+                                detailRow("24시간 거래대금", CoinPilotFormatting.compactWon(detail.volume24h))
+                            }
+                            Divider().overlay(CoinPilotColors.line)
+                            if detail.hasHolding {
+                                detailRow("보유 수량", CoinPilotFormatting.quantity(detail.holdingAmount))
+                                detailRow("평균 매입가", CoinPilotFormatting.price(detail.holdingAvgPrice))
+                                HStack {
+                                    detailRow("평가 금액", CoinPilotFormatting.won(detail.holdingValue))
+                                    Spacer()
+                                    VStack(alignment: .trailing, spacing: 2) {
+                                        Text("평가 손익").font(.caption2).foregroundColor(CoinPilotColors.secondaryInk)
+                                        Text("\(CoinPilotFormatting.signedWon(detail.holdingProfit)) (\(CoinPilotFormatting.percent(detail.holdingProfitPercent)))")
+                                            .font(.subheadline.weight(.semibold))
+                                            .foregroundColor(profitColor(detail.holdingProfitPercent))
+                                    }
+                                }
+                            } else {
+                                Text("이 종목은 보유하고 있지 않습니다.")
+                                    .font(.subheadline).foregroundColor(CoinPilotColors.secondaryInk)
+                            }
+                            Divider().overlay(CoinPilotColors.line)
+                            HStack(spacing: 12) {
+                                detailRow("RSI", CoinPilotFormatting.indicator(detail.rsi, fractionDigits: 1))
+                                detailRow("MACD", CoinPilotFormatting.indicator(detail.macdHistogram))
+                                detailRow("BB %B", CoinPilotFormatting.indicator(detail.bollingerPercentB))
+                            }
+                            Divider().overlay(CoinPilotColors.line)
+                            detailRow("\(store.quoteAssetLabel) 잔고", CoinPilotFormatting.won(detail.krwBalance))
+                            HStack(spacing: 12) {
+                                detailRow("최대 매수 가능", CoinPilotFormatting.won(detail.maxBuyAmount))
+                                detailRow("최대 매도 평가", CoinPilotFormatting.won(detail.maxSellAmount))
+                            }
+                            if let message = store.featureMessages["market-detail"] {
+                                InlineNotice(text: message, color: CoinPilotColors.amber)
+                            }
+                        }
+                    }
+                }
+                if store.canOperate {
+                    NativeCard {
+                        VStack(alignment: .leading, spacing: 10) {
+                            SectionHeading(title: "종목별 뉴스")
+                            Text("전체 뉴스 화면에서 코인별 기사와 원문을 확인할 수 있습니다.")
+                                .font(.subheadline).foregroundColor(CoinPilotColors.secondaryInk)
+                            NavigationLink(destination: CoinPilotNewsView(store: store)) {
+                                FeatureMenuRow(title: "뉴스 보기", detail: "", symbol: "newspaper")
+                            }
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 18)
+            .padding(.top, 12)
+            .padding(.bottom, 30)
+        }
+        .cpReadableWidth()
+        .background(CoinPilotColors.paper.ignoresSafeArea())
+        .navigationTitle(CoinPilotFormatting.ticker(coin))
+        .cpInlineTitle()
+                        .task { await store.loadMarketDetail(coin: coin) }
+    }
+
+    private func detailRow(_ title: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(title).font(.caption2).foregroundColor(CoinPilotColors.secondaryInk)
+            Text(value).font(.subheadline.weight(.semibold)).foregroundColor(CoinPilotColors.ink)
+        }
+    }
+
+    private func marketMetric(_ title: String, _ value: Double?) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(title).font(.caption2).foregroundColor(CoinPilotColors.secondaryInk)
+            Text(CoinPilotFormatting.price(value)).font(.subheadline.weight(.semibold)).foregroundColor(CoinPilotColors.ink)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// 저가~고가 범위에서 현재가의 위치를 보여주는 가로 막대입니다.
+private struct CoinPilotPriceRangeBar: View {
+    let low: Double
+    let high: Double
+    let price: Double
+    var lowLabel: String = "저가"
+    var highLabel: String = "고가"
+
+    private var ratio: Double {
+        guard high > low else { return 0.5 }
+        return min(max((price - low) / (high - low), 0), 1)
+    }
+
+    var body: some View {
+        VStack(spacing: 5) {
+            GeometryReader { geometry in
+                ZStack(alignment: .leading) {
+                    Capsule()
+                        .fill(CoinPilotColors.line)
+                        .frame(height: 4)
+                        .frame(maxHeight: .infinity, alignment: .center)
+                    Circle()
+                        .fill(CoinPilotColors.blue)
+                        .frame(width: 9, height: 9)
+                        .overlay(Circle().stroke(CoinPilotColors.surface, lineWidth: 2))
+                        .position(
+                            x: 5 + (geometry.size.width - 10) * CGFloat(ratio),
+                            y: geometry.size.height / 2
+                        )
+                }
+            }
+            .frame(height: 12)
+            HStack {
+                Text("\(lowLabel) \(CoinPilotFormatting.price(low))")
+                Spacer()
+                Text("\(highLabel) \(CoinPilotFormatting.price(high))")
+            }
+            .font(.caption2.monospacedDigit())
+            .foregroundColor(CoinPilotColors.secondaryInk)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("가격 범위")
+        .accessibilityValue("\(lowLabel) \(CoinPilotFormatting.price(low))부터 \(highLabel) \(CoinPilotFormatting.price(high))까지, 현재가 \(CoinPilotFormatting.price(price))")
+    }
+}
+
+private struct CoinPilotCandleChart: View {
+    let candles: [CoinPilotCandle]
+
+    private var validCandles: [CoinPilotCandle] {
+        candles.filter { $0.open != nil && $0.high != nil && $0.low != nil && $0.close != nil }
+    }
+
+    private var accessibilitySummary: String {
+        guard let first = validCandles.first, let last = validCandles.last else {
+            return "읽을 수 있는 캔들 자료가 없습니다."
+        }
+        let low = validCandles.compactMap(\.low).min()
+        let high = validCandles.compactMap(\.high).max()
+        return "최근 종가 \(CoinPilotFormatting.price(last.close)), " +
+            "기간 최저가 \(CoinPilotFormatting.price(low)), 최고가 \(CoinPilotFormatting.price(high)), " +
+            "\(first.time.map(CoinPilotFormatting.utcMarketTimestamp) ?? "시각 미제공")부터 " +
+            "\(last.time.map(CoinPilotFormatting.utcMarketTimestamp) ?? "시각 미제공")까지"
+    }
+
+    private func axisLabel(_ value: Double) -> String {
+        let formatted = CoinPilotFormatting.compactWon(value)
+        return formatted.hasSuffix("원") ? String(formatted.dropLast()) : formatted
+    }
+
+    private func candleIndex(x: CGFloat, width: CGFloat) -> Int? {
+        let count = validCandles.count
+        guard count > 1, width > 90 else { return nil }
+        let plotWidth = width - 56
+        guard x <= plotWidth else { return count - 1 }
+        let step = plotWidth / CGFloat(count)
+        let index = Int((x / step).rounded(.down))
+        return min(max(index, 0), count - 1)
+    }
+
+    var body: some View {
+        VStack(spacing: 6) {
+            GeometryReader { geometry in
+                Canvas { context, size in
+                    let valid = validCandles
+                    guard valid.count > 1, size.width > 90 else { return }
+                    let labelWidth: CGFloat = 56
+                    let plotWidth = size.width - labelWidth
+                    let showsVolume = valid.contains { ($0.volume ?? 0) > 0 }
+                    let volumeHeight = showsVolume ? size.height * 0.17 : 0
+                    let volumeGap: CGFloat = showsVolume ? 6 : 0
+                    let priceHeight = size.height - volumeHeight - volumeGap
+                    let inset: CGFloat = 5
+
+                    let minimum = valid.compactMap(\.low).min() ?? 0
+                    let maximum = valid.compactMap(\.high).max() ?? 1
+                    let span = max(maximum - minimum, max(abs(maximum) * 0.0001, 0.000001))
+                    let step = plotWidth / CGFloat(valid.count)
+                    let bodyWidth = max(2, step * 0.55)
+                    func y(_ value: Double) -> CGFloat {
+                        inset + (priceHeight - inset * 2) * CGFloat(1 - (value - minimum) / span)
+                    }
+
+                    if showsVolume, let maxVolume = valid.compactMap(\.volume).max(), maxVolume > 0 {
+                        let volumeTop = priceHeight + volumeGap
+                        for (index, candle) in valid.enumerated() {
+                            guard let volume = candle.volume, volume > 0,
+                                  let open = candle.open, let close = candle.close else { continue }
+                            let x = CGFloat(index) * step + step / 2
+                            let barHeight = max(1.5, CGFloat(volume / maxVolume) * volumeHeight)
+                            let tint = close >= open ? CoinPilotColors.green : CoinPilotColors.red
+                            let rect = CGRect(
+                                x: x - bodyWidth / 2,
+                                y: volumeTop + volumeHeight - barHeight,
+                                width: bodyWidth,
+                                height: barHeight
+                            )
+                            context.fill(Path(rect), with: .color(tint.opacity(0.28)))
+                        }
+                    }
+
+                    if let inspectedIndex, valid.indices.contains(inspectedIndex) {
+                        let highlight = CGRect(x: CGFloat(inspectedIndex) * step, y: 0, width: step, height: size.height)
+                        context.fill(Path(highlight), with: .color(CoinPilotColors.ink.opacity(0.05)))
+                    }
+
+                    for (index, candle) in valid.enumerated() {
+                        guard let open = candle.open, let high = candle.high, let low = candle.low, let close = candle.close else { continue }
+                        let x = CGFloat(index) * step + step / 2
+                        let tint = close >= open ? CoinPilotColors.green : CoinPilotColors.red
+                        var wick = Path()
+                        wick.move(to: CGPoint(x: x, y: y(high)))
+                        wick.addLine(to: CGPoint(x: x, y: y(low)))
+                        context.stroke(wick, with: .color(tint.opacity(0.8)), lineWidth: 1)
+                        let top = min(y(open), y(close))
+                        let height = max(2, abs(y(close) - y(open)))
+                        let rect = CGRect(x: x - bodyWidth / 2, y: top, width: bodyWidth, height: height)
+                        context.fill(Path(rect), with: .color(tint))
+                    }
+
+                    let labelX = plotWidth + 5
+                    let labelFont = Font.caption2.monospacedDigit()
+                    context.draw(
+                        Text(axisLabel(maximum)).font(labelFont).foregroundColor(CoinPilotColors.secondaryInk),
+                        at: CGPoint(x: labelX, y: inset),
+                        anchor: .topLeading
+                    )
+                    context.draw(
+                        Text(axisLabel(minimum)).font(labelFont).foregroundColor(CoinPilotColors.secondaryInk),
+                        at: CGPoint(x: labelX, y: priceHeight - inset),
+                        anchor: .bottomLeading
+                    )
+                    if let lastClose = valid.last?.close, lastClose.isFinite {
+                        let lastY = y(lastClose)
+                        let lastTint = (valid.last?.close ?? 0) >= (valid.last?.open ?? 0)
+                            ? CoinPilotColors.green : CoinPilotColors.red
+                        var reference = Path()
+                        reference.move(to: CGPoint(x: 0, y: lastY))
+                        reference.addLine(to: CGPoint(x: plotWidth, y: lastY))
+                        context.stroke(
+                            reference,
+                            with: .color(lastTint.opacity(0.65)),
+                            style: StrokeStyle(lineWidth: 1, dash: [3, 3])
+                        )
+                        if lastY > inset + 12, lastY < priceHeight - inset - 12 {
+                            context.draw(
+                                Text(axisLabel(lastClose)).font(labelFont.weight(.semibold)).foregroundColor(lastTint),
+                                at: CGPoint(x: labelX, y: lastY),
+                                anchor: .leading
+                            )
+                        }
+                    }
+                }
+                .contentShape(Rectangle())
+                .gesture(
+                    LongPressGesture(minimumDuration: 0.25)
+                        .sequenced(before: DragGesture(minimumDistance: 0))
+                        .onChanged { value in
+                            if case .second(true, let drag) = value, let location = drag?.location {
+                                inspectedIndex = candleIndex(x: location.x, width: geometry.size.width)
+                            }
+                        }
+                        .onEnded { _ in inspectedIndex = nil }
+                )
+                .overlay(alignment: .topLeading) {
+                    if let inspectedIndex, validCandles.indices.contains(inspectedIndex) {
+                        let candle = validCandles[inspectedIndex]
+                        VStack(alignment: .leading, spacing: 2) {
+                            MetadataLine(text: "\(CoinPilotFormatting.shortUtcTimestamp(candle.time)) UTC · 종가 \(CoinPilotFormatting.price(candle.close))")
+                                .foregroundColor((candle.close ?? 0) >= (candle.open ?? 0) ? CoinPilotColors.green : CoinPilotColors.red)
+                            Text("시 \(CoinPilotFormatting.price(candle.open)) 고 \(CoinPilotFormatting.price(candle.high)) 저 \(CoinPilotFormatting.price(candle.low))")
+                                .foregroundColor(CoinPilotColors.ink)
+                        }
+                        .font(.caption2.monospacedDigit())
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
+                        .background(CoinPilotColors.surface.opacity(0.92))
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                        .overlay(RoundedRectangle(cornerRadius: 6).stroke(CoinPilotColors.line, lineWidth: 1))
+                        .padding(6)
+                        .allowsHitTesting(false)
+                    }
+                }
+            }
+            HStack {
+                Text(CoinPilotFormatting.shortUtcTimestamp(validCandles.first?.time))
+                Spacer()
+                Text("\(CoinPilotFormatting.shortUtcTimestamp(validCandles.last?.time)) UTC")
+            }
+            .font(.caption2)
+            .foregroundColor(CoinPilotColors.secondaryInk)
+        }
+        .padding(10)
+        .background(CoinPilotColors.paper)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(validCandles.count)개 완료 분봉 가격 차트")
+        .accessibilityValue(accessibilitySummary)
+        .accessibilityHint("길게 누른 뒤 좌우로 움직이면 각 캔들의 시가·고가·저가·종가를 확인할 수 있습니다.")
+    }
+
+    @State private var inspectedIndex: Int?
+}
+
+private struct CoinPilotCandleDataDisclosure: View {
+    let candles: [CoinPilotCandle]
+
+    private var recentCandles: [CoinPilotCandle] {
+        Array(candles.suffix(20).reversed())
+    }
+
+    var body: some View {
+        if !recentCandles.isEmpty {
+            DisclosureGroup("최근 캔들 값 (\(recentCandles.count)개)") {
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(recentCandles) { candle in
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack {
+                                Text(candle.time.map(CoinPilotFormatting.utcMarketTimestamp) ?? "시각 미제공")
+                                    .foregroundColor(CoinPilotColors.secondaryInk)
+                                Spacer(minLength: 8)
+                                Text("종가 \(CoinPilotFormatting.price(candle.close))")
+                                    .foregroundColor(CoinPilotColors.ink)
+                            }
+                            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], alignment: .leading, spacing: 5) {
+                                Text("시가 \(CoinPilotFormatting.price(candle.open))")
+                                Text("고가 \(CoinPilotFormatting.price(candle.high))")
+                                Text("저가 \(CoinPilotFormatting.price(candle.low))")
+                                Text("거래량 \(candle.volume.map { String(format: "%.8f", $0) } ?? "—")")
+                            }
+                            .foregroundColor(CoinPilotColors.secondaryInk)
+                        }
+                        .font(.caption2.monospacedDigit())
+                        if candle.id != recentCandles.last?.id {
+                            Divider().overlay(CoinPilotColors.line)
+                        }
+                    }
+                }
+                .padding(.top, 8)
+            }
+            .font(.subheadline.weight(.medium))
+            .foregroundColor(CoinPilotColors.ink)
+        }
+    }
+}
+
+/// RSI 0-100 척도에서 과매도(30 이하)·과매수(70 이상) 구간과 현재 위치를 보여줍니다.
+private struct CoinPilotRsiGauge: View {
+    let value: Double?
+
+    private var zone: (title: String, tint: Color) {
+        guard let value, value.isFinite else { return ("RSI 미제공", CoinPilotColors.secondaryInk) }
+        if value <= 30 { return ("과매도 구간", CoinPilotColors.blue) }
+        if value >= 70 { return ("과매수 구간", CoinPilotColors.red) }
+        return ("중립 구간", CoinPilotColors.secondaryInk)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack {
+                Text("RSI \(value.map { String(format: "%.1f", $0) } ?? "미제공")")
+                    .foregroundColor(CoinPilotColors.secondaryInk)
+                Spacer()
+                Text(zone.title)
+                    .foregroundColor(zone.tint)
+            }
+            .font(.caption)
+            GeometryReader { geometry in
+                ZStack {
+                    HStack(spacing: 0) {
+                        Rectangle().fill(CoinPilotColors.blue.opacity(0.18)).frame(width: geometry.size.width * 0.3, height: 4)
+                        Rectangle().fill(CoinPilotColors.line).frame(width: geometry.size.width * 0.4, height: 4)
+                        Rectangle().fill(CoinPilotColors.red.opacity(0.18)).frame(width: geometry.size.width * 0.3, height: 4)
+                    }
+                    .frame(maxHeight: .infinity, alignment: .center)
+                    .clipShape(Capsule())
+                    if let value, value.isFinite {
+                        Circle()
+                            .fill(zone.tint)
+                            .frame(width: 9, height: 9)
+                            .overlay(Circle().stroke(CoinPilotColors.surface, lineWidth: 2))
+                            .position(
+                                x: 5 + (geometry.size.width - 10) * CGFloat(min(max(value, 0), 100) / 100),
+                                y: geometry.size.height / 2
+                            )
+                    }
+                }
+            }
+            .frame(height: 12)
+            HStack {
+                Text("과매도 30")
+                Spacer()
+                Text("과매수 70")
+            }
+            .font(.caption2)
+            .foregroundColor(CoinPilotColors.secondaryInk.opacity(0.8))
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("RSI 지표")
+        .accessibilityValue(value.map { "\(String(format: "%.1f", $0)), \(zone.title)" } ?? "미제공")
+    }
+}
+
+private struct CoinPilotAnalysisView: View {
+    @ObservedObject var store: CoinPilotStore
+    @AppStorage("coinpilot.native.selectedTab.v2") private var selectedTab = 0
+    @State private var filter = "전체"
+    @State private var sort = "종합 점수"
+
+    private var results: [CoinPilotAnalysisResult] {
+        let filtered = store.analysisResults.filter { result in
+            switch filter {
+            case "매수": return result.recommendation == "BUY"
+            case "매도": return result.recommendation == "SELL"
+            case "관망": return result.recommendation == "HOLD"
+            default: return true
+            }
+        }
+        return filtered.sorted { left, right in
+            switch sort {
+            case "매수 점수": return (left.buyScore ?? -1) > (right.buyScore ?? -1)
+            case "매도 점수": return (left.sellScore ?? -1) > (right.sellScore ?? -1)
+            case "변동률": return (left.change24h ?? -Double.infinity) > (right.change24h ?? -Double.infinity)
+            default: return (left.totalScore ?? -1) > (right.totalScore ?? -1)
+            }
+        }
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                NativeCard {
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack(alignment: .center) {
+                            SectionHeading(title: "시장 신호")
+                            Spacer()
+                            Image("CoinPilotAnalysisHero")
+                                .resizable()
+                                .scaledToFit()
+                                .frame(width: 48, height: 48)
+                                .accessibilityHidden(true)
+                            Button(store.loadingFeatures.contains("analysis") ? "분석 중" : "분석 실행") {
+                                Task { await store.loadAnalysisFeatures() }
+                            }
+                            .font(.subheadline.weight(.semibold))
+                            .disabled(store.loadingFeatures.contains("analysis") || !store.canOperate)
+                        }
+                        HStack(spacing: 12) {
+                            analysisCount("분석", store.analysisSummary["totalAnalyzed"])
+                            analysisCount("매수", store.analysisResults.filter { $0.recommendation == "BUY" }.count)
+                            analysisCount("매도", store.analysisResults.filter { $0.recommendation == "SELL" }.count)
+                            analysisCount("관망", store.analysisResults.filter { $0.recommendation == "HOLD" }.count)
+                        }
+                        Picker("결과 필터", selection: $filter) {
+                            Text("전체").tag("전체")
+                            Text("매수").tag("매수")
+                            Text("매도").tag("매도")
+                            Text("관망").tag("관망")
+                        }
+                        .pickerStyle(SegmentedPickerStyle())
+                        Picker("정렬", selection: $sort) {
+                            Text("종합 점수").tag("종합 점수")
+                            Text("매수 점수").tag("매수 점수")
+                            Text("매도 점수").tag("매도 점수")
+                            Text("변동률").tag("변동률")
+                        }
+                        .pickerStyle(MenuPickerStyle())
+                    }
+                }
+                if let message = store.featureMessages["analysis"] {
+                    InlineNotice(text: message, color: CoinPilotColors.amber)
+                } else if results.isEmpty {
+                    NativeCard { EmptyMessage(text: "분석 실행을 누르면 서버가 확인한 시장 신호가 표시됩니다. 판정은 참고 정보이며 수익을 보장하지 않습니다.") }
+                } else {
+                    ForEach(results) { result in
+                        NativeCard {
+                            VStack(alignment: .leading, spacing: 10) {
+                                HStack(alignment: .firstTextBaseline) {
+                                    CoinAvatar(coin: result.coin, size: 38)
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text(CoinPilotFormatting.ticker(result.coin)).font(.headline.weight(.semibold))
+                                        Text(CoinPilotFormatting.price(result.currentPrice)).font(.caption).foregroundColor(CoinPilotColors.secondaryInk)
+                                    }
+                                    Spacer()
+                                    Text(analysisAction(result.recommendation))
+                                        .font(.caption.weight(.bold))
+                                        .foregroundColor(analysisTint(result.recommendation))
+                                }
+                                HStack {
+                                    Text("24시간 \(CoinPilotFormatting.percent(result.change24h))")
+                                    Spacer()
+                                    MetadataLine(text: "매수 \(result.buyScore.map { String(Int($0)) } ?? "—") · 매도 \(result.sellScore.map { String(Int($0)) } ?? "—")")
+                                    Spacer()
+                                    Text("종합 \(result.totalScore.map { String(Int($0)) } ?? "—")/100")
+                                }
+                                .font(.caption)
+                                .foregroundColor(CoinPilotColors.secondaryInk)
+                                CoinPilotRsiGauge(value: result.rsi)
+                                if !result.signals.isEmpty {
+                                    MetadataLine(text: result.signals.joined(separator: " · "))
+                                        .font(.caption)
+                                        .foregroundColor(CoinPilotColors.ink)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                                HStack(spacing: 8) {
+                                    if result.coin.range(of: "^[A-Z0-9]{2,10}-[A-Z0-9]{2,15}$", options: .regularExpression) != nil {
+                                        NavigationLink(destination: CoinPilotMarketDetailView(store: store, coin: result.coin)) {
+                                            Label("시세", systemImage: "chart.line.uptrend.xyaxis")
+                                                .frame(maxWidth: .infinity, minHeight: 40)
+                                        }
+                                        .buttonStyle(CoinPilotSecondaryButtonStyle())
+                                    }
+                                    Button {
+                                        store.selectedMarket = result.coin
+                                        selectedTab = 1
+                                    } label: {
+                                        Label("주문 열기", systemImage: "arrow.left.arrow.right")
+                                            .frame(maxWidth: .infinity, minHeight: 40)
+                                    }
+                                    .buttonStyle(CoinPilotSecondaryButtonStyle())
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 18)
+            .padding(.top, 12)
+            .padding(.bottom, 30)
+        }
+        .cpReadableWidth()
+        .background(CoinPilotColors.paper.ignoresSafeArea())
+        .navigationTitle("전략 분석")
+        .cpInlineTitle()
+        .task { if store.analysisResults.isEmpty { await store.loadAnalysisFeatures() } }
+    }
+
+    private func analysisCount(_ label: String, _ value: Any?) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(value.map { String(describing: $0) } ?? "—").font(.headline.monospacedDigit()).foregroundColor(CoinPilotColors.ink)
+            Text(label).font(.caption2).foregroundColor(CoinPilotColors.secondaryInk)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func analysisAction(_ value: String?) -> String {
+        switch value {
+        case "BUY": return "매수 검토"
+        case "SELL": return "매도 검토"
+        case "HOLD": return "관망"
+        default: return "미판정"
+        }
+    }
+
+    private func analysisTint(_ value: String?) -> Color {
+        switch value {
+        case "BUY": return CoinPilotColors.green
+        case "SELL": return CoinPilotColors.red
+        default: return CoinPilotColors.secondaryInk
+        }
+    }
+}
+
+private struct FeatureMenuRow: View {
+    let title: String
+    let detail: String
+    let symbol: String
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: symbol)
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundColor(CoinPilotColors.blue)
+                .frame(width: 42, height: 42)
+                .background(CoinPilotColors.blue.opacity(0.09))
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title).font(.subheadline.weight(.semibold)).foregroundColor(CoinPilotColors.ink)
+                if !detail.isEmpty {
+                    Text(detail).font(.caption).foregroundColor(CoinPilotColors.secondaryInk).fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            Spacer(minLength: 6)
+            Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundColor(CoinPilotColors.secondaryInk)
+        }
+        .contentShape(Rectangle())
+        .padding(.vertical, 7)
+    }
+}
+
+private struct CoinPilotMoreView: View {
+    @ObservedObject var store: CoinPilotStore
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                NativeCard {
+                    VStack(alignment: .leading, spacing: 12) {
+                        SectionHeading(title: "기록과 자산")
+                        NavigationLink(destination: CoinPilotActivityView(store: store).navigationTitle("거래 내역").cpInlineTitle()) {
+                            FeatureMenuRow(title: "거래 내역", detail: "", symbol: "clock.arrow.circlepath")
+                        }
+                        Divider().overlay(CoinPilotColors.line)
+                        NavigationLink(destination: CoinPilotAccountAnalyticsView(store: store)) {
+                            FeatureMenuRow(title: "포트폴리오 분석", detail: "", symbol: "chart.pie")
+                        }
+                        if !store.isBundledPreview {
+                            Divider().overlay(CoinPilotColors.line)
+                            NavigationLink(destination: CoinPilotResearchDeskView(store: store)) {
+                                FeatureMenuRow(title: "주문 전 점검", detail: "검증 결과와 운용 상태", symbol: "checkmark.shield")
+                            }
+                        }
+                    }
+                }
+                NativeCard {
+                    VStack(alignment: .leading, spacing: 12) {
+                        SectionHeading(title: store.isBundledPreview ? "앱 설정" : "전략 관리")
+                        if !store.isBundledPreview {
+                            NavigationLink(destination: CoinPilotOptimizationView(store: store)) {
+                                FeatureMenuRow(title: "설정 후보 비교", detail: "", symbol: "slider.horizontal.3")
+                            }
+                            Divider().overlay(CoinPilotColors.line)
+                            NavigationLink(destination: CoinPilotPresetView(store: store)) {
+                                FeatureMenuRow(title: "전략 프리셋", detail: "투자 비중과 지표 기간", symbol: "square.stack.3d.up")
+                            }
+                            Divider().overlay(CoinPilotColors.line)
+                        }
+                        NavigationLink(destination: CoinPilotSettingsView(store: store).navigationTitle("설정").cpInlineTitle()) {
+                            FeatureMenuRow(title: "설정", detail: "", symbol: "gearshape")
+                        }
+                    }
+                }
+                if !store.isBundledPreview {
+                    NativeCard {
+                        VStack(alignment: .leading, spacing: 12) {
+                            SectionHeading(title: "시장 의견")
+                            NavigationLink(destination: CoinPilotNewsView(store: store)) {
+                                FeatureMenuRow(title: "뉴스", detail: "", symbol: "newspaper")
+                            }
+                            Divider().overlay(CoinPilotColors.line)
+                            NavigationLink(destination: CoinPilotAIDeskView(store: store)) {
+                                FeatureMenuRow(title: "시장 자문", detail: "관심 신호 기록과 의견 확인", symbol: "text.bubble")
+                            }
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 18)
+            .padding(.top, 12)
+            .padding(.bottom, 32)
+        }
+        .buttonStyle(PlainButtonStyle())
+        .cpReadableWidth()
+        .background(CoinPilotColors.paper.ignoresSafeArea())
+    }
+}
+
+private struct CoinPilotNewsView: View {
+    @ObservedObject var store: CoinPilotStore
+    @State private var filter = "전체"
+
+    private var visibleNews: [CoinPilotNewsArticle] {
+        store.newsArticles.filter { article in
+            guard filter != "전체" else { return true }
+            guard let sentiment = article.sentiment?.lowercased() else { return false }
+            if filter == "긍정" { return sentiment.contains("positive") || sentiment.contains("bull") || sentiment.contains("긍정") }
+            if filter == "부정" { return sentiment.contains("negative") || sentiment.contains("bear") || sentiment.contains("부정") }
+            return sentiment.contains("neutral") || sentiment.contains("중립")
+        }
+    }
+
+    private var hasClassifiedArticles: Bool {
+        store.newsArticles.contains { sentimentLabel($0.sentiment) != "감성 분류 없음" }
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                if !store.canOperate {
+                    NativeCard {
+                        VStack(alignment: .leading, spacing: 12) {
+                            SectionHeading(title: "뉴스")
+                            Text("뉴스를 보려면 운영 토큰이 필요합니다.")
+                                .font(.subheadline)
+                                .foregroundColor(CoinPilotColors.secondaryInk)
+                            NavigationLink(destination: CoinPilotSettingsView(store: store)) {
+                                Text("연결 설정")
+                            }
+                            .buttonStyle(CoinPilotSecondaryButtonStyle())
+                        }
+                    }
+                }
+                if store.canOperate {
+                    NativeCard {
+                        VStack(alignment: .leading, spacing: 12) {
+                            HStack {
+                                SectionHeading(title: "뉴스")
+                                Spacer()
+                                Button(store.refreshingFeatureGroups.contains("news") ? "불러오는 중" : "새로고침") {
+                                    Task { await store.loadNews() }
+                                }
+                                .font(.subheadline.weight(.semibold))
+                                .disabled(store.refreshingFeatureGroups.contains("news") || !store.canOperate)
+                            }
+                            CoinPilotFeatureFreshnessLine(
+                                lastSuccessfulAt: store.featureLastSuccessfulAt["news"],
+                                error: store.featureMessages["news"]
+                            )
+                            if store.featureLastSuccessfulAt["news"] != nil || !store.newsArticles.isEmpty {
+                                Text(sentimentSummary)
+                                    .font(.subheadline.weight(.medium))
+                                    .foregroundColor(CoinPilotColors.ink)
+                            }
+                            if hasClassifiedArticles {
+                                Picker("기사 감성", selection: $filter) {
+                                    Text("전체").tag("전체")
+                                    Text("긍정").tag("긍정")
+                                    Text("부정").tag("부정")
+                                    Text("중립").tag("중립")
+                                }
+                                .pickerStyle(SegmentedPickerStyle())
+                                DisclosureGroup("분류 기준") {
+                                    Text("기사 분위기 분류는 참고 자료이며 매매 신호나 수익 예측으로 사용하지 않습니다.")
+                                        .font(.caption).foregroundColor(CoinPilotColors.secondaryInk)
+                                        .padding(.top, 6)
+                                }.font(.caption).frame(minHeight: 44)
+                            }
+                        }
+                    }
+                    if store.newsArticles.isEmpty {
+                        NativeCard {
+                            if store.refreshingFeatureGroups.contains("news") {
+                                ProgressView("뉴스 불러오는 중")
+                            } else {
+                                EmptyMessage(text: store.featureMessages["news"] ?? "불러온 기사가 없습니다.", actionTitle: "다시 불러오기") { Task { await store.loadNews() } }
+                            }
+                        }
+                    } else if visibleNews.isEmpty {
+                        NativeCard { EmptyMessage(text: "선택한 분류의 기사가 없습니다.", actionTitle: "전체 기사 보기") { filter = "전체" } }
+                    } else {
+                        ForEach(visibleNews) { article in
+                            NativeCard {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    HStack {
+                                        Text(article.source ?? "출처 미상").font(.caption.weight(.semibold)).foregroundColor(CoinPilotColors.blue)
+                                        Spacer()
+                                        Text(CoinPilotFormatting.dateTime(article.timestamp, unavailable: "시각 미제공"))
+                                            .font(.caption2).foregroundColor(CoinPilotColors.secondaryInk)
+                                    }
+                                    Text(article.title).font(.subheadline.weight(.semibold)).foregroundColor(CoinPilotColors.ink)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                    if let summary = article.summary, !summary.isEmpty {
+                                        Text(summary).font(.caption).foregroundColor(CoinPilotColors.secondaryInk).lineLimit(4)
+                                    }
+                                    HStack {
+                                        if sentimentLabel(article.sentiment) != "감성 분류 없음" {
+                                        Text(sentimentLabel(article.sentiment))
+                                            .font(.caption2.weight(.semibold))
+                                            .foregroundColor(sentimentTint(article.sentiment))
+                                            .padding(.horizontal, 7)
+                                            .padding(.vertical, 3)
+                                            .background(sentimentTint(article.sentiment).opacity(0.09))
+                                            .clipShape(Capsule())
+                                        }
+                                        Spacer()
+                                        if let url = article.url {
+                                            Link(destination: url) { Label("원문", systemImage: "arrow.up.right.square").font(.caption.weight(.semibold)) }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 18)
+            .padding(.top, 12)
+            .padding(.bottom, 30)
+        }
+        .cpReadableWidth()
+        .background(CoinPilotColors.paper.ignoresSafeArea())
+        .navigationTitle("뉴스")
+        .cpInlineTitle()
+        .refreshFeatureWhenVisible(enabled: store.canOperate) { await store.loadNewsIfStale() }
+    }
+
+    private var sentimentSummary: String {
+        "기사 \(visibleNews.count)건"
+    }
+
+    private func sentimentLabel(_ value: String?) -> String {
+        let normalized = (value ?? "").lowercased()
+        if normalized.contains("positive") || normalized.contains("bull") || normalized.contains("긍정") { return "긍정 기사" }
+        if normalized.contains("negative") || normalized.contains("bear") || normalized.contains("부정") { return "부정 기사" }
+        if normalized.contains("neutral") || normalized.contains("중립") { return "중립 기사" }
+        return "감성 분류 없음"
+    }
+
+    private func sentimentTint(_ value: String?) -> Color {
+        let normalized = (value ?? "").lowercased()
+        if normalized.contains("positive") || normalized.contains("bull") || normalized.contains("긍정") { return CoinPilotColors.green }
+        if normalized.contains("negative") || normalized.contains("bear") || normalized.contains("부정") { return CoinPilotColors.red }
+        return CoinPilotColors.secondaryInk
+    }
+}
+
+private struct CoinPilotAIDeskView: View {
+    @ObservedObject var store: CoinPilotStore
+    @State private var sessionName = "시장 신호 기록"
+    @State private var providers: Set<String> = ["gpt", "claude"]
+    @State private var eventTypes: Set<String> = ["BUY_SIGNAL", "SELL_SIGNAL"]
+    @State private var autoConsultEventTypes: Set<String> = ["BUY_SIGNAL", "SELL_SIGNAL"]
+    @State private var autoConsult = false
+    @State private var cooldownMinutes = 5
+    @State private var evaluationMinutes = 5
+    @State private var coins = ""
+    @State private var consultationProvider = "both"
+
+    private let eventOptions: [(String, String)] = [
+        ("BUY_SIGNAL", "매수 신호"), ("SELL_SIGNAL", "매도 신호"),
+        ("REBOUND_CANDIDATE", "반등 후보"), ("BREAKING_NEWS", "속보"),
+        ("BUNDLE_SUGGESTION", "종목 교체 제안"), ("TRADE_EXECUTED", "거래 완료")
+    ]
+
+    private var providersForSession: Set<String> {
+        autoConsult ? providers.intersection(store.readyAIProviderIDs) : ["gpt", "claude"]
+    }
+
+    private var effectiveConsultationProvider: String {
+        if store.canRequestAIConsultation(provider: consultationProvider) { return consultationProvider }
+        if store.canRequestAIConsultation(provider: "both") { return "both" }
+        return store.readyAIProviderIDs.sorted().first ?? "none"
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                if !store.canOperate {
+                    InlineNotice(text: "AI 서비스 상태와 신호 세션을 사용하려면 운영 토큰이 필요합니다.", color: CoinPilotColors.amber)
+                }
+                serviceCard
+                sessionCreationCard
+                sessionsCard
+                signalsCard
+                if !store.aiConsultations.isEmpty || (store.aiEffectiveness["actualProviderCompletions"] as? Int ?? 0) > 0 {
+                    comparisonCard
+                }
+            }
+            .padding(.horizontal, 18)
+            .padding(.top, 12)
+            .padding(.bottom, 30)
+        }
+        .cpReadableWidth()
+        .background(CoinPilotColors.paper.ignoresSafeArea())
+        .navigationTitle("시장 자문")
+        .cpInlineTitle()
+        .refreshFeatureWhenVisible(enabled: store.canOperate) { await store.loadAIDeskIfStale() }
+    }
+
+    private var comparisonCard: some View {
+        NativeCard {
+            VStack(alignment: .leading, spacing: 9) {
+                SectionHeading(title: "가격 비교 기록")
+                let effectiveness = store.aiEffectiveness
+                if effectiveness.isEmpty {
+                    EmptyMessage(text: "AI 의견 뒤의 가격 비교 자료가 없습니다.")
+                } else {
+                    AnalyticsMetric(title: "의견 완료", value: "\(effectiveness["actualProviderCompletions"] as? Int ?? 0)회")
+                    AnalyticsMetric(title: "가격 확인", value: "\(effectiveness["evaluatedConsultations"] as? Int ?? 0)건")
+                    AnalyticsMetric(title: "충분한 비교 자료", value: effectiveness["sufficientEvidence"] as? Bool == true ? "예" : "아직 부족")
+                    let coverage = number(effectiveness["evaluationCoverageRate"])
+                    AnalyticsMetric(title: "가격 확인 비율", value: coverage.map { CoinPilotFormatting.percent($0 * 100) } ?? "미제공")
+                    Text("가격 방향 비교는 실제 매매 수익률이 아니며, 실제 체결이나 수익을 증명하지 않습니다.")
+                        .font(.caption).foregroundColor(CoinPilotColors.secondaryInk)
+                }
+            }
+        }
+    }
+
+    private var serviceCard: some View {
+        NativeCard {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    SectionHeading(title: "서비스 상태")
+                    Spacer()
+                    Button(store.refreshingFeatureGroups.contains("ai") ? "불러오는 중" : "새로고침") {
+                        Task { await store.loadAIDesk() }
+                    }
+                        .font(.caption.weight(.semibold))
+                        .disabled(!store.canOperate || store.refreshingFeatureGroups.contains("ai"))
+                }
+                CoinPilotFeatureFreshnessLine(
+                    lastSuccessfulAt: store.featureLastSuccessfulAt["ai"],
+                    error: store.featureMessages["ai"]
+                )
+                providerStatus
+                Text("AI 의견은 참고 정보이며 자동 주문에 사용하지 않습니다. 주문 화면에서 직접 확인해 주세요.")
+                    .font(.caption).foregroundColor(CoinPilotColors.secondaryInk)
+            }
+        }
+    }
+
+    private var sessionCreationCard: some View {
+        NativeCard {
+            VStack(alignment: .leading, spacing: 10) {
+                SectionHeading(title: "관심 신호 만들기")
+                TextField("세션 이름", text: $sessionName).textFieldStyle(.roundedBorder)
+                if autoConsult {
+                    Text("의견을 받을 서비스")
+                        .font(.caption.weight(.semibold)).foregroundColor(CoinPilotColors.secondaryInk)
+                    Toggle("OpenAI", isOn: providerBinding("gpt"))
+                        .font(.subheadline).tint(CoinPilotColors.blue)
+                        .disabled(!store.readyAIProviderIDs.contains("gpt"))
+                    Toggle("Claude", isOn: providerBinding("claude"))
+                        .font(.subheadline).tint(CoinPilotColors.blue)
+                        .disabled(!store.readyAIProviderIDs.contains("claude"))
+                }
+                TextField("종목 코드 (비우면 전체)", text: $coins)
+                    .cpAutocapitalizeCharacters()
+                    .cpNoAutocorrection()
+                    .textFieldStyle(.roundedBorder)
+                ForEach(Array(eventOptions.enumerated()), id: \.offset) { item in
+                    let value = item.element.0
+                    let label = item.element.1
+                    Toggle(label, isOn: Binding(
+                        get: { eventTypes.contains(value) },
+                        set: { enabled in
+                            if enabled { eventTypes.insert(value) } else { eventTypes.remove(value) }
+                        }
+                    ))
+                    .font(.subheadline)
+                    .tint(CoinPilotColors.blue)
+                }
+                Toggle("새 신호에 의견 자동 요청", isOn: $autoConsult)
+                    .font(.subheadline)
+                    .tint(CoinPilotColors.blue)
+                    .disabled(store.readyAIProviderIDs.isEmpty && !autoConsult)
+                    .onChange(of: autoConsult) { enabled in
+                        if enabled {
+                            providers = providers.intersection(store.readyAIProviderIDs)
+                            if providers.isEmpty { providers = store.readyAIProviderIDs }
+                        }
+                    }
+                if autoConsult {
+                    Text("AI 의견을 자동 요청할 신호")
+                        .font(.caption.weight(.semibold)).foregroundColor(CoinPilotColors.secondaryInk)
+                    ForEach(Array(eventOptions.enumerated()), id: \.offset) { item in
+                        let value = item.element.0
+                        let label = item.element.1
+                        Toggle(label, isOn: Binding(
+                            get: { autoConsultEventTypes.contains(value) },
+                            set: { enabled in
+                                if enabled { autoConsultEventTypes.insert(value) } else { autoConsultEventTypes.remove(value) }
+                            }
+                        ))
+                        .font(.caption)
+                        .tint(CoinPilotColors.blue)
+                        .disabled(!eventTypes.contains(value))
+                    }
+                }
+                if autoConsult {
+                    Picker("같은 신호 다시 요청 간격", selection: $cooldownMinutes) {
+                        Text("5분").tag(5)
+                        Text("15분").tag(15)
+                        Text("1시간").tag(60)
+                        Text("6시간").tag(360)
+                        Text("24시간").tag(1440)
+                    }
+                    .pickerStyle(MenuPickerStyle())
+                    Picker("의견 뒤 가격 확인", selection: $evaluationMinutes) {
+                        Text("1분").tag(1)
+                        Text("5분").tag(5)
+                        Text("15분").tag(15)
+                        Text("1시간").tag(60)
+                        Text("4시간").tag(240)
+                        Text("24시간").tag(1440)
+                    }
+                    .pickerStyle(MenuPickerStyle())
+                }
+                Button(store.isRunningFeatureAction ? "저장 중" : "신호 기록 시작") {
+                    Task {
+                        _ = await store.createAISession(
+                            name: sessionName,
+                            providers: Array(providersForSession),
+                            eventTypes: Array(eventTypes),
+                            autoConsultEventTypes: autoConsult ? Array(autoConsultEventTypes.intersection(eventTypes)) : [],
+                            autoConsult: autoConsult,
+                            coins: coins,
+                            cooldownSeconds: cooldownMinutes * 60,
+                            evaluationMinutes: evaluationMinutes
+                        )
+                    }
+                }
+                .buttonStyle(CoinPilotSecondaryButtonStyle())
+                .disabled(!store.canOperate || store.isRunningFeatureAction || eventTypes.isEmpty || providersForSession.isEmpty)
+            }
+        }
+    }
+
+    private var sessionsCard: some View {
+        NativeCard {
+            VStack(alignment: .leading, spacing: 10) {
+                SectionHeading(title: "세션 관리")
+                if store.aiSessions.isEmpty {
+                    EmptyMessage(text: "만든 신호 세션이 없습니다.")
+                }
+                ForEach(store.aiSessions) { session in
+                    VStack(alignment: .leading, spacing: 7) {
+                        HStack {
+                            Text(session.name).font(.subheadline.weight(.semibold))
+                            Spacer()
+                            Text(sessionStatus(session.status)).font(.caption.weight(.semibold)).foregroundColor(CoinPilotColors.secondaryInk)
+                        }
+                        MetadataLine(text: "\(session.autoConsult ? session.providers.map(providerLabel).joined(separator: " + ") : "신호 기록") · \(session.eventTypes.map(eventLabel).joined(separator: " · "))")
+                            .font(.caption).foregroundColor(CoinPilotColors.secondaryInk)
+                        MetadataLine(text: "\(session.coins.isEmpty ? "전체 종목" : session.coins.map(CoinPilotFormatting.ticker).joined(separator: ", ")) · 신호 \(session.eventCount ?? 0)건")
+                            .font(.caption2).foregroundColor(CoinPilotColors.secondaryInk)
+                        if session.autoConsult {
+                            MetadataLine(text: "의견 \(session.consultationCount ?? 0)회 · \(session.evaluationMinutes ?? 5)분 뒤 가격 확인")
+                                .font(.caption2).foregroundColor(CoinPilotColors.secondaryInk)
+                        }
+                        HStack {
+                            if session.status == "RUNNING" {
+                                sessionButton("일시 정지", id: session.id, action: "pause")
+                            } else if session.status == "PAUSED" {
+                                sessionButton("다시 시작", id: session.id, action: "resume")
+                            }
+                            if session.status != "STOPPED" {
+                                sessionButton("종료", id: session.id, action: "stop")
+                            }
+                        }
+                    }
+                    .padding(.vertical, 8)
+                    Divider().overlay(CoinPilotColors.line)
+                }
+            }
+        }
+    }
+
+    private var signalsCard: some View {
+        NativeCard {
+            VStack(alignment: .leading, spacing: 10) {
+                SectionHeading(title: "최근 신호와 자문")
+                Picker("의견을 받을 서비스", selection: Binding(
+                    get: { effectiveConsultationProvider },
+                    set: { consultationProvider = $0 }
+                )) {
+                    if store.readyAIProviderIDs.isEmpty { Text("서비스 미연결").tag("none") }
+                    if store.canRequestAIConsultation(provider: "both") { Text("OpenAI + Claude").tag("both") }
+                    if store.readyAIProviderIDs.contains("gpt") { Text("OpenAI").tag("gpt") }
+                    if store.readyAIProviderIDs.contains("claude") { Text("Claude").tag("claude") }
+                }
+                .pickerStyle(SegmentedPickerStyle())
+                .disabled(store.readyAIProviderIDs.isEmpty)
+                if store.aiEvents.isEmpty {
+                    EmptyMessage(text: "최근 도착한 신호가 없습니다.")
+                }
+                ForEach(store.aiEvents.prefix(20)) { event in
+                    VStack(alignment: .leading, spacing: 5) {
+                        HStack {
+                            Text(event.coin.map(CoinPilotFormatting.ticker) ?? eventTypeLabel(event.type))
+                                .font(.subheadline.weight(.semibold))
+                            Spacer()
+                            Text(CoinPilotFormatting.dateTime(event.timestamp, unavailable: "시각 미제공"))
+                                .font(.caption2).foregroundColor(CoinPilotColors.secondaryInk)
+                        }
+                        HStack(spacing: 8) {
+                            Text(event.action.map(actionLabel) ?? eventTypeLabel(event.type))
+                            if let price = event.price { Text(CoinPilotFormatting.price(price)) }
+                            if let strength = event.signalStrength { Text(strength) }
+                        }
+                        .font(.caption.weight(.medium)).foregroundColor(CoinPilotColors.secondaryInk)
+                        Text(event.title).font(.caption).foregroundColor(CoinPilotColors.ink).lineLimit(3)
+                        if let detail = event.detail { Text(detail).font(.caption2).foregroundColor(CoinPilotColors.secondaryInk).lineLimit(3) }
+                        Button("이 신호에 의견 요청") { Task { _ = await store.requestAIConsultation(eventId: event.id, provider: effectiveConsultationProvider) } }
+                            .font(.caption.weight(.semibold))
+                            .disabled(!store.canRequestAIConsultation(provider: effectiveConsultationProvider) || store.isRunningFeatureAction)
+                    }
+                    .padding(.vertical, 7)
+                    Divider().overlay(CoinPilotColors.line)
+                }
+                if let message = store.aiConsultationMessage {
+                    InlineNotice(text: message, color: CoinPilotColors.blue)
+                }
+                ForEach(Array(store.aiConsultations.prefix(5).enumerated()), id: \.offset) { item in
+                    let value = item.element
+                    VStack(alignment: .leading, spacing: 5) {
+                        let event = value["event"] as? [String: Any] ?? [:]
+                        MetadataLine(text: "\(CoinPilotFormatting.ticker(event["coin"] as? String)) · \(value["status"] as? String ?? "의견")")
+                            .font(.caption.weight(.semibold)).foregroundColor(CoinPilotColors.secondaryInk)
+                        if let results = value["results"] as? [[String: Any]], !results.isEmpty {
+                            ForEach(Array(results.enumerated()), id: \.offset) { resultRow in
+                                let result = resultRow.element
+                                let advice = result["advice"] as? [String: Any] ?? [:]
+                                VStack(alignment: .leading, spacing: 3) {
+                                    HStack {
+                                        Text(providerLabel(result["provider"] as? String ?? ""))
+                                        Spacer()
+                                        Text(actionLabel(advice["action"] as? String ?? "확인"))
+                                            .fontWeight(.semibold)
+                                    }
+                                    .font(.caption2).foregroundColor(CoinPilotColors.blue)
+                                    Text(advice["rationale"] as? String ?? result["error"] as? String ?? "의견 내용을 제공하지 않았습니다.")
+                                        .font(.caption).foregroundColor(CoinPilotColors.ink).lineLimit(5)
+                                    if let risks = advice["risks"] as? [String], !risks.isEmpty {
+                                        MetadataLine(text: "확인할 위험: " + risks.joined(separator: " · "))
+                                            .font(.caption2).foregroundColor(CoinPilotColors.amber).lineLimit(3)
+                                    }
+                                    if let invalidation = advice["invalidation"] as? String {
+                                        Text("다시 확인할 조건: \(invalidation)")
+                                            .font(.caption2).foregroundColor(CoinPilotColors.secondaryInk).lineLimit(2)
+                                    }
+                                }
+                            }
+                        } else {
+                            Text(value["error"] as? String ?? "아직 받은 서비스 의견이 없습니다.")
+                                .font(.caption).foregroundColor(CoinPilotColors.ink).lineLimit(4)
+                        }
+                        consultationEvaluation(value["evaluation"] as? [String: Any] ?? [:])
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var providerStatus: some View {
+        if let providers = store.aiProviderStatus["providers"] as? [[String: Any]], !providers.isEmpty {
+            ForEach(Array(providers.enumerated()), id: \.offset) { item in
+                let provider = item.element
+                let id = (provider["id"] as? String ?? provider["provider"] as? String ?? "").lowercased()
+                let ready = store.readyAIProviderIDs.contains(id)
+                let status = store.featureMessages["ai-providers"] != nil ? "UNCONFIRMED"
+                    : store.aiProviderStatus["enabled"] as? Bool != true ? "DISABLED"
+                    : provider["status"] as? String
+                HStack {
+                    Text(provider["label"] as? String ?? provider["name"] as? String ?? provider["provider"] as? String ?? provider["id"] as? String ?? "AI 서비스")
+                    Spacer()
+                    Text(providerState(status, ready: ready))
+                        .font(.caption.weight(.semibold))
+                        .foregroundColor(ready ? CoinPilotColors.green : CoinPilotColors.amber)
+                }
+                .font(.subheadline)
+            }
+        } else {
+            Text("서비스 제공 상태를 확인할 수 없습니다.").font(.subheadline).foregroundColor(CoinPilotColors.secondaryInk)
+        }
+    }
+
+    private func sessionButton(_ title: String, id: String, action: String) -> some View {
+        Button(title) { Task { _ = await store.updateAISession(id: id, action: action) } }
+            .buttonStyle(CoinPilotCompactButtonStyle(tint: CoinPilotColors.blue))
+            .disabled(!store.canOperate || store.isRunningFeatureAction)
+    }
+
+    private func sessionStatus(_ value: String) -> String {
+        switch value {
+        case "RUNNING": return "실행 중"
+        case "PAUSED": return "일시 정지"
+        case "STOPPED": return "종료"
+        default: return "상태 확인 필요"
+        }
+    }
+
+    private func eventLabel(_ value: String) -> String {
+        eventOptions.first(where: { $0.0 == value })?.1 ?? value
+    }
+
+    private func eventTypeLabel(_ value: String) -> String { eventLabel(value) }
+
+    private func providerBinding(_ provider: String) -> Binding<Bool> {
+        Binding(
+            get: { providers.contains(provider) && store.readyAIProviderIDs.contains(provider) },
+            set: { enabled in
+                if enabled { providers.insert(provider) } else { providers.remove(provider) }
+            }
+        )
+    }
+
+    private func providerLabel(_ value: String) -> String {
+        switch value.lowercased() {
+        case "gpt", "openai", "chatgpt", "codex": return "OpenAI"
+        case "claude", "anthropic": return "Claude"
+        default: return value.isEmpty ? "AI 의견" : value
+        }
+    }
+
+    private func providerState(_ status: String?, ready: Bool) -> String {
+        if ready { return "사용 가능" }
+        switch status {
+        case "UNCONFIRMED": return "확인 불가"
+        case "NOT_AUTHENTICATED": return "계정 로그인 필요"
+        case "NOT_INSTALLED": return "연결 프로그램 없음"
+        case "DISABLED": return "현재 사용 안 함"
+        default: return "연결 확인 필요"
+        }
+    }
+
+    private func actionLabel(_ value: String) -> String {
+        switch value.uppercased() {
+        case "BUY": return "매수 의견"
+        case "SELL": return "매도 의견"
+        case "WAIT", "HOLD": return "관망 의견"
+        default: return value
+        }
+    }
+
+    @ViewBuilder
+    private func consultationEvaluation(_ evaluation: [String: Any]) -> some View {
+        if !evaluation.isEmpty {
+            let status = evaluation["status"] as? String ?? ""
+            if status == "COMPLETED" {
+                let minutes = evaluation["horizonMinutes"] as? Int ?? 5
+                let change = (evaluation["priceChangePercent"] as? NSNumber)?.doubleValue
+                MetadataLine(text: "\(minutes)분 뒤 가격 변화 · \(CoinPilotFormatting.percent(change))")
+                    .font(.caption2.weight(.semibold)).foregroundColor(CoinPilotColors.secondaryInk)
+            } else if status == "PENDING" {
+                Text("가격 확인 시점 대기 중").font(.caption2).foregroundColor(CoinPilotColors.amber)
+            } else if status == "NOT_EVALUABLE" {
+                Text(evaluation["reason"] as? String ?? "기준 가격을 비교할 수 없습니다.")
+                    .font(.caption2).foregroundColor(CoinPilotColors.secondaryInk)
+            }
+        }
+    }
+
+    private func number(_ value: Any?) -> Double? {
+        if let number = value as? NSNumber { return number.doubleValue }
+        if let string = value as? String { return Double(string) }
+        return nil
+    }
+}
+
+private struct CoinPilotAccountAnalyticsView: View {
+    @ObservedObject var store: CoinPilotStore
+
+    private var summary: [String: Any] { store.portfolioAnalysis["summary"] as? [String: Any] ?? [:] }
+    private var holdings: [[String: Any]] { store.portfolioAnalysis["holdings"] as? [[String: Any]] ?? [] }
+    private var gainers: [[String: Any]] {
+        (store.portfolioAnalysis["topGainers"] as? [[String: Any]] ?? []).filter { (number($0["profitPercent"]) ?? 0) > 0 }
+    }
+    private var losers: [[String: Any]] {
+        (store.portfolioAnalysis["topLosers"] as? [[String: Any]] ?? []).filter { (number($0["profitPercent"]) ?? 0) < 0 }
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                NativeCard {
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack {
+                            SectionHeading(title: "포트폴리오 구성")
+                            Spacer()
+                            Button(store.refreshingFeatureGroups.contains("account-analytics") ? "불러오는 중" : "새로고침") {
+                                Task { await store.loadAccountAnalytics() }
+                            }
+                                .font(.caption.weight(.semibold))
+                                .disabled(!store.canOperate || store.refreshingFeatureGroups.contains("account-analytics"))
+                        }
+                        CoinPilotFeatureFreshnessLine(
+                            lastSuccessfulAt: store.featureLastSuccessfulAt["account-analytics"],
+                            error: store.featureMessages["account-analytics"]
+                        )
+                        if summary.isEmpty {
+                            EmptyMessage(text: store.featureMessages["account-analytics"] ?? store.featureMessages["portfolio-analysis"] ?? "포트폴리오 분석 자료가 아직 없습니다.")
+                        } else {
+                            if let message = store.featureMessages["account-analytics"] {
+                                InlineNotice(text: message, color: CoinPilotColors.amber)
+                            }
+                            HStack(alignment: .center, spacing: 12) {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text("총 자산")
+                                        .font(.caption)
+                                        .foregroundColor(CoinPilotColors.secondaryInk)
+                                    Text(CoinPilotFormatting.won(number(summary["totalAssets"])))
+                                        .font(.title3.weight(.bold))
+                                        .monospacedDigit()
+                                        .foregroundColor(CoinPilotColors.ink)
+                                }
+                                Spacer()
+                            }
+                            LazyVGrid(
+                                columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)],
+                                spacing: 8
+                            ) {
+                                MetricTile(title: "보유 자산 평가", value: CoinPilotFormatting.won(number(summary["totalValue"])))
+                                MetricTile(title: "매입 원가", value: CoinPilotFormatting.won(number(summary["totalCost"])))
+                                MetricTile(title: "현금 잔액", value: CoinPilotFormatting.won(number(summary["krwBalance"])))
+                                MetricTile(
+                                    title: "보유 코인 평가손익",
+                                    value: CoinPilotFormatting.signedWon(number(summary["totalProfit"])),
+                                    detail: number(summary["totalProfitPercent"]).map { CoinPilotFormatting.percent($0) },
+                                    tint: profitColor(number(summary["totalProfit"]))
+                                )
+                            }
+                        }
+                    }
+                }
+                NativeCard {
+                    VStack(alignment: .leading, spacing: 10) {
+                        SectionHeading(title: "보유 비중")
+                        if holdings.isEmpty {
+                            EmptyMessage(text: "현재 보유한 코인이 없습니다.")
+                        }
+                        let allocationSlices = CoinPilotAllocationBar.slices(summary: summary, holdings: holdings)
+                        if !allocationSlices.isEmpty {
+                            CoinPilotAllocationBar(slices: allocationSlices)
+                            Divider().overlay(CoinPilotColors.line)
+                        }
+                        ForEach(Array(holdings.enumerated()), id: \.offset) { item in
+                            let holding = item.element
+                            let coin = holding["coin"] as? String ?? "자산"
+                            let weight = number(holding["weight"])
+                            HStack {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(CoinPilotFormatting.ticker(coin)).font(.subheadline.weight(.semibold))
+                                    Text("비중 \(CoinPilotFormatting.percent(weight, signed: false))")
+                                        .font(.caption2).foregroundColor(CoinPilotColors.secondaryInk)
+                                }
+                                Spacer()
+                                VStack(alignment: .trailing, spacing: 4) {
+                                    Text(CoinPilotFormatting.won(number(holding["currentValue"])))
+                                        .font(.subheadline.weight(.semibold))
+                                    Text(CoinPilotFormatting.signedWon(number(holding["profit"])))
+                                        .font(.caption).foregroundColor(profitColor(number(holding["profit"])))
+                                }
+                            }
+                            if let weight {
+                                ProgressView(value: max(0, min(weight, 100)), total: 100)
+                                    .tint(CoinPilotColors.blue)
+                            }
+                            if item.offset != holdings.count - 1 { Divider().overlay(CoinPilotColors.line) }
+                        }
+                    }
+                }
+                if !gainers.isEmpty || !losers.isEmpty {
+                    NativeCard {
+                        VStack(alignment: .leading, spacing: 10) {
+                            SectionHeading(title: "평가 손익")
+                            ForEach(Array(gainers.enumerated()), id: \.offset) { item in
+                                AnalyticsMarketRow(title: "수익 종목", value: item.element)
+                            }
+                            ForEach(Array(losers.enumerated()), id: \.offset) { item in
+                                AnalyticsMarketRow(title: "손실 종목", value: item.element)
+                            }
+                        }
+                    }
+                }
+                NativeCard {
+                    VStack(alignment: .leading, spacing: 10) {
+                        SectionHeading(title: "거래 통계")
+                        if store.statistics.isEmpty {
+                            EmptyMessage(text: "아직 집계된 거래 통계가 없습니다.")
+                        }
+                        ForEach(Array(store.statistics.enumerated()), id: \.offset) { item in
+                            let value = item.element
+                            Text(CoinPilotFormatting.ticker(value["coin"] as? String ?? "전략"))
+                                .font(.subheadline.weight(.semibold))
+                            AnalyticsMetric(title: "청산 거래", value: number(value["totalTrades"]).map { "\(CoinPilotFormatting.quantity($0))회" } ?? "미제공")
+                            AnalyticsMetric(title: "승률", value: value["winRate"] as? String ?? "미제공")
+                            AnalyticsMetric(title: "실현 손익", value: value["totalProfit"] as? String ?? "미제공")
+                            if let average = value["avgProfit"] as? String { AnalyticsMetric(title: "거래당 평균", value: average) }
+                            if item.offset != store.statistics.count - 1 { Divider().overlay(CoinPilotColors.line) }
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 18)
+            .padding(.top, 12)
+            .padding(.bottom, 30)
+        }
+        .cpReadableWidth()
+        .background(CoinPilotColors.paper.ignoresSafeArea())
+        .navigationTitle("포트폴리오 분석")
+        .cpInlineTitle()
+        .refreshFeatureWhenVisible(enabled: store.canOperate) { await store.loadAccountAnalyticsIfStale() }
+    }
+
+    private func number(_ value: Any?) -> Double? {
+        guard let value, !(value is NSNull) else { return nil }
+        if let number = value as? NSNumber { return number.doubleValue }
+        if let string = value as? String { return Double(string) }
+        return nil
+    }
+}
+
+private struct AnalyticsMetric: View {
+    let title: String
+    let value: String
+
+    var body: some View {
+        HStack {
+            Text(title).font(.caption).foregroundColor(CoinPilotColors.secondaryInk)
+            Spacer()
+            Text(value).font(.caption.weight(.semibold)).foregroundColor(CoinPilotColors.ink).multilineTextAlignment(.trailing)
+        }
+    }
+}
+
+/// 요약 지표를 타일로 표시합니다. detail은 값 아래의 보조 문구입니다.
+private struct MetricTile: View {
+    let title: String
+    let value: String
+    var detail: String? = nil
+    var tint: Color = CoinPilotColors.ink
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.caption)
+                .foregroundColor(CoinPilotColors.secondaryInk)
+            Text(value)
+                .font(.subheadline.weight(.semibold))
+                .monospacedDigit()
+                .foregroundColor(tint)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+            if let detail {
+                Text(detail)
+                    .font(.caption2.weight(.medium))
+                    .monospacedDigit()
+                    .foregroundColor(tint == CoinPilotColors.ink ? CoinPilotColors.secondaryInk : tint)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(CoinPilotColors.paper)
+        .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+        .accessibilityElement(children: .combine)
+    }
+}
+
+private struct AnalyticsMarketRow: View {
+    let title: String
+    let value: [String: Any]
+
+    private var profitPercent: Double? {
+        if let number = value["profitPercent"] as? NSNumber { return number.doubleValue }
+        if let string = value["profitPercent"] as? String { return Double(string) }
+        return nil
+    }
+
+    var body: some View {
+        HStack {
+            MetadataLine(text: "\(title) · \(CoinPilotFormatting.ticker(value["coin"] as? String))")
+                .font(.caption.weight(.semibold)).foregroundColor(CoinPilotColors.ink)
+            Spacer()
+            Text(profitPercent.map { CoinPilotFormatting.percent($0) } ?? "변동률 미제공")
+                .font(.caption.weight(.semibold)).monospacedDigit()
+                .foregroundColor(profitColor(profitPercent))
+        }
+    }
+}
+
+private struct CoinPilotResearchDeskView: View {
+    @ObservedObject var store: CoinPilotStore
+    @State private var requestedPaperAction: Bool?
+
+    private var readinessStatusText: String {
+        switch store.strategyReadiness["status"] as? String {
+        case "READY": return "검증 자료 준비됨"
+        case "NOT_REQUIRED": return "성과 검증은 선택 사항"
+        case "BLOCKED": return "자료 확인 필요"
+        default: return "상태 확인 필요"
+        }
+    }
+
+    private var paperIsActive: Bool {
+        (store.paperValidationState["active"] as? Bool) ??
+        ((store.paperValidationState["status"] as? [String: Any])?["active"] as? Bool) ?? false
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                NativeCard {
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack {
+                            SectionHeading(title: "전략 준비 상태")
+                            Spacer()
+                            Button(store.refreshingFeatureGroups.contains("research") ? "확인 중" : "다시 확인") {
+                                Task { await store.loadResearchDesk() }
+                            }
+                                .font(.caption.weight(.semibold))
+                                .disabled(!store.canOperate || store.refreshingFeatureGroups.contains("research"))
+                        }
+                        CoinPilotFeatureFreshnessLine(
+                            lastSuccessfulAt: store.featureLastSuccessfulAt["research"],
+                            error: store.featureMessages["research"]
+                        )
+                        if store.strategyReadiness.isEmpty {
+                            EmptyMessage(text: store.featureMessages["strategy-readiness"] ?? "서버의 검증 자료를 불러오지 않았습니다.")
+                        } else {
+                            let gate = store.strategyReadiness["liveGate"] as? [String: Any] ?? [:]
+                            AnalyticsMetric(title: "준비 상태", value: readinessStatusText)
+                            AnalyticsMetric(title: "자료 확인", value: store.strategyReadiness["status"] as? String == "NOT_REQUIRED" ? "시작 필수 조건 아님" : store.strategyReadiness["currentEvidence"] as? Bool == true ? "확인 완료" : "확인 필요")
+                            if store.activeWorkspace == .live {
+                                AnalyticsMetric(title: "실거래 진입", value: store.strategyReadiness["status"] as? String == "NOT_REQUIRED" ? "계좌와 주문 상태 확인 후 시작" : gate["passed"] as? Bool == true ? "서버 조건 통과" : "잠금")
+                                Text("실제 주문은 서버의 계좌 동기화와 안전 조건을 별도로 통과해야 합니다.")
+                                    .font(.caption).foregroundColor(CoinPilotColors.secondaryInk)
+                            }
+                        }
+                    }
+                }
+                NativeCard {
+                    VStack(alignment: .leading, spacing: 10) {
+                        SectionHeading(title: "모의투자 점검 세션")
+                        AnalyticsMetric(title: "상태", value: paperIsActive ? "실행 중" : (store.paperValidationState["available"] as? Bool == true ? "중지" : "사용할 수 없음"))
+                        AnalyticsMetric(title: "연속성", value: store.paperValidationState["continuityEligible"] as? Bool == true ? "자료 연속" : "검증 필요")
+                        if let reason = store.paperValidationState["reason"] as? String {
+                            Text(reason).font(.caption).foregroundColor(CoinPilotColors.secondaryInk)
+                        }
+                        if let message = store.featureMessages["paper-validation"] {
+                            InlineNotice(text: message, color: CoinPilotColors.amber)
+                        }
+                        if store.activeWorkspace == .paper && store.canOperate {
+                            Button(paperIsActive ? "모의 점검 중지" : "모의 점검 시작") { requestedPaperAction = !paperIsActive }
+                                .buttonStyle(CoinPilotSecondaryButtonStyle())
+                        } else {
+                            Text("모의 점검 세션은 모의투자 서버에서만 제어할 수 있습니다.")
+                                .font(.caption).foregroundColor(CoinPilotColors.secondaryInk)
+                        }
+                    }
+                }
+                NativeDisclosureCard(title: "전략 검증") {
+                    VStack(alignment: .leading, spacing: 10) {
+                        if store.scalpingValidation.isEmpty {
+                            EmptyMessage(text: store.featureMessages["validation"] ?? "검증 보고서가 없습니다.")
+                        } else {
+                            AnalyticsMetric(title: "보고서", value: store.scalpingValidation["available"] as? Bool == true ? "사용 가능" : "자료 없음")
+                            AnalyticsMetric(title: "최근 검증 상태", value: store.scalpingValidation["promoted"] as? Bool == true ? "서버에서 별도 승인됨" : "승인 상태 아님")
+                            AnalyticsMetric(title: "보고서 생성", value: store.scalpingValidation["generatedAt"] as? String ?? "시각 미제공")
+                            if let results = store.scalpingValidation["results"] as? [[String: Any]] {
+                                ForEach(Array(results.prefix(8).enumerated()), id: \.offset) { item in
+                                    let result = item.element
+                                    AnalyticsMetric(
+                                        title: result["coin"] as? String ?? result["market"] as? String ?? "종목",
+                                        value: result["status"] as? String ?? result["decision"] as? String ?? "결과 확인 필요"
+                                    )
+                                }
+                            }
+                        }
+                        Text("과거 검증은 실제 체결이나 수익을 보장하지 않습니다.")
+                            .font(.caption).foregroundColor(CoinPilotColors.secondaryInk)
+                    }
+                }
+                NativeDisclosureCard(title: "전략 연구 자료") {
+                    VStack(alignment: .leading, spacing: 10) {
+                        if store.strategyResearch.isEmpty {
+                            EmptyMessage(text: store.featureMessages["strategy-research"] ?? "전략 연구 자료를 불러오지 않았습니다.")
+                        } else {
+                            let freshness = store.strategyResearch["reportFreshness"] as? [String: Any] ?? [:]
+                            AnalyticsMetric(title: "자료 상태", value: store.strategyResearch["available"] as? Bool == true ? "자료 있음" : "자료 없음")
+                            AnalyticsMetric(title: "생성 시각", value: store.strategyResearch["generatedAt"] as? String ?? "시각 미제공")
+                            AnalyticsMetric(title: "자료 최신성", value: freshness["fresh"] as? Bool == true ? "최신" : "확인 필요")
+                            AnalyticsMetric(title: "적용 승인", value: store.strategyResearch["promoted"] as? Bool == true ? "서버 승인" : "승인 자료 없음")
+                            if let results = store.strategyResearch["results"] as? [[String: Any]] {
+                                ForEach(Array(results.prefix(8).enumerated()), id: \.offset) { item in
+                                    let value = item.element
+                                    AnalyticsMetric(
+                                        title: value["coin"] as? String ?? value["market"] as? String ?? "연구 후보",
+                                        value: value["status"] as? String ?? value["reason"] as? String ?? "자료 확인 필요"
+                                    )
+                                }
+                            }
+                        }
+                        Text("연구 후보와 과거 결과는 진단 자료입니다. 서버 주문 조건을 대신 승인하지 않습니다.")
+                            .font(.caption).foregroundColor(CoinPilotColors.secondaryInk)
+                    }
+                }
+                NativeDisclosureCard(title: "모멘텀 후보 점검") {
+                    VStack(alignment: .leading, spacing: 10) {
+                        if store.momentumShadow.isEmpty {
+                            EmptyMessage(text: store.featureMessages["momentum-shadow"] ?? "후보 점검 자료가 없습니다.")
+                        } else {
+                            AnalyticsMetric(title: "자료 상태", value: store.momentumShadow["available"] as? Bool == true ? "조회 가능" : "자료 없음")
+                            AnalyticsMetric(title: "실거래 승인", value: store.momentumShadow["promoted"] as? Bool == true ? "서버 승인" : "승인하지 않음")
+                            let readiness = store.momentumShadow["candidateReadiness"] as? [String: Any] ?? [:]
+                            AnalyticsMetric(title: "후보 판정", value: readiness["status"] as? String ?? readiness["state"] as? String ?? "확인 필요")
+                            if let variants = store.momentumShadow["candidateReadinessVariants"] as? [[String: Any]] {
+                                ForEach(Array(variants.prefix(8).enumerated()), id: \.offset) { item in
+                                    let value = item.element
+                                    let result = value["readiness"] as? [String: Any] ?? [:]
+                                    AnalyticsMetric(
+                                        title: value["label"] as? String ?? "후보",
+                                        value: result["status"] as? String ?? result["decision"] as? String ?? "참고 자료"
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                NativeDisclosureCard(title: "실거래 실행 기록") {
+                    VStack(alignment: .leading, spacing: 10) {
+                        if store.liveExecutionEvidence.isEmpty {
+                            EmptyMessage(text: store.featureMessages["live-execution-evidence"] ?? "서버 실행 기록을 불러오지 않았습니다.")
+                        } else {
+                            AnalyticsMetric(title: "기록 상태", value: store.liveExecutionEvidence["available"] as? Bool == true ? "조회 가능" : "조회 자료 없음")
+                            AnalyticsMetric(title: "저장 오류", value: store.liveExecutionEvidence["writeError"] as? String ?? "없음")
+                            AnalyticsMetric(title: "자료 오류", value: store.liveExecutionEvidence["dataError"] as? String ?? "없음")
+                            Text("이 기록은 실거래 체결이 관찰됐다는 사실을 확인하는 용도입니다. 모의 검증과는 별도 자료입니다.")
+                                .font(.caption).foregroundColor(CoinPilotColors.secondaryInk)
+                        }
+                    }
+                }
+
+            }
+            .padding(.horizontal, 18)
+            .padding(.top, 12)
+            .padding(.bottom, 30)
+        }
+        .cpReadableWidth()
+        .background(CoinPilotColors.paper.ignoresSafeArea())
+        .navigationTitle("주문 전 점검")
+        .cpInlineTitle()
+        .confirmationDialog(
+            requestedPaperAction == true ? "모의투자 점검을 시작할까요?" : "모의투자 점검을 중지할까요?",
+            isPresented: Binding(get: { requestedPaperAction != nil }, set: { if !$0 { requestedPaperAction = nil } }),
+            titleVisibility: .visible
+        ) {
+            if let shouldStart = requestedPaperAction {
+                if shouldStart {
+                    Button("기록 유지하고 시작") {
+                        requestedPaperAction = nil
+                        Task { _ = await store.startPaperValidation(reset: false) }
+                    }
+                    Button("기록 지우고 새로 시작", role: .destructive) {
+                        requestedPaperAction = nil
+                        Task { _ = await store.startPaperValidation(reset: true) }
+                    }
+                } else {
+                    Button("점검 중지", role: .destructive) {
+                        requestedPaperAction = nil
+                        Task { _ = await store.stopPaperValidation() }
+                    }
+                }
+            }
+            Button("취소", role: .cancel) { requestedPaperAction = nil }
+        } message: {
+            Text(requestedPaperAction == true
+                 ? "모의투자 점검 기록은 전략 검토 자료입니다. 실거래 체결이나 수익을 증명하지 않습니다."
+                 : "현재 모의 점검 세션을 중지합니다.")
+        }
+        .refreshFeatureWhenVisible(enabled: store.canOperate) { await store.loadResearchDeskIfStale() }
+    }
+}
+
+private struct CoinPilotOptimizationView: View {
+    @ObservedObject var store: CoinPilotStore
+
+    private let intervals: [(String, Int)] = [
+        ("1시간", 3_600_000), ("2시간", 7_200_000), ("3시간", 10_800_000),
+        ("6시간", 21_600_000), ("12시간", 43_200_000), ("24시간", 86_400_000)
+    ]
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                if let reason = store.optimizationBlockReason { InlineNotice(text: reason, color: CoinPilotColors.amber) }
+                NativeCard {
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack {
+                            SectionHeading(title: "자동 후보 비교")
+                            Spacer()
+                            Button(store.refreshingFeatureGroups.contains("optimization") ? "불러오는 중" : "새로고침") {
+                                Task { _ = await store.loadOptimization() }
+                            }
+                                .font(.caption.weight(.semibold))
+                                .disabled(!store.canOperate || store.refreshingFeatureGroups.contains("optimization"))
+                        }
+                        CoinPilotFeatureFreshnessLine(
+                            lastSuccessfulAt: store.featureLastSuccessfulAt["optimization"],
+                            error: store.featureMessages["optimization"]
+                        )
+                        if store.optimizationSettings["isRunning"] as? Bool == true {
+                            Label("후보 비교 중", systemImage: "clock").font(.subheadline).foregroundColor(CoinPilotColors.blue)
+                        } else if let outcome = store.optimizationSettings["lastOutcome"] as? [String: Any],
+                                  let status = outcome["status"] as? String {
+                            switch status {
+                            case "COMPLETED": Label("후보 비교 완료", systemImage: "checkmark.circle").foregroundColor(CoinPilotColors.green)
+                            case "INSUFFICIENT_DATA":
+                                Text("비교할 가격 기록이 부족합니다 (\(outcome["candleCount"] as? Int ?? 0)/\(outcome["minimumCandleCount"] as? Int ?? 250)).")
+                                    .foregroundColor(CoinPilotColors.secondaryInk)
+                            case "FAILED", "INTERRUPTED": Text(outcome["message"] as? String ?? "후보 비교를 완료하지 못했습니다.").foregroundColor(CoinPilotColors.amber)
+                            default: EmptyView()
+                            }
+                        }
+                        Toggle("정한 간격으로 후보 비교", isOn: Binding(
+                            get: { store.optimizationSettings["enabled"] as? Bool ?? false },
+                            set: { value in Task { _ = await store.setOptimizationEnabled(value) } }
+                        ))
+                        .tint(CoinPilotColors.blue)
+                        .disabled(store.optimizationBlockReason != nil)
+                        Text("비교 결과는 자동으로 적용되지 않습니다. 검증 자료를 확인한 뒤 설정을 직접 적용해 주세요.")
+                            .font(.caption).foregroundColor(CoinPilotColors.secondaryInk)
+                        Picker("비교 간격", selection: Binding(
+                            get: { store.optimizationSettings["interval"] as? Int ?? 21_600_000 },
+                            set: { value in Task { _ = await store.setOptimizationInterval(value) } }
+                        )) {
+                            ForEach(Array(intervals.enumerated()), id: \.offset) { item in
+                                Text(item.element.0).tag(item.element.1)
+                            }
+                        }
+                        .pickerStyle(MenuPickerStyle())
+                        .disabled(store.optimizationBlockReason != nil)
+                        if let nextRun = store.optimizationSettings["nextRun"] as? String {
+                            AnalyticsMetric(title: "다음 비교", value: CoinPilotFormatting.dateTime(nextRun))
+                        }
+                        Button(store.isRunningFeatureAction ? "처리 중" : "지금 후보 비교") {
+                            Task { _ = await store.runOptimizationNow() }
+                        }
+                        .buttonStyle(CoinPilotSecondaryButtonStyle())
+                        .disabled(!store.canOperate || store.isRunningFeatureAction || store.optimizationBlockReason != nil)
+                        if let message = store.featureMessages["optimization"] {
+                            InlineNotice(text: message, color: CoinPilotColors.amber)
+                        }
+                    }
+                }
+                NativeCard {
+                    VStack(alignment: .leading, spacing: 10) {
+                        SectionHeading(title: "최근 후보 비교")
+                        if store.optimizationHistory.isEmpty {
+                            EmptyMessage(text: "저장된 비교 기록이 없습니다.")
+                        }
+                        ForEach(Array(store.optimizationHistory.prefix(12).enumerated()), id: \.offset) { item in
+                            let value = item.element
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack {
+                                    Text(value["type"] as? String ?? value["strategy"] as? String ?? "설정 비교")
+                                        .font(.subheadline.weight(.semibold))
+                                    Spacer()
+                                    Text(String(describing: value["fitness"] ?? value["score"] ?? "—"))
+                                        .font(.caption.monospacedDigit()).foregroundColor(CoinPilotColors.secondaryInk)
+                                }
+                                Text(value["description"] as? String ?? value["message"] as? String ?? "비교 기록")
+                                    .font(.caption).foregroundColor(CoinPilotColors.secondaryInk).lineLimit(3)
+                                Text(CoinPilotFormatting.dateTime(value["timestamp"] as? String ?? value["date"] as? String, unavailable: "시각 미제공"))
+                                    .font(.caption2).foregroundColor(CoinPilotColors.secondaryInk)
+                            }
+                            .padding(.vertical, 7)
+                            Divider().overlay(CoinPilotColors.line)
+                        }
+                    }
+                }
+                NativeDisclosureCard(title: "과거 데이터 비교") {
+                    VStack(alignment: .leading, spacing: 10) {
+                        let rows = store.backtestResults["results"] as? [[String: Any]] ?? store.backtestResults["entries"] as? [[String: Any]] ?? []
+                        if rows.isEmpty {
+                            EmptyMessage(text: store.backtestResults["message"] as? String ?? "과거 데이터 비교 결과가 없습니다.")
+                        }
+                        ForEach(Array(rows.prefix(10).enumerated()), id: \.offset) { item in
+                            let value = item.element
+                            AnalyticsMetric(
+                                title: value["coin"] as? String ?? value["strategy"] as? String ?? "후보",
+                                value: value["totalReturnPercent"].map { "\($0) %" } ?? value["returnPercent"].map { "\($0) %" } ?? "결과 미제공"
+                            )
+                        }
+                        Text("과거 비교만으로 후보가 실제 주문에 적용되지는 않습니다.")
+                            .font(.caption).foregroundColor(CoinPilotColors.secondaryInk)
+                    }
+                }
+            }
+            .padding(.horizontal, 18)
+            .padding(.top, 12)
+            .padding(.bottom, 30)
+        }
+        .cpReadableWidth()
+        .background(CoinPilotColors.paper.ignoresSafeArea())
+        .navigationTitle("설정 후보 비교")
+        .cpInlineTitle()
+        .refreshFeatureWhenVisible(enabled: store.canOperate) { _ = await store.loadOptimizationIfStale() }
+    }
+}
+
+private func coinPilotPresetName(_ preset: [String: Any]) -> String {
+    let names = ["aggressive": "높은 투자 비중", "conservative": "낮은 투자 비중",
+                 "shortterm": "짧은 지표", "scalping": "스캘핑 설정",
+                 "longterm": "긴 지표", "balanced": "기본 지표"]
+    return (preset["id"] as? String).flatMap { names[$0] } ?? preset["name"] as? String ?? "전략 프리셋"
+}
+
+private struct CoinPilotPresetView: View {
+    @ObservedObject var store: CoinPilotStore
+    @State private var requestedPreset: [String: Any]?
+    @State private var appliedPresetID: String?
+    @State private var applyingPresetID: String?
+    @State private var applicationRequestID: UUID?
+    @State private var applicationMessage: String?
+    @State private var applicationFailed = false
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                if let reason = store.tuningBlockReason { InlineNotice(text: reason, color: CoinPilotColors.amber) }
+                Text("지표와 주문 비중을 함께 바꾸는 설정입니다. 투자 기간이나 손익을 보장하지 않습니다.")
+                    .font(.subheadline).foregroundColor(CoinPilotColors.secondaryInk)
+                CoinPilotFeatureFreshnessLine(
+                    lastSuccessfulAt: store.featureLastSuccessfulAt["optimization"],
+                    error: store.featureMessages["optimization"]
+                )
+                if let applicationMessage {
+                    InlineNotice(text: applicationMessage, color: applicationFailed ? CoinPilotColors.amber : CoinPilotColors.green)
+                }
+                if applyingPresetID == nil, let message = store.tuningMessage, message != applicationMessage {
+                    InlineNotice(text: message, color: CoinPilotColors.amber)
+                }
+                if store.investmentPresets.isEmpty {
+                    NativeCard {
+                        EmptyMessage(text: store.featureMessages["investment-presets"] ?? "서버 프리셋을 불러오는 중입니다.")
+                    }
+                }
+                ForEach(Array(store.investmentPresets.enumerated()), id: \.offset) { item in
+                    let preset = item.element
+                    CoinPilotPresetCard(
+                        preset: preset,
+                        store: store,
+                        isApplied: appliedPresetID != nil && appliedPresetID == (preset["id"] as? String),
+                        isApplying: applyingPresetID != nil && applyingPresetID == (preset["id"] as? String),
+                        isApplicationPending: applyingPresetID != nil
+                    ) {
+                        requestedPreset = preset
+                    }
+                }
+            }
+            .padding(.horizontal, 18)
+            .padding(.top, 12)
+            .padding(.bottom, 30)
+        }
+        .cpReadableWidth()
+        .background(CoinPilotColors.paper.ignoresSafeArea())
+        .navigationTitle("전략 프리셋")
+        .cpInlineTitle()
+        .confirmationDialog(
+            requestedPreset.map(coinPilotPresetName) ?? "프리셋 적용",
+            isPresented: Binding(get: { requestedPreset != nil }, set: { if !$0 { requestedPreset = nil } }),
+            titleVisibility: .visible
+        ) {
+            if let preset = requestedPreset, let id = preset["id"] as? String {
+                Button("\(store.activeWorkspace.title) 전략 설정 바꾸기", role: .destructive) {
+                    let requestID = UUID()
+                    let workspace = store.activeWorkspace
+                    let serverAddress = store.serverAddress
+                    let name = coinPilotPresetName(preset)
+                    resetApplicationFeedback()
+                    applicationRequestID = requestID
+                    applyingPresetID = id
+                    Task {
+                        let succeeded = await store.applyInvestmentPreset(id: id)
+                        guard applicationRequestID == requestID,
+                              store.activeWorkspace == workspace,
+                              store.serverAddress == serverAddress else { return }
+                        applicationRequestID = nil
+                        applyingPresetID = nil
+                        applicationFailed = !succeeded
+                        if succeeded {
+                            appliedPresetID = id
+                            applicationMessage = "\(name) 설정을 \(workspace.title) 서버에 적용했습니다.\n\(serverAddress)"
+                        } else {
+                            applicationMessage = store.featureMessages["preset"] ?? store.tuningMessage
+                                ?? "설정을 적용하지 못했습니다. 다시 시도해 주세요."
+                        }
+                    }
+                }
+            }
+            Button("취소", role: .cancel) { requestedPreset = nil }
+        } message: {
+            Text("\(store.activeWorkspace.title) 서버(\(store.serverAddress))의 전략 설정을 이 프리셋으로 바꿉니다. 현재 보유 자산이나 주문 기록은 변경하지 않습니다.")
+        }
+        .onChange(of: store.activeWorkspace) { _ in resetApplicationFeedback() }
+        .onChange(of: store.serverAddress) { _ in resetApplicationFeedback() }
+        .refreshFeatureWhenVisible(enabled: store.canOperate) { _ = await store.loadOptimizationIfStale() }
+    }
+
+    private func resetApplicationFeedback() {
+        requestedPreset = nil
+        appliedPresetID = nil
+        applyingPresetID = nil
+        applicationRequestID = nil
+        applicationMessage = nil
+        applicationFailed = false
+    }
+}
+
+private struct CoinPilotPresetCard: View {
+    let preset: [String: Any]
+    @ObservedObject var store: CoinPilotStore
+    let isApplied: Bool
+    let isApplying: Bool
+    let isApplicationPending: Bool
+    let onApply: () -> Void
+
+    private var name: String { coinPilotPresetName(preset) }
+    private var description: String {
+        if ["longterm", "shortterm"].contains(preset["id"] as? String ?? "") {
+            return "지표 계산에 사용하는 기간을 바꿉니다. 최대 보유 시간은 별도 설정을 따릅니다."
+        }
+        return preset["description"] as? String ?? "설정 설명이 없습니다."
+    }
+    private var riskLevel: Int? { preset["riskLevel"] as? Int }
+
+    private var investmentRatioText: String? {
+        guard let config = preset["config"] as? [String: Any],
+              let value = (config["investmentRatio"] as? NSNumber)?.doubleValue,
+              value.isFinite else { return nil }
+        return "1회 투자 비율 \(CoinPilotFormatting.percent(value * 100, signed: false))"
+    }
+
+    var body: some View {
+        NativeCard {
+            VStack(alignment: .leading, spacing: 9) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(name).font(.headline.weight(.semibold))
+                    Spacer()
+
+                }
+                DisclosureGroup("설정값과 설명") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(description).font(.caption).foregroundColor(CoinPilotColors.secondaryInk)
+                            .fixedSize(horizontal: false, vertical: true)
+                        if let config = preset["config"] as? [String: Any] {
+                            ForEach([("stopLossPercent", "손절 기준"), ("takeProfitPercent", "익절 기준"), ("rsiPeriod", "RSI 기간")], id: \.0) { field in
+                                if let value = (config[field.0] as? NSNumber)?.doubleValue, value.isFinite {
+                                    AnalyticsMetric(title: field.1, value: field.0 == "rsiPeriod" ? String(format: "%.0f", value) : CoinPilotFormatting.percent(value, signed: false))
+                                }
+                            }
+                        }
+                    }.padding(.top, 8)
+                }
+                .font(.caption)
+                .frame(minHeight: 44)
+                if let investmentRatioText {
+                    Text(investmentRatioText)
+                        .font(.caption2)
+                        .foregroundColor(CoinPilotColors.secondaryInk)
+                }
+                if isApplied {
+                    Label("적용 완료", systemImage: "checkmark.circle.fill")
+                        .font(.caption.weight(.semibold))
+                        .foregroundColor(CoinPilotColors.green)
+                }
+                Button(action: onApply) {
+                    HStack(spacing: 8) {
+                        if isApplying { ProgressView().controlSize(.small) }
+                        Text(isApplying ? "적용 중…" : isApplied ? "다시 적용" : "이 설정 적용")
+                    }
+                }
+                .buttonStyle(CoinPilotSecondaryButtonStyle())
+                .disabled(!store.canOperate || store.tuningBlockReason != nil || store.isRunningFeatureAction || isApplicationPending)
+            }
+        }
+    }
+}
+
+private struct CoinPilotTuningEditor: View {
+    @ObservedObject var store: CoinPilotStore
+    @Environment(\.dismiss) private var dismiss
+    @State private var numericDrafts: [String: String] = [:]
+    @State private var booleanDrafts: [String: Bool] = [:]
+    @State private var universeDraft = ""
+    @State private var scalpMaxMarketsDraft = ""
+    @State private var maxPositionsDraft = ""
+    @State private var validationMessage: String?
+    @State private var didLoadDrafts = false
+    @State private var search = ""
+    @State private var expandedCategories: Set<String> = []
+    private let commonKeys: Set<String> = ["investmentRatio", "stopLossPercent", "takeProfitPercent", "maxHoldMinutes"]
+
+    private var hasDraftChanges: Bool {
+        if let values = try? CoinPilotTuningEdits.changes(fields: store.tuningFields, numeric: numericDrafts, boolean: booleanDrafts) {
+            if !values.isEmpty { return true }
+        } else { return true }
+        guard showsUniverseEditor else { return false }
+        let originalCoins = (store.tuningValues["targetCoins"] as? [String] ?? []).joined(separator: ", ")
+        let originalMarkets = (store.tuningValues["scalpMaxMarkets"] as? Double).map(numberText) ?? ""
+        let originalPositions = (store.tuningValues["maxPositions"] as? Double).map(numberText) ?? ""
+        return universeDraft.trimmingCharacters(in: .whitespacesAndNewlines) != originalCoins ||
+            scalpMaxMarketsDraft.trimmingCharacters(in: .whitespaces) != originalMarkets ||
+            maxPositionsDraft.trimmingCharacters(in: .whitespaces) != originalPositions
+    }
+
+    private var showsUniverseEditor: Bool {
+        store.tuningValues["targetCoins"] != nil || store.tuningValues["scalpMaxMarkets"] != nil
+    }
+
+    private var filteredFields: [CoinPilotTuningField] {
+        let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
+        return store.tuningFields.filter {
+            query.isEmpty || CoinPilotTuningEdits.matches($0, query: query) ||
+            categoryTitle($0.category).localizedCaseInsensitiveContains(query)
+        }
+    }
+
+    private var commonFields: [CoinPilotTuningField] { filteredFields.filter { commonKeys.contains($0.key) } }
+
+    private var categories: [String] {
+        let priority = ["risk", "trading", "scalping", "rsi", "macd", "ema", "bb", "volume"]
+        return Array(Set(filteredFields.filter { !commonKeys.contains($0.key) }.map(\.category))).sorted {
+            let first = priority.firstIndex(of: $0.lowercased()) ?? priority.count
+            let second = priority.firstIndex(of: $1.lowercased()) ?? priority.count
+            return first == second ? $0 < $1 : first < second
+        }
+    }
+
+    var body: some View {
+        CoinPilotNavigationHost {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    if let blockReason = store.tuningBlockReason {
+                        InlineNotice(text: blockReason, color: CoinPilotColors.amber)
+                    }
+                    if let message = validationMessage ?? (hasDraftChanges ? nil : store.tuningMessage) {
+                        InlineNotice(text: message, color: validationMessage == nil && store.lastTuningSaveRefreshed ? CoinPilotColors.green : CoinPilotColors.amber)
+                    }
+                    if store.isLoadingTuning && store.tuningFields.isEmpty {
+                        NativeCard {
+                            HStack(spacing: 10) {
+                                ProgressView()
+                                Text("서버 설정을 불러오고 있습니다.")
+                                    .font(.subheadline)
+                                    .foregroundColor(CoinPilotColors.secondaryInk)
+                            }
+                        }
+                    } else if store.tuningFields.isEmpty {
+                        NativeCard {
+                            EmptyMessage(text: store.tuningMessage ?? "이 서버에서 조정할 수 있는 튜닝값을 확인하지 못했습니다.")
+                        }
+                    } else {
+                        HStack(spacing: 10) {
+                            Image(systemName: "magnifyingglass").foregroundColor(CoinPilotColors.secondaryInk)
+                            TextField("설정 검색", text: $search).textFieldStyle(.plain)
+                                .cpNoAutocapitalization().cpNoAutocorrection().accessibilityLabel("설정 검색")
+                            if !search.isEmpty {
+                                Button { search = "" } label: { Image(systemName: "xmark.circle.fill") }
+                                    .frame(minWidth: 44, minHeight: 44).accessibilityLabel("설정 검색어 지우기")
+                            }
+                        }
+                        .padding(.horizontal, 14).frame(minHeight: 48)
+                        .background(CoinPilotColors.surface).clipShape(RoundedRectangle(cornerRadius: 12))
+                        if filteredFields.isEmpty {
+                            NativeCard { EmptyMessage(text: "맞는 설정이 없습니다.", actionTitle: "검색어 지우기") { search = "" } }
+                        }
+                        if !commonFields.isEmpty {
+                            NativeCard {
+                                VStack(alignment: .leading, spacing: 13) {
+                                    SectionHeading(title: "기본 설정")
+                                    fieldRows(commonFields)
+                                }
+                            }
+                        }
+                        ForEach(categories, id: \.self) { category in
+                            NativeCard {
+                                DisclosureGroup(isExpanded: Binding(
+                                    get: { !search.isEmpty || expandedCategories.contains(category) },
+                                    set: { if $0 { expandedCategories.insert(category) } else { expandedCategories.remove(category) } }
+                                )) {
+                                    fieldRows(filteredFields.filter { $0.category == category && !commonKeys.contains($0.key) })
+                                        .padding(.top, 12)
+                                } label: {
+                                    Text(categoryTitle(category)).font(.subheadline.weight(.semibold))
+                                        .foregroundColor(CoinPilotColors.ink).frame(minHeight: 44)
+                                }
+                            }
+                        }
+                    }
+                    if showsUniverseEditor && search.isEmpty {
+                        NativeDisclosureCard(title: "분석 대상 시장") {
+                            VStack(alignment: .leading, spacing: 13) {
+                                VStack(alignment: .leading, spacing: 6) {
+                                    Text("대상 코인")
+                                        .font(.body.weight(.medium))
+                                        .foregroundColor(CoinPilotColors.ink)
+                                    TextField(store.quoteCurrency == "USDT" ? "USDT-BTC, USDT-ETH 또는 ALL" : "KRW-BTC, KRW-ETH 또는 ALL", text: $universeDraft)
+                                        .accessibilityLabel("분석 대상 코인")
+                                        .cpNoAutocapitalization()
+                                        .cpNoAutocorrection()
+                                        .multilineTextAlignment(.leading)
+                                        .textFieldStyle(.plain)
+                                        .frame(minHeight: 38)
+                                        .padding(.horizontal, 8)
+                                        .background(CoinPilotColors.paper)
+                                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                                    Text("쉼표로 구분한 KRW-·USDT- 형식 코드이거나 ALL입니다. ALL은 유동성 상위 마켓을 다시 선택합니다.")
+                                        .font(.caption)
+                                        .foregroundColor(CoinPilotColors.secondaryInk)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                                Divider().overlay(CoinPilotColors.line)
+                                VStack(alignment: .leading, spacing: 6) {
+                                    Text("스캔 마켓 수 상한")
+                                        .font(.body.weight(.medium))
+                                        .foregroundColor(CoinPilotColors.ink)
+                                    TextField("20", text: $scalpMaxMarketsDraft)
+                                        .accessibilityLabel("스캔 마켓 수 상한")
+                                        .cpKeyboardNumberPad()
+                                        .multilineTextAlignment(.trailing)
+                                        .textFieldStyle(.plain)
+                                        .frame(width: 106)
+                                        .frame(minHeight: 38)
+                                        .padding(.horizontal, 8)
+                                        .background(CoinPilotColors.paper)
+                                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                                    Text("ALL 선택 시 유동성 상위로 자를 최대 마켓 수 (1~500)")
+                                        .font(.caption)
+                                        .foregroundColor(CoinPilotColors.secondaryInk)
+                                }
+                                VStack(alignment: .leading, spacing: 6) {
+                                    Text("최대 동시 포지션")
+                                        .font(.body.weight(.medium))
+                                        .foregroundColor(CoinPilotColors.ink)
+                                    TextField("3", text: $maxPositionsDraft)
+                                        .accessibilityLabel("최대 동시 포지션")
+                                        .cpKeyboardNumberPad()
+                                        .multilineTextAlignment(.trailing)
+                                        .textFieldStyle(.plain)
+                                        .frame(width: 106)
+                                        .frame(minHeight: 38)
+                                        .padding(.horizontal, 8)
+                                        .background(CoinPilotColors.paper)
+                                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                                    Text("동시에 보유할 수 있는 최대 포지션 수 (1~50)")
+                                        .font(.caption)
+                                        .foregroundColor(CoinPilotColors.secondaryInk)
+                                }
+
+                            }
+                        }
+                    }
+                    Text("설정은 \(store.activeWorkspace.title) 서버에만 적용됩니다. 자동매매 실행 중이거나 성과 점검이 잠긴 동안에는 저장할 수 없습니다.")
+                        .font(.footnote)
+                        .foregroundColor(CoinPilotColors.secondaryInk)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 12)
+                .padding(.bottom, 28)
+            }
+            .cpReadableWidth()
+            .background(CoinPilotColors.paper.ignoresSafeArea())
+            .navigationTitle("튜닝값 설정")
+            .cpInlineTitle()
+            .cpScrollDismissesKeyboard()
+            .cpKeyboardDoneToolbar()
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("닫기") { dismiss() }.keyboardShortcut(.cancelAction)
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(store.isSavingTuning ? "저장 중" : "저장") {
+                        save()
+                    }
+                    .disabled(store.isSavingTuning || store.isLoadingTuning || store.tuningBlockReason != nil || store.tuningFields.isEmpty || !hasDraftChanges)
+                }
+            }
+        }
+        .cpEditorSheetFrame()
+        .task {
+            if await store.loadTuning() { hydrateDrafts() }
+        }
+    }
+
+    @ViewBuilder
+    private func tuningRow(_ field: CoinPilotTuningField) -> some View {
+        if let booleanValue = field.booleanValue {
+            Toggle(field.label, isOn: booleanBinding(for: field, fallback: booleanValue))
+                .font(.body.weight(.medium))
+                .tint(CoinPilotColors.blue)
+            if !field.description.isEmpty {
+                DisclosureGroup("설명") {
+                    Text(field.description).font(.caption).foregroundColor(CoinPilotColors.secondaryInk)
+                        .fixedSize(horizontal: false, vertical: true).padding(.top, 5)
+                }.font(.caption).frame(minHeight: 44)
+            }
+        } else {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .center, spacing: 12) {
+                    Text(field.label)
+                        .font(.body.weight(.medium))
+                        .foregroundColor(CoinPilotColors.ink)
+                    Spacer(minLength: 4)
+                    TextField("값", text: numericBinding(for: field))
+                        .cpKeyboardDecimalPad(allowNegative: (field.minimum ?? 0) < 0)
+                        .multilineTextAlignment(.trailing)
+                        .textFieldStyle(.plain)
+                        .frame(width: 106)
+                        .frame(minHeight: 38)
+                        .padding(.horizontal, 8)
+                        .background(CoinPilotColors.paper)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                        .accessibilityLabel(field.label)
+                }
+                if !field.description.isEmpty {
+                    DisclosureGroup("설명") {
+                        Text(field.description).font(.caption).foregroundColor(CoinPilotColors.secondaryInk)
+                            .fixedSize(horizontal: false, vertical: true).padding(.top, 5)
+                    }.font(.caption).frame(minHeight: 36)
+                }
+                if let minimum = field.minimum, let maximum = field.maximum {
+                    let multiplier = field.displayMultiplier
+                    MetadataLine(text: "허용 범위 \(numberText(minimum * multiplier))~\(numberText(maximum * multiplier)) · 간격 \(numberText((field.step ?? 0) * multiplier))")
+                        .font(.caption2)
+                        .foregroundColor(CoinPilotColors.secondaryInk)
+                }
+            }
+        }
+    }
+
+    private func numericBinding(for field: CoinPilotTuningField) -> Binding<String> {
+        Binding(
+            get: { self.numericDrafts[field.key] ?? field.displayValue.map(self.numberText) ?? "" },
+            set: { self.numericDrafts[field.key] = $0; self.validationMessage = nil }
+        )
+    }
+
+    private func booleanBinding(for field: CoinPilotTuningField, fallback: Bool) -> Binding<Bool> {
+        Binding(
+            get: { self.booleanDrafts[field.key] ?? fallback },
+            set: { self.booleanDrafts[field.key] = $0; self.validationMessage = nil }
+        )
+    }
+
+    private func hydrateDrafts() {
+        var numeric: [String: String] = [:]
+        var boolean: [String: Bool] = [:]
+        for field in store.tuningFields {
+            if let value = field.booleanValue { boolean[field.key] = value }
+            if let value = field.displayValue { numeric[field.key] = numberText(value) }
+        }
+        numericDrafts = numeric
+        booleanDrafts = boolean
+        if let coins = store.tuningValues["targetCoins"] as? [String] {
+            universeDraft = coins.joined(separator: ", ")
+        }
+        if let limit = store.tuningValues["scalpMaxMarkets"] as? Double {
+            scalpMaxMarketsDraft = numberText(limit)
+        }
+        if let cap = store.tuningValues["maxPositions"] as? Double {
+            maxPositionsDraft = numberText(cap)
+        }
+        didLoadDrafts = true
+    }
+
+    private func universeChanges() -> [String: Any]? {
+        var updates: [String: Any] = [:]
+        let trimmedUniverse = universeDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        let originalUniverse = (store.tuningValues["targetCoins"] as? [String] ?? []).joined(separator: ", ")
+        if trimmedUniverse != originalUniverse {
+            if trimmedUniverse.uppercased() == "ALL" {
+                updates["targetCoins"] = "ALL"
+            } else {
+                let codes = trimmedUniverse.split(separator: ",").map {
+                    $0.trimmingCharacters(in: .whitespaces).uppercased()
+                }
+                guard !codes.isEmpty,
+                      codes.allSatisfy({
+                          $0.range(of: "^[A-Z0-9]{2,10}-[A-Z0-9]{2,15}$", options: .regularExpression) != nil
+                      }) else {
+                    validationMessage = "대상 코인은 KRW-·USDT- 형식 코드를 쉼표로 구분하거나 ALL로 입력해 주세요."
+                    return nil
+                }
+                updates["targetCoins"] = codes
+            }
+        }
+        let trimmedMaxMarkets = scalpMaxMarketsDraft.trimmingCharacters(in: .whitespaces)
+        let originalMaxMarkets = (store.tuningValues["scalpMaxMarkets"] as? Double).map(numberText) ?? ""
+        if trimmedMaxMarkets != originalMaxMarkets {
+            guard let value = Int(trimmedMaxMarkets), (1...500).contains(value) else {
+                validationMessage = "스캔 마켓 수 상한은 1~500 정수로 입력해 주세요."
+                return nil
+            }
+            updates["scalpMaxMarkets"] = value
+        }
+        let trimmedMaxPositions = maxPositionsDraft.trimmingCharacters(in: .whitespaces)
+        let originalMaxPositions = (store.tuningValues["maxPositions"] as? Double).map(numberText) ?? ""
+        if trimmedMaxPositions != originalMaxPositions {
+            guard let value = Int(trimmedMaxPositions), (1...50).contains(value) else {
+                validationMessage = "최대 동시 포지션은 1~50 정수로 입력해 주세요."
+                return nil
+            }
+            updates["maxPositions"] = value
+        }
+        return updates
+    }
+
+    private func save() {
+        guard didLoadDrafts else { return }
+        var updates: [String: Any]
+        do {
+            updates = try CoinPilotTuningEdits.changes(fields: store.tuningFields, numeric: numericDrafts, boolean: booleanDrafts)
+        } catch let error as CoinPilotTuningEditError {
+            validationMessage = error.message
+            return
+        } catch { return }
+        if showsUniverseEditor {
+            guard let marketChanges = universeChanges() else { return }
+            updates.merge(marketChanges) { _, latest in latest }
+        }
+        guard !updates.isEmpty else {
+            validationMessage = "변경한 설정이 없습니다."
+            return
+        }
+        validationMessage = nil
+        Task {
+            if await store.saveTuning(updates), store.lastTuningSaveRefreshed { hydrateDrafts() }
+        }
+    }
+
+    private func fieldRows(_ fields: [CoinPilotTuningField]) -> some View {
+        VStack(alignment: .leading, spacing: 13) {
+            ForEach(fields) { field in
+                tuningRow(field)
+                if field.id != fields.last?.id { Divider().overlay(CoinPilotColors.line) }
+            }
+        }
+    }
+
+    private func categoryTitle(_ value: String) -> String {
+        switch value.lowercased() {
+        case "investment": return "투자 금액"
+        case "risk": return "위험 관리"
+        case "trading": return "매매 조건"
+        case "volume": return "거래량"
+        case "scalping": return "전략 진입·보유"
+        default: return value
+        }
+    }
+
+    private func numberText(_ value: Double) -> String {
+        CoinPilotFormatting.editableNumber(value)
+    }
+}
+
+/// 코인 로고가 없는 시세에서 쓰는 이니셜 아바타 — 티커 해시로 고정된 파스텔 틴트.
+private struct CoinAvatar: View {
+    let coin: String?
+    var size: CGFloat = 36
+
+    private static let palette: [Color] = [
+        CoinPilotColors.blue,
+        Color(red: 0.30, green: 0.62, blue: 0.93),
+        Color(red: 0.11, green: 0.66, blue: 0.48),
+        Color(red: 0.86, green: 0.55, blue: 0.20),
+        Color(red: 0.56, green: 0.45, blue: 0.87),
+        Color(red: 0.88, green: 0.40, blue: 0.45),
+        Color(red: 0.24, green: 0.63, blue: 0.71)
+    ]
+
+    private var ticker: String { CoinPilotFormatting.ticker(coin ?? "") }
+
+    private var tint: Color {
+        var hash = 0
+        for scalar in ticker.unicodeScalars { hash = (hash &* 31 &+ Int(scalar.value)) & 0x7fffffff }
+        return Self.palette[hash % Self.palette.count]
+    }
+
+    var body: some View {
+        Text(ticker.isEmpty ? "?" : String(ticker.prefix(1)))
+            .font(.system(size: size * 0.42, weight: .bold, design: .rounded))
+            .foregroundColor(.white)
+            .frame(width: size, height: size)
+            .background(
+                LinearGradient(
+                    colors: [tint.opacity(0.92), tint],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
+            .clipShape(Circle())
+            .accessibilityHidden(true)
+    }
+}
+
+/// 홈 빠른 액션의 토스식 아이콘 칩 — 틴트 원형 아이콘 + 짧은 라벨.
+private struct HomeQuickActionContent: View {
+    let title: String
+    let symbol: String
+    let tint: Color
+
+    var body: some View {
+        VStack(spacing: 7) {
+            Image(systemName: symbol)
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundColor(tint)
+                .frame(width: 48, height: 48)
+                .background(tint.opacity(0.10))
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            Text(title)
+                .font(.caption.weight(.medium))
+                .foregroundColor(CoinPilotColors.ink)
+        }
+        .frame(maxWidth: .infinity)
+        .contentShape(Rectangle())
+    }
+}
+
+private struct HomeQuickAction: View {
+    let title: String
+    let symbol: String
+    let tint: Color
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HomeQuickActionContent(title: title, symbol: symbol, tint: tint)
+        }
+        .buttonStyle(PlainButtonStyle())
+        .accessibilityLabel(title)
+    }
+}
+
+private struct CoinPilotCompactButtonStyle: ButtonStyle {
+    let tint: Color
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.caption.weight(.semibold))
+            .foregroundColor(tint)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(tint.opacity(0.08))
+            .clipShape(Capsule())
+            .frame(minWidth: 44, minHeight: 44)
+            .contentShape(Rectangle())
+            .opacity(isEnabled ? (configuration.isPressed ? 0.65 : 1) : 0.4)
+    }
+}
+
+private struct CoinPilotSecondaryButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.subheadline.weight(.semibold))
+            .frame(maxWidth: .infinity, minHeight: 46)
+            .foregroundColor(isEnabled ? CoinPilotColors.blue : CoinPilotColors.secondaryInk)
+            .background(isEnabled
+                        ? CoinPilotColors.blue.opacity(configuration.isPressed ? 0.18 : 0.10)
+                        : CoinPilotColors.line)
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .scaleEffect(configuration.isPressed ? 0.985 : 1)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+    }
+}
+
+private struct CoinPilotPrimaryButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.headline.weight(.bold))
+            .frame(maxWidth: .infinity, minHeight: 54)
+            .foregroundColor(isEnabled ? .white : CoinPilotColors.ink)
+            .background(isEnabled
+                        ? CoinPilotColors.blue.opacity(configuration.isPressed ? 0.82 : 1)
+                        : CoinPilotColors.line)
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .scaleEffect(configuration.isPressed ? 0.985 : 1)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+    }
+}
+
+private struct CoinPilotServerEditor: View {
+    @ObservedObject var store: CoinPilotStore
+    @Environment(\.dismiss) private var dismiss
+    @State private var address: String
+    @State private var message: String?
+
+    init(store: CoinPilotStore) {
+        self.store = store
+        _address = State(initialValue: store.serverDraft)
+    }
+
+    var body: some View {
+        CoinPilotNavigationHost {
+            Form {
+                Section {
+                        TextField("서버 주소", text: $address, prompt: Text("https://example.com"))
+                        .cpKeyboardURL()
+                        .cpNoAutocapitalization()
+                        .cpNoAutocorrection()
+                } header: {
+                    Text("서버 주소")
+                } footer: {
+                    Text("같은 Wi-Fi의 서버는 내부 주소로, 외부 서버는 HTTPS 주소로 연결해 주세요.")
+                }
+                if !store.bundledServerPresets.isEmpty {
+                    Section {
+                        ForEach(store.bundledServerPresets, id: \.url.absoluteString) { preset in
+                            Button {
+                                address = preset.url.absoluteString
+                            } label: {
+                                HStack {
+                                    Text(preset.label).foregroundColor(CoinPilotColors.ink)
+                                    Spacer()
+                                    Text(preset.url.absoluteString)
+                                        .font(.caption)
+                                        .foregroundColor(CoinPilotColors.secondaryInk)
+                                }
+                            }
+                        }
+                    } header: {
+                        Text("등록된 서버")
+                    } footer: {
+                        Text("서버를 선택하면 주소가 채워집니다. 연결 후 거래소를 확인할 수 있어요.")
+                    }
+                }
+                if let message {
+                    Text(message).foregroundColor(CoinPilotColors.red)
+                }
+                Section {
+                    Button {
+                        Task {
+                            let updated = await store.updateServerAddress(address)
+                            if updated { dismiss() }
+                            else { message = store.connectionMessage }
+                        }
+                    } label: {
+                        HStack {
+                            Spacer()
+                            if store.isWorking { ProgressView().padding(.trailing, 6) }
+                            Text(store.isWorking ? "연결 중" : "저장하고 연결")
+                                .fontWeight(.semibold)
+                            Spacer()
+                        }
+                    }
+                    .disabled(store.isWorking)
+                }
+            }
+            .cpSettingsFormStyle()
+            .background(CoinPilotColors.paper)
+            .navigationTitle("서버 주소")
+            .cpInlineTitle()
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("취소") { dismiss() }.keyboardShortcut(.cancelAction)
+                }
+            }
+        }
+        .cpEditorSheetFrame()
+    }
+}
+
+private struct CoinPilotTokenEditor: View {
+    @ObservedObject var store: CoinPilotStore
+    @Environment(\.dismiss) private var dismiss
+    @State private var token = ""
+    @State private var message: String?
+
+    var body: some View {
+        CoinPilotNavigationHost {
+            Form {
+                Section {
+                    SecureField("서버 토큰 입력", text: $token)
+                        .cpNoAutocapitalization()
+                        .cpNoAutocorrection()
+                } header: {
+                    Text("서버 토큰")
+                } footer: {
+                    Text("\(store.serverAddress) 서버의 운영 토큰을 입력해 주세요. 기존 토큰은 새 토큰이 확인된 뒤 교체됩니다. 거래소 API 키는 서버에만 보관합니다.")
+                }
+                if let message {
+                    Text(message).foregroundColor(CoinPilotColors.red)
+                }
+                Section {
+                    Button {
+                        Task {
+                            if let error = await store.updateServerToken(token) {
+                                message = error
+                            } else {
+                                token = ""
+                                dismiss()
+                            }
+                        }
+                    } label: {
+                        HStack {
+                            Spacer()
+                            if store.isWorking { ProgressView().padding(.trailing, 6) }
+                            Text(store.isWorking ? "토큰 확인 중" : "토큰 확인 후 저장")
+                                .fontWeight(.semibold)
+                            Spacer()
+                        }
+                    }
+                    .disabled(store.isWorking || token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+            .cpSettingsFormStyle()
+            .background(CoinPilotColors.paper)
+            .navigationTitle("서버 토큰 입력")
+            .cpInlineTitle()
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("취소") {
+                        token = ""
+                        dismiss()
+                    }
+                    .keyboardShortcut(.cancelAction)
+                }
+            }
+        }
+        .cpEditorSheetFrame()
+    }
+}
+
+private struct SettingsRow: View {
+    let title: String
+    let value: String
+    let symbol: String
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: symbol)
+                .font(.headline)
+                .foregroundColor(CoinPilotColors.secondaryInk)
+                .frame(width: 23)
+            Text(title)
+                .font(.body)
+                .foregroundColor(CoinPilotColors.secondaryInk)
+            Spacer(minLength: 10)
+            Text(value)
+                .font(.body.weight(.medium))
+                .foregroundColor(CoinPilotColors.ink)
+                .multilineTextAlignment(.trailing)
+                .lineLimit(2)
+        }
+    }
+}
+
+private struct PositionRow: View {
+    let position: CoinPilotPosition
+    @ObservedObject var store: CoinPilotStore
+    @State private var showingSellConfirmation = false
+
+    private var marketDetailCoin: String? {
+        guard !store.isBundledPreview, !store.isBundledLocalMarketData,
+              let coin = position.coin,
+              coin.range(of: "^[A-Z0-9]{2,10}-[A-Z0-9]{2,15}$", options: .regularExpression) != nil
+        else { return nil }
+        return coin
+    }
+
+    var body: some View {
+        Group {
+            if let coin = marketDetailCoin {
+                NavigationLink(destination: CoinPilotMarketDetailView(store: store, coin: coin)) {
+                    rowInner(showsChevron: true)
+                }
+                .buttonStyle(PlainButtonStyle())
+            } else {
+                rowInner(showsChevron: false)
+            }
+        }
+        .confirmationDialog(
+            "\(CoinPilotFormatting.ticker(position.coin)) 전체 매도",
+            isPresented: $showingSellConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button(store.activeWorkspace == .live ? "실거래 전체 매도" : "모의 전체 매도", role: store.activeWorkspace == .live ? .destructive : nil) {
+                guard let coin = position.coin, let amount = position.amount else { return }
+                Task { _ = await store.submitManualSell(coin: coin, quantity: amount) }
+            }
+            Button("취소", role: .cancel) {}
+        } message: {
+            Text("\(CoinPilotFormatting.quantity(position.amount))개를 시장가로 매도합니다. \(store.activeWorkspace == .live ? "\(store.exchangeDisplayName) 실계정 주문입니다." : "모의 서버 가상 계좌에만 적용됩니다.")")
+        }
+    }
+
+    private func rowInner(showsChevron: Bool) -> some View {
+        HStack(alignment: .center, spacing: 12) {
+            CoinAvatar(coin: position.coin)
+            VStack(alignment: .leading, spacing: 5) {
+                Text(CoinPilotFormatting.symbol(position.coin))
+                    .font(.body.weight(.semibold))
+                    .foregroundColor(CoinPilotColors.ink)
+                HStack(spacing: 5) {
+                    Text(CoinPilotFormatting.ticker(position.coin))
+                    Spacer(minLength: 8)
+                    Text("\(CoinPilotFormatting.quantity(position.amount))개")
+                }
+                .font(.footnote)
+                .foregroundColor(CoinPilotColors.secondaryInk)
+                if position.entryPrice != nil || position.currentPrice != nil {
+                    MetadataLine(text: "평단 \(CoinPilotFormatting.price(position.entryPrice)) · 현재 \(CoinPilotFormatting.price(position.currentPrice))")
+                        .font(.caption2.monospacedDigit())
+                        .foregroundColor(CoinPilotColors.secondaryInk)
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.8)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            Spacer(minLength: 8)
+            VStack(alignment: .trailing, spacing: 5) {
+                Text(CoinPilotFormatting.won(position.currentValue, unavailable: "평가액 미제공"))
+                    .font(.body.weight(.semibold))
+                    .foregroundColor(CoinPilotColors.ink)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+                HStack(spacing: 5) {
+                    Text(CoinPilotFormatting.signedWon(position.profit))
+                    if let percent = position.profitPercent {
+                        Text(CoinPilotFormatting.percent(percent))
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(profitColor(position.profit).opacity(0.09))
+                            .clipShape(Capsule())
+                    }
+                }
+                .font(.caption.weight(.medium))
+                .foregroundColor(profitColor(position.profit))
+                if store.isBundledPreview {
+                    EmptyView()
+                } else if (position.coin.map { store.manualOrderBlockReason(for: $0) != nil } ?? true) || position.amount == nil {
+                    Text("주문 잠김")
+                        .font(.caption.weight(.semibold))
+                        .foregroundColor(CoinPilotColors.secondaryInk)
+                        .accessibilityLabel("매도 주문 잠김")
+                } else {
+                    Button("매도") { showingSellConfirmation = true }
+                        .buttonStyle(CoinPilotCompactButtonStyle(tint: CoinPilotColors.red))
+                }
+            }
+            if showsChevron {
+                Image(systemName: "chevron.right")
+                    .font(.caption2.weight(.bold))
+                    .foregroundColor(CoinPilotColors.secondaryInk)
+                    .accessibilityHidden(true)
+            }
+        }
+        .padding(.vertical, 14)
+    }
+}
+
+private struct MarketRow: View {
+    let market: CoinPilotMarketPrice
+    let isBundledPreview: Bool
+    let maximumAgeSeconds: TimeInterval
+    var rank: Int? = nil
+
+    private var freshnessIssue: String? {
+        guard !isBundledPreview else { return nil }
+        return market.freshnessIssue(at: Date(), maximumAgeSeconds: maximumAgeSeconds)
+    }
+
+    private var freshnessLabel: String {
+        if isBundledPreview {
+            return CoinPilotFormatting.marketTimestamp(market.sourceAsOf, label: "예시 체결")
+        }
+        guard let freshnessIssue else {
+            return CoinPilotFormatting.marketTimestamp(market.sourceAsOf, label: "최근 체결")
+        }
+        let capturedAt = CoinPilotFormatting.marketTimestamp(market.fetchedAt, label: "서버 수집")
+        if freshnessIssue.contains("저장된 최근 시세") {
+            return "저장 시세 · \(capturedAt)"
+        }
+        if freshnessIssue.contains("오래됐") {
+            return "오래된 시세 · \(capturedAt)"
+        }
+        return "시세 확인 필요 · \(capturedAt)"
+    }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            if let rank {
+                Text("\(rank)")
+                    .font(.subheadline.weight(.bold).monospacedDigit())
+                    .foregroundColor(rank <= 3 ? CoinPilotColors.blue : CoinPilotColors.secondaryInk)
+                    .frame(width: 21, alignment: .leading)
+                    .accessibilityLabel("거래대금 \(rank)위")
+            }
+            CoinAvatar(coin: market.coin)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(CoinPilotFormatting.symbol(market.coin))
+                    .font(.body.weight(.semibold))
+                    .foregroundColor(CoinPilotColors.ink)
+                HStack(spacing: 5) {
+                    Text(CoinPilotFormatting.ticker(market.coin))
+                    if let volume = market.volumeKrw, volume.isFinite, volume > 0 {
+                        Text("24h 거래대금 \(CoinPilotFormatting.compactWon(volume))")
+                    }
+                }
+                .font(.caption)
+                .foregroundColor(CoinPilotColors.secondaryInk)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+                if freshnessIssue != nil {
+                    MetadataLine(text: freshnessLabel)
+                        .font(.caption2)
+                        .foregroundColor(CoinPilotColors.amber)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            Spacer()
+            VStack(alignment: .trailing, spacing: 4) {
+                Text(CoinPilotFormatting.price(market.price))
+                    .font(.body.weight(.semibold))
+                    .foregroundColor(CoinPilotColors.ink)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                    .fixedSize(horizontal: true, vertical: false)
+                HStack(spacing: 3) {
+                    if let change = market.change, change != 0 {
+                        Image(systemName: change > 0 ? "arrowtriangle.up.fill" : "arrowtriangle.down.fill")
+                            .font(.system(size: 6, weight: .bold))
+                            .accessibilityHidden(true)
+                    }
+                    Text(CoinPilotFormatting.percent(market.change))
+                }
+                .font(.caption.weight(.medium))
+                .foregroundColor(profitColor(market.change))
+            }
+        }
+        .padding(.vertical, 12)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+private struct TradeRow: View {
+    let trade: CoinPilotTrade
+
+    private var actionTint: Color {
+        switch trade.action {
+        case "매수": return CoinPilotColors.blue
+        case "매도": return CoinPilotColors.red
+        default: return CoinPilotColors.secondaryInk
+        }
+    }
+
+    private var actionSymbol: String {
+        switch trade.action {
+        case "매수": return "arrow.down.left"
+        case "매도": return "arrow.up.right"
+        default: return "arrow.left.arrow.right"
+        }
+    }
+
+    private var valueLabel: String? {
+        if trade.profit != nil { return "실현 손익" }
+        if trade.amount != nil { return "거래 금액" }
+        if trade.quantity != nil { return "\(trade.action) 수량" }
+        if trade.price != nil { return "단가" }
+        return nil
+    }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: actionSymbol)
+                .font(.body.weight(.medium))
+                .foregroundColor(actionTint)
+                .frame(width: 34, height: 34)
+                .background(actionTint.opacity(0.10))
+                .clipShape(Circle())
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 8) {
+                    Text(trade.coin.map(CoinPilotFormatting.ticker) ?? "자산 미제공")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundColor(CoinPilotColors.ink)
+                    Text(trade.action)
+                        .font(.caption.weight(.medium))
+                        .foregroundColor(actionTint)
+                        .padding(.horizontal, 7).padding(.vertical, 3)
+                        .background(actionTint.opacity(0.08))
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                }
+                Text(CoinPilotFormatting.dateTime(trade.timestamp, unavailable: "거래 시각 미제공"))
+                    .font(.caption)
+                    .foregroundColor(CoinPilotColors.secondaryInk)
+            }
+            Spacer(minLength: 5)
+            VStack(alignment: .trailing, spacing: 4) {
+                Text(valueText)
+                    .font(.footnote.weight(.semibold))
+                    .foregroundColor(trade.profit == nil ? CoinPilotColors.ink : profitColor(trade.profit))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+                if let valueLabel {
+                    Text(valueLabel)
+                        .font(.caption2)
+                        .foregroundColor(CoinPilotColors.secondaryInk)
+                }
+                if (trade.profit != nil || trade.amount != nil || trade.quantity != nil), let price = trade.price {
+                    Text("단가 \(CoinPilotFormatting.price(price))")
+                        .font(.caption2.monospacedDigit())
+                        .foregroundColor(CoinPilotColors.secondaryInk)
+                }
+            }
+        }
+        .padding(.vertical, 12)
+        .accessibilityElement(children: .combine)
+    }
+
+    private var valueText: String {
+        if let profit = trade.profit { return CoinPilotFormatting.signedWon(profit) }
+        if let amount = trade.amount { return CoinPilotFormatting.won(amount) }
+        if let quantity = trade.quantity { return "\(CoinPilotFormatting.quantity(quantity))개" }
+        if let price = trade.price { return CoinPilotFormatting.price(price) }
+        return "금액 미제공"
+    }
+}
+
+private struct SectionHeading: View {
+    let title: String
+
+    var body: some View {
+        Text(title)
+            .font(.headline.weight(.bold))
+            .foregroundColor(CoinPilotColors.ink)
+    }
+}
+
+private struct PaperEvidenceRow: View {
+    let title: String
+    let value: String
+    let tint: Color
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text(title)
+                .font(.caption)
+                .foregroundColor(CoinPilotColors.secondaryInk)
+            Spacer(minLength: 6)
+            Text(value)
+                .font(.caption.weight(.semibold))
+                .monospacedDigit()
+                .foregroundColor(tint)
+                .multilineTextAlignment(.trailing)
+                .lineLimit(2)
+                .minimumScaleFactor(0.8)
+        }
+    }
+}
+
+private struct MetadataLine: View {
+    let text: String
+
+    private var values: [String] {
+        text.replacingOccurrences(of: " • ", with: " · ")
+            .components(separatedBy: " · ").filter { !$0.isEmpty }
+    }
+
+    private var horizontal: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            ForEach(Array(values.enumerated()), id: \.offset) { item in
+                Text(item.element).fixedSize(horizontal: true, vertical: false)
+            }
+        }
+    }
+
+    private var vertical: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ForEach(Array(values.enumerated()), id: \.offset) { item in
+                Text(item.element).fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    var body: some View {
+        Group {
+            if #available(iOS 16.0, macOS 13.0, *) {
+                ViewThatFits(in: .horizontal) { horizontal; vertical }
+            } else {
+                vertical
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+}
+
+private struct NativeDisclosureCard<Content: View>: View {
+    let title: String
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        NativeCard {
+            DisclosureGroup {
+                content().padding(.top, 12)
+            } label: {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundColor(CoinPilotColors.ink)
+                    .frame(minHeight: 44)
+            }
+        }
+    }
+}
+
+private struct NativeCard<Content: View>: View {
+    private let content: Content
+
+    init(@ViewBuilder content: () -> Content) {
+        self.content = content()
+    }
+
+    var body: some View {
+        content
+            .padding(18)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(CoinPilotColors.surface)
+            .clipShape(RoundedRectangle(cornerRadius: CoinPilotShapes.cardCornerRadius, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: CoinPilotShapes.cardCornerRadius, style: .continuous)
+                .stroke(CoinPilotColors.line.opacity(0.65), lineWidth: 0.5))
+    }
+}
+
+private struct EmptyMessage: View {
+    let text: String
+    var image: String? = nil
+    var actionTitle: String? = nil
+    var isActionDisabled = false
+    var action: (() -> Void)? = nil
+
+    var body: some View {
+        VStack(spacing: 10) {
+            if let image {
+                Image(image)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 92, height: 92)
+                    .accessibilityHidden(true)
+            }
+            Text(text)
+                .font(.subheadline)
+                .foregroundColor(CoinPilotColors.secondaryInk)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+            if let actionTitle, let action {
+                Button(actionTitle, action: action)
+                    .buttonStyle(CoinPilotSecondaryButtonStyle())
+                    .disabled(isActionDisabled)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 12)
+    }
+}
+
+private struct InlineNotice: View {
+    let text: String
+    let color: Color
+    var symbol: String = "exclamationmark.circle.fill"
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 9) {
+            Image(systemName: symbol)
+                .foregroundColor(color)
+            Text(text)
+                .font(.subheadline.weight(.medium))
+                .foregroundColor(CoinPilotColors.ink)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.vertical, 11)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+private func profitColor(_ value: Double?) -> Color {
+    guard let value else { return CoinPilotColors.secondaryInk }
+    if value > 0 { return CoinPilotColors.green }
+    if value < 0 { return CoinPilotColors.red }
+    return CoinPilotColors.secondaryInk
+}

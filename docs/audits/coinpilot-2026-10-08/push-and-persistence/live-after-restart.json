@@ -1,0 +1,147 @@
+{
+  "LIVE/health": {
+    "httpStatus": 200,
+    "body": {
+      "status": "ok",
+      "uptimeSec": 111,
+      "pid": 77529,
+      "timestamp": "2026-10-08T07:28:33.911Z"
+    }
+  },
+  "LIVE/service-ready": {
+    "httpStatus": 200,
+    "body": {
+      "ready": true,
+      "uptimeSec": 111,
+      "timestamp": "2026-10-08T07:28:34.220Z",
+      "checks": {
+        "httpServerListening": true,
+        "marketDataScheduler": {
+          "available": true,
+          "queueLength": 0,
+          "queuedByPriority": {
+            "normal": 0,
+            "risk": 0
+          },
+          "oldestWaitAgeMsByPriority": {
+            "normal": null,
+            "risk": null
+          },
+          "inFlightByPriority": {
+            "normal": 0,
+            "risk": 0
+          },
+          "inFlightTotal": 0,
+          "maxInFlight": 4,
+          "maxQueuedByPriority": {
+            "normal": 64,
+            "risk": 16
+          },
+          "nextStartInMs": 0,
+          "backoffRemainingMs": 0,
+          "pressure": {
+            "normalQueueSaturated": false,
+            "riskQueueSaturated": false,
+            "backoffActive": false
+          }
+        },
+        "publicMarketSnapshot": {
+          "available": true,
+          "marketCount": 293,
+          "persistedAt": "2026-10-08T07:28:32.025Z",
+          "dirty": false,
+          "readOnly": false,
+          "persistenceHealthy": true,
+          "loadHealthy": true
+        },
+        "marketDataCoordinator": {
+          "required": true,
+          "enabled": true,
+          "available": true,
+          "failureCode": null,
+          "queuedTotal": 0,
+          "inFlightTotal": 0,
+          "maxInFlight": 4,
+          "nextStartInMs": 0
+        }
+      }
+    }
+  },
+  "LIVE/api/status": {
+    "httpStatus": 200,
+    "body": {
+      "mode": "LIVE",
+      "isRunning": true,
+      "runtimeState": "RUNNING",
+      "stopReason": null,
+      "exchangeStateKnown": true,
+      "autoRecovery": {
+        "enabled": true,
+        "active": true,
+        "armed": false,
+        "stopReason": null,
+        "desiredRunning": true,
+        "incidentSince": null,
+        "healthyProbes": 0,
+        "requiredHealthyProbes": 2,
+        "nextAttemptAt": null,
+        "lastProbeAt": null,
+        "lastProbeError": null,
+        "lastStartAttemptAt": null,
+        "lastStartError": null,
+        "resumeAttempts": 0,
+        "resumeCount": 0,
+        "lastResumedAt": null,
+        "intentWriteError": null,
+        "tracking": {
+          "available": true,
+          "savedAt": "2026-10-08T07:28:29.189Z",
+          "eventCount": 7,
+          "error": null
+        },
+        "validationRefresh": {
+          "enabled": true,
+          "eligible": false,
+          "active": false,
+          "running": false,
+          "queued": false,
+          "runCount": 0,
+          "lastRunStartedAt": null,
+          "lastRunFinishedAt": null,
+          "lastRunReason": null,
+          "lastExitCode": null,
+          "lastError": null,
+          "lastReport": null,
+          "reportFile": "scalping_validation.json"
+        }
+      }
+    }
+  },
+  "LIVE/api/notifications/status": {
+    "httpStatus": 200,
+    "body": {
+      "configured": true,
+      "registeredDevices": 0,
+      "events": 0,
+      "queued": 0,
+      "accepted": 0,
+      "failed": 0,
+      "lastEventAt": null,
+      "error": null
+    }
+  },
+  "LIVE/api/automation/history": {
+    "httpStatus": 200,
+    "body": {
+      "available": true,
+      "persistence": {
+        "available": true,
+        "savedAt": "2026-10-08T07:28:29.189Z",
+        "eventCount": 7,
+        "error": null
+      },
+      "eventCount": 7,
+      "latestRunning": true
+    }
+  }
+}

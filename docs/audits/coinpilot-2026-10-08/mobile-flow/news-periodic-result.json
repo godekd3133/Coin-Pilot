@@ -1,0 +1,19 @@
+{
+  "synthetic": true,
+  "firstRequest": {
+    "at": "2026-10-09T08:39:49.815Z",
+    "method": "GET",
+    "path": "/news",
+    "status": 200,
+    "client": "CoinPilot%20UX%20Validation/23 CFNetwork/3896.100.1.1.1 Darwin/27.0.0"
+  },
+  "renewedRequest": {
+    "at": "2026-10-09T08:44:51.504Z",
+    "method": "GET",
+    "path": "/news",
+    "status": 200,
+    "client": "CoinPilot%20UX%20Validation/23 CFNetwork/3896.100.1.1.1 Darwin/27.0.0"
+  },
+  "intervalSeconds": 301.689,
+  "manualRefreshDuringInterval": false
+}

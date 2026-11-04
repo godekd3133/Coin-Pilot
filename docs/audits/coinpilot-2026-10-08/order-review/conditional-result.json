@@ -1,0 +1,21 @@
+{
+  "synthetic": true,
+  "mode": "DRY_RUN",
+  "smartBuyTotal": 10000,
+  "smartBuyMaximumCoins": 1,
+  "smartSellTarget": 15000,
+  "smartSellPriority": "worst",
+  "krwBalance": 955987.5,
+  "positions": [
+    {
+      "coin": "KRW-BTC",
+      "amount": 0.0003497,
+      "currentValue": 34970
+    },
+    {
+      "coin": "KRW-ETH",
+      "amount": 0.0017991,
+      "currentValue": 8996
+    }
+  ]
+}

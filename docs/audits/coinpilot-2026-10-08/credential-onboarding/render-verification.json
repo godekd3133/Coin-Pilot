@@ -1,0 +1,37 @@
+{
+  "recordedAt": "2026-10-09T18:09:47.487006+00:00",
+  "checks": {
+    "eligibleFormSimulatedRender": "passed",
+    "emptyInputDisabled": "passed",
+    "dummyInputEnabled": "passed",
+    "forbiddenClearsInput": "passed",
+    "guideAlignment": "passed",
+    "fixtureCompile": "passed",
+    "iosSimulatorBuild": "passed",
+    "networkRegistration": "not-run",
+    "realKeys": "not-run",
+    "realOrders": "not-run",
+    "currentDeviceVisual": "blocked"
+  },
+  "sourceSHA256": {
+    "mobile/ios/App/App/CoinPilotViews.swift": "fe04ed49a48ac7cbc8bf1b0ae41b699c1df56eb47b9b68ea88b50cbedc3910d2",
+    "docs/audits/coinpilot-2026-10-08/credential-onboarding/render-fixture/FixtureViews.swift": "1123c8f5b8dfcaf4b4626ef2ea9300a6471755f739111e9bcedafe28f64a618a",
+    "docs/audits/coinpilot-2026-10-08/credential-onboarding/render-fixture/FixtureStore.swift": "070cb18da005e220378dbf905f0a8aef6d46883b777a980a01cca3fc6402723c",
+    "docs/audits/coinpilot-2026-10-08/credential-onboarding/render-fixture/FixtureApp.swift": "05aac11135665c0c1b0451edd8c5adbcbcab6a85436cc06ba06d7a3d99b5617e"
+  },
+  "fixtureChanges": [
+    "Store construction injects memory API",
+    "SSE disabled in copied Store",
+    "API mutation and credential methods reject without networking"
+  ],
+  "blockingEvidence": [
+    "Physical iPhone unavailable on repeated devicectl snapshots",
+    "iPhone Mirroring Timed Out with request to lock phone",
+    "User lock-state question unanswered"
+  ],
+  "remaining": [
+    "Actual current iPhone flow",
+    "Keyboard and safe area",
+    "Larger text and VoiceOver"
+  ]
+}

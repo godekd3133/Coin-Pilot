@@ -1,0 +1,30 @@
+{
+  "recordedAt": "2026-10-09T09:54:13.074783+00:00",
+  "goalStatus": "active",
+  "checks": {
+    "backendTests": {
+      "status": "passed",
+      "count": 16
+    },
+    "actualSyntheticFallbackResponse": "passed",
+    "nativeConfirmation": "passed",
+    "nativeFallbackResult": "passed",
+    "macQA": "passed",
+    "iosSimulatorBuild": "passed",
+    "diffCheck": "passed",
+    "realOrders": "not-run",
+    "productionDeployment": "not-run",
+    "currentPhysicalVisual": "blocked - iPhone unavailable"
+  },
+  "sourceSHA256": {
+    "src/api/manualOrderSmartBuy.js": "d7b541868f67616ad24455bd06ba6f15e8098c82d6ed4fce9cc31bb0978f9405",
+    "test/manualOrderQuoteCurrency.test.js": "6f59b80b4d12d77df5f43a0204b05676de01c3c4e53566cf2f588f0e6a83c917",
+    "mobile/ios/App/App/CoinPilotViews.swift": "2ab7a60ed6bfac0ae4bebe830b68712d5e4bd044a409a6223a8afac926317a73"
+  },
+  "selectionPolicyChanged": false,
+  "remaining": [
+    "Current iPhone UI",
+    "Dynamic Type and VoiceOver",
+    "Whole-goal completion audit"
+  ]
+}

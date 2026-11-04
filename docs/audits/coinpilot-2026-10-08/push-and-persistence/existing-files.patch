@@ -8,7 +8,7 @@
 @@ -272,7 +273,11 @@
        trader.liveValidationRefresher = validationRefresher;
        validationRefresher.start();
- 
+
 -      const startTraderOnBoot = config.dashboardStartTraderOnBoot;
 +      const autoRecovery = createAutoRecoverySupervisor(trader, { ...config,
 +        autoRecoveryStateFile: process.env.AUTO_RECOVERY_STATE_FILE || config.autoRecoveryStateFile });
@@ -50,23 +50,23 @@
    emitTradeNotification(tradeInfo) {
      this._notificationMonitor().emitTradeNotification(tradeInfo);
 +    try {
-+      this.orderPush.enqueue(tradeInfo);
-+      this.tradingSystem.autoRecovery?.tracking?.record('trade', { type: tradeInfo.type, market: tradeInfo.coin, orderId: tradeInfo.orderId || null });
++      const eventId = this.orderPush.enqueue(tradeInfo);
++      if (this.orderPush.lastEnqueueNew) this.tradingSystem.autoRecovery?.tracking?.record('trade', { eventId, type: tradeInfo.type, market: tradeInfo.coin, orderId: tradeInfo.orderId || null, price: tradeInfo.price || null, volume: tradeInfo.volume || null });
 +    } catch (error) { this.orderPush.error = error.message; this.logger.error('주문 알림 기록 실패', { error: error.message }); }
    }
- 
+
    /**
-@@ -558,6 +569,7 @@
-       this.logger.warn(warning);
-     }
- 
-+    this.orderPush.start();
-     const server = this.httpServer;
-     this.server = server;
-     let listening = false;
+@@ -608,6 +619,7 @@
+             console.log(`   🔐 인증: ${this.auth.enabled ? '대시보드 토큰 필요' : '비활성 (루프백 전용)'}`);
+             console.log(`   📡 실시간 알림: Socket.io 활성화`);
+             this.logger.info(`Dashboard server started on ${this.auth.host}:${boundPort} (auth=${this.auth.enabled})`);
++            this.orderPush.start();
+             resolve(server);
+           });
+         })
 @@ -708,6 +720,9 @@
    }
- 
+
    stop() {
 +    this.orderPush?.stop();
 +    this.tradingSystem.autoRecovery?.stop?.();
@@ -119,14 +119,35 @@
        const start = trader.start();
        Promise.resolve(start).catch(error => {
          console.error('Trading system start error:', error);
-@@ -530,6 +531,7 @@
+@@ -530,6 +531,9 @@
    router.post('/control/stop', (req, res) => {
      try {
        const trader = server.tradingSystem;
 +      trader.autoRecovery?.noteDesiredRunning?.(false, 'control_stop');
++      const persistenceWarning = trader.autoRecovery?.getStatus?.().intentWriteError
++        ? ' 중지 선택을 저장하지 못했습니다. 서버를 재시작하기 전에 저장 상태를 확인해 주세요.' : '';
        if (typeof trader.requestGracefulShutdown === 'function') {
          const shutdown = trader.requestGracefulShutdown('operator_stop');
          Promise.resolve(shutdown).catch(error => {
+@@ -546,7 +550,8 @@
+           success: true,
+           shutdownRequested: true,
+           runtimeState: safety.runtimeState || null,
+-          message: safety.runtimeState === 'PROTECTIVE_ONLY'
++          automationStateSaved: !persistenceWarning,
++          message: (safety.runtimeState === 'PROTECTIVE_ONLY'
+             ? '신규 진입을 잠갔습니다. 보유 포지션의 위험 감시를 유지하고 있습니다.'
+             : safety.runtimeState === 'SYNC_REQUIRED' || safety.exchangeStateKnown === false
+               ? '거래소 계좌와 미체결 주문을 확인할 때까지 중지를 보류합니다.'
+@@ -554,7 +559,7 @@
+                 ? '신규 진입을 잠그고 보유 포지션 확인을 시작했습니다.'
+                 : shutdownInProgress
+                   ? '진행 중인 주문과 위험 확인을 마친 뒤 중지를 완료합니다.'
+-                : '자동매매를 중지했습니다.'
++                : '자동매매를 중지했습니다.') + persistenceWarning
+         });
+       }
+       if (trader.isRunning) {
 --- live/src/config/envSchema.js
 +++ live/src/config/envSchema.js
 @@ -3,6 +3,12 @@
@@ -152,7 +173,7 @@
 @@ -825,7 +826,11 @@
          }
        }
- 
+
 -      const startTraderOnBoot = config.dashboardStartTraderOnBoot;
 +      const autoRecovery = createAutoRecoverySupervisor(trader, { ...config,
 +        autoRecoveryStateFile: process.env.AUTO_RECOVERY_STATE_FILE || config.autoRecoveryStateFile });
@@ -189,14 +210,35 @@
      this.app.use('/api', createAccountRoutes(this));
      this.app.use('/api', createLiveCredentialsRoutes(this));
      this.app.use('/api', createPortfolioRoutes(this));
-@@ -1403,6 +1410,7 @@
-       this.logger.warn(warning);
-     }
- 
-+    this.orderPush.start();
-     const server = this.httpServer;
-     this.server = server;
-     let listening = false;
+@@ -1093,6 +1100,10 @@
+   }
+
+   emitTradeNotification(tradeInfo) {
++    try {
++      const eventId = this.orderPush.enqueue(tradeInfo);
++      if (this.orderPush.lastEnqueueNew) this.tradingSystem.autoRecovery?.tracking?.record('trade', { eventId, type: tradeInfo.type, market: tradeInfo.coin, orderId: tradeInfo.orderId || null, price: tradeInfo.price || null, volume: tradeInfo.volume || null });
++    } catch (error) { this.orderPush.error = error.message; this.logger.error('주문 알림 기록 실패', { error: error.message }); }
+     if (!this.io) return;
+
+     const notification = {
+@@ -1453,6 +1464,7 @@
+             console.log(`   🔐 인증: ${this.auth.enabled ? '대시보드 토큰 필요' : '비활성 (루프백 전용)'}`);
+             console.log(`   📡 실시간 알림: Socket.io 활성화`);
+             this.logger.info(`Dashboard server started on ${this.auth.host}:${boundPort} (auth=${this.auth.enabled})`);
++            this.orderPush.start();
+             resolve(server);
+           });
+         })
+@@ -2087,6 +2099,9 @@
+   }
+
+   stop() {
++    this.orderPush?.stop();
++    this.tradingSystem.autoRecovery?.stop?.();
++    try { this.tradingSystem.autoRecovery?.tracking?.record('shutdown'); } catch { /* keep persistence error visible */ }
+     this.stopOptimizationScheduler();
+
+     if (this.sseHeartbeat) {
 --- paper/src/api/auth.js
 +++ paper/src/api/auth.js
 @@ -25,6 +25,8 @@
@@ -242,14 +284,35 @@
        const start = trader.start();
        Promise.resolve(start).catch(error => {
          console.error('Trading system start error:', error);
-@@ -530,6 +531,7 @@
+@@ -530,6 +531,9 @@
    router.post('/control/stop', (req, res) => {
      try {
        const trader = server.tradingSystem;
 +      trader.autoRecovery?.noteDesiredRunning?.(false, 'control_stop');
++      const persistenceWarning = trader.autoRecovery?.getStatus?.().intentWriteError
++        ? ' 중지 선택을 저장하지 못했습니다. 서버를 재시작하기 전에 저장 상태를 확인해 주세요.' : '';
        if (typeof trader.requestGracefulShutdown === 'function') {
          const shutdown = trader.requestGracefulShutdown('operator_stop');
          Promise.resolve(shutdown).catch(error => {
+@@ -546,7 +550,8 @@
+           success: true,
+           shutdownRequested: true,
+           runtimeState: safety.runtimeState || null,
+-          message: safety.runtimeState === 'PROTECTIVE_ONLY'
++          automationStateSaved: !persistenceWarning,
++          message: (safety.runtimeState === 'PROTECTIVE_ONLY'
+             ? '신규 진입을 잠갔습니다. 보유 포지션의 위험 감시를 유지하고 있습니다.'
+             : safety.runtimeState === 'SYNC_REQUIRED' || safety.exchangeStateKnown === false
+               ? '거래소 계좌와 미체결 주문을 확인할 때까지 중지를 보류합니다.'
+@@ -554,7 +559,7 @@
+                 ? '신규 진입을 잠그고 보유 포지션 확인을 시작했습니다.'
+                 : shutdownInProgress
+                   ? '진행 중인 주문과 위험 확인을 마친 뒤 중지를 완료합니다.'
+-                : '자동매매를 중지했습니다.'
++                : '자동매매를 중지했습니다.') + persistenceWarning
+         });
+       }
+       if (trader.isRunning) {
 --- paper/src/config/envSchema.js
 +++ paper/src/config/envSchema.js
 @@ -3,6 +3,12 @@
@@ -276,7 +339,7 @@
 +      autoRecovery: this.owner.autoRecovery?.getStatus?.() || null
      };
    }
- 
+
 --- paper/src/trader/multiCoinTrader.js
 +++ paper/src/trader/multiCoinTrader.js
 @@ -5713,7 +5713,8 @@
@@ -288,4 +351,4 @@
 +      autoRecovery: this.autoRecovery?.getStatus?.() || null
      };
    }
- 
+

@@ -1,0 +1,17 @@
+[
+  {
+    "path": "src/api/marketValuation.js",
+    "originalSha256": "02847a1f590c1798610acae0df4e112b5cd25694e56596c324f7196672b78e7f",
+    "newSha256": "956de729322ca9e4c21ac8c60b298b630c992680036a29211da17ad80b47d3f8"
+  },
+  {
+    "path": "src/api/publicMarketSnapshotStore.js",
+    "originalSha256": "2f53379906d1d187f17ece2c8f043883e819e01370c730f8c8b8659005127b04",
+    "newSha256": "52188673fa760f880e3e3d5b9221b0efc0038586a8f92e7ddee4c6bcd0933cc3"
+  },
+  {
+    "path": "src/api/routes/account.js",
+    "originalSha256": "56b1fb968ef0e833107f41edef0f2218d0951f9ffc4b726d992189c06ecf7c2d",
+    "newSha256": "e623f945f45fb26384d6974fa1d44f4ed1b27b3aeb57b30ac91c4ded78df8c3b"
+  }
+]

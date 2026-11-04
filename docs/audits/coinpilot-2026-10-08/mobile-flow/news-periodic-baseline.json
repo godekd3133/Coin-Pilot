@@ -1,0 +1,11 @@
+{
+  "startedAt": "2026-10-09T08:40:13.859504+00:00",
+  "latestRequest": {
+    "at": "2026-10-09T08:39:49.815Z",
+    "method": "GET",
+    "path": "/news",
+    "status": 200,
+    "client": "CoinPilot%20UX%20Validation/23 CFNetwork/3896.100.1.1.1 Darwin/27.0.0"
+  },
+  "initialCount": 5
+}

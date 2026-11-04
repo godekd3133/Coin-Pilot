@@ -1,0 +1,4 @@
+** EXPORT SUCCEEDED **
+==> Done. CoinPilot 1.0 (23) submitted to TestFlight.
+Assigning build 23 (VALID) -> CoinPilot Internal
+Verified: build 23 VALID, group "CoinPilot Internal", internal state IN_BETA_TESTING

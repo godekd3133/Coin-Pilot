@@ -1,0 +1,17 @@
+{
+  "synthetic": true,
+  "mode": "DRY_RUN",
+  "krwBalance": 950995,
+  "positions": [
+    {
+      "coin": "KRW-BTC",
+      "amount": 0.00039975,
+      "currentValue": 39975
+    },
+    {
+      "coin": "KRW-ETH",
+      "amount": 0.0017991,
+      "currentValue": 8996
+    }
+  ]
+}

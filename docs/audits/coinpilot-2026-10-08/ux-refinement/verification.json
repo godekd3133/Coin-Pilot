@@ -1,0 +1,28 @@
+{
+  "mac": "passed",
+  "ios": "passed",
+  "store_scenarios": 62,
+  "usefulness_scenarios": 3,
+  "native_interactions": [
+    "workspace and tabs",
+    "order method selection",
+    "amount preset and preview lock",
+    "ETH market search",
+    "buy trade filter",
+    "aggregation disclosure",
+    "empty today filter and reset",
+    "invalid server address rejected"
+  ],
+  "scope": "Local native UI review using synthetic data; no production deployment or real orders performed by this task.",
+  "unverified": [
+    "real server token login",
+    "LIVE automation start or stop",
+    "actual exchange fills and settlement",
+    "physical iPhone",
+    "maximum Dynamic Type",
+    "full VoiceOver journey"
+  ],
+  "source": "mobile/ios/App/App/CoinPilotViews.swift",
+  "source_sha256": "8e70e02880f81ff5fd4e740f08334d7d366f770ac310a60b5bb8485a93c459d9",
+  "checked_at": "2026-10-08T16:46:39.596450+09:00"
+}

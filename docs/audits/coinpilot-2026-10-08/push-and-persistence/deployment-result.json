@@ -1,0 +1,1 @@
+{"applied": true, "backup": "/root/coinpilot-backups/20261008-push-persistence", "profiles": {"live": {"mode": "LIVE", "isRunning": true, "currentPositions": 0, "stopReason": null, "savedDesiredRunning": true}, "paper": {"mode": "DRY_RUN", "isRunning": false, "currentPositions": 1, "stopReason": "risk_data_gap", "savedDesiredRunning": true}}, "files": 22}

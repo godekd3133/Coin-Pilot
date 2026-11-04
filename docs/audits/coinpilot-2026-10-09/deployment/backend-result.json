@@ -1,0 +1,41 @@
+{
+  "applied": true,
+  "files": 21,
+  "backup": "/root/coinpilot-backups/20261009-release-v2",
+  "before": {
+    "live": {
+      "mode": "LIVE",
+      "isRunning": true,
+      "currentPositions": 0,
+      "lastTradeTime": null,
+      "stopReason": null
+    },
+    "paper": {
+      "mode": "DRY_RUN",
+      "isRunning": true,
+      "currentPositions": 0,
+      "lastTradeTime": null,
+      "stopReason": null
+    }
+  },
+  "after": {
+    "live": {
+      "mode": "LIVE",
+      "isRunning": true,
+      "currentPositions": 0,
+      "lastTradeTime": null,
+      "stopReason": null
+    },
+    "paper": {
+      "mode": "DRY_RUN",
+      "isRunning": true,
+      "currentPositions": 0,
+      "lastTradeTime": "2026-10-09T07:55:25.302Z",
+      "stopReason": null
+    }
+  },
+  "savedDesiredRunning": {
+    "live": true,
+    "paper": true
+  }
+}

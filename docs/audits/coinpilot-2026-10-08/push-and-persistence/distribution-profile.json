@@ -1,0 +1,8 @@
+{
+  "id": "9ADFALLAHM",
+  "uuid": "2a3045be-43d5-4cf7-be0c-16f795377851",
+  "name": "CoinPilot Push TestFlight 20261008",
+  "state": "ACTIVE",
+  "apsEnvironment": "production",
+  "bundleId": "com.godekd3133.coinpilot"
+}

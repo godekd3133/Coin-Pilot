@@ -1,0 +1,37 @@
+{
+  "recordedAt": "2026-10-09T08:25:18.807143+00:00",
+  "goalStatus": "active",
+  "checks": {
+    "macQA": "passed",
+    "macRegular": "passed",
+    "iosSimulatorBuild": "passed",
+    "diffCheck": "passed",
+    "scenarioHarnessSyntax": "passed",
+    "partialProviderUI": "passed",
+    "providerFailureUI": "passed",
+    "disableAutoConsultDuringFailure": "passed",
+    "signalOnlySessionDuringFailure": "passed",
+    "globalDisabledProvidersUI": "passed",
+    "providerRecoveryUI": "passed",
+    "realProviderExecution": "not-run",
+    "realOrders": "not-run",
+    "actualIPhoneVisual": "blocked"
+  },
+  "sourceSHA256": {
+    "mobile/ios/App/App/CoinPilotViews.swift": "19b0cb2d27f86b6d6e21acfdc7569a51fdb972c8c24631efd82d536e4aba8d70",
+    "mobile/scripts/runNativeQA.mjs": "eaff082b76681011873c784ba343963bfffcc0caca04070de0c2d4d1dd7b2879"
+  },
+  "screenshotsInspected": [
+    "35-partial-provider-before.png",
+    "36-provider-error-before.png",
+    "37-provider-error-after.png",
+    "38-signal-only-error-after.png",
+    "39-provider-disabled-after.png",
+    "40-provider-recovery-after.png"
+  ],
+  "remaining": [
+    "Whole-server outage and timeout recovery",
+    "Actual iPhone layout, Dynamic Type, VoiceOver",
+    "Periodic news renewal trace"
+  ]
+}

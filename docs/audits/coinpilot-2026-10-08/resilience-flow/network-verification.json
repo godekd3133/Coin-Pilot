@@ -1,0 +1,43 @@
+{
+  "recordedAt": "2026-10-09T08:37:24.062169+00:00",
+  "goalStatus": "active",
+  "checks": {
+    "nativeStoreScenarios": {
+      "status": "passed",
+      "count": 70
+    },
+    "macQA": "passed",
+    "macRegular": "passed",
+    "iosSimulatorBuild": "passed",
+    "diffCheck": "passed",
+    "offlineUI": "passed",
+    "serverRestartRecovery": "passed",
+    "delayedStatusTimeout": "passed",
+    "retryRetainsFailure": "passed",
+    "timeoutRecovery": "passed",
+    "realOrders": "not-run",
+    "productionDeployment": "not-run",
+    "actualIPhoneVisual": "blocked"
+  },
+  "statusResponseDelayMilliseconds": 30000,
+  "clientRequestTimeoutSeconds": 20,
+  "sourceSHA256": {
+    "mobile/ios/App/App/CoinPilotStore.swift": "72dfbf4db46a1b43c62d7fc5abd1419b9ea2fc01d4d23975378e52cc0a2436c3",
+    "mobile/ios/App/App/CoinPilotViews.swift": "70a3a08b3495a8070d09c079659efc745f52bbc756a23377253b511c3500e75d",
+    "mobile/tests/CoinPilotStoreTests.swift": "e154c0343f9bf3da2895deec72f67d9443f8cec7ee1ce4050ecf0d9139895da2",
+    "mobile/scripts/runNativeQA.mjs": "2c2c4a1b3ae359bfe397f11d9ccccfd130d42770e27439aa88f278e9faf79f5c"
+  },
+  "screenshotsInspected": [
+    "41-network-offline-before.png",
+    "42-network-offline-after.png",
+    "44-timeout-message-before.png",
+    "45-timeout-message-retained-after.png",
+    "46-retry-message-retained-after.png",
+    "47-timeout-recovery-after.png"
+  ],
+  "remaining": [
+    "Actual iPhone, Dynamic Type and VoiceOver",
+    "Periodic news renewal trace",
+    "Full current-state goal completion audit"
+  ]
+}
