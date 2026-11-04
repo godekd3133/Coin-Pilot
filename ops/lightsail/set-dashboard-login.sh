@@ -5,8 +5,9 @@
 #
 # Asks for the password twice without echoing, stores only its scrypt hash in
 # both the paper (/etc/coinpilot.env) and LIVE (/etc/coinpilot/coinpilot-live.env)
-# env files, validates each file, and restarts both services. Saved app and
-# browser sessions keep working: the login hands out the existing tokens.
+# env files, gives each server an operator token if it has none, validates
+# each file, and restarts both services. Saved app and browser sessions keep
+# working: the login hands out the existing tokens.
 set -euo pipefail
 
 if [[ $EUID -ne 0 ]]; then
@@ -47,6 +48,12 @@ set_key() {
 for file in "$PAPER_ENV" "$LIVE_ENV"; do
   [[ -f "$file" ]] || { echo "env 파일이 없습니다: $file" >&2; exit 1; }
   cp -p "$file" "$file.bak-login-$(date +%Y%m%d%H%M%S)"
+  # One sign-in controls both workspaces from the browser too, so each server
+  # needs an operator token for the login to hand out. A mobile-only LIVE
+  # profile gets its own random one (never Paper's).
+  if ! grep -q '^DASHBOARD_TOKEN=.\+' "$file"; then
+    set_key "$file" DASHBOARD_TOKEN "$(openssl rand -hex 32)"
+  fi
   set_key "$file" DASHBOARD_LOGIN_USERNAME "$USERNAME"
   set_key "$file" DASHBOARD_LOGIN_PASSWORD_HASH "$HASH"
   # Fail before restarting anything if the file no longer validates.
