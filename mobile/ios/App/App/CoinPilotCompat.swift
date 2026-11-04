@@ -129,6 +129,21 @@ extension View {
         #endif
     }
 
+    /// 값 변경 감지. macOS 14+/iOS 17+에서는 새 두 인자 API를, iOS 15~16에서는
+    /// 기존 API를 써서 배포 대상 전체에서 경고 없이 같은 동작을 한다.
+    @ViewBuilder
+    func cpOnChange<Value: Equatable>(of value: Value, perform action: @escaping (Value) -> Void) -> some View {
+        #if os(macOS)
+        onChange(of: value) { _, newValue in action(newValue) }
+        #else
+        if #available(iOS 17.0, *) {
+            onChange(of: value) { _, newValue in action(newValue) }
+        } else {
+            onChange(of: value, perform: action)
+        }
+        #endif
+    }
+
     /// macOS에서는 내용을 넓은 창에 맞춰 늘리지 않고 읽기 좋은 폭으로 중앙 정렬한다.
     /// iOS는 원래 폭을 그대로 쓴다.
     @ViewBuilder
