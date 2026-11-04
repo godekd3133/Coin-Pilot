@@ -18,9 +18,12 @@ function read(file) {
   return fs.readFileSync(file, 'utf8');
 }
 
+// Shell URLs are relative to the deployment prefix (`/` for paper, `/live/`
+// behind the LIVE proxy), so both `icon.svg` and a legacy `/icon.svg` resolve
+// against public/.
 function safePublicFile(urlPath) {
-  if (typeof urlPath !== 'string' || !urlPath.startsWith('/')) return null;
-  const resolved = path.resolve(publicRoot, urlPath.slice(1));
+  if (typeof urlPath !== 'string' || urlPath === '' || /^[a-z]+:/i.test(urlPath)) return null;
+  const resolved = path.resolve(publicRoot, urlPath.replace(/^\/+/, ''));
   const relative = path.relative(publicRoot, resolved);
   if (relative.startsWith('..') || path.isAbsolute(relative)) return null;
   return resolved;
@@ -46,11 +49,11 @@ function main() {
 
   check('manifest-display-standalone', manifest.display === 'standalone',
     `display=${manifest.display || 'missing'}`);
-  check('manifest-scope-root', manifest.scope === '/',
+  check('manifest-scope-relative', manifest.scope === './',
     `scope=${manifest.scope || 'missing'}`);
-  check('manifest-start-url', manifest.start_url === '/?source=pwa',
+  check('manifest-start-url', manifest.start_url === './?source=pwa',
     `start_url=${manifest.start_url || 'missing'}`);
-  check('manifest-id-stable', manifest.id === '/?source=pwa',
+  check('manifest-id-stable', manifest.id === './?source=pwa',
     `id=${manifest.id || 'missing'}`);
 
   const icons = Array.isArray(manifest.icons) ? manifest.icons : [];
@@ -72,10 +75,12 @@ function main() {
     /<svg\b[^>]*\bwidth=["']512["'][^>]*\bheight=["'][^>]*\bviewBox=["']0 0 512 512["']/.test(svgIconSource),
   'SVG install icon declares explicit 512x512 geometry');
 
-  const scriptAsset = indexSource.match(/<script\s+type=["']module["']\s+src=["'](\/app\/main\.js)["']/)?.[1];
-  const styleAssets = [...indexSource.matchAll(/<link\s+rel=["']stylesheet["']\s+href=["'](\/app\/ui\/[a-z]+\.css)["']/g)].map(match => match[1]);
-  check('index-app-module-entry', Boolean(scriptAsset), scriptAsset || 'missing');
-  check('index-app-design-tokens', styleAssets.includes('/app/ui/tokens.css'), styleAssets.join(', ') || 'missing');
+  const scriptAsset = indexSource.match(/<script\s+type=["']module["']\s+src=["'](app\/main\.js)["']/)?.[1];
+  const styleAssets = [...indexSource.matchAll(/<link\s+rel=["']stylesheet["']\s+href=["'](app\/ui\/[a-z]+\.css)["']/g)].map(match => match[1]);
+  check('index-app-module-entry', Boolean(scriptAsset), scriptAsset || 'missing (must be relative: app/main.js)');
+  check('index-app-design-tokens', styleAssets.includes('app/ui/tokens.css'), styleAssets.join(', ') || 'missing');
+  check('index-no-root-absolute-assets', !/(?:href|src)=["']\/(?!\/)/.test(indexSource),
+    'every shell asset is relative so a prefixed deployment loads its own server');
   check('index-mobile-web-app-capable',
     /<meta\s+name=["']mobile-web-app-capable["']\s+content=["']yes["']/i.test(indexSource),
     'Android install metadata declares mobile web app capability');
@@ -89,40 +94,42 @@ function main() {
     /<meta\s+name=["']apple-mobile-web-app-status-bar-style["']\s+content=["'][^"']+["']/i.test(indexSource),
     'iOS standalone status-bar metadata is declared');
   check('index-apple-touch-icon-link',
-    /<link\s+rel=["']apple-touch-icon["']\s+href=["']\/apple-touch-icon\.png["']/i.test(indexSource),
+    /<link\s+rel=["']apple-touch-icon["']\s+href=["']apple-touch-icon\.png["']/i.test(indexSource),
     'iOS home-screen raster icon is linked');
 
   const shellAssets = [
-    '/',
-    '/index.html',
-    '/manifest.webmanifest',
-    '/icon.svg',
-    '/icon-192.png',
-    '/icon-512.png',
-    '/apple-touch-icon.png',
-    '/auth-client.js',
+    '',
+    'index.html',
+    'manifest.webmanifest',
+    'icon.svg',
+    'icon-192.png',
+    'icon-512.png',
+    'apple-touch-icon.png',
+    'auth-client.js',
     scriptAsset,
     ...styleAssets
   ].filter(Boolean);
   for (const asset of shellAssets) {
-    const file = asset === '/' ? indexFile : safePublicFile(asset.split('?')[0]);
+    const file = asset === '' ? indexFile : safePublicFile(asset.split('?')[0]);
     const exists = file && fs.existsSync(file) && fs.statSync(file).isFile();
-    check(`shell-file:${asset}`, Boolean(exists && fs.statSync(file).size > 0),
+    check(`shell-file:${asset || '(scope root)'}`, Boolean(exists && fs.statSync(file).size > 0),
       exists ? `${fs.statSync(file).size} bytes` : 'missing');
-    check(`shell-cache:${asset}`, quotedAssetExists(serviceWorkerSource, asset),
+    check(`shell-cache:${asset || '(scope root)'}`, quotedAssetExists(serviceWorkerSource, asset),
       quotedAssetExists(serviceWorkerSource, asset) ? 'pre-cached' : 'not listed in APP_SHELL');
   }
 
-  check('service-worker-api-bypass', /url\.pathname\.startsWith\(['"]\/api\//.test(serviceWorkerSource),
-    'dynamic API state is not served from the shell cache');
+  check('service-worker-scope-relative', /const SCOPE = new URL\(self\.registration\.scope\)\.pathname/.test(serviceWorkerSource),
+    'shell paths resolve against the registration scope (paper / and LIVE /live/)');
+  check('service-worker-own-shell-only', /if \(!isOwnShellPath\(url\.pathname\)\) return;/.test(serviceWorkerSource),
+    'API, realtime and other prefixes on this origin are never answered from the shell cache');
   check('service-worker-cross-origin-bypass', /url\.origin\s*!==\s*self\.location\.origin\)\s*return/.test(serviceWorkerSource),
     'third-party assets keep their own response types when offline');
   check('service-worker-shell-network-first', /NETWORK_FIRST_SHELL_PATHS/.test(serviceWorkerSource) &&
     /fetch\(request\)[\s\S]*ignoreSearch: true/.test(serviceWorkerSource),
   'online shell assets refresh from the network and fall back to cache offline');
-  check('service-worker-app-prefix-network-first', /NETWORK_FIRST_PREFIXES = \[['"]\/app\/['"]\]/.test(serviceWorkerSource),
-    'shell modules under /app/ refresh from the network first');
-  check('app-service-worker-registration', /navigator\.serviceWorker\.register\(['"]\/sw\.js['"]/.test(read(path.join(publicRoot, 'app', 'main.js'))),
+  check('service-worker-app-prefix-network-first', /NETWORK_FIRST_PREFIXES = \[at\(['"]app\/['"]\)\]/.test(serviceWorkerSource),
+    'shell modules under app/ refresh from the network first');
+  check('app-service-worker-registration', /navigator\.serviceWorker\.register\(`\$\{APP_BASE\}sw\.js`, \{ scope: APP_BASE \}\)/.test(read(path.join(publicRoot, 'app', 'main.js'))),
     'the web shell entry owns service worker registration');
 
   const valid = checks.every(item => item.passed);

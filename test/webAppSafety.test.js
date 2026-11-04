@@ -1132,7 +1132,7 @@ test('service worker does not replace failed third-party requests with the local
   const handlers = {};
   vm.runInNewContext(serviceWorkerSource, {
     URL,
-    self: { location: { origin: 'https://coinpilot.example' }, addEventListener(name, handler) { handlers[name] = handler; } }
+    self: { location: { origin: 'https://coinpilot.example' }, registration: { scope: 'https://coinpilot.example/' }, addEventListener(name, handler) { handlers[name] = handler; } }
   });
   for (const url of ['https://cdn.example.net/style.css', 'https://coinpilot.example/api/account']) {
     let intercepted = false;
@@ -1144,13 +1144,46 @@ test('service worker does not replace failed third-party requests with the local
   assert.equal(intercepted, false, 'non-GET requests are never served from cache');
 });
 
+function loadServiceWorker(scope) {
+  const handlers = {};
+  vm.runInNewContext(serviceWorkerSource, {
+    URL,
+    Response: { error: () => null },
+    fetch: () => new Promise(() => {}),
+    caches: { match: () => new Promise(() => {}), open: () => new Promise(() => {}) },
+    self: { location: { origin: 'https://coinpilot.example' }, registration: { scope }, addEventListener(name, handler) { handlers[name] = handler; } }
+  });
+  return url => {
+    let intercepted = false;
+    handlers.fetch({ request: { method: 'GET', url, mode: 'no-cors' }, respondWith() { intercepted = true; } });
+    return intercepted;
+  };
+}
+
+test('paper and LIVE service workers on one origin only answer their own shell files', () => {
+  const root = loadServiceWorker('https://coinpilot.example/');
+  const live = loadServiceWorker('https://coinpilot.example/live/');
+  // The root (paper) worker's scope also covers /live/, so it must pass LIVE traffic through.
+  for (const url of ['/live/', '/live/api/account', '/live/app/main.js', '/live/socket.io/?EIO=4', '/api/account', '/socket.io/?EIO=4']) {
+    assert.equal(root(`https://coinpilot.example${url}`), false, `root worker must not answer ${url}`);
+  }
+  for (const url of ['/', '/app/main.js', '/auth-client.js']) assert.equal(root(`https://coinpilot.example${url}`), true, `root worker serves ${url}`);
+  for (const url of ['/live/api/account', '/live/socket.io/?EIO=4', '/app/main.js', '/']) {
+    assert.equal(live(`https://coinpilot.example${url}`), false, `LIVE worker must not answer ${url}`);
+  }
+  for (const url of ['/live/', '/live/app/main.js', '/live/auth-client.js']) assert.equal(live(`https://coinpilot.example${url}`), true, `LIVE worker serves ${url}`);
+  assert.match(serviceWorkerSource, /const CACHE_NAME = `\$\{CACHE_VERSION\}@\$\{SCOPE\}`/, 'cache names are scoped per deployment prefix');
+});
+
 test('service worker waits for the user update action before activating a replacement worker', async () => {
   const handlers = {};
   let skipWaitingCalls = 0;
   vm.runInNewContext(serviceWorkerSource, {
+    URL,
     caches: { open: async () => ({ addAll: async () => {} }) },
     self: {
       location: { origin: 'https://coinpilot.example' },
+      registration: { scope: 'https://coinpilot.example/' },
       addEventListener(name, handler) { handlers[name] = handler; },
       skipWaiting() { skipWaitingCalls += 1; return Promise.resolve(); }
     }
@@ -1166,25 +1199,28 @@ test('service worker waits for the user update action before activating a replac
 test('manifest icons and every service worker app-shell asset exist; the shell is network-first', () => {
   const manifest = JSON.parse(readSource('public/manifest.webmanifest'));
   assert.equal(manifest.display, 'standalone');
-  assert.equal(manifest.scope, '/');
-  assert.equal(manifest.start_url, '/?source=pwa');
-  assert.equal(manifest.id, '/?source=pwa');
+  // Relative to the manifest URL so `/live/manifest.webmanifest` scopes the LIVE install to `/live/`.
+  assert.equal(manifest.scope, './');
+  assert.equal(manifest.start_url, './?source=pwa');
+  assert.equal(manifest.id, './?source=pwa');
   for (const icon of manifest.icons) {
-    const file = path.join(projectRoot, 'public', icon.src.slice(1));
+    assert.ok(!icon.src.startsWith('/'), `manifest icon must be relative: ${icon.src}`);
+    const file = path.join(projectRoot, 'public', icon.src);
     assert.ok(fs.existsSync(file) && fs.statSync(file).size > 0, `manifest icon missing: ${icon.src}`);
   }
-  const appShell = JSON.parse(`[${serviceWorkerSource.match(/const APP_SHELL = \[([\s\S]*?)\n\];/)[1].replace(/'/g, '"')}]`);
+  const appShell = JSON.parse(`[${serviceWorkerSource.match(/const APP_SHELL = \[([\s\S]*?)\n\]\.map\(at\);/)[1].replace(/'/g, '"')}]`);
   for (const asset of appShell) {
-    const file = path.join(projectRoot, 'public', asset === '/' ? 'index.html' : asset.slice(1));
+    assert.ok(!asset.startsWith('/'), `service worker shell entries are scope-relative: ${asset}`);
+    const file = path.join(projectRoot, 'public', asset === '' ? 'index.html' : asset);
     assert.ok(fs.existsSync(file), `service worker app shell missing: ${asset}`);
   }
-  for (const required of ['/', '/auth-client.js', '/app/main.js', '/app/ui/tokens.css', '/app/core/mutations.js']) assert.ok(appShell.includes(required), required);
-  assert.match(serviceWorkerSource, /NETWORK_FIRST_PREFIXES = \['\/app\/'\]/);
+  for (const required of ['', 'auth-client.js', 'app/main.js', 'app/ui/tokens.css', 'app/core/mutations.js', 'app/core/base.js']) assert.ok(appShell.includes(required), required || '(scope root)');
+  assert.match(serviceWorkerSource, /NETWORK_FIRST_PREFIXES = \[at\('app\/'\)\]/);
   for (const legacy of ['pilot-redesign', 'ai-desk', 'icons.css']) assert.equal(serviceWorkerSource.includes(legacy), false, `${legacy} left in the service worker`);
   const indexSource = readSource('public/index.html');
-  assert.match(indexSource, /<link rel="manifest" href="\/manifest\.webmanifest">/);
+  assert.match(indexSource, /<link rel="manifest" href="manifest\.webmanifest">/);
   assert.match(indexSource, /apple-mobile-web-app-capable/);
-  assert.match(readSource('public/app/main.js'), /navigator\.serviceWorker\.register\('\/sw\.js'/);
+  assert.match(readSource('public/app/main.js'), /navigator\.serviceWorker\.register\(`\$\{APP_BASE\}sw\.js`, \{ scope: APP_BASE \}\)/);
 });
 
 // ------------------------------------------------------------------ static order boundaries
