@@ -454,8 +454,20 @@ class UpbitAPI {
           return target;
         };
 
+        // A terminal order that is fully filled has nothing left to fill.
+        // Upbit omits remaining_volume on a market (price) buy that ends as
+        // 'cancel'; record that inferred zero so the fill accounting stays
+        // complete instead of blocking every later order.
+        const terminalFill = target => {
+          const filled = fillAveragePriceFromTrades(target);
+          if (filled && (filled.remaining_volume === null || filled.remaining_volume === undefined)) {
+            filled.remaining_volume = '0';
+          }
+          return filled;
+        };
+
         if (order.state === 'done') {
-          return { filled: true, order: fillAveragePriceFromTrades(order) };
+          return { filled: true, order: terminalFill(order) };
         }
 
         if (order.state === 'cancel') {
@@ -465,7 +477,7 @@ class UpbitAPI {
           const cancelledExecuted = parseFloat(order.executed_volume || 0);
           const cancelledRemaining = parseFloat(order.remaining_volume || 0);
           if (cancelledExecuted > 0 && cancelledRemaining === 0) {
-            return { filled: true, order: fillAveragePriceFromTrades(order) };
+            return { filled: true, order: terminalFill(order) };
           }
           if (cancelledExecuted > 0) {
             return { filled: false, partial: true, order, error: '부분 체결 후 취소됨' };
