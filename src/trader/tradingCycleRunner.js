@@ -269,8 +269,14 @@ export class TradingCycleRunner {
     });
 
     // 5. 상위 코인부터 매매 실행
-    console.log('\n📊 코인별 분석 결과 (점수 순):');
-    coinAnalyses.forEach((analysis, index) => {
+    // A full KRW universe prints hundreds of rows every few seconds; show the
+    // top of the ranking and any actionable market, and count the rest.
+    const printLimit = 10;
+    const printed = coinAnalyses.filter((analysis, index) =>
+      index < printLimit || analysis.decision?.action !== 'HOLD');
+    const inactiveCount = coinAnalyses.filter(analysis => analysis.inactiveMarket).length;
+    console.log(`\n📊 코인별 분석 결과 (점수 순, ${coinAnalyses.length}개 중 ${printed.length}개 표시${inactiveCount ? ` · 체결 없음/이력 부족 ${inactiveCount}개` : ''}):`);
+    printed.forEach((analysis, index) => {
       const strength = analysis.decision.signalStrength;
       const strengthEmoji = {
         'VERY_STRONG': '🔥🔥',
@@ -383,9 +389,14 @@ export class TradingCycleRunner {
       batchTickerFailures: 0
     };
     this.cycleRequestStats.batchTickerRequests += 1;
+    this.cycleTickerFeedLive = false;
     try {
       const tickers = await this.owner.marketDataAdapter.getTickers(this.owner.targetCoins);
       if (!Array.isArray(tickers)) return null;
+      // One fresh quote in the same batch proves the exchange feed is live, so
+      // a market whose last trade is old is quiet, not a data outage.
+      this.cycleTickerFeedLive = tickers.some(ticker =>
+        inspectTraderMarketQuote(ticker, ticker?.market, this.owner.maxCandleAgeSeconds).fresh);
       return new Map(
         tickers
           .filter(ticker => ticker?.market && Number.isFinite(Number(ticker.trade_price)))
@@ -398,6 +409,38 @@ export class TradingCycleRunner {
       this.cycleRequestStats.batchTickerFailures += 1;
       return null;
     }
+  }
+
+  /**
+   * A stale quote is a quiet market only when it came from this cycle's batch
+   * response and that same batch carried at least one fresh quote. A feed-wide
+   * staleness, an individual fallback, or a future timestamp still fails.
+   */
+  isQuietMarket(marketData, freshness) {
+    return freshness?.fresh === false && freshness.reason === 'market_source_stale' &&
+      Boolean(marketData?.ticker) && marketData.sharedSnapshot !== true && this.cycleTickerFeedLive === true;
+  }
+
+  inactiveMarketAnalysis(coin, currentPrice, coinBalance, marketQuoteFreshness, reason, inactiveReason) {
+    return {
+      coin,
+      currentPrice,
+      coinBalance,
+      technicalAnalysis: null,
+      decision: {
+        action: 'HOLD',
+        reason,
+        confidence: '0.00',
+        signalStrength: { level: 'NONE', multiplier: 0, score: 0 },
+        scores: { technical: '0.00', news: '0.00', total: '0.00' },
+        details: { inactiveMarket: inactiveReason, marketQuoteFreshness }
+      },
+      marketReturnPercent: null,
+      candleFreshness: null,
+      marketQuoteFreshness,
+      inactiveMarket: inactiveReason,
+      sentiment: { overall: 'neutral', score: 0, confidence: 0 }
+    };
   }
 
   async analyzeCoin(coin, newsSentiment, marketData = {}, accountSnapshot) {
@@ -431,10 +474,15 @@ export class TradingCycleRunner {
       coin,
       this.owner.maxCandleAgeSeconds
     );
-    if (!marketQuoteFreshness.fresh) {
+    const quietMarket = this.isQuietMarket(marketData, marketQuoteFreshness);
+    if (!marketQuoteFreshness.fresh && !quietMarket) {
       throw createMarketQuoteFreshnessError(coin, marketQuoteFreshness);
     }
     const currentPrice = ticker[0].trade_price;
+    if (quietMarket) {
+      return this.inactiveMarketAnalysis(coin, currentPrice, coinBalance, marketQuoteFreshness,
+        '최근 체결 없음 - 관망', 'market_quote_quiet');
+    }
 
     // 캔들 데이터 조회
     if (marketData.candles === undefined && !sharedSnapshot) this.cycleRequestStats.candleRequests += 1;
@@ -444,6 +492,12 @@ export class TradingCycleRunner {
     const minimumCandleCount = Math.max(50, (this.owner.config.rsiPeriod || 14) + 10);
     if (!candles || !Array.isArray(candles) || candles.length < minimumCandleCount) {
       this.owner.recordInsufficientCandleData(coin, Array.isArray(candles) ? candles.length : 0, minimumCandleCount);
+      // A newly listed market legitimately has a short history. While the
+      // feed is live that is a HOLD, not a cycle-wide data failure.
+      if (Array.isArray(candles) && marketData.ticker && !sharedSnapshot && this.cycleTickerFeedLive === true) {
+        return this.inactiveMarketAnalysis(coin, currentPrice, coinBalance, marketQuoteFreshness,
+          `캔들 이력 부족 (${candles.length}개) - 관망`, 'insufficient_candle_history');
+      }
       throw new Error(`${coin} 캔들 데이터 부족 (${candles?.length || 0}개)`);
     }
 
