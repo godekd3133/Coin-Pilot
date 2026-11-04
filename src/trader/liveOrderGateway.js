@@ -748,10 +748,12 @@ export class LiveOrderGateway {
 
         const balance = Number(acc.balance);
         const locked = Number(acc.locked);
-        const totalBalance = balance + locked;
+        const market = `${quote}-${acc.currency}`;
+        // 기간별 포트폴리오가 보유한 수량은 스캘퍼 동기화 대상에서 제외한다.
+        const reserved = this.owner.getExternallyReservedVolume?.(market) || 0;
+        const totalBalance = Math.max(0, balance + locked - reserved);
 
-        if (totalBalance > 0) {
-          const market = `${quote}-${acc.currency}`;
+        if (totalBalance > 1e-12) {
           exchangeHoldings.set(market, {
             balance: totalBalance,
             avgPrice: Number(acc.avg_buy_price || 0)

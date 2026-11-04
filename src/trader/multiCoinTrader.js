@@ -823,6 +823,29 @@ class MultiCoinTrader {
   /**
    * 다중 코인 자동매매 시작
    */
+  /**
+   * 다른 엔진(기간별 포트폴리오)이 같은 거래소 계좌에서 보유한 수량을 등록한다.
+   * 스캘퍼의 잔고 조회와 거래소 동기화는 이 수량을 제외해, 다른 엔진의 보유분을
+   * 자기 포지션으로 복구하거나 매도하지 않는다.
+   */
+  setExternalHoldingReservations(source, reservations) {
+    if (!this._externalHoldingReservations) this._externalHoldingReservations = new Map();
+    const normalized = new Map();
+    for (const [market, volume] of Object.entries(reservations || {})) {
+      const amount = Number(volume);
+      if (Number.isFinite(amount) && amount > 0) normalized.set(String(market).toUpperCase(), amount);
+    }
+    this._externalHoldingReservations.set(String(source), normalized);
+  }
+
+  getExternallyReservedVolume(market) {
+    if (!this._externalHoldingReservations) return 0;
+    const key = String(market || '').toUpperCase();
+    let total = 0;
+    for (const reservations of this._externalHoldingReservations.values()) total += reservations.get(key) || 0;
+    return total;
+  }
+
   get liveCredentialsConfigured() {
     return !this.dryRun &&
       typeof this.upbit?.accessKey === 'string' && this.upbit.accessKey.trim().length > 0 &&

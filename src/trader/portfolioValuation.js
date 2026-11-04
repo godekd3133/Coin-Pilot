@@ -325,6 +325,9 @@ export class PortfolioValuation {
   getCoinBalance(accounts, market) {
     const coinSymbol = market.split('-')[1];
     const coinAccount = accounts.find(acc => acc.currency === coinSymbol);
-    return coinAccount ? parseFloat(coinAccount.balance) : 0;
+    const balance = coinAccount ? parseFloat(coinAccount.balance) : 0;
+    // 기간별 포트폴리오 등 다른 엔진이 보유한 수량은 스캘퍼 잔고에서 제외한다.
+    const reserved = this.owner.dryRun ? 0 : (this.owner.getExternallyReservedVolume?.(market) || 0);
+    return Math.max(0, balance - reserved);
   }
 }
