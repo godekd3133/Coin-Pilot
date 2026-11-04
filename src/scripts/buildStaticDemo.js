@@ -14,7 +14,7 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'
 const publicDir = path.join(repoRoot, 'public');
 const demoDir = path.join(repoRoot, 'demo', 'static');
 const defaultOutDir = path.join(repoRoot, '..', '..', 'linked-me', 'public', 'demos', 'coin-pilot');
-const SERVICE_WORKER_CALL = /navigator\.serviceWorker\.register\('\/sw\.js'\)/g;
+const SERVICE_WORKER_CALL = /navigator\.serviceWorker\.register\((?:'\/sw\.js'|`\$\{APP_BASE\}sw\.js`, \{ scope: APP_BASE \})\)/g;
 const DISABLED_SERVICE_WORKER = 'Promise.reject(new Error("demo: service worker disabled"))';
 
 export const FORBIDDEN_PATTERNS = [
@@ -38,12 +38,12 @@ export function transformIndexHtml(source) {
   let html = source;
   html = replaceRequired(html, /<link rel="manifest"[^>]*>\s*/, '', 'manifest');
   html = replaceRequired(html, /<link rel="apple-touch-icon"[^>]*>\s*/, '', 'touch icon');
-  html = replaceRequired(html, /href="\/icon\.svg"/, 'href="./icon.svg"', 'favicon');
-  html = replaceRequired(html, /href="\/app\/ui\/tokens\.css"/, 'href="./app/ui/tokens.css"', 'design tokens');
-  html = html.replace(/href="\/app\/ui\/([a-z]+\.css)"/g, 'href="./app/ui/$1"');
-  html = replaceRequired(html, /<script src="\/socket\.io\/socket\.io\.js"><\/script>/, '<script src="./sim-core.js"></script>\n    <script src="./runtime.js"></script>', 'socket script');
-  html = replaceRequired(html, /<script src="\/auth-client\.js[^"]*"><\/script>/, '<script src="./auth-client.js"></script>', 'auth client');
-  html = replaceRequired(html, /<script type="module" src="\/app\/main\.js"><\/script>/, '<script type="module" src="./app/main.js"></script>\n    <script src="./demo-ui.js"></script>', 'app entry');
+  html = replaceRequired(html, /href="\/?icon\.svg"/, 'href="./icon.svg"', 'favicon');
+  html = replaceRequired(html, /href="\/?app\/ui\/tokens\.css"/, 'href="./app/ui/tokens.css"', 'design tokens');
+  html = html.replace(/href="\/?app\/ui\/([a-z]+\.css)"/g, 'href="./app/ui/$1"');
+  html = replaceRequired(html, /<script src="\/?socket\.io\/socket\.io\.js"><\/script>/, '<script src="./sim-core.js"></script>\n    <script src="./runtime.js"></script>', 'socket script');
+  html = replaceRequired(html, /<script src="\/?auth-client\.js[^"]*"><\/script>/, '<script src="./auth-client.js"></script>', 'auth client');
+  html = replaceRequired(html, /<script type="module" src="\/?app\/main\.js"><\/script>/, '<script type="module" src="./app/main.js"></script>\n    <script src="./demo-ui.js"></script>', 'app entry');
   html = replaceRequired(html, /<title>[^<]*<\/title>/, '<title>Coin Pilot 체험판 (합성 데이터)</title>', 'title');
   html = replaceRequired(html, '</head>', `    <meta name="robots" content="noindex">
     <meta name="description" content="Coin Pilot 대시보드를 합성 데이터로 만져 보는 체험판. 실제 거래소와 연결되지 않으며 투자 권유가 아닙니다.">

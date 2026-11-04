@@ -131,8 +131,8 @@ test('dashboard serves hardening headers, local icons and rejects malformed mark
     assert.equal(shell.headers.get('x-powered-by'), null);
     const html = await shell.text();
     assert.equal(/https?:\/\/(?!www\.w3\.org)[^"']*\.(css|js)/.test(html), false, 'shell must not load remote assets');
-    assert.match(html, /href="\/app\/ui\/tokens\.css"/);
-    assert.match(html, /<script type="module" src="\/app\/main\.js"><\/script>/);
+    assert.match(html, /href="app\/ui\/tokens\.css"/);
+    assert.match(html, /<script type="module" src="app\/main\.js"><\/script>/);
     const icons = await fetch(`${base}/app/ui/icons.js`);
     assert.equal(icons.status, 200);
     assert.match(icons.headers.get('content-type') || '', /javascript/);

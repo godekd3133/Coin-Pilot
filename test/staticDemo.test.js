@@ -142,6 +142,7 @@ test('demo build isolates the bundle and leaves no external asset, service worke
 test('demo transforms fail loudly when the dashboard markup they rely on moves', () => {
   assert.throws(() => transformIndexHtml('<html></html>'), /expected fragment/);
   assert.equal(transformAppScript("navigator.serviceWorker.register('/sw.js')").includes('register'), false);
+  assert.equal(transformAppScript('navigator.serviceWorker.register(`${APP_BASE}sw.js`, { scope: APP_BASE })').includes('register'), false);
 });
 
 test('scanBundle flags forbidden content', () => {
