@@ -102,6 +102,17 @@
 
   // ---------------------------------------------------------------- overlay
   let overlay = null;
+  // `passwordLogin` from /api/auth/status decides the first form shown.
+  let passwordLoginAvailable = false;
+  let loginMode = 'token';
+  let applyLoginMode = () => {};
+
+  function focusLoginField() {
+    const target = loginMode === 'password'
+      ? overlay?.querySelector('#cp-auth-username')
+      : overlay?.querySelector('#cp-auth-token');
+    window.setTimeout(() => target?.focus?.(), 50);
+  }
 
   function ensureOverlay() {
     if (overlay) return overlay;
@@ -124,6 +135,9 @@
       #cp-auth-gate .cp-auth-benefits{display:grid;gap:10px;padding:0 0 20px;margin:0 0 20px;border-bottom:1px solid #e5e8eb;list-style:none;font-size:13px;line-height:1.5;color:#4e5968}
       #cp-auth-gate .cp-auth-benefits strong{display:block;color:#191f28;font-weight:650}
       #cp-auth-gate .cp-auth-card{margin:auto}
+      #cp-auth-gate .cp-auth-fields[hidden]{display:none}
+      #cp-auth-gate .cp-auth-fields label + input{margin-bottom:12px}
+      #cp-auth-gate button.cp-auth-switch{width:auto;min-height:44px;margin:6px 0 0;padding:0;background:none;color:#1b64da;font-size:13px;font-weight:600}
     `;
     document.head.appendChild(style);
 
@@ -140,21 +154,96 @@
           <li><strong>어떤 거래가 있었는지</strong>최근 거래와 보유 코인을 살펴봐요.</li>
           <li><strong>지금 확인할 일이 있는지</strong>시세 갱신과 자동매매 중단 상태를 확인해요.</li>
         </ul>
-        <label for="cp-auth-token">서버 접속 토큰</label>
-        <input id="cp-auth-token" type="password" name="token" autocomplete="off" autocapitalize="none" spellcheck="false" aria-describedby="cp-auth-help cp-auth-error" placeholder="관리자에게 받은 접속 토큰">
-        <button type="submit">연결하고 내 현황 보기</button>
+        <div class="cp-auth-fields cp-auth-password-fields" hidden>
+          <label for="cp-auth-username">아이디</label>
+          <input id="cp-auth-username" type="text" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" aria-describedby="cp-auth-error">
+          <label for="cp-auth-password">비밀번호</label>
+          <input id="cp-auth-password" type="password" name="password" autocomplete="current-password" aria-describedby="cp-auth-error">
+        </div>
+        <div class="cp-auth-fields cp-auth-token-fields">
+          <label for="cp-auth-token">서버 접속 토큰</label>
+          <input id="cp-auth-token" type="password" name="token" autocomplete="off" autocapitalize="none" spellcheck="false" aria-describedby="cp-auth-help cp-auth-error" placeholder="관리자에게 받은 접속 토큰">
+        </div>
+        <button type="submit" class="cp-auth-submit">연결하고 내 현황 보기</button>
         <div id="cp-auth-error" class="cp-auth-error" role="alert"></div>
+        <button type="button" class="cp-auth-switch" hidden>토큰으로 접속</button>
         <div id="cp-auth-help" class="cp-auth-hint">토큰은 서버 관리자에게 받을 수 있어요. 거래소 API 키와는 다른 값입니다. 입력한 토큰은 이 브라우저에 저장됩니다.</div>
       </form>`;
     document.body.appendChild(overlay);
 
     const form = overlay.querySelector('form');
-    const input = overlay.querySelector('input');
+    const input = overlay.querySelector('#cp-auth-token');
+    const usernameInput = overlay.querySelector('#cp-auth-username');
+    const passwordInput = overlay.querySelector('#cp-auth-password');
+    const passwordFields = overlay.querySelector('.cp-auth-password-fields');
+    const tokenFields = overlay.querySelector('.cp-auth-token-fields');
+    const switchButton = overlay.querySelector('.cp-auth-switch');
+    const helpBox = overlay.querySelector('.cp-auth-hint');
     const errorBox = overlay.querySelector('.cp-auth-error');
-    const button = overlay.querySelector('button');
+    const button = overlay.querySelector('.cp-auth-submit');
+
+    applyLoginMode = mode => {
+      loginMode = passwordLoginAvailable && mode === 'password' ? 'password' : 'token';
+      passwordFields.hidden = loginMode !== 'password';
+      tokenFields.hidden = loginMode === 'password';
+      switchButton.hidden = !passwordLoginAvailable;
+      switchButton.textContent = loginMode === 'password' ? '토큰으로 접속' : '아이디로 로그인';
+      helpBox.textContent = loginMode === 'password'
+        ? '서버에 등록한 아이디와 비밀번호로 로그인해요. 로그인하면 이 브라우저에 접속 권한이 저장됩니다.'
+        : '토큰은 서버 관리자에게 받을 수 있어요. 거래소 API 키와는 다른 값입니다. 입력한 토큰은 이 브라우저에 저장됩니다.';
+      errorBox.textContent = '';
+    };
+    switchButton.addEventListener('click', () => {
+      applyLoginMode(loginMode === 'password' ? 'token' : 'password');
+      focusLoginField();
+    });
+    applyLoginMode(passwordLoginAvailable ? 'password' : 'token');
+
+    async function submitPassword() {
+      const username = usernameInput.value.trim();
+      const password = passwordInput.value;
+      if (!username || !password) {
+        errorBox.textContent = '아이디와 비밀번호를 입력해 주세요.';
+        return;
+      }
+      button.disabled = true;
+      button.textContent = '로그인 중…';
+      errorBox.textContent = '';
+      try {
+        const response = await rawFetch(`${API_PREFIX}auth/login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, password })
+        });
+        let data = null;
+        try { data = await response.json(); } catch { /* handled below */ }
+        if (response.ok && typeof data?.token === 'string' && data.token && TOKEN_SCOPES.has(data.tokenScope)) {
+          passwordInput.value = '';
+          setToken(data.token);
+          setTokenScope(data.tokenScope);
+          setAuthState({ authRequired: true, tokenScope: data.tokenScope, authenticated: true, resolved: true, verification: 'verified', tokenPresent: true, error: null }, true);
+          window.location.reload();
+          return;
+        }
+        errorBox.textContent = response.status === 429
+          ? '로그인 시도가 많습니다. 잠시 후 다시 시도해 주세요.'
+          : response.status === 401
+            ? '아이디 또는 비밀번호가 맞지 않습니다.'
+            : '서버가 로그인 요청을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.';
+      } catch {
+        errorBox.textContent = '서버에 연결하지 못했습니다. 인터넷 연결을 확인해 주세요.';
+      } finally {
+        button.disabled = false;
+        button.textContent = '연결하고 내 현황 보기';
+      }
+    }
 
     form.addEventListener('submit', async event => {
       event.preventDefault();
+      if (loginMode === 'password') {
+        await submitPassword();
+        return;
+      }
       const token = input.value.trim();
       const previousToken = getToken();
       if (!token) {
@@ -212,7 +301,7 @@
     const gate = ensureOverlay();
     if (message) gate.querySelector('.cp-auth-error').textContent = message;
     gate.hidden = false;
-    window.setTimeout(() => gate.querySelector('input')?.focus(), 50);
+    focusLoginField();
   }
 
   function showAuthenticationFailure() {
@@ -329,6 +418,7 @@
         return;
       }
       if (data?.authRequired !== true) throw new Error('auth status response was incomplete');
+      passwordLoginAvailable = data.passwordLogin === true;
       if (!savedToken) {
         setAuthState({ authRequired: true, tokenScope: null, authenticated: false, resolved: true, verification: 'missing', tokenPresent: false, error: null }, true);
         showLogin('');

@@ -206,9 +206,9 @@ function renderBanners(current) {
     banners.push(notice({ tone: 'danger', title: '오프라인 · 주문 잠금', body: '서버 연결이 복구될 때까지 최신 자산과 시세를 확인할 수 없으며 주문을 중지합니다.' }));
   }
   if (auth?.authRequired === true && auth.resolved === true && auth.tokenScope === 'read_only') {
-    banners.push(notice({ tone: 'neutral', iconName: 'lock', title: '읽기 전용 접속', body: '자산과 손익만 조회할 수 있습니다. 주문, 설정 변경, 엔진 제어는 운영자 토큰이 필요합니다.', action: button({ label: '토큰 변경', size: 'sm', attrs: { 'data-action': 'login' } }) }));
+    banners.push(notice({ tone: 'neutral', iconName: 'lock', title: '읽기 전용 접속', body: '자산과 손익만 조회할 수 있습니다. 주문, 설정 변경, 엔진 제어는 운영자 토큰이 필요합니다.', action: button({ label: '다시 로그인', size: 'sm', attrs: { 'data-action': 'login' } }) }));
   } else if (auth?.authRequired === true && auth.resolved === true && auth.tokenScope === 'mobile_operator') {
-    banners.push(notice({ tone: 'warning', iconName: 'lock', title: '모바일 앱 전용 토큰', body: '이 토큰은 모바일 앱에서만 사용할 수 있습니다. 브라우저에서는 운영자 토큰으로 다시 연결해 주세요.', action: button({ label: '토큰 변경', size: 'sm', attrs: { 'data-action': 'login' } }) }));
+    banners.push(notice({ tone: 'warning', iconName: 'lock', title: '모바일 앱 전용 토큰', body: '이 토큰은 모바일 앱에서만 사용할 수 있습니다. 브라우저에서는 운영자 토큰으로 다시 연결해 주세요.', action: button({ label: '다시 로그인', size: 'sm', attrs: { 'data-action': 'login' } }) }));
   } else if (auth?.authRequired === true && auth.resolved === true && auth.verification === 'unavailable') {
     banners.push(notice({ tone: 'warning', title: '접속 권한 확인 필요', body: mutationBlockReason(auth, { online: current.online }), action: button({ label: '다시 연결', size: 'sm', attrs: { 'data-action': 'login' } }) }));
   }

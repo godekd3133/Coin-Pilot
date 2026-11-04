@@ -35,7 +35,7 @@ export default {
             ['서버 상태 갱신', relativeTime(ctx.resource('status').lastSuccessAt)]
           ])}
           <div class="cp-actions" style="margin-top:12px">
-            ${auth.authRequired === true ? button({ label: '토큰 변경', iconName: 'key', attrs: { 'data-action': 'change-token' } }) : ''}
+            ${auth.authRequired === true ? button({ label: '다시 로그인', iconName: 'key', attrs: { 'data-action': 'change-token' } }) : ''}
             ${auth.authRequired === true ? button({ label: '이 기기에서 로그아웃', iconName: 'logout', attrs: { 'data-action': 'logout' } }) : ''}
           </div>
           <p class="cp-caption" style="margin-top:8px">접속 토큰은 이 브라우저에만 저장돼요. 거래소 API 키와는 다른 값이에요.</p>`
@@ -90,7 +90,7 @@ export default {
     ctx.on('click', '[data-segment="theme"]', (event, target) => ctx.store.setTheme?.(target.dataset.value));
     ctx.on('click', '[data-action="change-token"]', () => window.coinPilotAuth?.requestLogin?.(''));
     ctx.on('click', '[data-action="logout"]', async () => {
-      const ok = await ctx.confirm({ title: '이 기기에서 로그아웃할까요?', message: '저장된 접속 토큰을 지웁니다. 다시 접속하려면 토큰을 입력해야 해요.', confirmLabel: '로그아웃', tone: 'danger' });
+      const ok = await ctx.confirm({ title: '이 기기에서 로그아웃할까요?', message: '저장된 접속 토큰을 지웁니다. 다시 접속하려면 로그인해야 해요.', confirmLabel: '로그아웃', tone: 'danger' });
       if (!ok) return;
       for (const key of TOKEN_KEYS) { try { localStorage.removeItem(key); } catch { /* ignore */ } }
       location.reload();

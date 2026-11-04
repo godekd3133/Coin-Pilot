@@ -32,7 +32,7 @@ function makeElement() {
 async function loadAuthClient({
   savedToken = '', savedTokenScope = '', apiStatus = 'auth-required', apiResponse = 401,
   loginResponse = { status: 200, body: { success: true, tokenScope: 'operator' } },
-  statusFailure = false, loginFailure = false, withSocket = false
+  statusFailure = false, loginFailure = false, withSocket = false, passwordLogin = false
 } = {}) {
   let token = savedToken;
   let tokenScope = savedTokenScope;
@@ -77,7 +77,7 @@ async function loadAuthClient({
       if (isStatus && statusFailure || isLogin && loginFailure) throw new TypeError('network unavailable');
       const status = isStatus ? 200 : isLogin ? loginResponse.status : apiResponse;
       const body = isStatus
-        ? { success: true, authRequired: apiStatus === 'auth-required' }
+        ? { success: true, authRequired: apiStatus === 'auth-required', passwordLogin }
         : isLogin ? loginResponse.body : { success: false, authRequired: true };
       return {
         status,
@@ -243,7 +243,7 @@ test('new login preserves the tokenScope returned by the login endpoint', async 
     loginResponse: { status: 200, body: { success: true, tokenScope: 'read_only' } }
   });
   const gate = client.gate();
-  gate.querySelector('input').value = 'new-read-only-token';
+  gate.querySelector('#cp-auth-token').value = 'new-read-only-token';
 
   await gate.querySelector('form').listener('submit')({ preventDefault() {} });
 
@@ -255,12 +255,12 @@ test('new login preserves the tokenScope returned by the login endpoint', async 
 test('login server errors preserve input and do not blame or store the token', async () => {
   const client = await loadAuthClient({ loginResponse: { status: 503, body: { success: false } } });
   const gate = client.gate();
-  gate.querySelector('input').value = 'retryable-token';
+  gate.querySelector('#cp-auth-token').value = 'retryable-token';
   await gate.querySelector('form').listener('submit')({ preventDefault() {} });
 
   assert.match(client.error(), /서버가 접속 요청을 처리하지 못했습니다/);
-  assert.equal(gate.querySelector('input').value, 'retryable-token');
-  assert.equal(gate.querySelector('button').disabled, false);
+  assert.equal(gate.querySelector('#cp-auth-token').value, 'retryable-token');
+  assert.equal(gate.querySelector('.cp-auth-submit').disabled, false);
   assert.equal(client.token(), '');
   assert.equal(client.window.coinPilotAuth.canMutate, false);
 });
@@ -269,10 +269,49 @@ test('rejected and rate-limited login attempts explain different recovery action
   for (const [status, expected] of [[401, /토큰이 맞지 않거나 권한이 없습니다/], [429, /잠시 후 다시 시도/]]) {
     const client = await loadAuthClient({ loginResponse: { status, body: { success: false } } });
     const gate = client.gate();
-    gate.querySelector('input').value = 'not-accepted';
+    gate.querySelector('#cp-auth-token').value = 'not-accepted';
     await gate.querySelector('form').listener('submit')({ preventDefault() {} });
     assert.match(client.error(), expected);
     assert.equal(client.token(), '');
     assert.equal(client.window.coinPilotAuth.canMutate, false);
   }
+});
+
+test('password sign-in stores the token the server returns and never the password', async () => {
+  const client = await loadAuthClient({
+    passwordLogin: true,
+    loginResponse: { status: 200, body: { success: true, tokenScope: 'operator', token: 'issued-operator-token' } }
+  });
+  const gate = client.gate();
+  assert.equal(gate.querySelector('.cp-auth-password-fields').hidden, false);
+  assert.equal(gate.querySelector('.cp-auth-token-fields').hidden, true);
+  assert.equal(gate.querySelector('.cp-auth-switch').hidden, false);
+  gate.querySelector('#cp-auth-username').value = ' owner ';
+  gate.querySelector('#cp-auth-password').value = 'correct horse';
+  await gate.querySelector('form').listener('submit')({ preventDefault() {} });
+  const login = client.calls.find(call => call.input === '/api/auth/login');
+  assert.deepEqual(JSON.parse(login.init.body), { username: 'owner', password: 'correct horse' });
+  assert.equal(client.token(), 'issued-operator-token');
+  assert.equal(client.tokenScope(), 'operator');
+  assert.equal(gate.querySelector('#cp-auth-password').value, '');
+});
+
+test('a rejected password keeps the prompt and stores nothing', async () => {
+  const client = await loadAuthClient({
+    passwordLogin: true,
+    loginResponse: { status: 401, body: { success: false } }
+  });
+  const gate = client.gate();
+  gate.querySelector('#cp-auth-username').value = 'owner';
+  gate.querySelector('#cp-auth-password').value = 'wrong';
+  await gate.querySelector('form').listener('submit')({ preventDefault() {} });
+  assert.equal(client.token(), '');
+  assert.equal(client.error(), '아이디 또는 비밀번호가 맞지 않습니다.');
+});
+
+test('the token form stays the only option when the server has no password login', async () => {
+  const client = await loadAuthClient();
+  const gate = client.gate();
+  assert.equal(gate.querySelector('.cp-auth-token-fields').hidden, false);
+  assert.equal(gate.querySelector('.cp-auth-switch').hidden, true);
 });
