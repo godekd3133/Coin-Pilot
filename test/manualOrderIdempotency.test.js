@@ -618,7 +618,7 @@ test('legacy bundle and execute request bodies are idempotent without changing t
   trader.virtualPortfolio.holdings.set('KRW-BTC', { amount: 100, avgPrice: 90, entryTime: null });
   const ctx = await startRoutes(t, makeServer(trader, root));
 
-  // public/index.html sends only sellCoin/buyCoin for the bundle route.
+  // public/app/features/trade sends only sellCoin/buyCoin for the bundle route.
   const bundleBody = { sellCoin: 'KRW-BTC', buyCoin: 'KRW-ETH' };
   const bundle = await postJson(ctx, '/api/trade/execute-bundle', bundleBody, 'legacy-bundle-key');
   assert.equal(bundle.status, 200);
