@@ -337,11 +337,11 @@ test('malformed exchange account balances keep sync unknown and preserve the las
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
 
   const trader = makeLiveTrader(root);
-  trader.getStrategy('KRW-BTC').openPosition(100, 2, 'BUY');
+  trader.getStrategy('KRW-BTC').openPosition(10000, 2, 'BUY');
   trader._liveAccountStateKnown = true;
   trader.upbit.getAccounts = async () => [
     { currency: 'KRW', balance: '1000', locked: '0' },
-    { currency: 'BTC', balance: 'not-a-number', locked: '0', avg_buy_price: '100' }
+    { currency: 'BTC', balance: 'not-a-number', locked: '0', avg_buy_price: '10000' }
   ];
   trader.upbit.getOrders = async () => [];
 
@@ -350,6 +350,18 @@ test('malformed exchange account balances keep sync unknown and preserve the las
   assert.equal(trader._liveAccountStateKnown, false);
   assert.equal(trader.getCurrentPositionCount(), 1);
   assert.equal(trader.getStrategy('KRW-BTC').currentPosition.amount, 2);
+});
+
+test('LIVE dust below the order minimum stays recovered but does not count as an open position', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'coinpilot-live-dust-count-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+
+  const trader = makeLiveTrader(root);
+  trader.getStrategy('KRW-BTC').openPosition(100, 2, 'BUY');
+  assert.ok(trader.getStrategy('KRW-BTC').currentPosition);
+  assert.equal(trader.getCurrentPositionCount(), 0);
+  trader.getStrategy('KRW-BTC').currentPosition.amount = 60;
+  assert.equal(trader.getCurrentPositionCount(), 1);
 });
 
 test('markets with prior engine orders remain in the managed universe after target candidates change', async t => {

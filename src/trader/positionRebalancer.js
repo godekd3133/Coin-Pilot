@@ -3,6 +3,18 @@
 // MultiCoinTrader에서 추출 — 순수 조합 로직, 상태는 owner 참조.
 import { hasCompleteLiveFillResult } from './orderExecutionEngine.js';
 
+const MIN_KRW_ORDER_AMOUNT = 5000;
+
+// A LIVE KRW balance worth less than the exchange minimum can never be sold.
+// It stays recovered as a position (so the market is not treated as flat), but
+// it must not occupy a position slot or hold the protective shutdown drain
+// open forever waiting for an exit that cannot happen.
+export function isUnsellableDust(owner, position) {
+  if (owner.dryRun !== false || (owner.quoteAsset || 'KRW') !== 'KRW') return false;
+  const value = Number(position.amount) * Number(position.entryPrice);
+  return Number.isFinite(value) && value < MIN_KRW_ORDER_AMOUNT;
+}
+
 export class PositionRebalancer {
   constructor(owner) {
     this.owner = owner;
@@ -15,7 +27,7 @@ export class PositionRebalancer {
   getCurrentPositionCount() {
     let count = 0;
     for (const strategy of this.owner.strategies.values()) {
-      if (strategy.currentPosition) {
+      if (strategy.currentPosition && !isUnsellableDust(this.owner, strategy.currentPosition)) {
         count++;
       }
     }
