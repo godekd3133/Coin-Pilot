@@ -42,6 +42,7 @@
     "benchmark:portfolio-history": "node src/scripts/benchmarkPortfolioHistory.js",
     "benchmark:dashboard-read-capacity": "node src/scripts/benchmarkDashboardReadCapacity.js",
     "verify:pwa": "node src/scripts/verifyPwaShell.js",
+    "demo:build": "node src/scripts/buildStaticDemo.js",
     "validate:scalping:portfolio": "node src/scripts/validatePortfolio.js",
     "compare:scalping": "node src/scripts/compareScalpingVariants.js",
     "paper:variants": "node src/scripts/runScalpingVariantForward.js",

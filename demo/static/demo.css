@@ -1,0 +1,83 @@
+:root { --demo-bar-height: 44px; }
+body.demo-mode { padding-top: var(--demo-bar-height) !important; }
+#demo-bar {
+  position: fixed; inset: 0 0 auto 0; z-index: 9000; min-height: var(--demo-bar-height);
+  display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 16px;
+  background: #191f28; color: #f2f4f6; font-size: 13px; line-height: 1.35;
+}
+#demo-bar p { margin: 0; display: flex; flex-wrap: wrap; gap: 2px 8px; min-width: 0; }
+#demo-bar strong { color: #ffd66b; white-space: nowrap; }
+.demo-bar-actions { display: flex; gap: 6px; flex: none; }
+#demo-bar button {
+  min-height: 32px; padding: 4px 10px; border-radius: 6px; border: 1px solid #6b7684; background: transparent;
+  color: #fff; font: inherit; font-size: 12px; cursor: pointer; white-space: nowrap;
+}
+#demo-bar button:hover { background: #333d4b; }
+#demo-bar button:focus-visible, #demo-guide button:focus-visible { outline: 2px solid #ffd66b; outline-offset: 2px; }
+
+#demo-guide {
+  position: fixed; right: 16px; bottom: 16px; z-index: 8000; width: 348px; max-height: calc(100dvh - var(--demo-bar-height) - 32px);
+  overflow: auto; background: #fff; color: #191f28; border: 1px solid #d1d6db; border-radius: 12px;
+  box-shadow: 0 10px 30px rgba(0, 12, 30, .18); font-size: 13px; line-height: 1.5;
+}
+.demo-guide-head {
+  position: sticky; top: 0; width: 100%; display: flex; justify-content: space-between; gap: 8px; align-items: center;
+  min-height: 44px; padding: 10px 14px; background: #f2f4f6; border: 0; border-radius: 12px 12px 0 0; color: inherit;
+  font: inherit; font-weight: 700; cursor: pointer; text-align: left;
+}
+#demo-guide.is-collapsed .demo-guide-head { border-radius: 12px; }
+.demo-current { padding: 12px 14px 0; }
+.demo-current p { margin: 4px 0 8px; color: #4e5968; }
+#demo-guide.is-collapsed .demo-guide-body { display: none; }
+a[href="#/ai"], a[href="#/news"], [data-action="install"] { display: none !important; }
+@media (min-width: 721px) { .cp-toasts { right: 380px !important; } }
+#demo-backtest { margin-top: 16px; }
+.cp-topbar, .cp-sidebar { top: var(--demo-bar-height) !important; }
+.demo-primary {
+  min-height: 40px; padding: 8px 12px; border: 0; border-radius: 8px; background: #1b64da; color: #fff; font: inherit; font-weight: 700; cursor: pointer;
+}
+.demo-note { margin: 8px 14px 0; padding: 8px 10px; border-radius: 8px; background: #fff8e1; color: #4e3b00; }
+.demo-status { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 10px 14px 6px; color: #4e5968; font-size: 12px; }
+.demo-speed { display: flex; gap: 4px; flex: none; }
+.demo-speed button { min-width: 44px; min-height: 32px; border: 1px solid #d1d6db; border-radius: 6px; background: #fff; color: #191f28; font: inherit; cursor: pointer; }
+.demo-speed button[aria-pressed="true"] { background: #191f28; color: #fff; border-color: #191f28; }
+.demo-log { list-style: none; margin: 0; padding: 0 14px 12px; display: grid; gap: 4px; font-size: 12px; color: #4e5968; }
+.demo-log b { display: inline-block; min-width: 30px; margin-right: 6px; color: #191f28; }
+.demo-log li[data-kind="risk"] b, .demo-log li[data-kind="blocked"] b { color: #a51926; }
+.demo-highlight { outline: 3px solid #1b64da !important; outline-offset: 3px; }
+.demo-inline-note { margin: 8px 0 0; padding: 8px 12px; border-radius: 8px; background: #f2f4f6; color: #4e5968; font-size: 12px; line-height: 1.5; }
+.demo-visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+#demo-backtest { scroll-margin-top: calc(var(--demo-bar-height) + 16px); }
+.demo-backtest-form { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; padding: 16px 20px 12px; }
+#demo-backtest-result { padding: 0 20px 20px; }
+.demo-backtest-form label { display: grid; gap: 4px; font-size: 12px; color: #4e5968; flex: 1 1 120px; }
+.demo-backtest-form input { min-height: 44px; padding: 8px 10px; border: 1px solid #d1d6db; border-radius: 8px; font: inherit; font-size: 16px; width: 100%; box-sizing: border-box; background: #fff; color: #191f28; }
+.demo-table-wrap { overflow-x: auto; }
+.demo-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.demo-table th, .demo-table td { padding: 10px 8px; border-bottom: 1px solid #e5e8eb; color: #191f28; background: transparent; white-space: nowrap; }
+.demo-table tr, .demo-table tr:hover, .demo-table tr:hover td, .demo-table tr:hover th { background: transparent !important; }
+.demo-table thead th { color: #6b7684; font-size: 12px; font-weight: 600; }
+.demo-table td, .demo-table thead th:not(:first-child) { text-align: right; font-variant-numeric: tabular-nums; }
+.demo-table tbody th { text-align: left; font-weight: 500; }
+.demo-curve { display: block; width: 100%; height: 140px; margin-top: 12px; }
+.demo-curve path { fill: none; stroke-width: 2; vector-effect: non-scaling-stroke; }
+.demo-curve-gross { stroke: #8b95a1; }
+.demo-curve-net { stroke: #1b64da; }
+.demo-curve-base { stroke: #d1d6db; stroke-dasharray: 4 4; vector-effect: non-scaling-stroke; }
+.demo-curve-legend { display: flex; gap: 14px; margin: 4px 0 0; font-size: 12px; color: #4e5968; }
+.demo-curve-legend span::before { content: ''; display: inline-block; width: 14px; height: 2px; margin-right: 5px; vertical-align: middle; background: #d1d6db; }
+.demo-curve-legend .is-gross::before { background: #8b95a1; }
+.demo-curve-legend .is-net::before { background: #1b64da; }
+
+@media (max-width: 720px) {
+  :root { --demo-bar-height: 62px; }
+  #demo-bar { padding: 6px 10px; font-size: 12px; align-items: flex-start; }
+  #demo-bar p { flex-direction: column; }
+  #demo-bar button { padding: 4px 8px; font-size: 11px; }
+  #demo-guide {
+    left: 8px; right: 8px; width: auto; bottom: calc(68px + env(safe-area-inset-bottom));
+    max-height: calc(100dvh - var(--demo-bar-height) - 92px);
+  }
+}
+@media (max-width: 720px) { .cp-toasts { top: calc(var(--demo-bar-height) + 8px) !important; bottom: auto !important; } }
+@media (prefers-reduced-motion: reduce) { #demo-guide, #demo-bar { transition: none; } }
