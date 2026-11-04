@@ -1,5 +1,6 @@
 // Bootstrap: auth gate → store/api/resources → shell chrome → router.
 import { createStore } from './core/store.js';
+import { APP_BASE } from './core/base.js';
 import { createApi } from './core/api.js';
 import { createResourceManager, resourceKey } from './core/resources.js';
 import { RESOURCE_CATALOG } from './core/resourceCatalog.js';
@@ -333,7 +334,7 @@ function initServiceWorker() {
     reloading = true;
     window.location.reload();
   });
-  navigator.serviceWorker.register('/sw.js').then(registration => {
+  navigator.serviceWorker.register(`${APP_BASE}sw.js`, { scope: APP_BASE }).then(registration => {
     swRegistration = registration;
     const markWaiting = () => store.set({ swWaiting: Boolean(registration.waiting && navigator.serviceWorker.controller) });
     markWaiting();

@@ -3,28 +3,28 @@
   "short_name": "CoinPilot",
   "description": "모의투자 결과와 실제 주문 전 점검, 계좌와 시장 현황을 확인하는 CoinPilot 대시보드",
   "lang": "ko-KR",
-  "start_url": "/?source=pwa",
-  "id": "/?source=pwa",
-  "scope": "/",
+  "start_url": "./?source=pwa",
+  "id": "./?source=pwa",
+  "scope": "./",
   "display": "standalone",
   "orientation": "any",
   "background_color": "#f2f4f6",
   "theme_color": "#f2f4f6",
   "icons": [
     {
-      "src": "/icon-192.png",
+      "src": "icon-192.png",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/icon-512.png",
+      "src": "icon-512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/icon-512.png",
+      "src": "icon-512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "maskable"

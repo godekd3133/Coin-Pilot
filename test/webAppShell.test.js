@@ -322,9 +322,9 @@ test('server serves the new shell at / with module assets and no legacy dashboar
     assert.equal(shell.status, 200);
     const page = await shell.text();
     assert.match(page, /<div id="cp-app"/);
-    assert.match(page, /<script type="module" src="\/app\/main\.js"><\/script>/);
-    assert.match(page, /<script src="\/auth-client\.js"><\/script>/);
-    assert.ok(page.indexOf('/auth-client.js') < page.indexOf('/app/main.js'), 'auth gate patches fetch before the app boots');
+    assert.match(page, /<script type="module" src="app\/main\.js"><\/script>/);
+    assert.match(page, /<script src="auth-client\.js"><\/script>/);
+    assert.ok(page.indexOf('auth-client.js') < page.indexOf('app/main.js'), 'auth gate patches fetch before the app boots');
     for (const asset of ['/app/main.js', '/app/core/router.js', '/app/ui/tokens.css', '/app/features/stocks/index.js']) {
       const response = await fetch(`${base}${asset}`);
       assert.equal(response.status, 200, asset);
@@ -384,4 +384,26 @@ test('responsive shell: 5-slot tab bar under 960px, sidebar at ≥960px, touch t
   assert.match(base, /env\(safe-area-inset-bottom/);
   const components = read('public/app/ui/components.css');
   assert.match(components, /\.cp-btn \{[^}]*min-height: 44px/);
+});
+
+test('deployment base path keeps paper (/) and LIVE (/live/) requests and storage apart', async () => {
+  const { appBasePath, apiUrl, scopedStorageKey, APP_BASE } = await import('../public/app/core/base.js');
+  assert.equal(APP_BASE, '/', 'node (no document) resolves to the root');
+  assert.equal(appBasePath({ baseURI: 'https://host.example/' }), '/');
+  assert.equal(appBasePath({ baseURI: 'https://host.example/#/coins' }), '/');
+  assert.equal(appBasePath({ baseURI: 'https://host.example/live/#/portfolios' }), '/live/');
+  assert.equal(appBasePath({ baseURI: 'https://host.example/live/index.html' }), '/live/');
+  assert.equal(appBasePath(undefined), '/');
+  assert.equal(apiUrl('/status', '/'), '/api/status');
+  assert.equal(apiUrl('/status', '/live/'), '/live/api/status');
+  assert.equal(scopedStorageKey('coinpilot.pending-mutation.v1', '/'), 'coinpilot.pending-mutation.v1');
+  assert.equal(scopedStorageKey('coinpilot.pending-mutation.v1', '/live/'), 'coinpilot.pending-mutation.v1@/live/');
+  const page = fs.readFileSync(path.join(root, 'public/index.html'), 'utf8');
+  assert.equal(/(?:href|src)="\/(?!\/)/.test(page), false, 'shell assets must be relative so /live/ loads its own server');
+  for (const file of ['public/app/core/api.js', 'public/app/core/mutations.js']) {
+    assert.equal(/fetchImpl\(`\/api/.test(fs.readFileSync(path.join(root, file), 'utf8')), false, `${file} must use apiUrl()`);
+  }
+  const auth = fs.readFileSync(path.join(root, 'public/auth-client.js'), 'utf8');
+  assert.equal(/rawFetch\('\/api/.test(auth), false, 'auth client follows the base prefix');
+  assert.match(auth, /const TOKEN_KEY = scopedKey\('coinpilot\.dashboardToken'\)/);
 });

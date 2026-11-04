@@ -1,10 +1,11 @@
 // 설정: connection & token scope, workspace (모의/실전) and live-key status,
 // theme, push notification delivery, app install/update and tool shortcuts.
+import { scopedStorageKey } from '../../core/base.js';
 import { html, render } from '../../core/dom.js';
 import { relativeTime, dateTime } from '../../core/format.js';
 import { card, kv, badge, button, segmented, notice, list, listRow, icon, liveBadge, paperBadge } from '../../ui/components.js';
 
-const TOKEN_KEYS = ['coinpilot.dashboardToken', 'coinpilot.dashboardTokenScope'];
+const TOKEN_KEYS = ['coinpilot.dashboardToken', 'coinpilot.dashboardTokenScope'].map(key => scopedStorageKey(key));
 const SCOPE_LABELS = { operator: '운영자 (조회·주문·설정)', read_only: '읽기 전용 (자산·손익 조회)', mobile_operator: '모바일 앱 전용' };
 
 export default {

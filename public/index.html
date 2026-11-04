@@ -12,9 +12,9 @@
     <meta name="apple-mobile-web-app-title" content="CoinPilot">
     <meta name="description" content="코인·주식 자동매매와 기간별 포트폴리오의 자산, 손익, 엔진 상태를 한곳에서 확인하는 CoinPilot">
     <title>CoinPilot</title>
-    <link rel="manifest" href="/manifest.webmanifest">
-    <link rel="icon" href="/icon.svg" type="image/svg+xml">
-    <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+    <link rel="manifest" href="manifest.webmanifest">
+    <link rel="icon" href="icon.svg" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="apple-touch-icon.png">
     <script>
         // Apply the saved theme before first paint to avoid a flash.
         try {
@@ -22,16 +22,16 @@
             if (savedTheme === 'light' || savedTheme === 'dark') document.documentElement.dataset.theme = savedTheme;
         } catch (e) { /* storage may be blocked */ }
     </script>
-    <link rel="stylesheet" href="/app/ui/tokens.css">
-    <link rel="stylesheet" href="/app/ui/base.css">
-    <link rel="stylesheet" href="/app/ui/components.css">
+    <link rel="stylesheet" href="app/ui/tokens.css">
+    <link rel="stylesheet" href="app/ui/base.css">
+    <link rel="stylesheet" href="app/ui/components.css">
 </head>
 <body>
     <div id="cp-app" class="cp-shell" aria-busy="true">
         <noscript>CoinPilot을 사용하려면 JavaScript를 켜 주세요.</noscript>
     </div>
-    <script src="/socket.io/socket.io.js"></script>
-    <script src="/auth-client.js"></script>
-    <script type="module" src="/app/main.js"></script>
+    <script src="socket.io/socket.io.js"></script>
+    <script src="auth-client.js"></script>
+    <script type="module" src="app/main.js"></script>
 </body>
 </html>

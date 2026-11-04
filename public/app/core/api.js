@@ -3,6 +3,7 @@
 // policy, a finite timeout and normalised errors. Screens never call fetch.
 
 import { requestAllowed, mutationBlockReason } from './authPolicy.js';
+import { apiUrl } from './base.js';
 
 export class ApiError extends Error {
   constructor(message, { status = null, code = null, body = null, cause } = {}) {
@@ -27,7 +28,7 @@ export function createApi({ fetchImpl = (...args) => globalThis.fetch(...args), 
     const onAbort = () => controller.abort();
     signal?.addEventListener?.('abort', onAbort);
     try {
-      const response = await fetchImpl(`/api${path}`, {
+      const response = await fetchImpl(apiUrl(path), {
         method: verb,
         headers: { ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}), ...headers },
         body: body === undefined ? undefined : typeof body === 'string' ? body : JSON.stringify(body),

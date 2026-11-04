@@ -9,8 +9,21 @@
 (function () {
   'use strict';
 
-  const TOKEN_KEY = 'coinpilot.dashboardToken';
-  const TOKEN_SCOPE_KEY = 'coinpilot.dashboardTokenScope';
+  // Paper is served at `/`, LIVE behind a proxy prefix such as `/live/`. Both
+  // share one origin, so the API path and the stored token follow the prefix
+  // the page was loaded from; the root keeps its historical key names.
+  const BASE = (() => {
+    try {
+      const pathname = new URL('./', document.baseURI).pathname;
+      return pathname.endsWith('/') ? pathname : `${pathname}/`;
+    } catch {
+      return '/';
+    }
+  })();
+  const scopedKey = key => (BASE === '/' ? key : `${key}@${BASE}`);
+  const API_PREFIX = `${BASE}api/`;
+  const TOKEN_KEY = scopedKey('coinpilot.dashboardToken');
+  const TOKEN_SCOPE_KEY = scopedKey('coinpilot.dashboardTokenScope');
   const TOKEN_SCOPES = new Set(['operator', 'mobile_operator', 'read_only']);
   const rawFetch = window.fetch ? window.fetch.bind(window) : null;
   if (!rawFetch) return;
@@ -81,7 +94,7 @@
   function isApiUrl(url) {
     try {
       const parsed = new URL(url, window.location.origin);
-      return parsed.origin === window.location.origin && parsed.pathname.startsWith('/api/');
+      return parsed.origin === window.location.origin && parsed.pathname.startsWith(API_PREFIX);
     } catch {
       return false;
     }
@@ -152,7 +165,7 @@
       button.textContent = '접속 권한 확인 중…';
       errorBox.textContent = '';
       try {
-        const response = await rawFetch('/api/auth/login', {
+        const response = await rawFetch(`${API_PREFIX}auth/login`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ token })
@@ -308,7 +321,7 @@
   async function boot() {
     const savedToken = getToken();
     try {
-      const response = await rawFetch('/api/auth/status');
+      const response = await rawFetch(`${API_PREFIX}auth/status`);
       if (!response.ok) throw new Error(`auth status HTTP ${response.status}`);
       const data = await response.json();
       if (data?.authRequired === false) {
@@ -324,7 +337,7 @@
 
       // Resolve the actual scope on every page load. Older saved tokens may not
       // have a stored scope, and a cached scope must never authorize a socket.
-      const scopeResponse = await rawFetch('/api/auth/login', {
+      const scopeResponse = await rawFetch(`${API_PREFIX}auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ token: savedToken })

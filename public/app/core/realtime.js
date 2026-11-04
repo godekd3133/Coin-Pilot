@@ -3,6 +3,7 @@
 // the token). Each server event maps to resource refreshes and/or a store
 // key, so screens only ever read from the store.
 
+import { APP_BASE } from './base.js';
 export const REALTIME_EVENTS = {
   'auto-trade': { refresh: ['account', 'trades', 'status', 'today', 'pnl'], toast: payload => {
     const trade = payload?.trade || payload;
@@ -25,7 +26,7 @@ export function connectRealtime({ store, resources, toast = () => {}, io = globa
   }
   let socket;
   try {
-    socket = io();
+    socket = io({ path: `${APP_BASE}socket.io` });
   } catch {
     store.set({ realtime: { connected: false, available: false } });
     return () => {};

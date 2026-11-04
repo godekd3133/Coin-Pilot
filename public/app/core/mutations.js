@@ -11,8 +11,10 @@
 //     and resolves. Conflict / key-missing require operator resolution.
 //  4. A Web Lock serialises submit/retry across tabs when available.
 
-export const PENDING_MUTATION_STORAGE_KEY = 'coinpilot.pending-mutation.v1';
-export const PENDING_MUTATION_LOCK_NAME = 'coinpilot.pending-mutation.v1';
+import { apiUrl, scopedStorageKey } from './base.js';
+// Scoped per deployment prefix so an unsent LIVE order is never replayed by the paper page.
+export const PENDING_MUTATION_STORAGE_KEY = scopedStorageKey('coinpilot.pending-mutation.v1');
+export const PENDING_MUTATION_LOCK_NAME = scopedStorageKey('coinpilot.pending-mutation.v1');
 export const PENDING_MUTATION_ENDPOINTS = new Set([
   '/trade/execute-bundle',
   '/trade/execute',
@@ -304,7 +306,7 @@ export function createManualMutationTransport({ fetchImpl, isAllowed = () => tru
     const controller = new AbortController();
     const timeoutId = setTimer(() => controller.abort(), timeoutMs);
     try {
-      const response = await fetchImpl(`/api${apiPath}`, {
+      const response = await fetchImpl(apiUrl(apiPath), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Idempotency-Key': idempotencyKey },
         body,
