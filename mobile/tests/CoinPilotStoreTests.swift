@@ -517,6 +517,7 @@ struct CoinPilotStoreTests {
         try await unsupportedQuoteCurrencyBlocksOnlyOrdersAndPaperWallet()
         try await tuningEditableNumbersReachTheServerWithoutChangingDecimals()
         try coinDetailPreservesUnknownValuationAndFiniteLosses()
+        try stockAndHorizonStatusDecodeTolerantlyAndStayAllowlisted()
         try await latestMarketDetailRequestWins()
         try localMarketPackRejectsInvalidData()
         try await bundledLocalMarketModeIsStrictReadOnlyAndOffline()
@@ -551,6 +552,76 @@ struct CoinPilotStoreTests {
         try await managedWorkspaceSwitchDiscardsQueuedConnections()
         try await managedAccountAuthenticationExpiryAllowsRelogin()
         print("CoinPilotStore: all scenarios passed")
+    }
+
+    private static func stockAndHorizonStatusDecodeTolerantlyAndStayAllowlisted() throws {
+        // A disabled server answers only { enabled: false }.
+        let disabled = CoinPilotFeatureDecoding.decode(CoinPilotStocksStatus.self, from: ["enabled": false, "provider": "x"])
+        precondition(disabled?.isEnabled == false && disabled?.paper == nil && disabled?.universe.isEmpty == true,
+                     "A disabled stock service must decode without traders.")
+
+        let stocks = CoinPilotFeatureDecoding.decode(CoinPilotStocksStatus.self, from: [
+            "enabled": true, "credentialsConfigured": true, "universe": ["005930", 7],
+            "paper": [
+                "mode": "paper", "running": true, "cash": 900_000, "initialSeedMoney": 1_000_000, "totalAssets": 1_010_000,
+                "market": ["open": true, "canEnter": false, "mustFlatten": true, "reason": "flatten_before_close"],
+                "positions": [["symbol": "005930", "quantity": 2, "entryPrice": 50_000, "lastPrice": 55_000, "unrealizedProfit": 10_000],
+                              ["quantity": "bad"]],
+                "statistics": ["totalTrades": 3, "winRate": "66.7", "totalProfit": NSNull()],
+                "recentTrades": [["action": "SELL", "symbol": "005930", "profit": -1200, "at": "2026-11-04T01:00:00.000Z"]],
+                "unknownFutureField": ["nested": true]
+            ],
+            "live": NSNull()
+        ])
+        let paper = stocks?.paper
+        precondition(stocks?.isEnabled == true && stocks?.universe == ["005930"] && stocks?.live == nil,
+                     "Unknown/mistyped universe entries are skipped and a null LIVE trader stays nil.")
+        precondition(paper?.running == true && paper?.positions.count == 2 && paper?.positions.first?.profitPercent == 10 &&
+                     paper?.market?.title == "장 마감 전 정리 중" && paper?.statistics?.winRate == 66.7 &&
+                     paper?.statistics?.totalProfit == nil && paper?.profitVersusSeed == 10_000 &&
+                     paper?.recentTrades.first?.profit == -1200,
+                     "Stock trader fields decode leniently; a null profit must stay unknown rather than zero.")
+        precondition(stocks?.trader(for: .live) == nil && stocks?.trader(for: .paper)?.mode == "paper",
+                     "The workspace selects the matching stock trader.")
+
+        let horizons = CoinPilotFeatureDecoding.decode(CoinPilotHorizonsStatus.self, from: [
+            "coin": [
+                "mode": "live", "running": false, "paramsValidated": false,
+                "sleeves": [
+                    "long": ["label": "장기", "weight": 30, "enabled": true, "interval": "1w"],
+                    "short": ["label": "단기", "weight": 0, "enabled": false, "interval": 60],
+                    "quarterly": ["label": "분기", "weight": 10]
+                ],
+                "positions": [["sleeve": "long", "symbol": "KRW-BTC", "quantity": 0.1, "cost": 1000, "unrealizedProfit": -50]],
+                "research": ["scheduler": ["running": true],
+                             "sleeves": [["horizon": "long", "passed": true, "outOfSampleReturnPercent": 12.5, "worstDrawdownPercent": 8]]]
+            ],
+            "stock": ["paper": ["mode": "paper", "totalAssets": 500_000, "initialSeedMoney": 400_000]]
+        ])
+        let coin = horizons?.coin
+        precondition(coin?.orderedSleeves.map(\.key) == ["short", "long", "quarterly"],
+                     "Known sleeves keep the server order and new server sleeves are appended, not dropped.")
+        precondition(coin?.orderedSleeves.first?.sleeve.interval == "60" && coin?.research(for: "long")?.passed == true &&
+                     coin?.research?.hasReport == false && coin?.research?.schedulerRunning == true &&
+                     coin?.positions(for: "long").first?.profitPercent == -5,
+                     "Sleeve, research and position fields decode from the response.")
+        precondition(horizons?.stockRuntime(for: .live)?.mode == "paper" &&
+                     horizons?.runtime(asset: .stock, workspace: .paper)?.profitVersusSeed == 100_000,
+                     "A single stock runtime is used regardless of the workspace key.")
+
+        for path in ["/api/stocks/status", "/api/horizons/status"] {
+            precondition(CoinPilotAPIClient.isAllowedMobileReadPath(path), "\(path) must be readable by the native app.")
+            precondition(!CoinPilotAPIClient.isAllowedMobileReadPath("\(path)?debug=1"), "\(path) must not accept queries.")
+        }
+        for path in ["/api/stocks/paper/start", "/api/stocks/live/stop", "/api/stocks/paper/reset",
+                     "/api/horizons/coin/start", "/api/horizons/stock/stop"] {
+            precondition(CoinPilotAPIClient.isAllowedMobileMutation(path, body: [:]), "\(path) must be an allowed control.")
+            precondition(!CoinPilotAPIClient.isAllowedMobileMutation(path, body: ["seedMoney": 1]),
+                         "\(path) must not carry a body.")
+        }
+        for path in ["/api/stocks/live/reset", "/api/stocks/demo/start", "/api/horizons/fx/start", "/api/horizons/coin/reset"] {
+            precondition(!CoinPilotAPIClient.isAllowedMobileMutation(path, body: [:]), "\(path) must be rejected.")
+        }
     }
 
     private static func coinDetailPreservesUnknownValuationAndFiniteLosses() throws {
