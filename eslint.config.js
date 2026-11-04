@@ -26,6 +26,15 @@ export default [
   },
   js.configs.recommended,
   {
+    files: ['demo/static/**/*.js'],
+    languageOptions: {
+      ecmaVersion: 'latest',
+      sourceType: 'script',
+      globals: { ...globals.browser },
+    },
+    rules: { 'no-unused-vars': noUnusedVars },
+  },
+  {
     files: ['src/**/*.js', 'test/**/*.js', 'eslint.config.js'],
     languageOptions: {
       ecmaVersion: 'latest',
@@ -45,6 +54,19 @@ export default [
       globals: { ...globals.browser },
     },
     rules: {
+      'no-unused-vars': noUnusedVars,
+    },
+  },
+  {
+    // Web shell: native ES modules in the browser, no build step.
+    files: ['public/app/**/*.js'],
+    languageOptions: {
+      ecmaVersion: 'latest',
+      sourceType: 'module',
+      globals: { ...globals.browser },
+    },
+    rules: {
+      'no-duplicate-imports': 'error',
       'no-unused-vars': noUnusedVars,
     },
   },
