@@ -896,7 +896,7 @@ test('시장 차트는 가장 긴 가격 축 라벨 폭을 확보하고 마지�
   const drawCalls = [];
   const drawMarketChart = new Function(
     'byId', 'getDisplayedCandles', 'state', 'window', 'drawCanvas', 'formatPrice', 'formatTime', 'number',
-    'formatDateTime', 'formatQuantity', 'escapeHtml',
+    'formatDateTime', 'formatQuantity', 'escapeHtml', 'chartColor',
     `${marketChartFunctionSource}; return drawMarketChart;`
   )(
     id => ({
@@ -919,7 +919,8 @@ test('시장 차트는 가장 긴 가격 축 라벨 폭을 확보하고 마지�
     value => Number(value) || 0,
     value => `time:${value}`,
     value => `volume:${value}`,
-    value => String(value)
+    value => String(value),
+    name => `token:${name}`
   );
   drawMarketChart();
 
@@ -1127,7 +1128,7 @@ test('PWA shell은 redesign asset version과 service worker cache version을 함
   assert.match(redesignScriptAsset || '', /^\/pilot-redesign\.js\?v=\d{8}-\d+$/);
   assert.match(redesignStylesheetAsset || '', /^\/pilot-redesign\.css\?v=\d{8}-\d+$/);
   assert.match(serviceWorkerCacheName || '', /^coinpilot-shell-v\d+$/);
-  assert.equal(serviceWorkerCacheName, 'coinpilot-shell-v206');
+  assert.equal(serviceWorkerCacheName, 'coinpilot-shell-v208');
   assert.ok(serviceWorkerAppShell);
   assert.match(serviceWorkerAppShell, new RegExp(`['"]${redesignScriptAsset.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}['"]`));
   assert.match(serviceWorkerAppShell, new RegExp(`['"]${redesignStylesheetAsset.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}['"]`));
@@ -2325,7 +2326,8 @@ test('overview leads with account value and one preflight action while order ent
   assert.match(overview, /class="pilot-overview-balance"[\s\S]*id="pilot-total-assets"/);
   assert.equal((overview.match(/id="pilot-total-assets"/g) || []).length, 1);
   const balanceRule = redesignStyleSource.match(/\.pilot-overview-balance\s*\{([^}]*)\}/)?.[1] || '';
-  assert.match(balanceRule, /border-left:\s*3px solid var\(--sl-blue\)/);
+  assert.match(balanceRule, /border-radius:\s*var\(--sl-radius-xl\)/);
+  assert.doesNotMatch(balanceRule, /border-left/);
   assert.doesNotMatch(balanceRule, /gradient|box-shadow/i);
   assert.doesNotMatch(redesignStyleSource, /\.pilot-overview-balance::after/);
   assert.match(overview, /<button[^>]*class="pilot-button is-primary pilot-overview-next-action"[^>]*data-pilot-go="history"/);
@@ -2945,4 +2947,42 @@ test('quote-cost panel exposes all candidate preflight variants in a mobile-safe
   assert.match(renderer, /pilot-quote-cost-candidates/);
   assert.match(redesignStyleSource, /\.pilot-quote-cost-candidate-grid/);
   assert.match(redesignStyleSource, /@media\s*\(max-width:\s*480px\)[\s\S]*\.pilot-quote-cost-candidate-grid/);
+});
+
+test('calm finance layer supports light/dark themes, count-up numbers, skeletons, and reduced motion', () => {
+  const layer = redesignStyleSource.split('Calm finance layer')[1] || '';
+  assert.ok(layer, 'calm finance layer must exist');
+  assert.match(layer, /@media \(prefers-color-scheme: dark\)\s*\{\s*:root:not\(\[data-theme="light"\]\)/);
+  assert.match(layer, /:root\[data-theme="dark"\]\s*\{[\s\S]*--sl-surface:\s*#1b1c21/);
+  assert.match(layer, /--sl-ease-spring|var\(--sl-ease-spring\)/);
+  assert.match(layer, /\.pilot-button:active:not\(:disabled\)[\s\S]*transform:\s*scale\(var\(--sl-press-scale\)\)/);
+  assert.match(layer, /#pilot-redesign-root\[data-pilot-loading\] \.pilot-overview-balance-value/);
+  assert.match(layer, /@media \(prefers-reduced-motion: reduce\)[\s\S]*animation:\s*none !important/);
+  assert.match(indexSource, /<meta name="color-scheme" content="light dark">/);
+  assert.match(indexSource, /<meta name="theme-color" content="#101114" media="\(prefers-color-scheme: dark\)">/);
+
+  assert.match(redesignSource, /setCountedText\('pilot-total-assets', totalAssets, value => formatWon\(value\)\)/);
+  assert.match(redesignSource, /function prefersReducedMotion\(\)/);
+  assert.match(redesignSource, /root\.setAttribute\('data-pilot-loading', ''\)/);
+  assert.match(redesignSource, /function settleFirstLoad\(\)/);
+  assert.match(redesignSource, /prefers-color-scheme: dark\)'\)\?\.addEventListener\?\.\('change', redrawCharts\)/);
+  const chartDraws = redesignSource.split('function drawCanvas(')[1]?.split('function renderCandleControls(')[0] || '';
+  assert.doesNotMatch(chartDraws, /'#(6b7684|191f28|1b64da|027648|a51926)'/i);
+});
+
+test('setCountedText renders final formatted text and an em dash for missing values', () => {
+  const helper = redesignSource.match(/function setCountedText\([\s\S]*?\n {4}\}\n/)?.[0];
+  assert.ok(helper);
+  const element = { dataset: {}, textContent: '', classList: { add() {}, remove() {} } };
+  const setCountedText = new Function('byId', 'prefersReducedMotion', 'window', 'document', 'performance',
+    `${helper}; return setCountedText;`)(
+    () => element, () => true, { cancelAnimationFrame() {}, requestAnimationFrame() { throw new Error('no animation'); } },
+    { hidden: false }, { now: () => 0 }
+  );
+  setCountedText('x', 1234, value => `${value.toLocaleString('ko-KR')}원`);
+  assert.equal(element.textContent, '1,234원');
+  assert.equal(element.dataset.pilotCountValue, '1234');
+  setCountedText('x', null, value => `${value}원`);
+  assert.equal(element.textContent, '—');
+  assert.equal(element.dataset.pilotCountValue, undefined);
 });

@@ -43,7 +43,8 @@
     --sl-faint: var(--tds-color-grey-500);
     --sl-line: var(--tds-color-grey-200);
     --sl-line-strong: var(--tds-color-grey-300);
-    --sl-paper: var(--tds-color-grey-50);
+    /* Calm finance shell: white cards sit on a soft grey paper. */
+    --sl-paper: var(--tds-color-grey-100);
     --sl-surface: #ffffff;
     --sl-surface-2: var(--tds-color-grey-100);
     --sl-blue: var(--tds-color-blue-700);
@@ -62,7 +63,25 @@
     --sl-radius-sm: 8px;
     --sl-radius-md: 12px;
     --sl-radius-lg: 16px;
+    --sl-radius-xl: 22px;
     --sl-sidebar: 224px;
+
+    /* Motion language: quick ease-out for state changes, a soft spring for
+       things that enter or are released after a press. */
+    --sl-ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+    --sl-ease-spring: cubic-bezier(0.34, 1.36, 0.64, 1);
+    --sl-duration-fast: 140ms;
+    --sl-duration-base: 260ms;
+    --sl-duration-slow: 420ms;
+    --sl-press-scale: 0.965;
+
+    /* Canvas chart tokens (read by chartColor() in pilot-redesign.js). */
+    --sl-chart-blue: var(--tds-color-blue-500);
+    --sl-chart-grid: rgba(2, 9, 19, 0.08);
+    --sl-chart-baseline: #b0b8c1;
+    --sl-skeleton-base: var(--tds-color-grey-100);
+    --sl-skeleton-shine: rgba(255, 255, 255, 0.7);
+    color-scheme: light;
 }
 
 /* The new experience is the visible source of truth. Keep compatibility DOM
@@ -128,7 +147,7 @@ body.pilot-redesign-shell .pilot-mobile-nav {
     display: grid;
     grid-template-columns: var(--sl-sidebar) minmax(0, 1fr);
     background:
-        linear-gradient(90deg, rgba(255, 255, 255, 0.46), transparent 32%),
+        linear-gradient(90deg, color-mix(in srgb, var(--sl-surface) 46%, transparent), transparent 32%),
         var(--sl-paper);
 }
 
@@ -143,7 +162,7 @@ body.pilot-redesign-shell .pilot-mobile-nav {
     overflow-y: auto;
     overscroll-behavior: contain;
     border-right: 1px solid var(--sl-line);
-    background: rgba(255, 255, 255, 0.88);
+    background: color-mix(in srgb, var(--sl-surface) 88%, transparent);
 }
 
 .pilot-brand {
@@ -545,13 +564,13 @@ body.pilot-redesign-shell .pilot-mobile-nav {
     justify-content: space-between;
     gap: 16px;
     padding: 13px 32px;
-    border-bottom: 1px solid #f0d38e;
+    border-bottom: 1px solid color-mix(in srgb, var(--sl-amber) 32%, var(--sl-line));
     background: var(--sl-amber-soft);
     color: #7a4d00;
 }
 
 .pilot-mode-banner.is-live {
-    border-bottom-color: #a8ddc8;
+    border-bottom-color: color-mix(in srgb, var(--sl-green) 32%, var(--sl-line));
     background: var(--sl-green-soft);
     color: #0a6e51;
 }
@@ -578,13 +597,12 @@ body.pilot-redesign-shell .pilot-mobile-nav {
     margin-top: 2px;
     color: inherit;
     font-size: 12px;
-    opacity: 0.78;
 }
 
 .pilot-mode-banner .pilot-button {
     flex: 0 0 auto;
     border-color: currentColor;
-    background: rgba(255, 255, 255, 0.48);
+    background: color-mix(in srgb, var(--sl-surface) 48%, transparent);
     color: inherit;
 }
 
@@ -627,7 +645,7 @@ body.pilot-redesign-shell .pilot-mobile-nav {
     padding: 12px 32px;
     border-bottom: 1px solid #f1b8b3;
     background: var(--sl-red-soft);
-    color: #8f302c;
+    color: var(--sl-red);
 }
 
 .pilot-offline-banner[hidden] {
@@ -662,7 +680,7 @@ body.pilot-redesign-shell .pilot-mobile-nav {
 .pilot-offline-banner .pilot-button {
     flex: 0 0 auto;
     border-color: currentColor;
-    background: rgba(255, 255, 255, 0.5);
+    background: color-mix(in srgb, var(--sl-surface) 50%, transparent);
     color: inherit;
 }
 
@@ -709,7 +727,7 @@ body.pilot-redesign-shell .pilot-mobile-nav {
 .pilot-pending-mutation .pilot-button {
     flex: 0 0 auto;
     border-color: currentColor;
-    background: rgba(255, 255, 255, 0.56);
+    background: color-mix(in srgb, var(--sl-surface) 56%, transparent);
     color: inherit;
 }
 
@@ -806,8 +824,9 @@ body.pilot-redesign-shell .pilot-mobile-nav {
 
 .pilot-overview-balance {
     min-width: 0;
-    padding: 23px 24px 22px;
-    border-left: 3px solid var(--sl-blue);
+    padding: 26px 26px 24px;
+    border-color: transparent;
+    border-radius: var(--sl-radius-xl);
 }
 
 .pilot-overview-balance-eyebrow,
@@ -931,7 +950,7 @@ body.pilot-redesign-shell .pilot-mobile-nav {
     gap: 16px;
     padding: 16px 18px;
     margin-bottom: 18px;
-    background: #fff9e7;
+    background: var(--sl-amber-soft);
     border-radius: 12px;
     color: var(--sl-ink);
     font-size: 13px;
@@ -961,6 +980,8 @@ body.pilot-redesign-shell .pilot-mobile-nav {
 .pilot-record-values small { margin-left: 6px; font-size: 11px; }
 .pilot-list-more { text-align: center; padding: 12px 16px; }
 .pilot-market-row-symbol small { color: var(--sl-muted); font-size: 11px; font-weight: 500; }
+.is-selected > .pilot-market-row-market .pilot-market-row-symbol small,
+.is-selected > .pilot-market-row-market .pilot-market-row-freshness.is-current { color: var(--sl-ink-soft); }
 .pilot-analysis-reason { display: block; max-width: 210px; margin-top: 5px; color: var(--sl-muted); font-size: 11px; line-height: 1.5; white-space: normal; }
 .pilot-analysis-reasons { padding-left: 20px; line-height: 1.8; font-size: 14px; }
 .pilot-settings-summary { margin-bottom: 22px; padding: 20px; background: var(--sl-surface); border-bottom: 1px solid var(--sl-line); }
@@ -1033,7 +1054,7 @@ body.pilot-redesign-shell .pilot-mobile-nav {
     min-width: 0;
     border: 1px solid var(--sl-line);
     border-radius: var(--sl-radius-md);
-    background: rgba(255, 255, 255, 0.86);
+    background: color-mix(in srgb, var(--sl-surface) 86%, transparent);
     box-shadow: var(--sl-shadow-xs);
 }
 
@@ -1096,7 +1117,7 @@ body.pilot-redesign-shell .pilot-mobile-nav {
 }
 
 .pilot-tab-button.is-active {
-    background: #fff;
+    background: var(--sl-surface);
     color: var(--sl-blue-deep);
     box-shadow: var(--sl-shadow-xs);
 }
@@ -1108,7 +1129,7 @@ body.pilot-redesign-shell .pilot-mobile-nav {
     background:
         linear-gradient(rgba(27, 100, 218, 0.045) 1px, transparent 1px),
         linear-gradient(90deg, rgba(27, 100, 218, 0.045) 1px, transparent 1px),
-        #fffefa;
+        var(--sl-surface);
     background-size: 10% 25%, 10% 100%;
     overflow: hidden;
 }
@@ -1473,7 +1494,7 @@ body.pilot-redesign-shell .pilot-mobile-nav {
     border: 1px solid rgba(180, 119, 18, 0.28);
     border-radius: 7px;
     background: var(--sl-amber-soft);
-    color: #8a5c14;
+    color: var(--sl-amber);
 }
 
 .pilot-momentum-shadow-profitability-gate strong {
@@ -1602,7 +1623,7 @@ body.pilot-redesign-shell .pilot-mobile-nav {
     padding: 8px 9px;
     border-radius: 7px;
     background: var(--sl-amber-soft);
-    color: #8a5c14;
+    color: var(--sl-amber);
     font-size: 10px;
     line-height: 1.45;
     overflow-wrap: anywhere;
@@ -1707,7 +1728,7 @@ body.pilot-redesign-shell .pilot-mobile-nav {
     border: 1px solid var(--sl-line-strong);
     border-radius: 8px;
     outline: 0;
-    background: #fff;
+    background: var(--sl-surface);
     color: var(--sl-ink);
     font: inherit;
     font-size: 13px;
@@ -2096,7 +2117,7 @@ body.pilot-redesign-shell .pilot-mobile-nav {
     background:
         linear-gradient(rgba(27, 100, 218, 0.05) 1px, transparent 1px),
         linear-gradient(90deg, rgba(27, 100, 218, 0.05) 1px, transparent 1px),
-        #fffefa;
+        var(--sl-surface);
     background-size: 10% 20%, 10% 100%;
 }
 
@@ -2163,7 +2184,7 @@ body.pilot-redesign-shell .pilot-mobile-nav {
     padding: 3px;
     border: 1px solid var(--sl-line);
     border-radius: 8px;
-    background: #fff;
+    background: var(--sl-surface);
 }
 
 .pilot-market-interval {
@@ -2171,7 +2192,7 @@ body.pilot-redesign-shell .pilot-mobile-nav {
     padding: 0 8px;
     border: 1px solid var(--sl-line);
     border-radius: 6px;
-    background: #fff;
+    background: var(--sl-surface);
     color: var(--sl-muted);
     cursor: pointer;
     font: inherit;
@@ -2312,7 +2333,7 @@ body.pilot-redesign-shell .pilot-mobile-nav {
     padding: 11px;
     border: 1px solid var(--sl-line);
     border-radius: 9px;
-    background: rgba(255, 255, 255, 0.68);
+    background: color-mix(in srgb, var(--sl-surface) 68%, transparent);
 }
 
 .pilot-analysis-stat strong {
@@ -2523,7 +2544,7 @@ body.pilot-redesign-shell .pilot-mobile-nav {
     align-items: flex-start;
     margin: 18px 20px;
     padding-top: 15px;
-    border-top: 1px solid #cad9ee;
+    border-top: 1px solid color-mix(in srgb, var(--sl-blue) 18%, var(--sl-line));
     color: var(--sl-ink);
     font-family: var(--sl-font-display);
     font-size: 17px;
@@ -2539,8 +2560,8 @@ body.pilot-redesign-shell .pilot-mobile-nav {
 
 .pilot-news-context-check {
     padding: 16px 20px 18px;
-    border-top: 1px solid #cad9ee;
-    background: rgba(255, 255, 255, 0.6);
+    border-top: 1px solid color-mix(in srgb, var(--sl-blue) 18%, var(--sl-line));
+    background: color-mix(in srgb, var(--sl-surface) 60%, transparent);
 }
 
 .pilot-news-context-check h3 {
@@ -2575,7 +2596,7 @@ body.pilot-redesign-shell .pilot-mobile-nav {
     padding: 10px 12px;
     border-left: 2px solid var(--sl-red);
     background: var(--sl-red-soft);
-    color: #8f302c;
+    color: var(--sl-red);
     font-size: 12px;
 }
 
@@ -2766,7 +2787,7 @@ body.pilot-redesign-shell .pilot-mobile-nav {
     padding: 12px;
     border: 1px solid var(--sl-line);
     border-radius: 9px;
-    background: #fff;
+    background: var(--sl-surface);
     color: var(--sl-ink);
     cursor: pointer;
     font: inherit;
@@ -2876,7 +2897,7 @@ body.pilot-redesign-shell .pilot-mobile-nav {
     width: 20px;
     height: 20px;
     border-radius: 50%;
-    background: #fff;
+    background: var(--sl-surface);
     box-shadow: var(--sl-shadow-xs);
     content: "";
     transition: transform 160ms ease;
@@ -2920,13 +2941,13 @@ body.pilot-redesign-shell .pilot-mobile-nav {
 }
 
 .pilot-history-warning strong {
-    color: #8f5200;
+    color: var(--sl-amber);
     font-size: 13px;
 }
 
 .pilot-history-warning span {
     margin-top: 3px;
-    color: #8a5c14;
+    color: var(--sl-amber);
     font-size: 11px;
     line-height: 1.45;
 }
@@ -2935,7 +2956,7 @@ body.pilot-redesign-shell .pilot-mobile-nav {
     padding: 14px;
     border: 1px solid var(--sl-line);
     border-radius: 9px;
-    background: rgba(255, 255, 255, 0.86);
+    background: color-mix(in srgb, var(--sl-surface) 86%, transparent);
 }
 
 .pilot-history-metric span {
@@ -3052,7 +3073,7 @@ body.pilot-redesign-shell .pilot-mobile-nav {
     padding: 10px 11px;
     border: 1px solid var(--sl-line);
     border-radius: 9px;
-    background: var(--sl-page, #f7f8fa);
+    background: var(--sl-page, var(--sl-surface-2));
 }
 
 .pilot-validation-audit-grid dt {
@@ -3102,7 +3123,7 @@ body.pilot-redesign-shell .pilot-mobile-nav {
     padding: 12px;
     border: 1px solid var(--sl-line);
     border-radius: 10px;
-    background: var(--sl-page, #f7f8fa);
+    background: var(--sl-page, var(--sl-surface-2));
 }
 
 .pilot-quote-cost-overview span,
@@ -3133,7 +3154,7 @@ body.pilot-redesign-shell .pilot-mobile-nav {
     padding: 10px 14px;
     border: 1px solid var(--sl-line);
     border-radius: 10px;
-    background: var(--sl-page, #f7f8fa);
+    background: var(--sl-page, var(--sl-surface-2));
 }
 
 .pilot-quote-cost-preflight > div {
@@ -3160,12 +3181,12 @@ body.pilot-redesign-shell .pilot-mobile-nav {
 }
 
 .pilot-quote-cost-preflight.is-blocked {
-    border-color: #f0d38e;
+    border-color: color-mix(in srgb, var(--sl-amber) 32%, var(--sl-line));
     background: var(--sl-amber-soft);
 }
 
 .pilot-quote-cost-preflight.is-ready {
-    border-color: #a8ddc8;
+    border-color: color-mix(in srgb, var(--sl-green) 32%, var(--sl-line));
     background: #f5fbf8;
 }
 
@@ -3214,15 +3235,15 @@ body.pilot-redesign-shell .pilot-mobile-nav {
     padding: 10px;
     border: 1px solid var(--sl-line);
     border-radius: 8px;
-    background: var(--sl-page, #f7f8fa);
+    background: var(--sl-page, var(--sl-surface-2));
 }
 
 .pilot-quote-cost-candidate.is-ready {
-    border-color: #a8ddc8;
+    border-color: color-mix(in srgb, var(--sl-green) 32%, var(--sl-line));
 }
 
 .pilot-quote-cost-candidate.is-blocked {
-    border-color: #f0d38e;
+    border-color: color-mix(in srgb, var(--sl-amber) 32%, var(--sl-line));
 }
 
 .pilot-quote-cost-candidate-head {
@@ -3316,7 +3337,7 @@ body.pilot-redesign-shell .pilot-mobile-nav {
     padding: 11px;
     border: 1px solid var(--sl-line);
     border-radius: 9px;
-    background: var(--sl-page, #f7f8fa);
+    background: var(--sl-page, var(--sl-surface-2));
 }
 
 .pilot-quote-cost-market.is-caution {
@@ -3436,15 +3457,15 @@ body.pilot-redesign-shell .pilot-mobile-nav {
     padding: 11px;
     border: 1px solid var(--sl-line);
     border-radius: 8px;
-    background: #fff;
+    background: var(--sl-surface);
 }
 
 .pilot-validation-market-card.is-pass {
-    border-color: #a8ddc8;
+    border-color: color-mix(in srgb, var(--sl-green) 32%, var(--sl-line));
 }
 
 .pilot-validation-market-card.is-hold {
-    border-color: #f0d38e;
+    border-color: color-mix(in srgb, var(--sl-amber) 32%, var(--sl-line));
 }
 
 .pilot-validation-market-name {
@@ -3643,8 +3664,8 @@ body.pilot-redesign-shell .pilot-mobile-nav {
 }
 
 .pilot-paper-diagnostic-card.is-loose {
-    border-color: #f0d38e;
-    background: #fffaf0;
+    border-color: color-mix(in srgb, var(--sl-amber) 32%, var(--sl-line));
+    background: var(--sl-amber-soft);
 }
 
 .pilot-paper-diagnostic-card-head {
@@ -3757,7 +3778,7 @@ body.pilot-redesign-shell .pilot-mobile-nav {
     gap: 9px;
     margin: 12px 20px 18px;
     padding: 12px 14px;
-    border: 1px solid #efc1bd;
+    border: 1px solid color-mix(in srgb, var(--sl-red) 26%, var(--sl-line));
     border-radius: var(--sl-radius-md);
     background: var(--sl-red-soft);
     color: var(--sl-red);
@@ -3782,7 +3803,7 @@ body.pilot-redesign-shell .pilot-mobile-nav {
     padding: 13px;
     border: 1px solid var(--sl-line);
     border-radius: 9px;
-    background: #fff;
+    background: var(--sl-surface);
 }
 
 .pilot-wallet-action h3 {
@@ -4104,7 +4125,7 @@ body.pilot-redesign-shell .pilot-mobile-nav {
     padding: 0 12px;
     border: 1px solid var(--sl-line);
     border-radius: 11px;
-    background: #fff;
+    background: var(--sl-surface);
     color: var(--sl-ink-soft);
     font-size: 13px;
     font-weight: 650;
@@ -4148,7 +4169,7 @@ body.pilot-redesign-shell .pilot-mobile-nav {
     padding: 13px 16px;
     border: 1px solid #eadbb5;
     border-radius: var(--sl-radius-md);
-    background: linear-gradient(110deg, #fff9e7, #ffffff 72%);
+    background: linear-gradient(110deg, var(--sl-amber-soft), var(--sl-surface) 72%);
     color: var(--sl-amber);
     font-size: 12px;
 }
@@ -4156,7 +4177,7 @@ body.pilot-redesign-shell .pilot-mobile-nav {
 .pilot-ai-policy strong {
     display: block;
     margin-bottom: 3px;
-    color: #8f5200;
+    color: var(--sl-amber);
     font-size: 13px;
 }
 
@@ -4345,7 +4366,7 @@ body.pilot-redesign-shell .pilot-mobile-nav {
     padding: 9px 7px;
     border: 1px solid var(--sl-line);
     border-radius: 8px;
-    background: #fbfbf9;
+    background: var(--sl-surface-2);
     text-align: center;
 }
 
@@ -4376,7 +4397,7 @@ body.pilot-redesign-shell .pilot-mobile-nav {
     padding: 8px 9px;
     border: 1px solid var(--sl-line);
     border-radius: 8px;
-    background: #fff;
+    background: var(--sl-surface);
 }
 
 .pilot-ai-effectiveness-row > div {
@@ -4421,7 +4442,7 @@ body.pilot-redesign-shell .pilot-mobile-nav {
     padding: 12px;
     border: 1px solid var(--sl-line);
     border-radius: 10px;
-    background: #fbfbf9;
+    background: var(--sl-surface-2);
 }
 
 .pilot-ai-provider-help {
@@ -4434,16 +4455,16 @@ body.pilot-redesign-shell .pilot-mobile-nav {
 
 .pilot-ai-provider.is-ready {
     border-color: #a9ddc8;
-    background: #f4fbf7;
+    background: var(--sl-green-soft);
 }
 
 .pilot-ai-provider.is-warning {
     border-color: #ead39a;
-    background: #fffaf0;
+    background: var(--sl-amber-soft);
 }
 
 .pilot-ai-provider.is-error {
-    border-color: #efc1bd;
+    border-color: color-mix(in srgb, var(--sl-red) 26%, var(--sl-line));
     background: #fff8f7;
 }
 
@@ -4517,7 +4538,7 @@ body.pilot-redesign-shell .pilot-mobile-nav {
     padding: 0 10px;
     border: 1px solid var(--sl-line-strong);
     border-radius: 8px;
-    background: #fff;
+    background: var(--sl-surface);
     color: var(--sl-ink);
     font: inherit;
     font-size: 12px;
@@ -4537,7 +4558,7 @@ body.pilot-redesign-shell .pilot-mobile-nav {
     padding: 0 9px;
     border: 1px solid var(--sl-line);
     border-radius: 7px;
-    background: #fff;
+    background: var(--sl-surface);
     color: var(--sl-muted);
     cursor: pointer;
     font-size: 11px;
@@ -4568,7 +4589,7 @@ body.pilot-redesign-shell .pilot-mobile-nav {
     border: 1px solid var(--sl-line);
     border-left: 3px solid var(--sl-blue);
     border-radius: 9px;
-    background: #fff;
+    background: var(--sl-surface);
 }
 
 .pilot-ai-session.is-paused { border-left-color: var(--sl-amber); }
@@ -4631,7 +4652,7 @@ body.pilot-redesign-shell .pilot-mobile-nav {
     padding: 8px 9px;
     border: 1px solid #b9decf;
     border-radius: 7px;
-    background: #f4fbf7;
+    background: var(--sl-green-soft);
     color: var(--sl-green);
     font-size: 11px;
 }
@@ -4793,7 +4814,7 @@ body.pilot-redesign-shell .pilot-mobile-nav {
         height: auto !important;
         border: 1px solid var(--sl-line-strong);
         border-radius: 18px;
-        background: rgba(255, 255, 255, 0.94);
+        background: color-mix(in srgb, var(--sl-surface) 94%, transparent);
         box-shadow: 0 12px 34px rgba(2, 9, 19, 0.15);
         -webkit-backdrop-filter: blur(16px);
         backdrop-filter: blur(16px);
@@ -5415,5 +5436,479 @@ body.pilot-redesign-shell .pilot-mobile-nav {
         animation-iteration-count: 1 !important;
         scroll-behavior: auto !important;
         transition-duration: 0.01ms !important;
+    }
+}
+
+/* ==========================================================================
+ * Calm finance layer (2026-11)
+ * --------------------------------------------------------------------------
+ * A Toss-like design language without any Toss brand asset: generous
+ * whitespace, large numerals, rounded borderless cards on a soft grey paper,
+ * restrained colour, count-up numbers, spring transitions, press feedback and
+ * skeleton loading. Light and dark themes share one token map; animations are
+ * removed for prefers-reduced-motion at the bottom of this layer.
+ * ======================================================================== */
+
+:root {
+    --sl-blue-fill: var(--tds-color-blue-500);
+    --sl-blue-fill-hover: var(--tds-color-blue-700);
+    --sl-green-fill: var(--sl-green);
+    --sl-red-fill: var(--sl-red);
+    --sl-card-shadow: 0 1px 2px rgba(2, 9, 19, 0.03);
+    --sl-card-shadow-hover: 0 8px 24px rgba(2, 9, 19, 0.06);
+    --sl-overlay-shadow: 0 24px 64px rgba(2, 9, 19, 0.18);
+}
+
+@media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+        --sl-ink: #f2f4f6;
+        --sl-ink-soft: #c5cad1;
+        --sl-muted: #9aa1ac;
+        --sl-faint: #6c7480;
+        --sl-line: rgba(255, 255, 255, 0.08);
+        --sl-line-strong: rgba(255, 255, 255, 0.14);
+        --sl-paper: #101114;
+        --sl-surface: #1b1c21;
+        --sl-surface-2: #25262c;
+        --sl-blue: #5a9dff;
+        --sl-blue-deep: #93bfff;
+        --sl-blue-soft: rgba(90, 157, 255, 0.15);
+        --sl-blue-fill: #2b6fd9;
+        --sl-blue-fill-hover: #3a7ee6;
+        --sl-green: #34c98a;
+        --sl-green-bright: #34c98a;
+        --sl-green-soft: rgba(52, 201, 138, 0.13);
+        --sl-green-fill: #12804f;
+        --sl-amber: #f1b552;
+        --sl-amber-soft: rgba(241, 181, 82, 0.13);
+        --sl-red: #ff7b7b;
+        --sl-red-soft: rgba(255, 123, 123, 0.13);
+        --sl-red-fill: #c8343c;
+        --sl-shadow-xs: none;
+        --sl-shadow-sm: 0 10px 30px rgba(0, 0, 0, 0.35);
+        --sl-card-shadow: none;
+        --sl-card-shadow-hover: 0 8px 24px rgba(0, 0, 0, 0.32);
+        --sl-overlay-shadow: 0 24px 64px rgba(0, 0, 0, 0.55);
+        --sl-chart-blue: #5a9dff;
+        --sl-chart-grid: rgba(255, 255, 255, 0.08);
+        --sl-chart-baseline: #4c525c;
+        --sl-skeleton-base: #25262c;
+        --sl-skeleton-shine: rgba(255, 255, 255, 0.06);
+        color-scheme: dark;
+    }
+}
+
+:root[data-theme="dark"] {
+    --sl-ink: #f2f4f6;
+    --sl-ink-soft: #c5cad1;
+    --sl-muted: #9aa1ac;
+    --sl-faint: #6c7480;
+    --sl-line: rgba(255, 255, 255, 0.08);
+    --sl-line-strong: rgba(255, 255, 255, 0.14);
+    --sl-paper: #101114;
+    --sl-surface: #1b1c21;
+    --sl-surface-2: #25262c;
+    --sl-blue: #5a9dff;
+    --sl-blue-deep: #93bfff;
+    --sl-blue-soft: rgba(90, 157, 255, 0.15);
+    --sl-blue-fill: #2b6fd9;
+    --sl-blue-fill-hover: #3a7ee6;
+    --sl-green: #34c98a;
+    --sl-green-bright: #34c98a;
+    --sl-green-soft: rgba(52, 201, 138, 0.13);
+    --sl-green-fill: #12804f;
+    --sl-amber: #f1b552;
+    --sl-amber-soft: rgba(241, 181, 82, 0.13);
+    --sl-red: #ff7b7b;
+    --sl-red-soft: rgba(255, 123, 123, 0.13);
+    --sl-red-fill: #c8343c;
+    --sl-shadow-xs: none;
+    --sl-shadow-sm: 0 10px 30px rgba(0, 0, 0, 0.35);
+    --sl-card-shadow: none;
+    --sl-card-shadow-hover: 0 8px 24px rgba(0, 0, 0, 0.32);
+    --sl-overlay-shadow: 0 24px 64px rgba(0, 0, 0, 0.55);
+    --sl-chart-blue: #5a9dff;
+    --sl-chart-grid: rgba(255, 255, 255, 0.08);
+    --sl-chart-baseline: #4c525c;
+    --sl-skeleton-base: #25262c;
+    --sl-skeleton-shine: rgba(255, 255, 255, 0.06);
+    color-scheme: dark;
+}
+
+/* ---- Surfaces ---------------------------------------------------------- */
+
+#pilot-redesign-root .pilot-app {
+    background: var(--sl-paper);
+}
+
+#pilot-redesign-root .pilot-sidebar {
+    border-right-color: transparent;
+    background: var(--sl-surface);
+}
+
+#pilot-redesign-root .pilot-brand {
+    border-bottom-color: transparent;
+}
+
+#pilot-redesign-root .pilot-topbar {
+    border-bottom-color: transparent;
+    background: color-mix(in srgb, var(--sl-paper) 86%, transparent);
+    -webkit-backdrop-filter: saturate(160%) blur(16px);
+    backdrop-filter: saturate(160%) blur(16px);
+}
+
+#pilot-redesign-root .pilot-overview-lead {
+    border-color: transparent;
+    border-radius: var(--sl-radius-xl);
+    box-shadow: var(--sl-card-shadow);
+}
+
+#pilot-redesign-root .pilot-overview-lead .pilot-overview-balance {
+    border-radius: 0;
+    box-shadow: none;
+}
+
+#pilot-redesign-root .pilot-panel,
+#pilot-redesign-root .pilot-history-metric,
+#pilot-redesign-root .pilot-wallet-action,
+#pilot-redesign-root .pilot-overview-balance {
+    border-color: transparent;
+    border-radius: var(--sl-radius-xl);
+    background: var(--sl-surface);
+    box-shadow: var(--sl-card-shadow);
+    transition:
+        box-shadow var(--sl-duration-base) var(--sl-ease-out),
+        transform var(--sl-duration-base) var(--sl-ease-out);
+}
+
+#pilot-redesign-root .pilot-panel-header {
+    padding: 22px 24px 14px;
+    border-bottom-color: transparent;
+}
+
+#pilot-redesign-root .pilot-page-title {
+    font-weight: 750;
+    letter-spacing: -0.04em;
+}
+
+/* ---- Big numerals ------------------------------------------------------- */
+
+#pilot-redesign-root .pilot-overview-balance-value {
+    font-size: clamp(34px, 4.6vw, 48px);
+    font-weight: 760;
+    letter-spacing: -0.045em;
+}
+
+#pilot-redesign-root .pilot-stat-value,
+#pilot-redesign-root .pilot-overview-balance-value,
+#pilot-redesign-root .pilot-market-price {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum" 1;
+}
+
+#pilot-redesign-root .pilot-stat-value {
+    font-size: 20px;
+    font-weight: 720;
+}
+
+#pilot-redesign-root .is-counting {
+    will-change: contents;
+}
+
+/* ---- Buttons & press feedback ------------------------------------------ */
+
+#pilot-redesign-root .pilot-button {
+    min-height: 42px;
+    border-color: transparent;
+    border-radius: 12px;
+    background: var(--sl-surface-2);
+    color: var(--sl-ink-soft);
+    transition:
+        background var(--sl-duration-fast) var(--sl-ease-out),
+        color var(--sl-duration-fast) var(--sl-ease-out),
+        box-shadow var(--sl-duration-fast) var(--sl-ease-out),
+        transform var(--sl-duration-base) var(--sl-ease-spring);
+}
+
+#pilot-redesign-root .pilot-button:hover:not(:disabled) {
+    border-color: transparent;
+    background: var(--sl-blue-soft);
+    color: var(--sl-blue);
+    transform: none;
+}
+
+#pilot-redesign-root .pilot-button.is-primary {
+    background: var(--sl-blue-fill);
+    color: #fff;
+}
+
+#pilot-redesign-root .pilot-button.is-primary:hover:not(:disabled) {
+    background: var(--sl-blue-fill-hover);
+    color: #fff;
+}
+
+#pilot-redesign-root .pilot-button.is-success,
+#pilot-redesign-root .pilot-button.is-success:hover:not(:disabled) {
+    background: var(--sl-green-fill);
+    color: #fff;
+}
+
+#pilot-redesign-root .pilot-button.is-danger,
+#pilot-redesign-root .pilot-button.is-danger:hover:not(:disabled) {
+    background: var(--sl-red-fill);
+    color: #fff;
+}
+
+#pilot-redesign-root .pilot-button.is-quiet {
+    background: transparent;
+}
+
+#pilot-redesign-root .pilot-button.is-small {
+    min-height: 34px;
+    border-radius: 10px;
+}
+
+#pilot-redesign-root .pilot-button:active:not(:disabled),
+#pilot-redesign-root .pilot-nav-button:active,
+#pilot-redesign-root .pilot-mode-button:active:not(:disabled),
+#pilot-redesign-root .pilot-filter-chip:active,
+#pilot-redesign-root .pilot-icon-button:active,
+#pilot-redesign-root .pilot-table-action:active,
+#pilot-redesign-root .pilot-market-row:active {
+    transform: scale(var(--sl-press-scale));
+    transition-duration: 90ms;
+    transition-timing-function: var(--sl-ease-out);
+}
+
+#pilot-redesign-root .pilot-nav-button,
+#pilot-redesign-root .pilot-mode-button,
+#pilot-redesign-root .pilot-filter-chip,
+#pilot-redesign-root .pilot-icon-button,
+#pilot-redesign-root .pilot-table-action,
+#pilot-redesign-root .pilot-market-row {
+    transition:
+        background var(--sl-duration-fast) var(--sl-ease-out),
+        color var(--sl-duration-fast) var(--sl-ease-out),
+        transform var(--sl-duration-base) var(--sl-ease-spring);
+}
+
+#pilot-redesign-root .pilot-nav-button {
+    border-radius: 12px;
+}
+
+#pilot-redesign-root .pilot-nav-button.is-active {
+    box-shadow: none;
+    font-weight: 700;
+}
+
+#pilot-redesign-root .pilot-mode-switch {
+    border-radius: 14px;
+}
+
+#pilot-redesign-root .pilot-mode-button {
+    border-radius: 11px;
+}
+
+#pilot-redesign-root .pilot-icon-button {
+    border-color: transparent;
+    border-radius: 12px;
+    background: var(--sl-surface-2);
+}
+
+#pilot-redesign-root .pilot-input,
+#pilot-redesign-root .pilot-market-search input {
+    border-radius: 12px;
+}
+
+/* ---- Page & content transitions ---------------------------------------- */
+
+#pilot-redesign-root .pilot-page.is-active {
+    animation: pilot-calm-page-in var(--sl-duration-slow) var(--sl-ease-out) both;
+}
+
+#pilot-redesign-root .pilot-page.is-active > * {
+    animation: pilot-calm-rise var(--sl-duration-slow) var(--sl-ease-spring) both;
+}
+
+#pilot-redesign-root .pilot-page.is-active > *:nth-child(2) { animation-delay: 40ms; }
+#pilot-redesign-root .pilot-page.is-active > *:nth-child(3) { animation-delay: 80ms; }
+#pilot-redesign-root .pilot-page.is-active > *:nth-child(4) { animation-delay: 120ms; }
+#pilot-redesign-root .pilot-page.is-active > *:nth-child(5) { animation-delay: 160ms; }
+#pilot-redesign-root .pilot-page.is-active > *:nth-child(n + 6) { animation-delay: 200ms; }
+
+@keyframes pilot-calm-page-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+@keyframes pilot-calm-rise {
+    from { opacity: 0; transform: translateY(14px) scale(0.99); }
+    to { opacity: 1; transform: none; }
+}
+
+#pilot-redesign-root .pilot-toast {
+    border-color: transparent;
+    border-left-width: 0;
+    border-radius: 16px;
+    background: color-mix(in srgb, var(--sl-ink) 92%, transparent);
+    box-shadow: var(--sl-overlay-shadow);
+    color: var(--sl-surface);
+    font-size: 13px;
+    font-weight: 600;
+    animation: pilot-calm-toast-in var(--sl-duration-slow) var(--sl-ease-spring) both;
+}
+
+#pilot-redesign-root .pilot-toast i {
+    color: var(--sl-surface);
+}
+
+#pilot-redesign-root .pilot-toast.is-success i { color: var(--sl-green-bright); }
+#pilot-redesign-root .pilot-toast.is-error i { color: #ff8f8f; }
+#pilot-redesign-root .pilot-toast.is-warning i { color: #f6c35f; }
+
+@keyframes pilot-calm-toast-in {
+    from { opacity: 0; transform: translateY(18px) scale(0.96); }
+    to { opacity: 1; transform: none; }
+}
+
+#pilot-redesign-root .pilot-modal {
+    border-color: transparent;
+    border-radius: 24px;
+    box-shadow: var(--sl-overlay-shadow);
+    animation: pilot-calm-pop var(--sl-duration-slow) var(--sl-ease-spring) both;
+}
+
+#pilot-redesign-root .pilot-modal-header,
+#pilot-redesign-root .pilot-modal-footer {
+    border-color: transparent;
+    padding: 20px 24px;
+}
+
+#pilot-redesign-root .pilot-modal-body {
+    padding: 4px 24px 20px;
+}
+
+@keyframes pilot-calm-pop {
+    from { opacity: 0; transform: translateY(12px) scale(0.97); }
+    to { opacity: 1; transform: none; }
+}
+
+#pilot-redesign-root .pilot-mobile-menu-sheet {
+    border-color: transparent;
+    border-radius: 28px 28px 0 0;
+    box-shadow: var(--sl-overlay-shadow);
+    animation: pilot-calm-sheet-up var(--sl-duration-slow) var(--sl-ease-spring) both;
+}
+
+@keyframes pilot-calm-sheet-up {
+    from { transform: translateY(100%); }
+    to { transform: none; }
+}
+
+/* ---- Skeleton loading --------------------------------------------------- */
+
+#pilot-redesign-root[data-pilot-loading] .pilot-overview-balance-value,
+#pilot-redesign-root[data-pilot-loading] .pilot-stat-value,
+#pilot-redesign-root[data-pilot-loading] .pilot-overview-balance-caption,
+#pilot-redesign-root[data-pilot-loading] .pilot-stat-caption {
+    width: fit-content;
+    min-width: 7ch;
+    border-radius: 8px;
+    color: transparent !important;
+    background:
+        linear-gradient(100deg, transparent 20%, var(--sl-skeleton-shine) 50%, transparent 80%) 0 0 / 220% 100%,
+        var(--sl-skeleton-base);
+    animation: pilot-calm-shimmer 1.3s linear infinite;
+}
+
+#pilot-redesign-root[data-pilot-loading] .pilot-overview-balance-value {
+    min-width: 11ch;
+}
+
+#pilot-redesign-root .pilot-skeleton {
+    display: block;
+    min-height: 14px;
+    border-radius: 8px;
+    background:
+        linear-gradient(100deg, transparent 20%, var(--sl-skeleton-shine) 50%, transparent 80%) 0 0 / 220% 100%,
+        var(--sl-skeleton-base);
+    animation: pilot-calm-shimmer 1.3s linear infinite;
+}
+
+@keyframes pilot-calm-shimmer {
+    from { background-position: 120% 0, 0 0; }
+    to { background-position: -120% 0, 0 0; }
+}
+
+/* ---- Table rows / lists -------------------------------------------------- */
+
+#pilot-redesign-root .pilot-table th,
+#pilot-redesign-root .pilot-table td {
+    border-bottom-color: var(--sl-line);
+}
+
+#pilot-redesign-root .pilot-table tbody tr {
+    transition: background var(--sl-duration-fast) var(--sl-ease-out);
+}
+
+#pilot-redesign-root .pilot-table tbody tr:hover {
+    background: var(--sl-surface-2);
+}
+
+/* ---- Hover lift on pointer devices only ------------------------------- */
+
+@media (hover: hover) and (pointer: fine) {
+    #pilot-redesign-root .pilot-panel:hover {
+        box-shadow: var(--sl-card-shadow-hover);
+    }
+}
+
+/* ---- Mobile: full-bleed calm cards ----------------------------------- */
+
+@media (max-width: 760px) {
+    #pilot-redesign-root .pilot-panel,
+    #pilot-redesign-root .pilot-overview-balance {
+        border-radius: 20px;
+    }
+
+    #pilot-redesign-root .pilot-sidebar {
+        border-top: 1px solid var(--sl-line);
+        background: color-mix(in srgb, var(--sl-surface) 92%, transparent);
+        -webkit-backdrop-filter: saturate(160%) blur(18px);
+        backdrop-filter: saturate(160%) blur(18px);
+    }
+
+    #pilot-redesign-root .pilot-nav-button.is-active {
+        background: transparent;
+    }
+}
+
+/* ---- Reduced motion ------------------------------------------------------ */
+
+@media (prefers-reduced-motion: reduce) {
+    #pilot-redesign-root .pilot-page.is-active,
+    #pilot-redesign-root .pilot-page.is-active > *,
+    #pilot-redesign-root .pilot-toast,
+    #pilot-redesign-root .pilot-modal,
+    #pilot-redesign-root .pilot-mobile-menu-sheet {
+        animation: none !important;
+    }
+
+    #pilot-redesign-root[data-pilot-loading] .pilot-overview-balance-value,
+    #pilot-redesign-root[data-pilot-loading] .pilot-stat-value,
+    #pilot-redesign-root[data-pilot-loading] .pilot-overview-balance-caption,
+    #pilot-redesign-root[data-pilot-loading] .pilot-stat-caption,
+    #pilot-redesign-root .pilot-skeleton {
+        animation: none !important;
+    }
+
+    #pilot-redesign-root .pilot-button:active:not(:disabled),
+    #pilot-redesign-root .pilot-nav-button:active,
+    #pilot-redesign-root .pilot-mode-button:active:not(:disabled),
+    #pilot-redesign-root .pilot-filter-chip:active,
+    #pilot-redesign-root .pilot-icon-button:active,
+    #pilot-redesign-root .pilot-table-action:active,
+    #pilot-redesign-root .pilot-market-row:active {
+        transform: none;
     }
 }
