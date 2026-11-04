@@ -687,7 +687,8 @@ final class CoinPilotAPIClient: CoinPilotAPIProviding, @unchecked Sendable {
             "/api/optimization-history", "/api/optimization/settings", "/api/ai/providers",
             "/api/ai/monitoring", "/api/ai/events", "/api/ai/consultations",
             "/api/ai/effectiveness", "/api/ai/sessions", "/api/logs", "/api/system-status",
-            "/api/stream"
+            "/api/stream",
+            "/api/stocks/status", "/api/horizons/status"
         ]
         if simplePaths.contains(components.path) && (components.queryItems?.isEmpty ?? true) { return true }
 
@@ -759,6 +760,13 @@ final class CoinPilotAPIClient: CoinPilotAPIProviding, @unchecked Sendable {
               components.fragment == nil else { return false }
         let keys = Set(body.keys)
         if components.path.range(of: "^/api/ai/sessions/[A-Za-z0-9_-]{1,128}/(pause|resume|stop)$", options: .regularExpression) != nil {
+            return keys.isEmpty
+        }
+        if components.path.range(of: "^/api/stocks/(paper|live)/(start|stop)$", options: .regularExpression) != nil ||
+            components.path.range(of: "^/api/horizons/(coin|stock)/(start|stop)$", options: .regularExpression) != nil {
+            return keys.isEmpty
+        }
+        if components.path == "/api/stocks/paper/reset" {
             return keys.isEmpty
         }
         switch components.path {
@@ -1953,6 +1961,8 @@ final class CoinPilotStore: ObservableObject {
     ]
     private static let optionalResourceNames: Set<String> = ["paper-validation-summary"]
     private static let mobileFeatureFreshnessSeconds: [String: TimeInterval] = [
+        "stocks": 20,
+        "horizons": 30,
         "news": 300,
         "ai": 60,
         "account-analytics": 60,
@@ -1963,7 +1973,7 @@ final class CoinPilotStore: ObservableObject {
         resourceNames.count - optionalResourceNames.count
     }
 
-    private struct MobileFeatureRequestContext {
+    struct MobileFeatureRequestContext {
         let generation: Int
         let serverURL: URL
         let workspace: CoinPilotWorkspaceMode
@@ -2076,6 +2086,10 @@ final class CoinPilotStore: ObservableObject {
     @Published private(set) var featureLastSuccessfulAt: [String: Date] = [:]
     @Published private(set) var isRunningFeatureAction = false
     @Published private(set) var isRecordingSnapshot = false
+    /// `GET /api/stocks/status` (see CoinPilotStore+Stocks.swift).
+    @Published var stocksStatus: CoinPilotStocksStatus?
+    /// `GET /api/horizons/status` (see CoinPilotStore+Horizons.swift).
+    @Published var horizonsStatus: CoinPilotHorizonsStatus?
 
     private let api: CoinPilotAPIProviding
     private let tokens: CoinPilotTokenProviding
@@ -4345,7 +4359,7 @@ final class CoinPilotStore: ObservableObject {
         }
     }
 
-    private func makeMobileFeatureRequestContext(featureKey: String) -> MobileFeatureRequestContext? {
+    func makeMobileFeatureRequestContext(featureKey: String) -> MobileFeatureRequestContext? {
         guard canOperate,
               let serverURL = currentServerURL,
               hasRequestCredentials(for: serverURL) else {
@@ -4361,7 +4375,7 @@ final class CoinPilotStore: ObservableObject {
         )
     }
 
-    private func matchesMobileFeatureContext(_ context: MobileFeatureRequestContext) -> Bool {
+    func matchesMobileFeatureContext(_ context: MobileFeatureRequestContext) -> Bool {
         context.generation == requestGeneration &&
             currentServerURL == context.serverURL &&
             activeWorkspace == context.workspace &&
@@ -4369,11 +4383,11 @@ final class CoinPilotStore: ObservableObject {
             requestBearerToken(for: context.serverURL) == context.token
     }
 
-    private func isCurrentMobileFeatureContext(_ context: MobileFeatureRequestContext) -> Bool {
+    func isCurrentMobileFeatureContext(_ context: MobileFeatureRequestContext) -> Bool {
         !Task.isCancelled && matchesMobileFeatureContext(context)
     }
 
-    private func refreshMobileFeatureGroup(
+    func refreshMobileFeatureGroup(
         _ group: String,
         force: Bool,
         operation: (MobileFeatureRequestContext) async -> Bool
@@ -4817,7 +4831,7 @@ final class CoinPilotStore: ObservableObject {
         return true
     }
 
-    private func loadMobileFeature(
+    func loadMobileFeature(
         _ key: String,
         path: String,
         context suppliedContext: MobileFeatureRequestContext? = nil
@@ -4867,7 +4881,7 @@ final class CoinPilotStore: ObservableObject {
         }
     }
 
-    private func performFeatureMutation(_ key: String, path: String, body: [String: Any]) async -> [String: Any]? {
+    func performFeatureMutation(_ key: String, path: String, body: [String: Any]) async -> [String: Any]? {
         guard canOperate, let serverURL = currentServerURL, hasRequestCredentials(for: serverURL) else {
             featureMessages[key] = "운영 토큰으로 로그인해 주세요."
             return nil
@@ -5664,7 +5678,14 @@ final class CoinPilotStore: ObservableObject {
         dashboardMessage = messages.isEmpty ? nil : messages.joined(separator: "\n\n")
     }
 
+    /// Feature extensions in other files report status through this setter.
+    func setFeatureMessage(_ message: String?, for key: String) {
+        if let message { featureMessages[key] = message } else { featureMessages.removeValue(forKey: key) }
+    }
+
     private func clearMobileFeatureData() {
+        stocksStatus = nil
+        horizonsStatus = nil
         systemStatus = [:]
         analysisResults = []
         analysisSummary = [:]
