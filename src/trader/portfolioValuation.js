@@ -227,10 +227,24 @@ export class PortfolioValuation {
       console.log(`  📊 신호 강도: ${signalStrength.level} (x${signalStrength.multiplier})`);
     }
 
-    // 최소 주문 금액 체크 (업비트 최소 5,000원)
-    dynamicAmount = Math.max(this.owner.MIN_ORDER_AMOUNT, dynamicAmount);
+    // 최소 진입 금액 (업비트 최소 5,000원 + 손절 후에도 매도 가능한 여유분)
+    dynamicAmount = Math.max(this.getMinimumEntryAmount(), dynamicAmount);
 
     return Math.floor(dynamicAmount);
+  }
+
+  /**
+   * 소액 시드용 최소 진입 금액.
+   * 거래소 최소 주문금액(5,000원)으로 정확히 진입하면 손절가에 도달한 순간
+   * 평가금액이 최소 매도금액 아래로 내려가 포지션을 정리할 수 없다. 손절폭,
+   * 왕복 수수료, 1% 슬리피지 여유를 더해 100원 단위로 올림한다.
+   */
+  getMinimumEntryAmount() {
+    const minOrder = Number(this.owner.MIN_ORDER_AMOUNT) || 5000;
+    const stopLossPercent = Math.max(0, Number(this.owner.config?.stopLossPercent) || 0);
+    const bufferRate = (stopLossPercent / 100) + (2 * 0.0005) + 0.01;
+    const unit = minOrder >= 1000 ? 100 : 1;
+    return Math.ceil((minOrder * (1 + bufferRate)) / unit) * unit;
   }
 
   /**

@@ -698,6 +698,8 @@ class MultiCoinTrader {
 
   calculateDynamicInvestmentAmount(...args) { return this._valuation().calculateDynamicInvestmentAmount(...args); }
 
+  getMinimumEntryAmount(...args) { return this._valuation().getMinimumEntryAmount(...args); }
+
   calculateCumulativePnL(...args) { return this._valuation().calculateCumulativePnL(...args); }
 
   loadInitialSeedMoney(...args) { return this._portfolioStore().loadInitialSeedMoney(...args); }

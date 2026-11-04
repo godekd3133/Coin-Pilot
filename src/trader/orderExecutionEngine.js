@@ -305,11 +305,17 @@ export class OrderExecutionEngine {
       }
 
       const maxInvestment = krwBalance * this.owner.portfolioAllocation;
-      const investmentAmount = Math.min(
+      let investmentAmount = Math.min(
         dynamicInvestment,
         maxInvestment,
         krwBalance * 0.95
       );
+      // 소액 시드(1만~5만원): 비율 상한이 최소 주문금액보다 작아도 잔액이
+      // 최소 진입 금액(+수수료)을 감당하면 최소 금액으로 진입한다.
+      const minimumEntryAmount = this.owner.getMinimumEntryAmount();
+      if (investmentAmount < minimumEntryAmount && krwBalance >= minimumEntryAmount * 1.001) {
+        investmentAmount = minimumEntryAmount;
+      }
 
       // A LIVE data-gap transition may happen during an awaited confirmation
       // or investment calculation. Recheck immediately before any BUY dispatch.
@@ -322,7 +328,7 @@ export class OrderExecutionEngine {
       console.log(`  💰 투자금액: ${investmentAmount.toLocaleString()}원`);
       console.log(`     (기본 ${baseInvestment.toLocaleString()}원 × ${signalStrength.multiplier} = ${dynamicInvestment.toLocaleString()}원)`);
 
-      if (investmentAmount < 5000) {
+      if (investmentAmount < minimumEntryAmount) {
         this.owner.resolveWinnerShadowBlockedEntryAsNotFilled(coin, decision, 'investment_below_minimum');
         console.log(`\n⚠️  [${coin}] 매수 불가: 잔액 부족 (${krwBalance.toLocaleString()}원)`);
         return;
