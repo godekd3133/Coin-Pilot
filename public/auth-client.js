@@ -20,10 +20,15 @@
       return '/';
     }
   })();
-  const scopedKey = key => (BASE === '/' ? key : `${key}@${BASE}`);
+  const keyFor = (key, base) => (base === '/' ? key : `${key}@${base}`);
+  const scopedKey = key => keyFor(key, BASE);
   const API_PREFIX = `${BASE}api/`;
   const TOKEN_KEY = scopedKey('coinpilot.dashboardToken');
   const TOKEN_SCOPE_KEY = scopedKey('coinpilot.dashboardTokenScope');
+  // Paper (`/`) and LIVE (`/live/`) are two servers behind one sign-in: a
+  // username login here also asks the other server for its own token, so the
+  // workspace switch inside the app never shows a second login.
+  const SIBLING_BASE = BASE === '/live/' ? '/' : BASE === '/' ? '/live/' : null;
   const TOKEN_SCOPES = new Set(['operator', 'mobile_operator', 'read_only']);
   const rawFetch = window.fetch ? window.fetch.bind(window) : null;
   if (!rawFetch) return;
@@ -83,9 +88,54 @@
       (authState.tokenScope === 'operator' || authState.tokenScope === 'mobile_operator');
   }
 
+  async function signInSibling(username, password) {
+    if (!SIBLING_BASE) return false;
+    try {
+      const response = await rawFetch(`${SIBLING_BASE}api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password })
+      });
+      if (!response.ok) return false;
+      const data = await response.json();
+      if (typeof data?.token !== 'string' || !data.token || !TOKEN_SCOPES.has(data.tokenScope)) return false;
+      window.localStorage.setItem(keyFor('coinpilot.dashboardToken', SIBLING_BASE), data.token);
+      window.localStorage.setItem(keyFor('coinpilot.dashboardTokenScope', SIBLING_BASE), data.tokenScope);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  // Whether the other workspace is deployed next to this one. A local server
+  // without a `/live/` proxy answers with HTML or 404, never this JSON shape.
+  let siblingProbe = null;
+  function probeSibling() {
+    if (!SIBLING_BASE) return Promise.resolve(null);
+    siblingProbe ||= rawFetch(`${SIBLING_BASE}api/auth/status`)
+      .then(async response => {
+        if (!response.ok) return null;
+        const data = await response.json();
+        return typeof data?.authRequired === 'boolean' ? { base: SIBLING_BASE, authRequired: data.authRequired } : null;
+      })
+      .catch(() => null);
+    return siblingProbe;
+  }
+
+  function signOutEverywhere() {
+    for (const base of [BASE, SIBLING_BASE].filter(Boolean)) {
+      for (const key of ['coinpilot.dashboardToken', 'coinpilot.dashboardTokenScope']) {
+        try { window.localStorage.removeItem(keyFor(key, base)); } catch { /* ignore */ }
+      }
+    }
+  }
+
   window.coinPilotAuth = {
     get state() { return authState; },
     ready,
+    siblingBase: SIBLING_BASE,
+    probeSibling,
+    signOutEverywhere,
     get canMutate() { return canUseOperatorSocket(); },
     get canOpenSocket() { return canOpenRealtimeStream(); },
     requestLogin(message = '') { showLogin(message); }
@@ -189,7 +239,7 @@
       switchButton.hidden = !passwordLoginAvailable;
       switchButton.textContent = loginMode === 'password' ? '토큰으로 접속' : '아이디로 로그인';
       helpBox.textContent = loginMode === 'password'
-        ? '서버에 등록한 아이디와 비밀번호로 로그인해요. 로그인하면 이 브라우저에 접속 권한이 저장됩니다.'
+        ? '한 번 로그인하면 모의투자와 실전을 앱 안에서 바로 오갈 수 있어요. 접속 권한은 이 브라우저에 저장됩니다.'
         : '토큰은 서버 관리자에게 받을 수 있어요. 거래소 API 키와는 다른 값입니다. 입력한 토큰은 이 브라우저에 저장됩니다.';
       errorBox.textContent = '';
     };
@@ -221,6 +271,8 @@
           passwordInput.value = '';
           setToken(data.token);
           setTokenScope(data.tokenScope);
+          button.textContent = '모의·실전 연결 중…';
+          await signInSibling(username, password);
           setAuthState({ authRequired: true, tokenScope: data.tokenScope, authenticated: true, resolved: true, verification: 'verified', tokenPresent: true, error: null }, true);
           window.location.reload();
           return;

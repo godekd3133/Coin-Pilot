@@ -32,8 +32,11 @@ function makeElement() {
 async function loadAuthClient({
   savedToken = '', savedTokenScope = '', apiStatus = 'auth-required', apiResponse = 401,
   loginResponse = { status: 200, body: { success: true, tokenScope: 'operator' } },
-  statusFailure = false, loginFailure = false, withSocket = false, passwordLogin = false
+  statusFailure = false, loginFailure = false, withSocket = false, passwordLogin = false,
+  siblingLoginResponse = { status: 404, body: null }
 } = {}) {
+  const sibling = new Map();
+  const isSiblingKey = key => key.endsWith('@/live/');
   let token = savedToken;
   let tokenScope = savedTokenScope;
   const appended = [];
@@ -45,17 +48,20 @@ async function loadAuthClient({
   };
   const localStorage = {
     getItem(key) {
+      if (isSiblingKey(key)) return sibling.get(key) ?? null;
       if (key === tokenKey) return token;
       if (key === tokenScopeKey) return tokenScope;
       assert.fail(`unexpected localStorage key: ${key}`);
     },
     setItem(key, value) {
-      if (key === tokenKey) token = value;
+      if (isSiblingKey(key)) sibling.set(key, value);
+      else if (key === tokenKey) token = value;
       else if (key === tokenScopeKey) tokenScope = value;
       else assert.fail(`unexpected localStorage key: ${key}`);
     },
     removeItem(key) {
-      if (key === tokenKey) token = '';
+      if (isSiblingKey(key)) sibling.delete(key);
+      else if (key === tokenKey) token = '';
       else if (key === tokenScopeKey) tokenScope = '';
       else assert.fail(`unexpected localStorage key: ${key}`);
     }
@@ -72,6 +78,10 @@ async function loadAuthClient({
     setTimeout() {},
     fetch: async (input, init = {}) => {
       calls.push({ input, init });
+      if (input === '/live/api/auth/login') {
+        const { status: siblingStatus, body: siblingBody } = siblingLoginResponse;
+        return { status: siblingStatus, ok: siblingStatus >= 200 && siblingStatus < 300, async json() { return siblingBody; } };
+      }
       const isStatus = input === '/api/auth/status';
       const isLogin = input === '/api/auth/login';
       if (isStatus && statusFailure || isLogin && loginFailure) throw new TypeError('network unavailable');
@@ -98,6 +108,7 @@ async function loadAuthClient({
     calls,
     socketCalls,
     socketListeners,
+    sibling,
     token: () => token,
     tokenScope: () => tokenScope,
     authState: () => window.coinPilotAuth.state,
@@ -314,4 +325,39 @@ test('the token form stays the only option when the server has no password login
   const gate = client.gate();
   assert.equal(gate.querySelector('.cp-auth-token-fields').hidden, false);
   assert.equal(gate.querySelector('.cp-auth-switch').hidden, true);
+});
+
+test('one username sign-in also stores the LIVE workspace token it was issued', async () => {
+  const client = await loadAuthClient({
+    passwordLogin: true,
+    loginResponse: { status: 200, body: { success: true, tokenScope: 'operator', token: 'paper-operator-token' } },
+    siblingLoginResponse: { status: 200, body: { success: true, tokenScope: 'operator', token: 'live-operator-token' } }
+  });
+  const gate = client.gate();
+  gate.querySelector('#cp-auth-username').value = 'owner';
+  gate.querySelector('#cp-auth-password').value = 'correct horse';
+  await gate.querySelector('form').listener('submit')({ preventDefault() {} });
+  const siblingLogin = client.calls.find(call => call.input === '/live/api/auth/login');
+  assert.deepEqual(JSON.parse(siblingLogin.init.body), { username: 'owner', password: 'correct horse' });
+  assert.equal(client.token(), 'paper-operator-token');
+  assert.equal(client.sibling.get('coinpilot.dashboardToken@/live/'), 'live-operator-token');
+  assert.equal(client.sibling.get('coinpilot.dashboardTokenScope@/live/'), 'operator');
+
+  client.window.coinPilotAuth.signOutEverywhere();
+  assert.equal(client.token(), '');
+  assert.equal(client.sibling.size, 0);
+});
+
+test('a LIVE workspace that refuses the login leaves only this workspace signed in', async () => {
+  const client = await loadAuthClient({
+    passwordLogin: true,
+    loginResponse: { status: 200, body: { success: true, tokenScope: 'operator', token: 'paper-operator-token' } },
+    siblingLoginResponse: { status: 401, body: { success: false } }
+  });
+  const gate = client.gate();
+  gate.querySelector('#cp-auth-username').value = 'owner';
+  gate.querySelector('#cp-auth-password').value = 'correct horse';
+  await gate.querySelector('form').listener('submit')({ preventDefault() {} });
+  assert.equal(client.token(), 'paper-operator-token');
+  assert.equal(client.sibling.size, 0);
 });
