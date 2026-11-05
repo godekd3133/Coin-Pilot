@@ -87,6 +87,7 @@ export class PositionRiskMonitor {
   }
 
   recordRiskMonitorSuccess(now = Date.now()) {
+    const outagesBefore = Number(this.riskMonitorState?.outageCount) || 0;
     this.riskMonitorState = recordRiskMonitorSuccess(
       this.riskMonitorState,
       now,
@@ -94,7 +95,11 @@ export class PositionRiskMonitor {
     );
     this.syncRiskMonitorState();
     const status = this.getRiskMonitorStatus(now);
-    if (this.riskMonitorState.lastFailureCode === 'RISK_CHECK_STALE' &&
+    // Only THIS success arriving late is a new outage. A RISK_CHECK_STALE left
+    // over from an earlier, already-handled incident keeps continuity invalid
+    // but must not stop the trader again on every later healthy check.
+    const delayedNow = (Number(this.riskMonitorState.outageCount) || 0) > outagesBefore;
+    if (delayedNow && this.riskMonitorState.lastFailureCode === 'RISK_CHECK_STALE' &&
       this.riskMonitorState.continuityEligible === false &&
       (this.owner.isRunning || this.owner._manualRiskProtection)) {
       this.persistRiskMonitorStateIfDue(now, true);

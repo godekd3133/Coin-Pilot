@@ -4,7 +4,7 @@
 // - 슬롯 균등 배분: 진입 시 (현재 평가자산 / maxPositions) 만큼 매수.
 // - 벤치마크 국면 필터·국면 청산은 실시간 엔진과 같은 함수를 쓴다.
 
-import { analyzeAt, evaluateExit, signalCandidates, rankTargets, initialStop, regimeAllowsEntries, positionBudget } from './horizonStrategy.js';
+import { analyzeAt, evaluateExit, signalCandidates, rankTargets, initialStop, regimeAllowsEntries, positionBudget, passesTickCost } from './horizonStrategy.js';
 import { minimumBars } from './chartAnalysis.js';
 
 function buildTimeline(seriesBySymbol) {
@@ -76,7 +76,8 @@ export function runSleeveBacktest(seriesBySymbol, profile, options = {}) {
         cash += proceeds;
         trades.push({ symbol: order.symbol, entryTime: position.entryTime, exitTime: time, entryPrice: position.entryPrice, exitPrice: open, returnPercent: (proceeds / position.cost - 1) * 100, reason: order.reason, bars: position.barsHeld });
         positions.delete(order.symbol);
-      } else if (!positions.has(order.symbol) && positions.size < profile.maxPositions) {
+      } else if (!positions.has(order.symbol) && positions.size < profile.maxPositions &&
+        passesTickCost(open, options.assetClass || 'coin')) {
         const stopPrice = initialStop(open, order.analysis, profile);
         const budget = Math.min(cash, positionBudget({
           sleeveEquity: equity(),
@@ -107,6 +108,7 @@ export function runSleeveBacktest(seriesBySymbol, profile, options = {}) {
       ? analysisFor(benchmark, benchmarkIndex)
       : null;
     const benchmarkOk = regimeAllowsEntries(benchmarkAnalysis);
+    const entryRegimeOk = regimeAllowsEntries(benchmarkAnalysis, { required: Boolean(profile.regimeFilter && benchmark) });
 
     // 3) 보유 포지션 청산(손절은 봉 내 즉시, 나머지는 종가 체결)
     for (const [symbol, position] of [...positions]) {
@@ -127,7 +129,7 @@ export function runSleeveBacktest(seriesBySymbol, profile, options = {}) {
 
     // 4) 신규 진입/리밸런싱 결정 → 다음 봉 시가 체결
     const shouldRebalance = profile.mode === 'signal' || step % profile.rebalanceBars === 0;
-    if (shouldRebalance && (benchmarkOk || !profile.regimeFilter)) {
+    if (shouldRebalance && (entryRegimeOk || !profile.regimeFilter)) {
       const analyses = [];
       for (const [symbol, now] of barsNow) {
         if (symbol === benchmark && options.excludeBenchmark) continue;

@@ -15,7 +15,7 @@
 import fs from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { writeDurableJson } from '../runtime/durableJson.js';
-import { analyzeAt, evaluateExit, signalCandidates, rankTargets, initialStop, regimeAllowsEntries } from './horizonStrategy.js';
+import { analyzeAt, evaluateExit, signalCandidates, rankTargets, initialStop, regimeAllowsEntries, positionBudget, passesTickCost } from './horizonStrategy.js';
 import { minimumBars } from './chartAnalysis.js';
 import { HORIZON_KEYS, INTERVAL_MS, normalizeWeights } from './horizonProfiles.js';
 
@@ -321,7 +321,15 @@ export class HorizonPortfolioManager {
   _entryAmount(sleeve, profile, { cash, horizonCapital }, price, stopPrice) {
     const sleeveBudget = horizonCapital * (this.weights[sleeve] || 0);
     const remaining = sleeveBudget - this._sleeveDeployed(sleeve);
-    const slot = sleeveBudget / profile.maxPositions;
+    // Same risk-based size as the backtest: the loss at the stop is about
+    // riskPerTradePercent of the sleeve, capped by the equal slot.
+    const slot = positionBudget({
+      sleeveEquity: sleeveBudget,
+      maxPositions: profile.maxPositions,
+      riskPerTradePercent: profile.riskPerTradePercent,
+      entryPrice: price,
+      stopPrice
+    });
     let amount = Math.min(slot, remaining, cash * 0.98);
     if (this.assetClass === 'coin') {
       const stopDistance = Math.min(0.5, Math.max(0, (price - stopPrice) / price));
@@ -536,6 +544,8 @@ export class HorizonPortfolioManager {
       }
     }
     const benchmarkOk = regimeAllowsEntries(benchmarkAnalysis);
+    // New entries fail closed when the regime filter is on but the benchmark is missing.
+    const entryRegimeOk = regimeAllowsEntries(benchmarkAnalysis, { required: Boolean(profile.regimeFilter) });
     this.lastAnalyses[sleeve] = {
       barStart: new Date(barStart).toISOString(),
       benchmarkRegime: benchmarkAnalysis?.regime ?? null,
@@ -564,7 +574,7 @@ export class HorizonPortfolioManager {
     // 진입/리밸런싱
     const shouldRebalance = profile.mode === 'signal' || sleeveState.rebalanceCounter % profile.rebalanceBars === 0;
     sleeveState.rebalanceCounter += 1;
-    if (!shouldRebalance || !gate.canEnter || this.entriesPaused || (profile.regimeFilter && !benchmarkOk)) return;
+    if (!shouldRebalance || !gate.canEnter || this.entriesPaused || (profile.regimeFilter && !entryRegimeOk)) return;
     if ((this.weights[sleeve] || 0) <= 0) return;
 
     const sleevePositions = () => Object.values(this.state.positions).filter(p => p.sleeve === sleeve);
@@ -584,9 +594,13 @@ export class HorizonPortfolioManager {
     for (const symbol of entries) {
       if (sleevePositions().length >= profile.maxPositions || this.entriesPaused) break;
       if (this.state.positions[positionKey(sleeve, symbol)]) continue;
+      // One symbol is held by at most one sleeve, so overlapping sleeves cannot
+      // stack a single coin into a large share of the portfolio.
+      if (Object.values(this.state.positions).some(position => position.symbol === symbol)) continue;
       const item = analyses.find(a => a.symbol === symbol);
       const price = priceMap.get(symbol);
       if (!item || !Number.isFinite(price)) continue;
+      if (!passesTickCost(price, this.assetClass)) continue;
       const refreshedCash = await this.broker.getAvailableCash(this.state);
       const amount = this._entryAmount(sleeve, profile, { ...capital, cash: refreshedCash }, price, initialStop(price, item.analysis, profile));
       if (amount <= 0) continue;

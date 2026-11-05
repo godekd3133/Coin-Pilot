@@ -275,3 +275,24 @@ test('스캘퍼는 기간별 포트폴리오가 예약한 코인 수량을 자�
   const accounts = [{ currency: 'BTC', balance: '0.5', locked: '0' }];
   assert.ok(Math.abs(valuation.getCoinBalance(accounts, 'KRW-BTC') - 0.2) < 1e-12);
 });
+
+test('호가 비용 필터: 1원 호가의 130원 코인과 1,500원 미만 주식은 진입 대상에서 빠진다', async () => {
+  const { tickFraction, passesTickCost, regimeAllowsEntries } = await import('../src/portfolio/horizonStrategy.js');
+  assert.ok(Math.abs(tickFraction(132, 'coin') - 1 / 132) < 1e-12);
+  assert.equal(passesTickCost(132, 'coin'), false);
+  assert.equal(passesTickCost(850, 'coin'), true);
+  assert.equal(passesTickCost(108_000_000, 'coin'), true);
+  assert.equal(passesTickCost(300, 'stock'), false);
+  assert.equal(passesTickCost(60_000, 'stock'), true);
+  assert.equal(regimeAllowsEntries(null), true, '청산 판단은 데이터 공백을 하락으로 보지 않는다');
+  assert.equal(regimeAllowsEntries(null, { required: true }), false, '국면 필터가 켜진 신규 진입은 데이터가 없으면 막는다');
+});
+
+test('실시간 진입 금액은 백테스트와 같은 위험 기준을 쓰고, 한 코인은 한 슬리브만 보유한다', () => {
+  const manager = new HorizonPortfolioManager({ assetClass: 'coin', mode: 'paper', loader: fakeLoader({}), broker: {}, profiles: resolveHorizonProfiles('coin'), universeProvider: async () => [], log: silent });
+  manager.weights = { short: 0, swing: 0.5, mid: 0.5, long: 0 };
+  const profile = { ...manager.profiles.mid, maxPositions: 3, riskPerTradePercent: 1 };
+  // 손절 -42%: 슬리브 500,000원의 1% 위험이면 약 11,900원 (균등 슬롯 166,666원 아님)
+  const amount = manager._entryAmount('mid', profile, { cash: 1_000_000, horizonCapital: 1_000_000 }, 132, 76.2);
+  assert.ok(amount > 11_000 && amount < 13_000, `risk-sized amount, got ${amount}`);
+});

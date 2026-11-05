@@ -12,10 +12,38 @@ export function analyzeAt(bars, end, periods) {
   return analyzeChart(analysisWindow(bars, end, periods), periods);
 }
 
-/** 벤치마크 국면: 하락 추세면 신규 진입 금지. 데이터가 없으면 허용(필터 비활성). */
-export function regimeAllowsEntries(benchmarkAnalysis) {
-  if (!benchmarkAnalysis?.available) return true;
+/**
+ * 벤치마크 국면: 하락 추세면 신규 진입 금지.
+ * `required`(국면 필터가 켜진 슬리브의 신규 진입)이면 데이터가 없을 때도 막는다
+ * (fail-closed). 청산 판단은 데이터 공백을 하락으로 오인해 팔지 않도록 required 없이 쓴다.
+ */
+export function regimeAllowsEntries(benchmarkAnalysis, { required = false } = {}) {
+  if (!benchmarkAnalysis?.available) return !required;
   return benchmarkAnalysis.regime !== 'downtrend';
+}
+
+/**
+ * 한 호가 단위가 가격에서 차지하는 비율(추정). 1원 호가의 130원 코인은 한 칸이 0.77%라
+ * 0.15% 비용 가정으로는 연구와 모의가 저가 종목 쪽으로 치우친다.
+ * coin: 업비트 KRW 1,000원 미만 구간은 가격 자릿수보다 두 자리 아래가 호가 단위.
+ * stock: KRX 호가가격단위.
+ */
+export function tickFraction(price, assetClass = 'coin') {
+  const p = Number(price);
+  if (!(p > 0)) return Infinity;
+  if (assetClass === 'stock') {
+    const tick = p < 2000 ? 1 : p < 5000 ? 5 : p < 20000 ? 10 : p < 50000 ? 50 : p < 200000 ? 100 : p < 500000 ? 500 : 1000;
+    return tick / p;
+  }
+  if (p >= 1000) return 0;
+  const tick = 10 ** (Math.floor(Math.log10(p)) - 2);
+  return tick / p;
+}
+
+/** 호가 한 칸 비용이 상한(기본 0.25%)을 넘는 종목은 신규 진입하지 않는다. */
+export const MAX_ENTRY_TICK_FRACTION = 0.0025;
+export function passesTickCost(price, assetClass = 'coin', max = MAX_ENTRY_TICK_FRACTION) {
+  return tickFraction(price, assetClass) <= max;
 }
 
 /**

@@ -6,6 +6,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import HorizonPortfolioManager from './horizonPortfolioManager.js';
@@ -113,15 +114,21 @@ export class HorizonResearchScheduler {
     if (this.running) return false;
     this.lastRunAt = new Date(this.now()).toISOString();
     this.log.log?.(`🔬 [기간별 ${this.assetClass}] 워크포워드 재연구 시작 (${reason})`);
+    // The study shares the trading process's public Upbit budget and host CPU.
+    // Slow its requests down and lower its CPU priority so it cannot starve the
+    // risk monitor (a study run once tripped a paper risk_data_gap stop).
+    const minIntervalMs = Math.max(500, Number(this.env.UPBIT_MIN_REQUEST_INTERVAL_MS) || 0);
     const child = this.spawnImpl(process.execPath, [STUDY_SCRIPT], {
       env: {
         ...this.env,
+        UPBIT_MIN_REQUEST_INTERVAL_MS: String(minIntervalMs),
         HORIZON_STUDY_ASSET: this.assetClass,
         [this.assetClass === 'stock' ? 'HORIZON_STOCK_PARAMS_FILE' : 'HORIZON_PARAMS_FILE']: this.paramsFile
       },
       stdio: ['ignore', 'ignore', 'pipe']
     });
     this.running = child;
+    try { if (child.pid) os.setPriority(child.pid, 10); } catch { /* best effort */ }
     let stderr = '';
     child.stderr?.on?.('data', chunk => { stderr = (stderr + chunk).slice(-2000); });
     child.on('exit', code => {
@@ -281,9 +288,14 @@ export function createStockHorizonRuntime({ config, mode, client, marketSession,
     profiles: resolveHorizonProfiles('stock'),
     universeProvider: async () => {
       if (universe.length === 0 || Date.now() - universeAt > UNIVERSE_REFRESH_MS) {
-        const rankings = await client.getRankings({ type: 'MARKET_TRADING_AMOUNT', duration: '1d', count: 100 });
+        const [rankings, listed] = await Promise.all([
+          client.getRankings({ type: 'MARKET_TRADING_AMOUNT', duration: '1d', count: 100 }),
+          client.listStockSymbols()
+        ]);
+        // Fail closed: without the listing an ETF could slip in, so no universe.
+        if (!(listed?.size > 0)) throw new Error('주식 종목 목록이 비어 있어 호라이즌 유니버스를 만들 수 없습니다');
         universe = rankings
-          .filter(item => item?.symbol && (item.currency || 'KRW') === 'KRW' && (toNumber(item?.price?.lastPrice, 0) || 0) >= minPrice)
+          .filter(item => item?.symbol && listed.has(String(item.symbol)) && (item.currency || 'KRW') === 'KRW' && (toNumber(item?.price?.lastPrice, 0) || 0) >= minPrice)
           .map(item => item.symbol)
           .slice(0, config.universeSize);
         universeAt = Date.now();

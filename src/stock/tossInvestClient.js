@@ -265,6 +265,22 @@ export class TossInvestClient {
     return Array.isArray(result) ? result : [];
   }
 
+  /**
+   * Symbols of every listed KOSPI/KOSDAQ STOCK-type security (no ETF/ETN).
+   * Horizon sleeves trade only these: the 0.20% sell tax in their cost model
+   * then holds for every symbol, and leveraged/inverse ETFs (path-decaying
+   * products that dominate the turnover ranking) never enter a multi-week hold.
+   */
+  async listStockSymbols(markets = ['KOSPI', 'KOSDAQ']) {
+    const symbols = new Set();
+    for (const market of markets) {
+      for (const item of await this.listStocks(market)) {
+        if (item?.symbol) symbols.add(String(item.symbol));
+      }
+    }
+    return symbols;
+  }
+
   async getRankings({ type = 'MARKET_TRADING_AMOUNT', duration = 'realtime', count = 100 } = {}) {
     const result = await this.request('GET', '/api/v1/rankings', {
       group: 'RANKING',

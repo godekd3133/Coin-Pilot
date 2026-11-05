@@ -1353,3 +1353,30 @@ test('a paper safety stop without positions still stops plainly', () => {
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('a stale-risk record from an earlier incident does not stop the trader again on a later healthy check', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'coinpilot-stale-leftover-'));
+  try {
+    const trader = makeLiveTrader(root, { dryRun: true }, true);
+    trader.isRunning = true;
+    const old = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+    trader.riskMonitorState = {
+      monitoringActive: false,
+      lastSuccessAt: old,
+      lastFailureAt: old,
+      lastFailureCode: 'RISK_CHECK_STALE',
+      continuityEligible: false,
+      outageCount: 1,
+      totalFailures: 1,
+      consecutiveFailures: 0,
+      maxObservedGapSeconds: 32
+    };
+    let pauses = 0;
+    trader.pauseForSafetyIncident = () => { pauses += 1; return false; };
+    trader.recordRiskMonitorSuccess();
+    assert.equal(pauses, 0);
+    assert.equal(trader.riskMonitorState.continuityEligible, false, 'the earlier gap stays recorded as invalid evidence');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

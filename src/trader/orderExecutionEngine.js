@@ -8,6 +8,7 @@
 // 상태는 전부 owner(트레이더)를 통해 조회한다 — 순수 오케스트레이션.
 import { inspectLatestCandleFreshness } from '../risk/candleFreshness.js';
 import { inspectTraderMarketQuote } from './positionRiskMonitor.js';
+import { isUnsellableDust } from './positionRebalancer.js';
 import { measureEntryCost, judgeEntryCost, createEntryCostStats, loadEntryCostStats, saveEntryCostStats } from './entryCostFilter.js';
 
 export function hasCompleteLiveFillResult(fillResult) {
@@ -629,7 +630,14 @@ export class OrderExecutionEngine {
       const exitFillPrice = currentPrice * (1 - (paperExitCostModel?.slippageRate || 0));
       const estimatedSellAmount = sellVolume * exitFillPrice;
       if (estimatedSellAmount < 5000) {
-        console.log(`\n⚠️  [${coin}] 매도 불가: 최소 매도금액(5,000원) 미만 (${estimatedSellAmount.toLocaleString()}원)`);
+        // A LIVE position below the order minimum cannot be sold at all; the
+        // strategy keeps re-issuing SELL for it every cycle, so log it once.
+        const dust = strategy.currentPosition && isUnsellableDust(this.owner, strategy.currentPosition);
+        this.reportedUnsellable ??= new Set();
+        if (!dust || !this.reportedUnsellable.has(coin)) {
+          if (dust) this.reportedUnsellable.add(coin);
+          console.log(`\n⚠️  [${coin}] 매도 불가: 최소 매도금액(5,000원) 미만 (${estimatedSellAmount.toLocaleString()}원)${dust ? ' · 먼지 잔고라 이후 같은 안내는 생략합니다' : ''}`);
+        }
         return;
       }
 

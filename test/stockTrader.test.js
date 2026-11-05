@@ -179,6 +179,19 @@ test('장 운영 캘린더: 휴장일·진입 마감·전량 정리 시점을 �
   assert.equal((await session.getState()).open, false);
 });
 
+test('장 운영 캘린더 조회 실패: 기본 시간표로 청산은 허용하되 신규 진입은 막는다', async () => {
+  let now = Date.parse('2026-03-25T10:00:00+09:00');
+  const session = new StockMarketSession({ client: { getMarketCalendarKR: async () => { throw new Error('down'); } }, now: () => now });
+  const state = await session.getState();
+  assert.equal(state.open, true);
+  assert.equal(state.canEnter, false);
+  assert.equal(state.reason, 'calendar_unavailable');
+  now = Date.parse('2026-03-25T15:10:00+09:00');
+  const late = await session.getState();
+  assert.equal(late.mustFlatten, true);
+  assert.equal(late.reason, 'flatten_before_close');
+});
+
 test('토스 클라이언트는 토큰을 캐시하고 계좌 헤더를 붙여 요청한다', async () => {
   const calls = [];
   const fetchImpl = async (url, init) => {

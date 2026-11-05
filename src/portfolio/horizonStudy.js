@@ -119,7 +119,7 @@ export function studySleeve(series, profile, options = {}) {
   const times = [...new Set([...series.values()].flatMap(bars => bars.map(bar => bar.time)))].sort((a, b) => a - b);
   if (times.length < 80) return { horizon: profile.key, error: 'insufficient_history', bars: times.length, passed: false };
   const cache = precomputeAnalyses(series, profile.periods);
-  const common = { costs, benchmark, barsPerYear, analysisCache: cache };
+  const common = { costs, benchmark, barsPerYear, analysisCache: cache, assetClass };
   const at = ratio => times[Math.min(times.length - 1, Math.floor((times.length - 1) * ratio))];
 
   const foldResults = [];

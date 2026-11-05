@@ -299,15 +299,19 @@ export class PositionRebalancer {
     // pushed older (LIVE) journal entries out of the size-capped journal.
     // Only held positions are printed; the rest is one count line.
     let held = 0;
+    let dust = 0;
     for (const coin of this.owner.targetCoins) {
       const strategy = this.owner.strategies.get(coin);
       if (!strategy?.currentPosition) continue;
+      // LIVE dust cannot be sold; printing it every 5-second cycle only floods
+      // the journal (GAS dust filled it for hours).
+      if (isUnsellableDust(this.owner, strategy.currentPosition)) { dust++; continue; }
       held++;
       const stats = strategy.getStatistics();
       console.log(`\n[${coin}] 📍 보유 · 진입가 ${strategy.currentPosition.entryPrice.toLocaleString()} 원 · 수량 ${strategy.currentPosition.amount.toFixed(8)}` +
         (stats.totalTrades > 0 ? ` · 누적 ${stats.totalTrades}회 승률 ${stats.winRate} 손익 ${stats.totalProfit}` : ''));
     }
-    console.log(`보유 ${held}개 / 감시 ${this.owner.targetCoins.length}개`);
+    console.log(`보유 ${held}개${dust > 0 ? ` (매도 불가 먼지 ${dust}개 제외)` : ''} / 감시 ${this.owner.targetCoins.length}개`);
     console.log('='.repeat(80));
   }
 }

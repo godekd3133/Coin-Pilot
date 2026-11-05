@@ -53,8 +53,13 @@ async function resolveUniverse(assetClass, loader, client, universeSize, cache) 
   if (markets.length > 0) return markets;
   if (cache.markets) return cache.markets;
   if (assetClass === 'stock') {
-    const rankings = await client.getRankings({ type: 'MARKET_TRADING_AMOUNT', duration: '1d', count: 100 });
-    markets = rankings.filter(item => item?.symbol && (item.currency || 'KRW') === 'KRW').map(item => item.symbol).slice(0, universeSize);
+    const [rankings, listed] = await Promise.all([
+      client.getRankings({ type: 'MARKET_TRADING_AMOUNT', duration: '1d', count: 100 }),
+      client.listStockSymbols()
+    ]);
+    if (!(listed?.size > 0)) throw new Error('주식 종목 목록이 비어 있어 연구 대상을 정할 수 없습니다');
+    // Same universe contract as the runtime: listed STOCK-type securities only.
+    markets = rankings.filter(item => item?.symbol && listed.has(String(item.symbol)) && (item.currency || 'KRW') === 'KRW').map(item => item.symbol).slice(0, universeSize);
     return markets.includes(STOCK_BENCHMARK) ? markets : [STOCK_BENCHMARK, ...markets];
   }
   markets = await loader.getKrwMarketsByTurnover(universeSize);
@@ -95,8 +100,16 @@ async function main() {
 
   const profiles = resolveHorizonProfiles(assetClass);
   const results = [];
+  // Sleeves the runtime does not trade are not studied: the disabled short
+  // sleeve alone took ~14 minutes of shared Upbit budget on the paper host.
+  const enabledSleeves = envList('HORIZON_SLEEVES', []);
   for (const key of HORIZON_KEYS) {
     const profile = profiles[key];
+    if (enabledSleeves.length > 0 && !enabledSleeves.includes(key)) {
+      results.push({ horizon: key, error: 'sleeve_not_enabled', passed: false });
+      console.log(`\n⏭️  ${profile.label}: HORIZON_SLEEVES에 없어 연구를 건너뜁니다.`);
+      continue;
+    }
     console.log(`\n📥 ${profile.label} (${profile.interval}) 데이터`);
     const series = await loadSeries(loader, markets, profile.interval, cache);
     fs.mkdirSync(path.dirname(cacheFile), { recursive: true });

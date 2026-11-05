@@ -1,6 +1,8 @@
 // 국내 정규장(KRX) 운영 시간 판단.
 // 토스증권 market-calendar/KR 응답을 하루 단위로 캐시하고, 조회 실패 시
 // 평일 09:00~15:30 KST 기본값으로 대체한다(공휴일은 캘린더로만 판단 가능).
+// 기본값 세션에서는 신규 진입을 막는다(fail-closed): 공휴일·임시휴장·개장 지연을
+// 모르는 채 매수하지 않고, 이미 보유한 포지션의 청산·마감 전 정리만 허용한다.
 
 const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
 
@@ -80,12 +82,14 @@ export class StockMarketSession {
     if (nowMs >= session.end) return { open: false, canEnter: false, mustFlatten: false, reason: 'after_close', session };
     const auction = session.closingAuction;
     const mustFlatten = nowMs >= auction - this.flattenMs;
-    const canEnter = nowMs < auction - this.entryCutoffMs;
+    const beforeCutoff = nowMs < auction - this.entryCutoffMs;
+    const calendarVerified = session.source !== 'default';
+    const canEnter = beforeCutoff && calendarVerified;
     return {
       open: nowMs < auction, // 종가 단일가 구간에는 시장가 즉시 체결이 안 되므로 거래하지 않는다.
       canEnter,
       mustFlatten,
-      reason: canEnter ? 'regular_session' : mustFlatten ? 'flatten_before_close' : 'entry_cutoff',
+      reason: canEnter ? 'regular_session' : mustFlatten ? 'flatten_before_close' : beforeCutoff ? 'calendar_unavailable' : 'entry_cutoff',
       session
     };
   }
