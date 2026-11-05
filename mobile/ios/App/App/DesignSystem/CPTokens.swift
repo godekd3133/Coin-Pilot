@@ -85,12 +85,12 @@ enum CPFont {
 /// a soft spring for press feedback. Reduce Motion swaps both for a short fade.
 enum CPMotion {
     static let fast: Double = 0.14
-    static let base: Double = 0.26
-    static let slow: Double = 0.42
+    static let base: Double = 0.24
+    static let slow: Double = 0.32
     static let easeOut = Animation.timingCurve(0.22, 1, 0.36, 1, duration: base)
-    static let spring = Animation.spring(response: 0.42, dampingFraction: 0.86)
+    static let spring = Animation.spring(response: 0.34, dampingFraction: 0.86)
     static let press = Animation.spring(response: 0.26, dampingFraction: 0.62)
-    static let countDuration: Double = 0.65
+    static let countDuration: Double = 0.55
     static let pressScale: CGFloat = 0.97
 
     static func resolved(_ animation: Animation, reduceMotion: Bool) -> Animation? {

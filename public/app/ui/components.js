@@ -48,18 +48,32 @@ export function paperBadge() {
 /** Big amount + change. The value counts up from its last shown value (data-countup). */
 export function heroValue({ label, value, key, change, changePercent, sub, formatter = 'won' }) {
   const known = hasFiniteValue(value);
+  const countKey = key || label;
   const changeTone = hasFiniteValue(change) ? (Number(change) > 0 ? 'up' : Number(change) < 0 ? 'down' : '') : hasFiniteValue(changePercent) ? (Number(changePercent) > 0 ? 'up' : Number(changePercent) < 0 ? 'down' : '') : '';
-  const changeText = [hasFiniteValue(change) ? signedWon(change) : null, hasFiniteValue(changePercent) ? `(${percent(changePercent)})` : null].filter(Boolean).join(' ');
+  const changeParts = [
+    hasFiniteValue(change) ? html`<span ${countAttrs(change, { key: `${countKey}:change`, format: 'signedWon' })}>${signedWon(change)}</span>` : null,
+    hasFiniteValue(changePercent) ? html`<span>(<span ${countAttrs(changePercent, { key: `${countKey}:percent`, format: 'percent' })}>${percent(changePercent)}</span>)</span>` : null
+  ].filter(Boolean);
   return html`<div class="cp-hero">
-    <p class="cp-hero-label">${label}</p>
-    <p class="cp-hero-value cp-num" ${attrs(known ? { 'data-countup': Number(value), 'data-countup-key': key || label, 'data-countup-format': formatter } : {})}>${known ? won(value) : '—'}</p>
-    ${changeText ? html`<p class="${classNames('cp-hero-change cp-num', changeTone && `cp-${changeTone}`)}">${changeText}</p>` : ''}
+    <p class="cp-hero-label cp-reveal">${label}</p>
+    <p class="cp-hero-value cp-num" ${attrs(known ? { 'data-countup': Number(value), 'data-countup-key': countKey, 'data-countup-format': formatter } : {})}>${known ? won(value) : '—'}</p>
+    ${changeParts.length ? html`<p class="${classNames('cp-hero-change cp-num', changeTone && `cp-${changeTone}`)}">${changeParts.map((part, index) => html`${index ? ' ' : ''}${part}`)}</p>` : ''}
     ${sub ? html`<p class="cp-hero-sub">${sub}</p>` : ''}
   </div>`;
 }
 
-export function stat({ label, value, tone, sub, mono = true }) {
-  return html`<div class="cp-stat"><dt class="cp-stat-label">${label}</dt><dd class="${classNames('cp-stat-value', mono && 'cp-num', tone && `cp-${tone}`)}">${value}</dd>${sub ? html`<dd class="cp-stat-sub">${sub}</dd>` : ''}</div>`;
+/**
+ * data-countup attributes for a number that should roll from its last shown
+ * value. format: won | signedWon | percent | plain. Non-finite values add nothing.
+ */
+export function countAttrs(value, { key, format = 'won' } = {}) {
+  if (!hasFiniteValue(value) || !key) return attrs({});
+  return attrs({ 'data-countup': Number(value), 'data-countup-key': key, 'data-countup-format': format });
+}
+
+/** stat({ countup: { value, key, format } }) makes the tile's number roll on change. */
+export function stat({ label, value, tone, sub, mono = true, countup }) {
+  return html`<div class="cp-stat"><dt class="cp-stat-label">${label}</dt><dd class="${classNames('cp-stat-value', mono && 'cp-num', tone && `cp-${tone}`)}" ${countup ? countAttrs(countup.value, countup) : attrs({})}>${value}</dd>${sub ? html`<dd class="cp-stat-sub">${sub}</dd>` : ''}</div>`;
 }
 
 export function statGrid(items, { columns } = {}) {
@@ -143,33 +157,70 @@ export function prefersReducedMotion() {
 }
 
 const countMemory = new Map();
-const formatters = { won: value => won(value), plain: value => Math.round(value).toLocaleString('ko-KR') };
+const countRuns = new WeakMap();
+const formatters = {
+  won: value => won(value),
+  signedWon: value => signedWon(Math.round(value)),
+  percent: value => percent(value),
+  plain: value => Math.round(value).toLocaleString('ko-KR')
+};
 
-/** Count-up for [data-countup] elements from the last value shown for the same key. */
-export function runCountUps(root, { duration = 640 } = {}) {
+/**
+ * Count-up for [data-countup] elements from the last value shown for the same
+ * key. A new run on the same element replaces the previous one, so a data
+ * refresh mid-roll never leaves a stale frame behind. The final text is always
+ * the exact formatted target.
+ */
+export function runCountUps(root, { duration = 560 } = {}) {
   if (!root?.querySelectorAll) return;
-  for (const element of root.querySelectorAll('[data-countup]')) {
+  const elements = [...(root.matches?.('[data-countup]') ? [root] : []), ...root.querySelectorAll('[data-countup]')];
+  for (const element of elements) {
     const target = Number(element.dataset.countup);
     const key = element.dataset.countupKey || '';
     const format = formatters[element.dataset.countupFormat] || formatters.won;
     if (!Number.isFinite(target)) continue;
+    const running = countRuns.get(element);
+    if (running && running.target === target) continue;
     const from = countMemory.has(key) ? countMemory.get(key) : target * 0.96;
     countMemory.set(key, target);
+    const token = { target };
+    countRuns.set(element, token);
     if (prefersReducedMotion() || from === target || typeof requestAnimationFrame !== 'function') {
       element.textContent = format(target);
       continue;
     }
+    element.classList.remove('is-ticking');
+    void element.offsetWidth;
+    element.classList.add('is-ticking');
     const start = performance.now();
     const ease = t => 1 - (1 - t) ** 3;
     const frame = now => {
-      if (!element.isConnected) return;
+      if (!element.isConnected || countRuns.get(element) !== token) return;
       const t = Math.min(1, (now - start) / duration);
       element.textContent = format(from + (target - from) * ease(t));
       if (t < 1) requestAnimationFrame(frame);
-      else element.textContent = format(target);
+      else { element.textContent = format(target); countRuns.delete(element); element.classList.remove('is-ticking'); }
     };
     requestAnimationFrame(frame);
   }
+}
+
+/**
+ * Re-runs count-ups for numbers a feature re-renders after a data refresh, so
+ * P&L and totals roll from the previous value without each screen wiring it.
+ * Returns a disconnect function.
+ */
+export function observeCountUps(root) {
+  if (!root || typeof MutationObserver !== 'function') return () => {};
+  const observer = new MutationObserver(records => {
+    for (const record of records) {
+      for (const node of record.addedNodes) {
+        if (node.nodeType === 1) runCountUps(node);
+      }
+    }
+  });
+  observer.observe(root, { childList: true, subtree: true });
+  return () => observer.disconnect();
 }
 
 let toastHost = null;
@@ -288,19 +339,52 @@ export function formSheet({ title, message, fields = [], confirmLabel = '확인'
   });
 }
 
-/** Marks a mount root so its cards play the staggered entrance once. */
+const ENTRANCE_CARD_CAP = 8;
+const ENTRANCE_ROW_CAP = 8;
+let entranceTimer = null;
+
+/**
+ * Marks a mount root so its cards, list rows and stat tiles play the staggered
+ * entrance once. Indexes are capped so long screens never wait on the tail;
+ * explicit --i values from card({ index }) win. Reduce Motion skips it.
+ */
 export function playEntrance(root) {
   if (!root || prefersReducedMotion()) return;
-  root.classList.remove('is-entering');
+  let cardIndex = 0;
+  for (const cardElement of root.querySelectorAll('.cp-card, .cp-enter')) {
+    if (cardElement.closest('.cp-sheet')) continue;
+    if (!cardElement.style.getPropertyValue('--i')) cardElement.style.setProperty('--i', String(Math.min(cardIndex, ENTRANCE_CARD_CAP)));
+    cardIndex += 1;
+  }
+  for (const group of root.querySelectorAll('.cp-list, .cp-stat-grid')) {
+    let rowIndex = 0;
+    for (const row of group.children) {
+      row.style.setProperty('--j', String(Math.min(rowIndex, ENTRANCE_ROW_CAP)));
+      rowIndex += 1;
+    }
+  }
+  root.classList.remove('is-entering', 'is-route-in');
   void root.offsetWidth;
-  root.classList.add('is-entering');
-  setTimeout(() => root.classList.remove('is-entering'), 900);
+  root.classList.add('is-entering', 'is-route-in');
+  clearTimeout(entranceTimer);
+  entranceTimer = setTimeout(() => root.classList.remove('is-entering', 'is-route-in'), 1100);
+}
+
+/** Replays a short text reveal on an element whose text just changed. */
+export function revealText(element, text) {
+  if (!element) return;
+  if (element.textContent === text) return;
+  element.textContent = text;
+  if (prefersReducedMotion()) return;
+  element.classList.remove('is-revealing');
+  void element.offsetWidth;
+  element.classList.add('is-revealing');
 }
 
 export const ui = {
   attrs, button, linkButton, card, badge, liveBadge, paperBadge, heroValue, stat, statGrid, avatar, listRow, list,
   segmented, allocationBar, sparkline, areaChart, candleChart, skeleton, emptyState, notice, engineStatus, field, disclosure, kv, icon,
-  toast, openSheet, confirmSheet, formSheet, runCountUps, playEntrance, prefersReducedMotion
+  toast, openSheet, confirmSheet, formSheet, runCountUps, observeCountUps, playEntrance, revealText, countAttrs, prefersReducedMotion
 };
 
 export default ui;
