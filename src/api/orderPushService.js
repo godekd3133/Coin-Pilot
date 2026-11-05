@@ -3,6 +3,41 @@ import http2 from 'node:http2';
 import { createHash, createPrivateKey, createSign, randomUUID } from 'node:crypto';
 import { writeDurableJson } from '../runtime/durableJson.js';
 
+function formatKrw(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return null;
+  const abs = Math.abs(number);
+  const digits = abs >= 1000 ? 0 : abs >= 1 ? 2 : 4;
+  return `${number.toLocaleString('ko-KR', { maximumFractionDigits: digits })}원`;
+}
+
+/** The phone notification text for one event: a fill or an operator alert. */
+export function describePushEvent(event) {
+  if (event.alert) {
+    return { title: event.alert.title, body: event.alert.body, thread: `coinpilot-${event.alert.mode || 'status'}` };
+  }
+  const trade = event.trade;
+  const label = trade.mode === 'LIVE' ? '실거래' : '모의거래';
+  const action = trade.type === 'BUY' ? '매수' : '매도';
+  const coin = trade.coin.replace(/^KRW-/, '');
+  const parts = [];
+  const price = formatKrw(trade.price);
+  if (price) parts.push(`${price}에 ${action}`);
+  const amount = formatKrw(trade.amount);
+  if (amount && trade.type === 'BUY') parts.push(`${amount} 투자`);
+  if (trade.type === 'SELL') {
+    const percent = Number(trade.profitPercent);
+    const profit = formatKrw(trade.profitAmount);
+    if (Number.isFinite(percent)) parts.push(`${percent >= 0 ? '+' : ''}${percent.toFixed(2)}%${profit ? ` (${Number(trade.profitAmount) >= 0 ? '+' : ''}${profit})` : ''}`);
+  }
+  if (trade.reason) parts.push(String(trade.reason).slice(0, 80));
+  return {
+    title: `${label} · ${coin} ${action}`,
+    body: parts.length > 0 ? parts.join(' · ') : `${action} 체결이 확인됐습니다. 앱에서 거래 내역을 확인하세요.`,
+    thread: `coinpilot-${trade.mode}`
+  };
+}
+
 export function createApnsSender(env = process.env) {
   const keyFile = env.APNS_KEY_FILE;
   const keyId = env.APNS_KEY_ID;
@@ -52,13 +87,13 @@ export function createApnsSender(env = process.env) {
         try { reason = JSON.parse(body).reason || null; } catch { /* successful responses have no body */ }
         finish({ status, reason });
       });
-      const label = event.trade.mode === 'LIVE' ? '실거래' : '모의거래';
-      const action = event.trade.type === 'BUY' ? '매수' : '매도';
-      const coin = event.trade.coin.replace(/^KRW-/, '');
+      const text = describePushEvent(event);
       request.end(JSON.stringify({
-        aps: { alert: { title: `${label} · ${coin} ${action}`, body: `${action} 체결이 확인됐습니다. 앱에서 거래 내역을 확인하세요.` },
-          sound: 'default', 'thread-id': `coinpilot-${event.trade.mode}` },
-        eventId: event.id, mode: event.trade.mode, market: event.trade.coin
+        aps: { alert: { title: text.title, body: text.body }, sound: 'default', 'thread-id': text.thread },
+        eventId: event.id,
+        mode: event.trade?.mode || event.alert?.mode || null,
+        market: event.trade?.coin || null,
+        category: event.alert?.category || 'trade'
       }));
     });
   };
@@ -121,7 +156,34 @@ export class OrderPushService {
     }
     const event = { id, createdAt: new Date(this.now()).toISOString(),
       trade: { type: trade.type, coin: trade.coin, mode: this.mode,
-        orderId: trade.orderId || null, price: trade.price || null, volume: trade.volume || null }, deliveries };
+        orderId: trade.orderId || null, price: trade.price || null, volume: trade.volume || null,
+        amount: Number.isFinite(Number(trade.amount)) ? Number(trade.amount) : null,
+        reason: typeof trade.reason === 'string' ? trade.reason.slice(0, 120) : null,
+        profitPercent: Number.isFinite(Number(trade.profitPercent)) ? Number(trade.profitPercent) : null,
+        profitAmount: Number.isFinite(Number(trade.profitAmount)) ? Number(trade.profitAmount) : null }, deliveries };
+    this._append(event);
+    return id;
+  }
+
+  /**
+   * Queue an operator alert (safety stop, recovery, held-while-stopped,
+   * daily summary). `key` deduplicates: the same key is delivered once.
+   */
+  enqueueAlert({ key, title, body, category = 'status' }) {
+    this.lastEnqueueNew = false;
+    if (typeof key !== 'string' || !key || typeof title !== 'string' || typeof body !== 'string') return null;
+    const id = createHash('sha256').update(`${this.mode}|alert|${key}`).digest('hex');
+    if (this.state.events.some(event => event.id === id)) return id;
+    const deliveries = {};
+    for (const [deviceId, device] of Object.entries(this.state.devices)) {
+      if (device.enabled) deliveries[deviceId] = { status: 'queued', attempts: 0, nextAttemptAt: 0 };
+    }
+    this._append({ id, createdAt: new Date(this.now()).toISOString(),
+      alert: { title: title.slice(0, 120), body: body.slice(0, 400), category, mode: this.mode }, deliveries });
+    return id;
+  }
+
+  _append(event) {
     const events = [...this.state.events, event];
     while (events.length > 1000) {
       const index = events.findIndex(item => !Object.values(item.deliveries).some(d => d.status === 'queued'));
@@ -130,7 +192,6 @@ export class OrderPushService {
     }
     this.save({ ...this.state, events });
     this.lastEnqueueNew = true;
-    return id;
   }
 
   start() {

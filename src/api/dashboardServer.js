@@ -1,4 +1,5 @@
 import { OrderPushService, createApnsSender } from './orderPushService.js';
+import { OperatorAlertMonitor } from './operatorAlertMonitor.js';
 import { createDashboardErrorHandler, scrubServerErrorResponses, securityHeadersMiddleware } from './httpHardening.js';
 import { createNotificationRoutes, manualNotificationMiddleware } from './routes/notifications.js';
 import express from 'express';
@@ -71,6 +72,11 @@ class DashboardServer {
     this.orderPush = new OrderPushService({ file: pushFile,
       mode: tradingSystem?.dryRun === false ? 'LIVE' : 'DRY_RUN',
       sender: options.apnsSender || createApnsSender(dashboardEnv) });
+    // Safety stops, recovery, positions held while stopped, and a daily
+    // summary go to the phone. Read-only: it never controls the trader.
+    this.operatorAlerts = tradingSystem && tradingSystem.readOnlyObserver !== true && options.operatorAlerts !== false
+      ? new OperatorAlertMonitor({ tradingSystem, push: this.orderPush, logger: this.logger || console })
+      : null;
     this.optimizationStoragePaths = resolveOptimizationStoragePaths({
       env: dashboardEnv,
       cwd: options.cwd || process.cwd(),
@@ -610,6 +616,7 @@ class DashboardServer {
             console.log(`   📡 실시간 알림: Socket.io 활성화`);
             this.logger.info(`Dashboard server started on ${this.auth.host}:${boundPort} (auth=${this.auth.enabled})`);
             this.orderPush.start();
+            this.operatorAlerts?.start();
             resolve(server);
           });
         })
@@ -711,6 +718,7 @@ class DashboardServer {
 
   stop() {
     this.orderPush?.stop();
+    this.operatorAlerts?.stop();
     this.tradingSystem.autoRecovery?.stop?.();
     try { this.tradingSystem.autoRecovery?.tracking?.record('shutdown'); } catch { /* persistence error remains in status */ }
     this.optimizationScheduler?.stop();
