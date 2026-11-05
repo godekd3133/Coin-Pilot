@@ -65,7 +65,18 @@ export function scalperEngine(session, { compact = false } = {}) {
   const detail = state === 'PROTECTIVE_ONLY' || state === 'SYNC_REQUIRED' ? runtimeBlockReason(status)
     : running ? `${(status.targetCoins || []).length}개 시장 감시 · 최대 ${status.maxPositions ?? '—'}개 보유 · 1분봉 과매도 반등`
       : status.stopReason ? `중지 사유: ${stopReasonLabel(status.stopReason)}` : '자동매매가 꺼져 있어요.';
+  const activity = status.engineActivity;
   const meta = [
+    activity?.lastCycleAt ? `마지막 분석 ${relativeTime(activity.lastCycleAt)}` : null,
+    activity ? `최근 1시간 신호 ${activity.signalsLastHour ?? 0}건 · 진입 ${activity.entriesLastHour ?? 0}건` : null,
+    activity?.lastExchangeSyncAt ? `거래소 확인 ${relativeTime(activity.lastExchangeSyncAt)}` : null,
+    status.accountLossGuard?.blocked
+      ? (status.accountLossGuard.blockedReason === 'daily_loss_limit'
+        ? `오늘 손실 한도 도달(${signedWon(status.accountLossGuard.realizedToday)}) · 신규 매수 중지`
+        : `계좌 하한 미만(${won(status.accountLossGuard.equity)}) · 신규 매수 중지`)
+      : status.accountLossGuard?.enabled
+        ? `손실 가드 · 오늘 ${signedWon(status.accountLossGuard.realizedToday)}${status.accountLossGuard.dailyLossLimitKrw ? ` / 한도 -${won(status.accountLossGuard.dailyLossLimitKrw)}` : ''}`
+        : null,
     breaker?.enabled ? `연속 손실 차단 ${breaker.lossCount || 0}/${breaker.maxLosses || 0}${breaker.coolingDown ? ' · 차단 중' : ''}` : null,
     status.autoRecovery?.desiredRunning === true && !running ? '자동 복구 대기' : null
   ].filter(Boolean).join(' · ');

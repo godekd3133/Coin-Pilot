@@ -216,6 +216,10 @@ export function createConfig(env) {
     maxConsecutiveLosses: env.SCALP_MAX_CONSECUTIVE_LOSSES || 3,
     // 0 disables the process-wide sliding-window circuit breaker.
     lossCircuitBreakerCount: env.SCALP_LOSS_CIRCUIT_BREAKER_COUNT || 0,
+    equityFloorKrw: env.SCALP_EQUITY_FLOOR_KRW || 0,
+    entryCostFilterMode: env.SCALP_ENTRY_COST_FILTER || 'observe',
+    entryCostMaxTakeProfitRatio: env.SCALP_ENTRY_COST_MAX_TP_RATIO ?? 0.15,
+    dailyLossLimitKrw: env.SCALP_DAILY_LOSS_LIMIT_KRW || 0,
     lossCircuitBreakerWindowMinutes: (env.SCALP_LOSS_CIRCUIT_BREAKER_WINDOW_MINUTES ?? 30),
     lossCircuitBreakerCooldownMinutes: (env.SCALP_LOSS_CIRCUIT_BREAKER_COOLDOWN_MINUTES ?? 60),
     paperValidationMinDays: env.SCALP_PAPER_MIN_DAYS || 7,

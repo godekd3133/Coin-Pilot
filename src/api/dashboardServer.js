@@ -1,5 +1,6 @@
 import { OrderPushService, createApnsSender } from './orderPushService.js';
 import { OperatorAlertMonitor } from './operatorAlertMonitor.js';
+import { EngineActivityTracker } from './engineActivity.js';
 import { createDashboardErrorHandler, scrubServerErrorResponses, securityHeadersMiddleware } from './httpHardening.js';
 import { createNotificationRoutes, manualNotificationMiddleware } from './routes/notifications.js';
 import express from 'express';
@@ -74,6 +75,7 @@ class DashboardServer {
       sender: options.apnsSender || createApnsSender(dashboardEnv) });
     // Safety stops, recovery, positions held while stopped, and a daily
     // summary go to the phone. Read-only: it never controls the trader.
+    this.engineActivity = new EngineActivityTracker();
     this.operatorAlerts = tradingSystem && tradingSystem.readOnlyObserver !== true && options.operatorAlerts !== false
       ? new OperatorAlertMonitor({ tradingSystem, push: this.orderPush, logger: this.logger || console })
       : null;
@@ -191,7 +193,10 @@ class DashboardServer {
     this.readiness = this._dashboardReadiness();
 
     if (this.tradingSystem?.setAnalysisCallback) {
-      this.tradingSystem.setAnalysisCallback((cycle) => this.monitoringSessions.ingestCycle(cycle));
+      this.tradingSystem.setAnalysisCallback((cycle) => {
+        try { this.engineActivity.ingestCycle(cycle); } catch { /* read-only telemetry */ }
+        return this.monitoringSessions.ingestCycle(cycle);
+      });
     }
     this.monitoringSessions.setUpdateCallback((update) => {
       if (!this.io) return;

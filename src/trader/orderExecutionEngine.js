@@ -8,6 +8,7 @@
 // 상태는 전부 owner(트레이더)를 통해 조회한다 — 순수 오케스트레이션.
 import { inspectLatestCandleFreshness } from '../risk/candleFreshness.js';
 import { inspectTraderMarketQuote } from './positionRiskMonitor.js';
+import { measureEntryCost, judgeEntryCost, createEntryCostStats } from './entryCostFilter.js';
 
 export function hasCompleteLiveFillResult(fillResult) {
   const order = fillResult?.order;
@@ -29,6 +30,41 @@ export class OrderExecutionEngine {
    * 반등 후보를 주문 직전에 다시 확인한다.
    * 지연 동안 가격/캔들이 바뀌면 기존 분석 결과를 재사용하지 않는다.
    */
+  /**
+   * Measure spread + tick from the orderbook. In 'observe' mode it only
+   * records what it would reject; a failed orderbook read never blocks.
+   */
+  async checkEntryCost(coin) {
+    const mode = this.owner.config?.entryCostFilterMode || 'observe';
+    if (mode === 'off' || this.owner.exchange !== 'upbit' || typeof this.owner.upbit?.getOrderbook !== 'function') return null;
+    const stats = this.owner.entryCostStats ||= createEntryCostStats();
+    let measurement;
+    try {
+      const books = await this.owner.upbit.getOrderbook(coin);
+      measurement = measureEntryCost(Array.isArray(books) ? books.find(book => book?.market === coin) || books[0] : null);
+    } catch {
+      measurement = null;
+    }
+    if (!measurement) {
+      stats.unavailable++;
+      return null;
+    }
+    const verdict = judgeEntryCost(measurement, {
+      takeProfitPercent: this.owner.strategyConfig?.takeProfitPercent ?? this.owner.config?.takeProfitPercent,
+      maxTakeProfitRatio: this.owner.config?.entryCostMaxTakeProfitRatio ?? 0.15
+    });
+    stats.checked++;
+    if (verdict.tooHigh) {
+      if (mode === 'enforce') stats.rejected++;
+      else stats.wouldReject++;
+    }
+    stats.lastSamples = [{ coin, at: new Date().toISOString(), ...measurement, limitPercent: verdict.limitPercent, tooHigh: verdict.tooHigh }, ...stats.lastSamples].slice(0, 20);
+    if (verdict.tooHigh && mode !== 'enforce') {
+      console.log(`  👀 [${coin}] 관찰: 진입 비용 ${measurement.costPercent}%가 한도 ${verdict.limitPercent}%를 넘음 (enforce 모드였다면 취소)`);
+    }
+    return { measurement, limitPercent: verdict.limitPercent, block: verdict.tooHigh && mode === 'enforce' };
+  }
+
   async confirmScalpingEntry(coin, decision, strategy, marketData = null) {
     const requestedDelay = Number(decision.entryDelayMs);
     const minDelay = Math.max(1000, Number(this.owner.entryDelayMinMs) || 1000);
@@ -101,6 +137,14 @@ export class OrderExecutionEngine {
       this.owner.recordPaperEntryConfirmation(coin, 'cancelled', candleFreshness.reason);
       this.owner.resolveWinnerShadowBlockedEntryAsNotFilled(coin, decision, candleFreshness.reason);
       console.log(`  ⛔ [${coin}] 지연 후 캔들 신선도 실패: ${candleFreshness.reason}`);
+      return null;
+    }
+
+    const costCheck = await this.checkEntryCost(coin);
+    if (costCheck?.block) {
+      this.owner.recordPaperEntryConfirmation(coin, 'cancelled', 'entry_cost_too_high');
+      this.owner.resolveWinnerShadowBlockedEntryAsNotFilled(coin, decision, 'entry_cost_too_high');
+      console.log(`  ⛔ [${coin}] 진입 비용 ${costCheck.measurement.costPercent}% (스프레드 ${costCheck.measurement.spreadPercent}% + 호가 ${costCheck.measurement.tickPercent}%)이 한도 ${costCheck.limitPercent}% 초과`);
       return null;
     }
 
@@ -226,6 +270,17 @@ export class OrderExecutionEngine {
         this.owner.resolveWinnerShadowBlockedEntryAsNotFilled(coin, decision, 'loss_circuit_breaker');
         console.log(`\n🛑 [${coin}] 전역 손실 회로차단기 쿨다운 중 - 신규 진입 차단 (${remainingMinutes}분 남음)`);
         return;
+      }
+
+      if (!strategy.currentPosition) {
+        const guard = this.owner.getAccountLossGuardStatus(krwBalance);
+        if (guard.blocked) {
+          this.owner.resolveWinnerShadowBlockedEntryAsNotFilled(coin, decision, guard.blockedReason);
+          console.log(guard.blockedReason === 'daily_loss_limit'
+            ? `\n🛑 [${coin}] 오늘 실현 손실 ${guard.realizedToday.toLocaleString()}원이 한도 -${guard.dailyLossLimitKrw.toLocaleString()}원에 닿아 신규 진입 차단`
+            : `\n🛑 [${coin}] 계좌 평가액 ${guard.equity?.toLocaleString()}원이 하한 ${guard.equityFloorKrw.toLocaleString()}원 미만이라 신규 진입 차단`);
+          return;
+        }
       }
 
       const entrySignalKey = decision.entrySignalKey || decision.details?.rebound?.signalKey;

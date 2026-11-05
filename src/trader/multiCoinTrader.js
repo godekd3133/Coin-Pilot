@@ -8,6 +8,7 @@ import { TradingCycleRunner } from './tradingCycleRunner.js';
 import { PositionRebalancer } from './positionRebalancer.js';
 import { PortfolioValuation } from './portfolioValuation.js';
 import { createLossCircuitBreakerState } from '../risk/lossCircuitBreaker.js';
+import { evaluateAccountLossGuard } from '../risk/accountLossGuard.js';
 import { createExchangeClient } from '../exchange/exchangeFactory.js';
 import { envNumber, envString } from '../config/envConfig.js';
 import { isPublicMarketDataSource } from '../api/publicMarketDataSource.js';
@@ -573,6 +574,17 @@ class MultiCoinTrader {
   /**
    * 거래 알림 전송
    */
+  /** Equity floor / daily loss limit for new entries (off when both are 0). */
+  getAccountLossGuardStatus(krwBalance = this.lastKnownKrwBalance) {
+    if (Number.isFinite(Number(krwBalance))) this.lastKnownKrwBalance = Number(krwBalance);
+    return evaluateAccountLossGuard({
+      equityFloorKrw: this.config?.equityFloorKrw,
+      dailyLossLimitKrw: this.config?.dailyLossLimitKrw,
+      krwBalance: this.lastKnownKrwBalance,
+      strategies: this.strategies
+    });
+  }
+
   notifyTrade(tradeInfo) {
     if (this.onTradeCallback) {
       try {

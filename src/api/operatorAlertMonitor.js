@@ -96,7 +96,8 @@ export class OperatorAlertMonitor {
       running: this.tradingSystem.isRunning === true,
       protective,
       stopReason: safety.stopReason ?? this.tradingSystem.stopReason ?? null,
-      autoRecoveryWaiting: safety.autoRecovery?.armed === true
+      autoRecoveryWaiting: safety.autoRecovery?.armed === true,
+      lossGuard: this.tradingSystem.getAccountLossGuardStatus?.() ?? null
     };
   }
 
@@ -140,6 +141,15 @@ export class OperatorAlertMonitor {
         const after = this.stoppedSince ? ` (${Math.max(1, Math.round((nowMs - this.stoppedSince) / 60000))}분 만에)` : '';
         this.alert(`resume|${minuteKey}`, '자동매매 재개', `자동매매가 다시 실행 중입니다${after}.`, 'status');
       }
+    }
+
+    if (previous && !previous.lossGuard?.blocked && state.lossGuard?.blocked) {
+      const guard = state.lossGuard;
+      this.alert(`lossguard|${guard.blockedReason}|${kstDateKey(nowMs)}`, '손실 가드 작동',
+        guard.blockedReason === 'daily_loss_limit'
+          ? `오늘 실현 손익 ${formatSignedKrw(guard.realizedToday)}이 한도 -${Math.round(guard.dailyLossLimitKrw).toLocaleString('ko-KR')}원에 닿아 신규 매수를 멈췄습니다. 보유 포지션의 손절·익절은 계속합니다.`
+          : `계좌 평가액 ${Math.round(guard.equity).toLocaleString('ko-KR')}원이 하한 ${Math.round(guard.equityFloorKrw).toLocaleString('ko-KR')}원 아래라 신규 매수를 멈췄습니다. 보유 포지션의 손절·익절은 계속합니다.`,
+        'safety');
     }
 
     if (state.running) {

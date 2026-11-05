@@ -78,6 +78,11 @@ export default function createStatusRoutes(server) {
         currentPositions,
         recentErrors,
         hasErrors: recentErrors.length > 0,
+        engineActivity: server.engineActivity?.getStatus(server.tradingSystem) ?? null,
+        accountLossGuard: server.tradingSystem.getAccountLossGuardStatus?.() ?? null,
+        entryCostFilter: server.tradingSystem.entryCostStats
+          ? { mode: server.tradingSystem.config?.entryCostFilterMode || 'observe', ...server.tradingSystem.entryCostStats }
+          : null,
         serverTime: now.toISOString()
       });
     } catch (error) {
