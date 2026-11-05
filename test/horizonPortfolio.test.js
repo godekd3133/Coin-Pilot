@@ -7,7 +7,8 @@ import { analyzeChart, aggregateWeekly, minimumBars } from '../src/portfolio/cha
 import { resolveHorizonProfiles, normalizeWeights, ASSET_COSTS } from '../src/portfolio/horizonProfiles.js';
 import { positionBudget, evaluateExit, volatilityAllowed } from '../src/portfolio/horizonStrategy.js';
 import { runSleeveBacktest, precomputeAnalyses } from '../src/portfolio/horizonBacktest.js';
-import { studySleeve, studyToOverrides } from '../src/portfolio/horizonStudy.js';
+import { studySleeve, studyToOverrides, barsPerYearFor, passesGoLiveGate, MIN_OOS_TRADES } from '../src/portfolio/horizonStudy.js';
+import { TossCandleLoader } from '../src/portfolio/marketDataLoader.js';
 import HorizonPortfolioManager, { latestCompletedBarStart } from '../src/portfolio/horizonPortfolioManager.js';
 import { PaperBroker } from '../src/portfolio/horizonBrokers.js';
 import { HorizonRuntime } from '../src/portfolio/horizonService.js';
@@ -295,4 +296,168 @@ test('실시간 진입 금액은 백테스트와 같은 위험 기준을 쓰고,
   // 손절 -42%: 슬리브 500,000원의 1% 위험이면 약 11,900원 (균등 슬롯 166,666원 아님)
   const amount = manager._entryAmount('mid', profile, { cash: 1_000_000, horizonCapital: 1_000_000 }, 132, 76.2);
   assert.ok(amount > 11_000 && amount < 13_000, `risk-sized amount, got ${amount}`);
+});
+
+// ---------- 백테스트 체결 경계 (가짜 분석 캐시로 신호를 고정) ----------
+
+const BT_PROFILE = resolveHorizonProfiles('coin').swing;
+const BT_WARMUP = minimumBars(BT_PROFILE.periods);
+
+function flatSeries(count, { price = 10_000, volume = 1000, interval = 4 * HOUR, startTime = Date.UTC(2025, 0, 1) } = {}) {
+  return Array.from({ length: count }, (_, i) => ({ time: startTime + i * interval, open: price, high: price * 1.001, low: price * 0.999, close: price, volume }));
+}
+
+/** scoreAt(index) → 점수(null이면 분석 없음). atr은 가격의 1%. */
+function fakeCache(series, scoreBySymbol) {
+  const cache = new Map();
+  for (const [symbol, bars] of series) {
+    cache.set(symbol, bars.map((bar, index) => {
+      const score = scoreBySymbol[symbol](index);
+      if (score === null) return null;
+      return { available: true, score, regime: score < 0 ? 'downtrend' : 'uptrend', atr: bar.close * 0.01, atrPercent: 1, close: bar.close };
+    }));
+  }
+  return cache;
+}
+
+function btProfile(overrides) {
+  return { ...BT_PROFILE, regimeFilter: false, regimeExit: false, riskPerTradePercent: 0, entryScore: 20, exitScore: 0, rebalanceBars: 1, maxHoldBars: 100, atrStopMultiple: 3, ...overrides };
+}
+
+test('백테스트: 최대 보유기간 청산은 판단 봉 종가가 아니라 다음 봉 시가(+비용)로 체결된다', () => {
+  const bars = flatSeries(BT_WARMUP + 12).map((bar, i) => ({ ...bar, open: 10_000 + i * 10, close: 10_000 + i * 10 + 5, high: 10_000 + i * 10 + 6, low: 10_000 + i * 10 - 1 }));
+  const series = new Map([['KRW-AAA', bars]]);
+  const profile = btProfile({ mode: 'signal', maxPositions: 1, maxHoldBars: 2 });
+  const result = runSleeveBacktest(series, profile, { costs: ASSET_COSTS.coin, analysisCache: fakeCache(series, { 'KRW-AAA': () => 50 }) });
+  const trade = result.tradeList.find(t => t.reason === '최대 보유기간');
+  assert.ok(trade, 'max-hold exit happened');
+  const exitIndex = bars.findIndex(bar => bar.time === trade.exitTime);
+  const entryIndex = bars.findIndex(bar => bar.time === trade.entryTime);
+  assert.equal(trade.exitPrice, bars[exitIndex].open, 'fills at the next bar open');
+  assert.equal(exitIndex, entryIndex + 2, 'decided at the close of the 2nd held bar, filled at the following open');
+  assert.ok(Math.abs(trade.returnPercent - ((trade.quantity * trade.exitPrice * (1 - ASSET_COSTS.coin.sellCostRate)) / trade.cost - 1) * 100) < 1e-9);
+});
+
+test('백테스트: 손절은 봉 내 min(시가, 손절가) 체결을 유지한다', () => {
+  const bars = flatSeries(BT_WARMUP + 8);
+  const crash = BT_WARMUP + 3;
+  bars[crash] = { ...bars[crash], open: 9_000, low: 8_500, close: 8_800, high: 9_100 };
+  const series = new Map([['KRW-AAA', bars]]);
+  const result = runSleeveBacktest(series, btProfile({ mode: 'signal', maxPositions: 1 }), { costs: ASSET_COSTS.coin, analysisCache: fakeCache(series, { 'KRW-AAA': () => 50 }) });
+  const trade = result.tradeList.find(t => t.reason === 'ATR 손절/트레일링');
+  assert.equal(trade.exitTime, bars[crash].time);
+  assert.equal(trade.exitPrice, 9_000, 'gap below the stop fills at the open');
+});
+
+test('백테스트: rank 리밸런싱은 같은 봉에서 매도를 먼저 체결해 매수 슬롯을 비운다', () => {
+  const n = BT_WARMUP + 12;
+  const series = new Map([['KRW-AAA', flatSeries(n)], ['KRW-BBB', flatSeries(n)]]);
+  const switchAt = BT_WARMUP + 3;
+  const cache = fakeCache(series, {
+    'KRW-AAA': i => (i < switchAt ? 50 : -10),
+    'KRW-BBB': i => (i < switchAt ? 5 : 60)
+  });
+  const result = runSleeveBacktest(series, btProfile({ mode: 'rank', maxPositions: 1, maxHoldBars: 4 }), { costs: ASSET_COSTS.coin, analysisCache: cache });
+  const bars = series.get('KRW-BBB');
+  const aaaExit = result.tradeList.find(t => t.symbol === 'KRW-AAA');
+  const bbb = result.tradeList.find(t => t.symbol === 'KRW-BBB');
+  assert.equal(aaaExit.exitTime, bars[switchAt + 1].time);
+  assert.ok(bbb, 'replacement entry is not dropped');
+  assert.equal(bbb.entryTime, bars[switchAt + 1].time, 'sell and buy fill at the same open');
+});
+
+test('백테스트: 체결 시 매수 크기는 보유 종목을 체결 봉 시가(종가 아님)로 평가한 자산 기준', () => {
+  const n = BT_WARMUP + 12;
+  const aaa = flatSeries(n);
+  const signalAt = BT_WARMUP + 2;
+  // 체결 봉에서 AAA는 10,000에 열려 30,000에 닫힌다 — 종가로 평가하면 매수 크기가 부풀려진다.
+  for (let i = signalAt + 1; i < n; i += 1) aaa[i] = { ...aaa[i], open: i === signalAt + 1 ? 10_000 : 30_000, high: 30_010, low: i === signalAt + 1 ? 10_000 : 29_990, close: 30_000 };
+  const series = new Map([['KRW-AAA', aaa], ['KRW-BBB', flatSeries(n)]]);
+  const cache = fakeCache(series, { 'KRW-AAA': () => 50, 'KRW-BBB': i => (i < signalAt ? 0 : 50) });
+  const result = runSleeveBacktest(series, btProfile({ mode: 'signal', maxPositions: 4, maxHoldBars: 4 }), { costs: ASSET_COSTS.coin, analysisCache: cache });
+  const bbb = result.tradeList.find(t => t.symbol === 'KRW-BBB');
+  assert.equal(bbb.entryTime, aaa[signalAt + 1].time);
+  const equityAtOpen = 750_000 + 250_000 * (1 - ASSET_COSTS.coin.buyCostRate);
+  assert.equal(bbb.cost, Math.floor(equityAtOpen / 4));
+});
+
+test('백테스트: 신규 진입은 결정 봉까지의 거래대금으로 고른 시점 유니버스 상위 N만 대상이다', () => {
+  const n = BT_WARMUP + 20;
+  const surgeAt = BT_WARMUP + 10;
+  const series = new Map([
+    ['KRW-AAA', flatSeries(n, { volume: 10 })],
+    ['KRW-BBB', flatSeries(n, { volume: 1000 })],
+    ['KRW-CCC', flatSeries(n, { volume: 10 }).map((bar, i) => (i >= surgeAt ? { ...bar, volume: 1_000_000 } : bar))]
+  ]);
+  const cache = fakeCache(series, { 'KRW-AAA': () => 90, 'KRW-BBB': () => 50, 'KRW-CCC': () => 70 });
+  const result = runSleeveBacktest(series, btProfile({ mode: 'signal', maxPositions: 3, maxHoldBars: 2 }), {
+    costs: ASSET_COSTS.coin, analysisCache: cache, universeSize: 1, universeLookbackBars: 3
+  });
+  const times = series.get('KRW-AAA').map(bar => bar.time);
+  assert.equal(result.tradeList.filter(t => t.symbol === 'KRW-AAA').length, 0, 'never in the top-1 by trailing turnover');
+  assert.ok(result.tradeList.some(t => t.symbol === 'KRW-BBB'));
+  const ccc = result.tradeList.filter(t => t.symbol === 'KRW-CCC');
+  assert.ok(ccc.length > 0);
+  assert.ok(ccc.every(t => t.entryTime > times[surgeAt]), 'future turnover is not used before it happens');
+});
+
+test('백테스트 진입 크기는 실시간과 같다: 주식 정수 주, 1주 미만·코인 최소 주문 미만은 건너뛴다', () => {
+  const n = BT_WARMUP + 8;
+  const run = (assetClass, price, initialEquity) => {
+    const series = new Map([['SYM', flatSeries(n, { price })]]);
+    return runSleeveBacktest(series, btProfile({ mode: 'signal', maxPositions: 4, maxHoldBars: 2 }), {
+      costs: ASSET_COSTS[assetClass], assetClass, initialEquity, analysisCache: fakeCache(series, { SYM: () => 50 })
+    });
+  };
+  const stock = run('stock', 30_000, 1_000_000);
+  assert.ok(stock.tradeList.length > 0);
+  assert.equal(stock.tradeList[0].quantity, 8, 'floor(250,000 / (30,000 × (1 + cost))) shares');
+  assert.equal(stock.tradeList[0].cost, 8 * 30_000 * (1 + ASSET_COSTS.stock.buyCostRate));
+  assert.equal(run('stock', 1_000_000, 1_000_000).tradeList.length, 0, 'cannot afford one share');
+  // 코인: 손절거리 3% → 최소 진입액 5,300원. 현금 4,900원(5,000×0.98)으로는 진입하지 않는다.
+  assert.equal(run('coin', 2_000, 5_000).tradeList.length, 0);
+  const small = run('coin', 2_000, 6_000);
+  assert.equal(small.tradeList[0].cost, 5_300, 'raised to the minimum entry like the live engine');
+});
+
+test('주식 주봉은 KST 달력 주(월~금)로 묶고 금요일 15:30 KST 이후에만 완료된다 (코인은 UTC 그대로)', async () => {
+  // 토스 일봉 timestamp = 거래일 00:00 KST(전날 15:00 UTC). 2026-03-02(월)~03-13(금) 2주.
+  const days = ['02', '03', '04', '05', '06', '09', '10', '11', '12', '13'];
+  const raw = days.map((day, i) => ({ timestamp: `2026-03-${day}T00:00:00+09:00`, openPrice: 100 + i, highPrice: 101 + i, lowPrice: 99 + i, closePrice: 100.5 + i, volume: 10 }));
+  const daily = raw.map(candle => ({ time: Date.parse(candle.timestamp), open: candle.openPrice, high: candle.highPrice, low: candle.lowPrice, close: candle.closePrice, volume: 1 }));
+  const weeks = aggregateWeekly(daily, { assetClass: 'stock' });
+  assert.equal(weeks.length, 2);
+  assert.equal(new Date(weeks[0].time).toISOString(), '2026-03-01T15:00:00.000Z', 'Monday 00:00 KST');
+  assert.equal(weeks[0].open, 100);
+  assert.equal(weeks[0].close, 104.5, 'Friday close');
+
+  const friBefore = Date.parse('2026-03-13T15:00:00+09:00');
+  const friAfter = Date.parse('2026-03-13T15:40:00+09:00');
+  assert.equal(new Date(latestCompletedBarStart('1w', friBefore, 'stock')).toISOString(), '2026-03-01T15:00:00.000Z');
+  assert.equal(new Date(latestCompletedBarStart('1w', friAfter, 'stock')).toISOString(), '2026-03-08T15:00:00.000Z');
+  assert.equal(latestCompletedBarStart('1w', Date.UTC(2026, 2, 13, 12), 'coin'), Date.UTC(2026, 2, 2), 'coin weeks stay UTC Monday');
+
+  const client = { getDailyCandles: async () => [...raw].reverse() };
+  const before = await new TossCandleLoader({ client, now: () => friBefore }).getBars('005930', '1w', 10);
+  const after = await new TossCandleLoader({ client, now: () => friAfter }).getBars('005930', '1w', 10);
+  assert.equal(before.length, 1);
+  assert.equal(after.length, 2);
+  assert.equal(after.at(-1).time, latestCompletedBarStart('1w', friAfter, 'stock'), 'loader and live clock agree');
+});
+
+test('연율화: 주식 일봉 252, 주봉 52, 코인 일봉 365', () => {
+  assert.equal(barsPerYearFor('1d', 'stock'), 252);
+  assert.equal(barsPerYearFor('1w', 'stock'), 52);
+  assert.equal(barsPerYearFor('1w', 'coin'), 52);
+  assert.equal(barsPerYearFor('1d', 'coin'), 365);
+  assert.equal(barsPerYearFor('240m', 'coin'), 2190);
+});
+
+test('편입 게이트: 바이앤홀드를 이기지 못하거나 OOS 거래가 부족하면 불합격', () => {
+  const base = { folds: 3, testedFolds: 3, compounded: 1.2, buyAndHoldCompounded: 1.1, nonNegativeFolds: 2, trades: 20, worstFoldDrawdown: 10, maxDrawdownPercent: 35 };
+  assert.equal(passesGoLiveGate(base), true);
+  assert.equal(passesGoLiveGate({ ...base, buyAndHoldCompounded: 1.3 }), false, 'positive but below buy-and-hold');
+  assert.equal(passesGoLiveGate({ ...base, trades: MIN_OOS_TRADES - 1 }), false);
+  assert.ok(MIN_OOS_TRADES >= 12);
+  assert.equal(passesGoLiveGate({ ...base, nonNegativeFolds: 1 }), false);
 });

@@ -4,7 +4,7 @@
 // 모든 결과는 시간순 완료 봉 { time, open, high, low, close, volume } 배열이며
 // 진행 중인 최신 봉은 제외한다.
 
-import { aggregateWeekly } from './chartAnalysis.js';
+import { aggregateWeekly, STOCK_WEEK_CLOSE_OFFSET_MS } from './chartAnalysis.js';
 import { INTERVAL_MS } from './horizonProfiles.js';
 import { toNumber } from '../stock/tossInvestClient.js';
 
@@ -125,7 +125,8 @@ export class TossCandleLoader {
   async getBars(symbol, interval, count) {
     if (interval === '1w') {
       const daily = await this.getBars(symbol, '1d', count * 5 + 10);
-      return dropIncomplete(aggregateWeekly(daily), INTERVAL_MS['1w'], this.now()).slice(-count);
+      // KST 달력 주(월~금)로 묶고, 금요일 15:30 KST 마감 후에만 그 주를 완료로 본다.
+      return dropIncomplete(aggregateWeekly(daily, { assetClass: 'stock' }), STOCK_WEEK_CLOSE_OFFSET_MS, this.now()).slice(-count);
     }
     if (interval !== '1d') throw new Error(`토스 주식은 ${interval} 봉을 지원하지 않습니다 (1d/1w만 사용).`);
     const raw = await this.client.getDailyCandles(symbol, count + 1);

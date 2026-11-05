@@ -1,12 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { selectByTrainingTurnover } from '../src/scripts/validateScalping.js';
 import {
+  DEFAULT_CONFIG,
+  findExit,
   calculateQualityScore,
   createScalpingFeatureCache,
   simulateScalpingSegmented,
   simulateScalping
 } from '../src/backtest/scalpingBacktest.js';
-import { simulateScalpingPortfolio } from '../src/backtest/scalpingPortfolioSimulation.js';
+import { calculatePortfolioMarketRegime, simulateScalpingPortfolio } from '../src/backtest/scalpingPortfolioSimulation.js';
 import {
   calculateTradeReturnConfidence,
   evaluateStatisticalConfidenceGate
@@ -843,4 +846,52 @@ test('연장된 포지션은 본전 스탑으로 추가 하락 대신 수익을 
   assert.equal(close.reason, 'BREAK_EVEN_STOP');
   assert.equal(close.winnerExtended, true);
   assert.ok(close.netProfit >= 0);
+});
+
+const t0 = Date.parse('2026-01-01T00:00:00Z');
+const bar = (min, o, h, l, cl) => ({
+  candle_date_time_utc: new Date(t0 + min * 60000).toISOString().slice(0, 19),
+  timestamp: t0 + min * 60000,
+  opening_price: o, high_price: h, low_price: l, trade_price: cl,
+  candle_acc_trade_volume: 1, candle_acc_trade_price: 100
+});
+
+test('pitfall: exits a candle that opens at the max hold at its open, not at a later TP wick', () => {
+  const config = { ...DEFAULT_CONFIG, slippage: 0.001, maxHoldMinutes: 30, takeProfitPercent: 1.8 };
+  const position = { entryPrice: 100, entryTimestamp: t0, highestPrice: 100, lowestPrice: 100 };
+  const exit = findExit(position, bar(30, 100.5, 102, 100.4, 100.6), config, t0 + 30 * 60000);
+  assert.equal(exit.reason, 'MAX_HOLD_TIME');
+  assert.ok(Math.abs(exit.price - 100.5 * 0.999) < 1e-9);
+});
+
+test('pitfall: portfolio regime ignores the close of the candle the entry fills on', () => {
+  const context = closes => ({ candles: closes.map((x, i) => bar(i, x, x, x, x)) });
+  const options = { marketRegimeEnabled: true, marketRegimeLookback: 5, marketRegimeMinBreadth: 0.5, marketRegimeMinReturnPercent: -0.2 };
+  const up = calculatePortfolioMarketRegime([{ context: context([100, 100, 100, 100, 100, 100, 103]), index: 6 }], options);
+  const down = calculatePortfolioMarketRegime([{ context: context([100, 100, 100, 100, 100, 100, 97]), index: 6 }], options);
+  assert.equal(up.confirmed, down.confirmed);
+});
+
+test('pitfall: ranks validation markets on training-window turnover only', () => {
+  const series = (trainTurnover, holdoutTurnover) => Array.from({ length: 10 }, (_, i) => ({
+    candle_date_time_utc: new Date(t0 + i * 60000).toISOString().slice(0, 19),
+    candle_acc_trade_price: i < 7 ? trainTurnover : holdoutTurnover
+  }));
+  const picked = selectByTrainingTurnover({
+    'KRW-PUMP': series(1, 1_000_000),
+    'KRW-STEADY': series(100, 100)
+  }, 1, 0.7);
+  assert.deepEqual(picked, ['KRW-STEADY']);
+});
+
+
+test('pitfall: follow-through entries at the close never exit on that candle high', () => {
+  const candles = syntheticRebound();
+  // The wick to 110 printed before the 97.8 close fill; it must not count as TP.
+  candles[27] = candle(27, 97.8, 96, 110, 96.7);
+  candles[28] = candle(28, 97.9, 97.8, 98, 97.6);
+  const result = simulateScalping(candles, { slippage: 0, requireNextCandleBullish: true, takeProfitPercent: 1.8 });
+  const close = result.trades.find(trade => trade.type === 'CLOSE');
+  assert.ok(close);
+  assert.equal(close.reason, 'BACKTEST_END');
 });

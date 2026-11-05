@@ -627,6 +627,19 @@ export function findExit(position, candle, config, timestamp) {
   const high = getHigh(candle);
   const protectiveStop = getProtectiveStop(position, config);
 
+  const holdAtOpenMs = timestamp - position.entryTimestamp;
+  const maxHoldMs = config.maxHoldMinutes > 0 ? config.maxHoldMinutes * 60 * 1000 : 0;
+  const extensionWindowMs = Math.max(0, Number(config.winnerExtendMinutes) || 0) * 60 * 1000;
+  // A candle that opens at or after the max hold is exited at its open: live
+  // sells within about a second of the deadline and never sees the rest of
+  // that minute's high/low. Checking stop/TP first would credit a TP wick the
+  // live trader cannot reach. The research-only winner extension keeps its
+  // own close-based branch below.
+  if (maxHoldMs > 0 && holdAtOpenMs >= maxHoldMs &&
+    (extensionWindowMs === 0 || holdAtOpenMs >= maxHoldMs + extensionWindowMs)) {
+    return { reason: 'MAX_HOLD_TIME', price: getOpen(candle) * (1 - config.slippage) };
+  }
+
   // If both levels are touched inside one candle, choose the stop first. This
   // avoids giving the backtest an optimistic intrabar ordering it cannot know.
   if (low <= protectiveStop.price) {
@@ -726,7 +739,10 @@ export function simulateScalping(rawCandles, config = {}, simulationOptions = {}
     const timestamp = candleTime(candle, index * options.candleUnit * 60 * 1000);
     let closedThisCandle = false;
 
-    if (position) {
+    // A follow-through entry fills at this candle's close, so its high/low
+    // happened before the fill and cannot trigger an exit.
+    const enteredAtThisClose = position?.entryAtClose === true && position.entryTimestamp >= timestamp;
+    if (position && !enteredAtThisClose) {
       const exit = findExit(position, candle, options, timestamp);
       if (exit) {
         const closeTrade = closePosition(position, candle, exit.reason, exit.price, options, timestamp);
@@ -813,6 +829,7 @@ export function simulateScalping(rawCandles, config = {}, simulationOptions = {}
                   amount,
                   investAmount,
                   entryTimestamp: candleTime(nextCandle, timestamp),
+                  entryAtClose: options.requireNextCandleBullish === true,
                   entryTime: nextCandle?.candle_date_time_utc || nextCandle?.candle_date_time_kst || null,
                   signalKey: rebound.signalKey,
                   signalReferencePrice: rebound.referencePrice,

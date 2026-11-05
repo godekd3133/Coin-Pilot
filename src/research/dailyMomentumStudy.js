@@ -33,10 +33,10 @@ export const DEFAULT_DAILY_MOMENTUM_CONFIG = Object.freeze({
   stopLossPercent: 0,
   maxPortfolioDrawdownPercent: 0,
   mode: 'fixed',
-  // `close` preserves the original diagnostic contract. `next_open` is an
-  // explicit execution-boundary stress lane: a signal observed at the
-  // completed close is filled at the following candle's opening price.
-  entryExecution: 'close',
+  // Default `next_open`: a signal observed at the completed close is filled
+  // at the following candle's opening price. `close` (signal and fill on the
+  // same close) is an explicit optimistic diagnostic and must be requested.
+  entryExecution: 'next_open',
   // `close` preserves the original exit contract. `next_open` defers a
   // close-based exit signal to the following candle's opening price.
   exitExecution: 'close',
@@ -384,10 +384,9 @@ function failureResult(options, dataQuality) {
  * Shared-balance daily replay for the defensive momentum candidate.
  * Signals and exits use only the completed daily close at the current index;
  * no future candle is used to decide the same index's entry. The default
- * `entryExecution=close` contract keeps the original close-fill diagnostic.
- * The explicit `next_open` lane delays only entry execution to the following
- * candle's opening price, making the boundary assumption measurable without
- * silently changing the existing candidate.
+ * `entryExecution=next_open` fills an entry at the following candle's opening
+ * price. The explicit `close` lane (signal and fill on the same close) is kept
+ * only as an optimistic diagnostic for comparison.
  */
 export function simulateDailyMomentumPortfolio(rawCandlesByMarket, config = {}) {
   const options = { ...DEFAULT_DAILY_MOMENTUM_CONFIG, ...config };
@@ -420,7 +419,7 @@ export function simulateDailyMomentumPortfolio(rawCandlesByMarket, config = {}) 
   const stopLossPercent = Math.max(0, finite(options.stopLossPercent, 0));
   const maxPortfolioDrawdownPercent = Math.max(0, finite(options.maxPortfolioDrawdownPercent, 0));
   const mode = options.mode === 'regime' ? 'regime' : 'fixed';
-  const entryExecution = options.entryExecution === 'next_open' ? 'next_open' : 'close';
+  const entryExecution = options.entryExecution === 'close' ? 'close' : 'next_open';
   const exitExecution = options.exitExecution === 'next_open' ? 'next_open' : 'close';
   const maxEntryGapPercent = Math.max(0, finite(options.maxEntryGapPercent, 0));
   const entryWindowEndRaw = options.entryWindowEndTimestamp;

@@ -31,7 +31,8 @@ export async function getHistoricalCandles(upbit, market, unit, totalCount) {
 async function selectMarkets(upbit) {
   const explicit = envList('SCALP_VALIDATION_MARKETS', [])
     .map(market => market.toUpperCase());
-  if (explicit.length > 0) return explicit;
+  const limit = envNumber('SCALP_VALIDATION_MARKET_COUNT', 3);
+  if (explicit.length > 0) return { markets: explicit, pool: explicit, limit: explicit.length, method: 'explicit' };
 
   const markets = await upbit.getMarkets();
   const excludedMarkets = new Set(['KRW-USDT', 'KRW-USDC', 'KRW-DAI', 'KRW-USD1']);
@@ -39,13 +40,39 @@ async function selectMarkets(upbit) {
     .filter(market => market.market?.startsWith('KRW-') && !excludedMarkets.has(market.market))
     .map(market => market.market);
   const tickers = await upbit.getTicker(krwMarkets);
-  const limit = envNumber('SCALP_VALIDATION_MARKET_COUNT', 3);
-
-  return (tickers || [])
+  // The current 24h turnover lies inside the holdout window, so ranking on it
+  // conditions the tested universe on holdout activity. Use it only to build
+  // a wider candidate pool; the final pick is re-ranked on training-window
+  // turnover after the candles are loaded (selectByTrainingTurnover).
+  const poolSize = Math.max(limit, Math.ceil(limit * envNumber('SCALP_VALIDATION_MARKET_POOL_MULTIPLIER', 3)));
+  const pool = (tickers || [])
     .filter(ticker => Number.isFinite(ticker?.acc_trade_price_24h))
     .sort((a, b) => b.acc_trade_price_24h - a.acc_trade_price_24h)
-    .slice(0, limit)
+    .slice(0, poolSize)
     .map(ticker => ticker.market);
+  return { markets: null, pool, limit, method: 'training_window_turnover' };
+}
+
+/**
+ * Rank candidate markets by turnover inside the training slice only, so the
+ * holdout cannot influence which markets are tested. Current listings are
+ * still survivors (delisted markets are absent): a residual, documented bias.
+ */
+export function selectByTrainingTurnover(candlesByMarket, limit, trainRatio) {
+  return Object.entries(candlesByMarket)
+    .map(([market, candles]) => {
+      const sorted = [...(candles || [])].sort((a, b) =>
+        Date.parse(a.candle_date_time_utc || 0) - Date.parse(b.candle_date_time_utc || 0));
+      const trainEnd = Math.floor(sorted.length * trainRatio);
+      let turnover = 0;
+      for (let index = 0; index < trainEnd; index += 1) {
+        turnover += Number(sorted[index].candle_acc_trade_price) || 0;
+      }
+      return { market, turnover };
+    })
+    .sort((a, b) => b.turnover - a.turnover)
+    .slice(0, limit)
+    .map(item => item.market);
 }
 
 function baseConfig(candleUnit = 1) {
@@ -138,7 +165,8 @@ async function main() {
     ? number(paperSnapshot?.config?.candleUnit, 1)
     : number(explicitUnit, 1);
   const candleCount = envNumber('SCALP_VALIDATION_CANDLE_COUNT', 10080);
-  const markets = await selectMarkets(upbit);
+  const selection = await selectMarkets(upbit);
+  let markets = selection.markets || selection.pool;
   const config = mergePaperValidationConfig(
     { ...baseConfig(unit), candleUnit: unit },
     paperSnapshot,
@@ -176,23 +204,45 @@ async function main() {
       : `설정 source: paper snapshot ${paperSnapshot.filePath} (session ${paperSnapshot.sessionId || 'unknown'})`
     : '설정 source: environment/defaults');
 
+  const trainRatio = envNumber('SCALP_VALIDATION_TRAIN_RATIO', 0.7);
+  const loadedCandles = {};
+  const loadCandles = async market => {
+    if (loadedCandles[market]) return loadedCandles[market];
+    const cachedCandles = candleCache?.[market];
+    if (candleCacheFile && !Array.isArray(cachedCandles)) {
+      throw new Error(`validation candle cache에 ${market} 데이터가 없습니다. 혼합 window를 만들지 않고 중단합니다.`);
+    }
+    const fromCache = Array.isArray(cachedCandles);
+    console.log(`\n⏳ ${market} ${fromCache ? 'cache 확인' : '데이터 수집'} 중...`);
+    const candles = fromCache ? cachedCandles : await getHistoricalCandles(upbit, market, unit, candleCount);
+    console.log(`   ${fromCache ? 'cache 사용' : '수집 완료'}: ${candles.length}개`);
+    loadedCandles[market] = { candles, fromCache };
+    return loadedCandles[market];
+  };
+  if (selection.method === 'training_window_turnover') {
+    const poolCandles = {};
+    for (const market of selection.pool) {
+      if (candleCacheFile && !Array.isArray(candleCache?.[market])) continue;
+      try {
+        poolCandles[market] = (await loadCandles(market)).candles;
+      } catch (error) {
+        console.error(`   ❌ ${market} 후보 수집 실패: ${error.message}`);
+      }
+    }
+    markets = selectByTrainingTurnover(poolCandles, selection.limit, trainRatio);
+    console.log(`마켓 선택(학습 구간 거래대금): ${markets.join(', ')} / 후보 ${selection.pool.length}개`);
+    if (markets.length === 0) throw new Error('검증할 KRW 마켓이 없습니다.');
+  }
+
   for (const market of markets) {
     try {
-      const cachedCandles = candleCache?.[market];
-      if (candleCacheFile && !Array.isArray(cachedCandles)) {
-        throw new Error(`validation candle cache에 ${market} 데이터가 없습니다. 혼합 window를 만들지 않고 중단합니다.`);
-      }
-      const fromCache = Array.isArray(cachedCandles);
-      console.log(`\n⏳ ${market} ${fromCache ? 'cache 확인' : '데이터 수집'} 중...`);
-      const candles = fromCache
-        ? cachedCandles
-        : await getHistoricalCandles(upbit, market, unit, candleCount);
+      const loaded = await loadCandles(market);
+      const { candles, fromCache } = loaded;
       if (candleCacheOutputFile) capturedCandleCache[market] = candles;
-      console.log(`   ${fromCache ? 'cache 사용' : '수집 완료'}: ${candles.length}개`);
 
       const validation = walkForwardValidate(candles, config, {
         grid: fixedConfigValidation ? {} : undefined,
-        trainRatio: envNumber('SCALP_VALIDATION_TRAIN_RATIO', 0.7),
+        trainRatio,
         minimumCandles: envNumber('SCALP_VALIDATION_MIN_CANDLES', 2000),
         minimumTrainingTrades: envNumber('SCALP_VALIDATION_MIN_TRAINING_TRADES', 3),
         minimumTrainingProfitFactor: envNumber('SCALP_VALIDATION_MIN_TRAINING_PROFIT_FACTOR', 1),
@@ -248,6 +298,7 @@ async function main() {
     validationMode: fixedConfigValidation ? 'fixed_config' : 'tuned_holdout',
     config,
     markets,
+    marketSelection: { method: selection.method, pool: selection.pool, limit: selection.limit },
     results,
     statisticalConfidence: {
       required: requireStatisticalConfidence,

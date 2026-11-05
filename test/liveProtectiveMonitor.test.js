@@ -1380,3 +1380,25 @@ test('a stale-risk record from an earlier incident does not stop the trader agai
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('paper operator stop keeps simulated exits running until flat; a process shutdown does not drain', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'coinpilot-paper-operator-stop-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+
+  const trader = makeLiveTrader(root, { dryRun: true });
+  trader.getStrategy('KRW-BTC').openPosition(100, 100, 'BUY');
+  trader.isRunning = true;
+  t.after(() => trader.stopPositionRiskMonitor());
+
+  assert.equal(await trader.requestGracefulShutdown('operator_stop'), true);
+  assert.equal(trader.isRunning, false);
+  assert.equal(trader._entriesPaused, true);
+  assert.equal(trader._riskMonitorProtectiveOnly, true);
+  assert.notEqual(trader.positionRiskTimer, null);
+
+  const other = makeLiveTrader(fs.mkdtempSync(path.join(root, 'b-')), { dryRun: true });
+  other.getStrategy('KRW-BTC').openPosition(100, 100, 'BUY');
+  other.isRunning = true;
+  assert.equal(await other.requestGracefulShutdown('operator_shutdown'), false);
+  assert.equal(other._riskMonitorProtectiveOnly, false);
+});

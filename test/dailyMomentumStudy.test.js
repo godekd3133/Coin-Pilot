@@ -36,6 +36,7 @@ test('daily momentum portfolio applies breadth, cost, and fixed-hold exits witho
     'KRW-ETH': daily([100, 101, 102, 103, 102])
   }, {
     ...DEFAULT_DAILY_MOMENTUM_CONFIG,
+    entryExecution: 'close',
     initialBalance: 1_000,
     trendLookbackDays: 2,
     maxHoldDays: 2,
@@ -63,6 +64,7 @@ test('maturity-tail cutoff blocks later close entries while existing positions c
     'KRW-ETH': daily(prices)
   }, {
     ...DEFAULT_DAILY_MOMENTUM_CONFIG,
+    entryExecution: 'close',
     initialBalance: 1_000,
     trendLookbackDays: 2,
     maxHoldDays: 2,
@@ -136,6 +138,7 @@ test('daily momentum next-open entry execution uses the following candle open', 
   };
   const base = {
     ...DEFAULT_DAILY_MOMENTUM_CONFIG,
+    entryExecution: 'close',
     initialBalance: 1_000,
     trendLookbackDays: 2,
     positionFraction: 0.5,
@@ -190,6 +193,7 @@ test('daily momentum close entry with next-open exit counts held days semantical
     'KRW-ETH': dailyWithOpens([100, 101, 102, 103, 104], [100, 101, 102, 103, 104])
   }, {
     ...DEFAULT_DAILY_MOMENTUM_CONFIG,
+    entryExecution: 'close',
     initialBalance: 1_000,
     trendLookbackDays: 2,
     trendMinPercent: 0,
@@ -375,6 +379,7 @@ test('daily momentum optional two-bar confirmation and loss cooldown reduce repe
   };
   const base = {
     ...DEFAULT_DAILY_MOMENTUM_CONFIG,
+    entryExecution: 'close',
     initialBalance: 1_000,
     trendLookbackDays: 2,
     maxHoldDays: 1,
@@ -430,6 +435,7 @@ test('daily momentum benchmark confirmation bars delay the first gate entry with
   };
   const base = {
     ...DEFAULT_DAILY_MOMENTUM_CONFIG,
+    entryExecution: 'close',
     initialBalance: 1_000,
     trendLookbackDays: 2,
     positionFraction: 0.5,
@@ -623,6 +629,7 @@ test('daily momentum optional stop loss exits on the completed close before late
     'KRW-ETH': daily([100, 101, 102, 98, 99])
   }, {
     ...DEFAULT_DAILY_MOMENTUM_CONFIG,
+    entryExecution: 'close',
     initialBalance: 1_000,
     trendLookbackDays: 2,
     breadthMin: 2,
@@ -754,6 +761,7 @@ test('daily momentum portfolio drawdown stop closes positions and disables later
     'KRW-ETH': daily([100, 101, 102, 80, 81, 82])
   }, {
     ...DEFAULT_DAILY_MOMENTUM_CONFIG,
+    entryExecution: 'close',
     initialBalance: 1_000,
     trendLookbackDays: 2,
     maxHoldDays: 3650,
@@ -855,4 +863,13 @@ test('daily momentum minOrderAmount mirrors the forward runner order floor when 
     minOrderAmount: 5_000
   });
   assert.equal(flooredNextOpen.entryCount, 0);
+});
+
+test('daily momentum defaults to next-open entry execution instead of a same-close fill', () => {
+  assert.equal(DEFAULT_DAILY_MOMENTUM_CONFIG.entryExecution, 'next_open');
+  const result = simulateDailyMomentumPortfolio({
+    'KRW-BTC': daily([100, 101, 102, 103, 102]),
+    'KRW-ETH': daily([100, 101, 102, 103, 102])
+  }, { initialBalance: 1_000, trendLookbackDays: 2, maxHoldDays: 2, positionFraction: 0.5, breadthMin: 2, maxPositions: 1 });
+  assert.equal(result.config.entryExecution, 'next_open');
 });

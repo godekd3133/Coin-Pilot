@@ -437,7 +437,13 @@ export class TradingLifecycle {
       await new Promise(resolve => setTimeout(resolve, 25));
     }
 
-    if (!this.owner.dryRun && this.owner.getCurrentPositionCount() > 0 && !this.owner._riskMonitorProtectiveOnly) {
+    // An operator stop drains paper the same way as LIVE: a plain stop runs
+    // no stop-loss/take-profit/max-hold, and paper positions left that way sat
+    // open for weeks and dominated the recorded paper losses. A paper process
+    // shutdown still stops at once; the persisted positions resume on boot.
+    const drainPaper = this.owner.dryRun && reason === 'operator_stop';
+    if ((!this.owner.dryRun || drainPaper) &&
+      this.owner.getCurrentPositionCount() > 0 && !this.owner._riskMonitorProtectiveOnly) {
       this.owner.pauseForSafetyIncident(reason);
     }
 
@@ -458,6 +464,9 @@ export class TradingLifecycle {
       }
     }
 
+    if (drainPaper && this.owner.getCurrentPositionCount() > 0 && this.owner._riskMonitorProtectiveOnly) {
+      return true;
+    }
     if (!this.owner.dryRun && this.owner.getCurrentPositionCount() > 0) {
       if (this.owner.positionRiskCheckIntervalMs <= 0) {
         throw new Error('LIVE 포지션이 남아 있지만 리스크 모니터가 비활성화되어 안전하게 종료할 수 없습니다.');

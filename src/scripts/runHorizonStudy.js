@@ -1,7 +1,10 @@
 // 기간별(단기/스윙/중기/장기) 포트폴리오 워크포워드 연구 CLI.
 //   npm run research:horizons
-// 업비트 공개 시세로 거래대금 상위 코인의 60m/240m/일봉/주봉을 받아
-// 슬리브별 파라미터를 학습 구간에서 고르고, 검증 구간 성과로 실거래 비중을 정한다.
+// 업비트 공개 시세로 현재 거래대금 상위 후보군(CANDIDATE_POOL_SIZE=80)의
+// 60m/240m/일봉/주봉을 받아 슬리브별 파라미터를 학습 구간에서 고르고, 검증 구간 성과로 실거래 비중을 정한다.
+// 백테스트는 각 결정 봉에서 그 시점까지의 거래대금으로 고른 상위 HORIZON_STUDY_UNIVERSE_SIZE(기본 30)
+// 종목만 신규 진입 대상으로 삼는다(오늘의 순위로 과거를 고르는 미래 참조 방지).
+// 잔여 편향: 후보군은 여전히 "현재 상장 중인" 종목이라 상장폐지·거래지원 종료 종목은 빠져 있다(생존 편향).
 // 결과: HORIZON_PARAMS_FILE (기본 .coinpilot-runtime/horizon_params.json)
 // 원시 봉 캐시: HORIZON_STUDY_CACHE_FILE (기본 .coinpilot-runtime/horizon_study_candles.json)
 
@@ -20,6 +23,8 @@ dotenv.config();
 
 const BAR_COUNTS = { '60m': 4000, '240m': 2200, '1d': 1100, '1w': 160 };
 const STOCK_BENCHMARK = '069500'; // KODEX 200
+// 현재 순위로 받는 후보군 크기. 시점별 상위 N(HORIZON_STUDY_UNIVERSE_SIZE)이 과거에 이 안에서 바뀔 여지를 준다.
+export const CANDIDATE_POOL_SIZE = 80;
 
 export function defaultParamsFile(env = process.env, assetClass = 'coin') {
   const dir = env.COINPILOT_STATE_DIR || path.join(process.cwd(), '.coinpilot-runtime');
@@ -48,21 +53,21 @@ async function loadSeries(loader, markets, interval, cache) {
   return series;
 }
 
-async function resolveUniverse(assetClass, loader, client, universeSize, cache) {
+async function resolveUniverse(assetClass, loader, client, poolSize, cache) {
   let markets = envList('HORIZON_STUDY_MARKETS', []);
   if (markets.length > 0) return markets;
-  if (cache.markets) return cache.markets;
+  if (cache.markets && cache.poolSize === poolSize) return cache.markets;
   if (assetClass === 'stock') {
     const [rankings, listed] = await Promise.all([
-      client.getRankings({ type: 'MARKET_TRADING_AMOUNT', duration: '1d', count: 100 }),
+      client.getRankings({ type: 'MARKET_TRADING_AMOUNT', duration: '1d', count: Math.max(100, poolSize) }),
       client.listStockSymbols()
     ]);
     if (!(listed?.size > 0)) throw new Error('주식 종목 목록이 비어 있어 연구 대상을 정할 수 없습니다');
     // Same universe contract as the runtime: listed STOCK-type securities only.
-    markets = rankings.filter(item => item?.symbol && listed.has(String(item.symbol)) && (item.currency || 'KRW') === 'KRW').map(item => item.symbol).slice(0, universeSize);
+    markets = rankings.filter(item => item?.symbol && listed.has(String(item.symbol)) && (item.currency || 'KRW') === 'KRW').map(item => item.symbol).slice(0, poolSize);
     return markets.includes(STOCK_BENCHMARK) ? markets : [STOCK_BENCHMARK, ...markets];
   }
-  markets = await loader.getKrwMarketsByTurnover(universeSize);
+  markets = await loader.getKrwMarketsByTurnover(poolSize);
   return markets.includes('KRW-BTC') ? markets : ['KRW-BTC', ...markets];
 }
 
@@ -71,7 +76,9 @@ async function main() {
   const stateDir = process.env.COINPILOT_STATE_DIR || path.join(process.cwd(), '.coinpilot-runtime');
   const cacheFile = envString('HORIZON_STUDY_CACHE_FILE', path.join(stateDir, `horizon_study_candles_${assetClass}.json`));
   const paramsFile = defaultParamsFile(process.env, assetClass);
+  // universeSize: 각 결정 봉의 시점 유니버스 크기. poolSize: 데이터를 받는 후보군(현재 순위 기준, 더 넓게).
   const universeSize = Math.max(5, Math.floor(envNumber('HORIZON_STUDY_UNIVERSE_SIZE', 30)));
+  const poolSize = Math.max(universeSize, CANDIDATE_POOL_SIZE);
   let client = null;
   let loader;
   if (assetClass === 'stock') {
@@ -93,10 +100,11 @@ async function main() {
     cache = JSON.parse(fs.readFileSync(cacheFile, 'utf8'));
     console.log(`📂 봉 캐시 사용: ${cacheFile}`);
   }
-  let markets = await resolveUniverse(assetClass, loader, client, universeSize, cache);
+  let markets = await resolveUniverse(assetClass, loader, client, poolSize, cache);
   markets = markets.filter(market => !STABLECOINS.has(String(market).split('-')[1]));
   cache.markets = markets;
-  console.log(`🔬 ${assetClass === 'stock' ? '주식' : '코인'} 연구 대상 ${markets.length}개: ${markets.join(', ')}`);
+  cache.poolSize = poolSize;
+  console.log(`🔬 ${assetClass === 'stock' ? '주식' : '코인'} 연구 후보 ${markets.length}개(시점별 상위 ${universeSize}): ${markets.join(', ')}`);
 
   const profiles = resolveHorizonProfiles(assetClass);
   const results = [];
@@ -116,7 +124,7 @@ async function main() {
     fs.writeFileSync(cacheFile, JSON.stringify(cache));
     console.log(`🧪 ${profile.label} 그리드 탐색...`);
     const started = Date.now();
-    const result = studySleeve(series, profile, { assetClass, benchmark });
+    const result = studySleeve(series, profile, { assetClass, benchmark, universeSize });
     result.elapsedMs = Date.now() - started;
     results.push(result);
     if (result.error) {
@@ -127,7 +135,7 @@ async function main() {
       if (!fold.test) { console.log(`  fold ~${fold.testEnd.slice(0, 10)}: 거래 부족으로 후보 없음`); continue; }
       console.log(`  fold ~${fold.testEnd.slice(0, 10)}: 검증 ${fold.test.totalReturnPercent}% (MDD ${fold.test.maxDrawdownPercent}%, 거래 ${fold.test.trades}, 승률 ${fold.test.winRatePercent}%) · 보유 ${fold.buyAndHoldPercent}% · BTC ${fold.benchmarkPercent}% · ${JSON.stringify(fold.chosenParams)}`);
     }
-    console.log(`  OOS 합산: ${result.outOfSample.compoundedReturnPercent}% / 거래 ${result.outOfSample.trades} / 손실없는 fold ${result.outOfSample.nonNegativeFolds}/${result.outOfSample.folds} / 최악 MDD ${result.outOfSample.worstFoldDrawdownPercent}%`);
+    console.log(`  OOS 합산: ${result.outOfSample.compoundedReturnPercent}% (보유 ${result.outOfSample.buyAndHoldCompoundedReturnPercent}%) / 거래 ${result.outOfSample.trades} / 손실없는 fold ${result.outOfSample.nonNegativeFolds}/${result.outOfSample.folds} / 최악 MDD ${result.outOfSample.worstFoldDrawdownPercent}%`);
     console.log(`  실거래 파라미터: ${JSON.stringify(result.chosenParams)}`);
     if (result.overfitting) {
       const o = result.overfitting;
@@ -143,9 +151,11 @@ async function main() {
     assetClass,
     source: assetClass === 'stock' ? 'tossinvest' : 'upbit_public',
     markets,
+    universe: { candidatePool: poolSize, pointInTimeSize: universeSize, ranking: 'trailing_30d_turnover_up_to_decision_bar' },
     method: 'expanding_walk_forward_3fold',
     caveats: [
-      '현재 거래대금 상위 종목으로 과거를 검증하므로 생존 편향이 있습니다.',
+      '후보군은 현재 상장 중인 거래대금 상위 종목이라, 시점별 순위로 진입 대상을 제한해도 상장폐지 종목이 빠진 생존 편향이 남습니다.',
+      '슬리브는 독립적으로 시뮬레이션하므로 실시간의 "한 종목은 한 슬리브만 보유" 규칙은 반영되지 않습니다.',
       '과거 성과는 미래 수익을 보장하지 않습니다.'
     ],
     overrides,

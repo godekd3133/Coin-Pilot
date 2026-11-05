@@ -373,8 +373,9 @@ function findExit(position, candle, timestamp, config) {
   const stopPrice = position.entryPrice * (1 - config.stopLossPercent / 100);
   const takePrice = position.entryPrice * (1 + config.takeProfitPercent / 100);
   // Intrabar ordering is unknown; stop first is the conservative convention.
+  // A candle that opens below the stop gaps through it and fills at the open.
   if (config.stopLossPercent > 0 && candleLow(candle) <= stopPrice) {
-    return { reason: 'STOP_LOSS', price: stopPrice * (1 - config.slippage) };
+    return { reason: 'STOP_LOSS', price: Math.min(candleOpen(candle), stopPrice) * (1 - config.slippage) };
   }
   if (config.takeProfitPercent > 0 && candleHigh(candle) >= takePrice) {
     return { reason: 'TAKE_PROFIT', price: takePrice * (1 - config.slippage) };
@@ -383,6 +384,19 @@ function findExit(position, candle, timestamp, config) {
     return { reason: 'MAX_HOLD_TIME', price: candleOpen(candle) * (1 - config.slippage) };
   }
   return null;
+}
+
+/**
+ * Stop check for the candle whose open filled the entry. The rest of that candle
+ * trades after the fill, so its low can already hit the stop. Only the stop is
+ * checked (conservative: a take-profit on the same candle has unknown ordering).
+ */
+function findEntryCandleStop(position, candle, config) {
+  if (!(config.stopLossPercent > 0)) return null;
+  updateExcursion(position, candle);
+  const stopPrice = position.entryPrice * (1 - config.stopLossPercent / 100);
+  if (candleLow(candle) > stopPrice) return null;
+  return { reason: 'STOP_LOSS', price: Math.min(candleOpen(candle), stopPrice) * (1 - config.slippage) };
 }
 
 function failureResult(candles, config, aggregation, reason) {
@@ -455,32 +469,34 @@ export function simulateHigherTimeframeMomentum(rawCandles, config = {}, simulat
   let skippedSignals = 0;
   let cooldownUntil = 0;
   let consecutiveLosses = 0;
+  let closedThisCandle;
+  const applyExit = (exit, candle, timestamp) => {
+    const closeTrade = closePosition(position, candle, exit.reason, exit.price, options, timestamp);
+    balance += closeTrade.grossAmount - closeTrade.sellFee;
+    fees += closeTrade.sellFee;
+    trades.push(closeTrade);
+    position = null;
+    closedThisCandle = true;
+    if (closeTrade.netProfit < 0) {
+      consecutiveLosses += 1;
+      cooldownUntil = timestamp + Math.max(
+        options.cooldownAfterLossMinutes,
+        consecutiveLosses >= options.maxConsecutiveLosses ? 60 : 0
+      ) * 60 * 1000;
+    } else {
+      consecutiveLosses = 0;
+      cooldownUntil = 0;
+    }
+  };
 
   for (let index = startTradingIndex; index <= endTradingIndex; index += 1) {
     const candle = candles[index];
     const timestamp = historicalTimestampForCandle(candle) ?? index * options.baseCandleUnit * 60 * 1000;
-    let closedThisCandle = false;
+    closedThisCandle = false;
 
     if (position) {
       const exit = findExit(position, candle, timestamp, options);
-      if (exit) {
-        const closeTrade = closePosition(position, candle, exit.reason, exit.price, options, timestamp);
-        balance += closeTrade.grossAmount - closeTrade.sellFee;
-        fees += closeTrade.sellFee;
-        trades.push(closeTrade);
-        position = null;
-        closedThisCandle = true;
-        if (closeTrade.netProfit < 0) {
-          consecutiveLosses += 1;
-          cooldownUntil = timestamp + Math.max(
-            options.cooldownAfterLossMinutes,
-            consecutiveLosses >= options.maxConsecutiveLosses ? 60 : 0
-          ) * 60 * 1000;
-        } else {
-          consecutiveLosses = 0;
-          cooldownUntil = 0;
-        }
-      }
+      if (exit) applyExit(exit, candle, timestamp);
     }
 
     const signal = signalByEntryIndex.get(index);
@@ -529,6 +545,8 @@ export function simulateHigherTimeframeMomentum(rawCandles, config = {}, simulat
             trendReturnPercent: signal.trendReturnPercent,
             higherTimeframeMinutes: signal.higherTimeframeMinutes
           });
+          const entryStop = findEntryCandleStop(position, candle, options);
+          if (entryStop) applyExit(entryStop, candle, timestamp);
         }
       }
     }
@@ -850,6 +868,23 @@ export function simulateHigherTimeframeMomentumPortfolio(rawCandlesByMarket, con
         trendReturnPercent: event.signal.trendReturnPercent,
         higherTimeframeMinutes: event.signal.higherTimeframeMinutes
       });
+      const entryStop = findEntryCandleStop(position, event.candle, options);
+      if (entryStop) {
+        const closeTrade = closePosition(position, event.candle, entryStop.reason, entryStop.price, { ...options, market: event.market }, timestamp);
+        balance += closeTrade.grossAmount - closeTrade.sellFee;
+        fees += closeTrade.sellFee;
+        trades.push(closeTrade);
+        positions.delete(event.market);
+        closedMarkets.add(event.market);
+        if (closeTrade.netProfit < 0) {
+          const losses = (consecutiveLossesByMarket.get(event.market) || 0) + 1;
+          consecutiveLossesByMarket.set(event.market, losses);
+          const cooldownMinutes = losses >= Math.max(1, Math.floor(finiteNumber(options.maxConsecutiveLosses, 3)))
+            ? Math.max(finiteNumber(options.cooldownAfterLossMinutes, 60), 60)
+            : finiteNumber(options.cooldownAfterLossMinutes, 60);
+          cooldownUntilByMarket.set(event.market, timestamp + cooldownMinutes * 60 * 1000);
+        }
+      }
     }
 
     const candleByMarket = new Map(group.map(event => [event.market, event.candle]));

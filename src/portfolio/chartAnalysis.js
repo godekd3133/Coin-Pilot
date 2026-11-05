@@ -191,13 +191,28 @@ export function analyzeChart(bars, periods = DEFAULT_ANALYSIS_PERIODS) {
   };
 }
 
-/** 일봉 → 주봉 집계 (월요일 시작 주, UTC 기준). */
-export function aggregateWeekly(dailyBars) {
+const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
+/** 국내 주식 주봉 완료 시점: 주 시작(월 00:00 KST) + 4일 15:30 (금요일 정규장 마감). */
+export const STOCK_WEEK_CLOSE_OFFSET_MS = 4 * DAY_MS + (15 * 60 + 30) * 60 * 1000;
+
+/**
+ * 해당 시각이 속한 주의 시작(월요일 00:00).
+ * coin: UTC 기준(업비트 일봉 00:00 UTC). stock: KST 달력 주(토스 일봉 00:00 KST = 전날 15:00 UTC)
+ * — UTC 요일로 묶으면 국내 주가 화~월로 어긋난다.
+ */
+export function weekStartOf(timeMs, assetClass = 'coin') {
+  const offset = assetClass === 'stock' ? KST_OFFSET_MS : 0;
+  const date = new Date(timeMs + offset);
+  const day = (date.getUTCDay() + 6) % 7;
+  return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate() - day) - offset;
+}
+
+/** 일봉 → 주봉 집계 (월요일 시작 주; coin=UTC, stock=KST 달력 주). */
+export function aggregateWeekly(dailyBars, { assetClass = 'coin' } = {}) {
   const weeks = new Map();
   for (const bar of dailyBars) {
-    const date = new Date(bar.time);
-    const day = (date.getUTCDay() + 6) % 7;
-    const weekStart = Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate() - day);
+    const weekStart = weekStartOf(bar.time, assetClass);
     const week = weeks.get(weekStart);
     if (!week) {
       weeks.set(weekStart, { time: weekStart, open: bar.open, high: bar.high, low: bar.low, close: bar.close, volume: bar.volume });

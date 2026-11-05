@@ -4,6 +4,7 @@ import {
   buildDailyMomentumRobustnessVariants,
   evaluateDailyMomentumRobustness
 } from '../src/research/dailyMomentumRobustnessStudy.js';
+import { DEFAULT_DAILY_MOMENTUM_CONFIG } from '../src/research/dailyMomentumStudy.js';
 
 function daily(prices, start = '2026-01-01T00:00:00.000Z') {
   const first = Date.parse(start);
@@ -231,7 +232,8 @@ test('robustness report exposes cost-adjusted market concentration without chang
         maxPositions: 2,
         benchmarkMarket: null,
         exitOnBenchmarkOff: false,
-        costPercent: 0.3
+        costPercent: 0.3,
+        entryExecution: 'close'
       }
     }],
     minimumFullReturnPercent: -100,
@@ -406,4 +408,15 @@ test('independent robustness reports expose boundary market attribution without 
   assert.ok(report.variants[0].eligibilityBlockers.includes('unknown_boundary_position'));
   assert.equal(report.variants[0].status, 'HOLD');
   assert.equal(report.promoted, false);
+});
+
+test('robustness study defaults to next-open entry execution (signal at close, fill at next open)', () => {
+  const variants = buildDailyMomentumRobustnessVariants(undefined, { ...DEFAULT_DAILY_MOMENTUM_CONFIG });
+  assert.ok(variants.length > 0);
+  assert.ok(variants.every(variant => variant.config.entryExecution === 'next_open'));
+  const report = evaluateDailyMomentumRobustness({
+    'KRW-BTC': daily([100, 110, 121, 133, 146, 161, 177, 194]),
+    'KRW-ETH': daily([100, 101, 102, 103, 104, 105, 106, 107])
+  }, { segmentCount: 2, variants: [{ name: 'default-execution', config: { mode: 'fixed', trendLookbackDays: 2 } }] });
+  assert.equal(report.variants[0].config.entryExecution, 'next_open');
 });

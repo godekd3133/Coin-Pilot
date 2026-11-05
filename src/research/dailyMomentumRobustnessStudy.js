@@ -466,8 +466,11 @@ export function evaluateDailyMomentumRobustness(rawCandlesByMarket, options = {}
     ...DEFAULT_DAILY_MOMENTUM_ROBUSTNESS_CONFIG,
     ...options
   };
+  // Inherits entryExecution='next_open' (signal at close, fill at the next
+  // open); a same-close fill must be requested explicitly via baseConfig.
   const baseConfig = {
     ...DEFAULT_DAILY_MOMENTUM_CONFIG,
+    entryExecution: 'next_open',
     ...(options.baseConfig || {})
   };
   const variants = options.variants || buildDailyMomentumRobustnessVariants(

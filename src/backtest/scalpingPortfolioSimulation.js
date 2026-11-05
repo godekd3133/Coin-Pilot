@@ -56,8 +56,12 @@ export function calculatePortfolioMarketRegime(group, options) {
   const minReturnPercent = number(options.marketRegimeMinReturnPercent, -0.2);
   const returns = group
     .map(({ context, index }) => {
-      const currentClose = getClose(context.candles[index]);
-      const referenceClose = getClose(context.candles[index - lookback]);
+      // The entry fills at candles[index] open, so the regime may only use the
+      // completed signal candle (index - 1) and earlier.
+      const signalIndex = index - 1;
+      if (signalIndex - lookback < 0) return null;
+      const currentClose = getClose(context.candles[signalIndex]);
+      const referenceClose = getClose(context.candles[signalIndex - lookback]);
       if (!Number.isFinite(currentClose) || !Number.isFinite(referenceClose) || referenceClose <= 0) return null;
       return ((currentClose - referenceClose) / referenceClose) * 100;
     })

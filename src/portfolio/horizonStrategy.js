@@ -62,16 +62,18 @@ export function evaluateExit(position, bar, analysis, profile, { benchmarkOk = t
   }
   if (bar.low <= position.stopPrice) {
     // 갭 하락이면 시가에 체결된 것으로 본다.
-    return { exit: true, reason: 'ATR 손절/트레일링', price: Math.min(bar.open, position.stopPrice), stopPrice, highestClose };
+    return { exit: true, reason: 'ATR 손절/트레일링', price: Math.min(bar.open, position.stopPrice), stopPrice, highestClose, timing: 'intrabar' };
   }
+  // 아래 청산은 봉 마감 후에야 알 수 있는 판단이다. 백테스트는 다음 봉 시가(+비용)로
+  // 체결한다(timing: 'next_open'). price는 판단 시점 종가(참고용)이며 실시간 엔진은 현재가로 판다.
   if ((position.barsHeld || 0) + 1 >= profile.maxHoldBars) {
-    return { exit: true, reason: '최대 보유기간', price: bar.close, stopPrice, highestClose };
+    return { exit: true, reason: '최대 보유기간', price: bar.close, stopPrice, highestClose, timing: 'next_open' };
   }
   if (profile.mode === 'signal' && analysis?.available && analysis.score <= profile.exitScore) {
-    return { exit: true, reason: `차트 점수 악화 (${analysis.score})`, price: bar.close, stopPrice, highestClose };
+    return { exit: true, reason: `차트 점수 악화 (${analysis.score})`, price: bar.close, stopPrice, highestClose, timing: 'next_open' };
   }
   if (profile.regimeExit && !benchmarkOk) {
-    return { exit: true, reason: '시장 하락 국면 전환', price: bar.close, stopPrice, highestClose };
+    return { exit: true, reason: '시장 하락 국면 전환', price: bar.close, stopPrice, highestClose, timing: 'next_open' };
   }
   return { exit: false, stopPrice, highestClose };
 }
@@ -124,4 +126,28 @@ export function positionBudget({ sleeveEquity, maxPositions, riskPerTradePercent
   if (!(riskPerTradePercent > 0)) return slot;
   const stopDistance = Math.max(0.005, (entryPrice - stopPrice) / entryPrice);
   return Math.min(slot, (sleeveEquity * riskPerTradePercent / 100) / stopDistance);
+}
+
+/** 업비트 KRW 최소 주문금액. */
+export const COIN_MIN_ORDER_AMOUNT = 5000;
+
+/**
+ * 진입 금액(실시간·백테스트 공통). 0이면 진입 불가.
+ * - coin: 손절 후에도 최소 주문금액을 넘도록 한 최소 진입액(minEntry) 미만이면, 슬리브 잔여 예산이
+ *   minEntry의 70% 이상이고 현금이 충분할 때만 minEntry로 올리고 아니면 0.
+ * - stock: 1주(가격×1.002) 미만이면 같은 규칙으로 1주로 올리거나 0. 실제 수량은 호출 측에서 정수 주로 내림.
+ */
+export function entryAmount({ assetClass = 'coin', slot, remaining, cash, price, stopPrice, minOrderAmount = COIN_MIN_ORDER_AMOUNT }) {
+  let amount = Math.min(slot, remaining, cash * 0.98);
+  if (assetClass === 'coin') {
+    const stopDistance = Math.min(0.5, Math.max(0, (price - stopPrice) / price));
+    const minEntry = Math.ceil((minOrderAmount / (1 - stopDistance - 0.01)) / 100) * 100;
+    // 소액 시드: 슬리브 예산이 최소 진입액의 70% 이상 남아 있으면 최소 진입액으로 올린다.
+    if (amount < minEntry && remaining >= minEntry * 0.7 && cash * 0.98 >= minEntry) amount = minEntry;
+    return amount >= minEntry ? Math.floor(amount) : 0;
+  }
+  // 주식: 1주 단위. 예산이 1주보다 작아도 남은 슬리브 예산·현금으로 1주를 살 수 있으면 1주.
+  const unit = price * 1.002;
+  if (amount < unit && remaining >= unit * 0.7 && cash * 0.98 >= unit) amount = unit;
+  return amount >= unit ? amount : 0;
 }

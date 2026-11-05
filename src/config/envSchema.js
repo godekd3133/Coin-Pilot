@@ -157,6 +157,7 @@ export const ENV_SCHEMA = {
   PAPER_ALLOW_CONCURRENT_SESSIONS: { type: 'bool' },
   SCALP_VALIDATION_CANDLE_COUNT: { type: 'number', min: 0 },
   SCALP_VALIDATION_MARKET_COUNT: { type: 'number', min: 0 },
+  SCALP_VALIDATION_MARKET_POOL_MULTIPLIER: { type: 'number', min: 1 },
   SCALP_VALIDATION_MAX_CANDIDATES: { type: 'number', min: 0 },
   SCALP_VALIDATION_FIXED: { type: 'bool' },
   SCALP_VALIDATION_MIN_TRAINING_TRADES: { type: 'number', min: 0 },

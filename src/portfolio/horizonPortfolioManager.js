@@ -15,8 +15,8 @@
 import fs from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { writeDurableJson } from '../runtime/durableJson.js';
-import { analyzeAt, evaluateExit, signalCandidates, rankTargets, initialStop, regimeAllowsEntries, positionBudget, passesTickCost } from './horizonStrategy.js';
-import { minimumBars } from './chartAnalysis.js';
+import { analyzeAt, evaluateExit, signalCandidates, rankTargets, initialStop, regimeAllowsEntries, positionBudget, passesTickCost, entryAmount } from './horizonStrategy.js';
+import { minimumBars, weekStartOf, STOCK_WEEK_CLOSE_OFFSET_MS } from './chartAnalysis.js';
 import { HORIZON_KEYS, INTERVAL_MS, normalizeWeights } from './horizonProfiles.js';
 
 const STATE_VERSION = 1;
@@ -29,8 +29,16 @@ function positionKey(sleeve, symbol) {
   return `${sleeve}:${symbol}`;
 }
 
-/** 해당 주기에서 마지막으로 "완료된" 봉의 시작 시각. 주봉은 월요일(UTC) 시작. */
+/**
+ * 해당 주기에서 마지막으로 "완료된" 봉의 시작 시각.
+ * 주봉: coin은 월요일 00:00 UTC 시작·7일 후 완료, stock은 KST 달력 주(월 00:00 KST)이며
+ * 금요일 15:30 KST 정규장 마감 후 완료(TossCandleLoader 주봉 필터와 같은 시점).
+ */
 export function latestCompletedBarStart(interval, nowMs, assetClass = 'coin') {
+  if (interval === '1w' && assetClass === 'stock') {
+    const thisWeek = weekStartOf(nowMs, 'stock');
+    return nowMs >= thisWeek + STOCK_WEEK_CLOSE_OFFSET_MS ? thisWeek : thisWeek - INTERVAL_MS['1w'];
+  }
   if (interval === '1w') {
     const date = new Date(nowMs);
     const day = (date.getUTCDay() + 6) % 7;
@@ -330,18 +338,15 @@ export class HorizonPortfolioManager {
       entryPrice: price,
       stopPrice
     });
-    let amount = Math.min(slot, remaining, cash * 0.98);
-    if (this.assetClass === 'coin') {
-      const stopDistance = Math.min(0.5, Math.max(0, (price - stopPrice) / price));
-      const minEntry = Math.ceil((this.config.minOrderAmount / (1 - stopDistance - 0.01)) / 100) * 100;
-      // 소액 시드: 슬리브 예산이 최소 진입액의 70% 이상 남아 있으면 최소 진입액으로 올린다.
-      if (amount < minEntry && remaining >= minEntry * 0.7 && cash * 0.98 >= minEntry) amount = minEntry;
-      return amount >= minEntry ? Math.floor(amount) : 0;
-    }
-    // 주식: 1주 단위. 예산이 1주보다 작아도 남은 슬리브 예산·현금으로 1주를 살 수 있으면 1주.
-    const unit = price * 1.002;
-    if (amount < unit && remaining >= unit * 0.7 && cash * 0.98 >= unit) amount = unit;
-    return amount >= unit ? amount : 0;
+    return entryAmount({
+      assetClass: this.assetClass,
+      slot,
+      remaining,
+      cash,
+      price,
+      stopPrice,
+      minOrderAmount: this.config.minOrderAmount
+    });
   }
 
   // ---------- 매매 반영 ----------

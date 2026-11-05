@@ -213,3 +213,51 @@ test('higher timeframe walk-forward requires every validation fold and stays dia
   assert.equal(result.promoted, false);
   assert.equal(result.promotionReason, 'higher_timeframe_momentum_is_research_only_and_not_wired_to_live_gate');
 });
+
+const STOP_TEST_OPTIONS = Object.freeze({
+  baseCandleUnit: 15,
+  timeframeMinutes: 60,
+  rsiPeriod: 3,
+  minRsi: 60,
+  trendLookbackMinutes: 4 * 60,
+  minTrendReturnPercent: 0,
+  investmentRatio: 0.1,
+  tradingFee: 0,
+  slippage: 0,
+  stopLossPercent: 1,
+  takeProfitPercent: 50,
+  maxHoldMinutes: 24 * 60
+});
+
+function firstEntryIndex(candles) {
+  return calculateHigherTimeframeMomentumSignals(candles, STOP_TEST_OPTIONS).signals[0].entryIndex;
+}
+
+test('higher timeframe stop fills at the open when the candle gaps below the stop', () => {
+  const candles = syntheticMomentumCandles();
+  const entryIndex = firstEntryIndex(candles);
+  const entryPrice = candles[entryIndex].opening_price;
+  const gapOpen = entryPrice * 0.9;
+  candles[entryIndex + 1] = { ...candles[entryIndex + 1], opening_price: gapOpen, low_price: gapOpen * 0.99, high_price: gapOpen * 1.01, trade_price: gapOpen };
+  const result = simulateHigherTimeframeMomentum(candles, STOP_TEST_OPTIONS);
+  const close = result.trades.find(trade => trade.type === 'CLOSE');
+  assert.equal(close.reason, 'STOP_LOSS');
+  assert.equal(close.exitPrice, gapOpen, 'gap-down fills at the open, not at the untraded stop price');
+});
+
+test('higher timeframe checks the stop on the entry candle when the entry fills at its open', () => {
+  const candles = syntheticMomentumCandles();
+  const entryIndex = firstEntryIndex(candles);
+  const entryPrice = candles[entryIndex].opening_price;
+  candles[entryIndex] = { ...candles[entryIndex], low_price: entryPrice * 0.95 };
+  const single = simulateHigherTimeframeMomentum(candles, STOP_TEST_OPTIONS);
+  const close = single.trades.find(trade => trade.type === 'CLOSE');
+  assert.equal(close.reason, 'STOP_LOSS');
+  assert.equal(close.exitTime, close.entryTime, 'stop is hit inside the entry candle');
+  assert.ok(Math.abs(close.exitPrice - entryPrice * 0.99) < 1e-9);
+
+  const portfolio = simulateHigherTimeframeMomentumPortfolio({ 'KRW-BTC': candles }, STOP_TEST_OPTIONS);
+  const portfolioClose = portfolio.trades.find(trade => trade.type === 'CLOSE');
+  assert.equal(portfolioClose.reason, 'STOP_LOSS');
+  assert.equal(portfolioClose.exitTime, portfolioClose.entryTime);
+});

@@ -2,12 +2,15 @@
 // 1) 확장 창 워크포워드 3 fold: [처음~50%]→[50~67%], [~67%]→[67~84%], [~84%]→[84~100%]
 // 2) 각 fold 학습 구간에서 파라미터 그리드를 평가해 고르고(거래 부족·과도 낙폭 제외),
 //    손대지 않은 다음 구간에 그대로 적용한다.
-// 3) 검증 구간들을 이어 붙인 수익이 양수이고 2/3 이상 fold가 손실이 아니며
-//    최악 낙폭이 한도 이내일 때만 실거래에 편입한다. 아니면 비중 0(비활성).
+// 3) 검증 구간들을 이어 붙인 수익이 양수이면서 같은 구간 동일가중 바이앤홀드 복리 수익보다 크고,
+//    2/3 이상 fold가 손실이 아니며, 검증 거래가 MIN_OOS_TRADES 이상이고 최악 낙폭이 한도 이내일
+//    때만 실거래에 편입한다. 아니면 비중 0(비활성).
+// 슬리브는 서로 독립적으로 시뮬레이션한다(각자 자기 자본). 실시간 엔진의 "한 종목은 한 슬리브만
+// 보유" 규칙은 연구에서 재현하지 않으므로, 슬리브 간 겹침은 실거래에서 진입 기회를 줄이는 쪽으로만 작용한다.
 // 4) 실거래 파라미터는 전체 기간 학습으로 고른다(성과 추정에는 쓰지 않음).
 // 결과는 HORIZON_PARAMS_FILE(JSON)로 저장되어 실시간 엔진이 그대로 읽는다.
 
-import { runSleeveBacktest, precomputeAnalyses, buyAndHoldReturn } from './horizonBacktest.js';
+import { runSleeveBacktest, precomputeAnalyses, buyAndHoldReturn, turnoverPrefixSums } from './horizonBacktest.js';
 import { ASSET_COSTS, INTERVAL_MS } from './horizonProfiles.js';
 import { assessSelectionOverfitting, sharpeRatio } from '../research/overfitting.js';
 
@@ -26,6 +29,37 @@ function* gridCombos(grid) {
     for (const value of grid[keys[index]]) yield* walk(index + 1, { ...current, [keys[index]]: value });
   };
   yield* walk(0, {});
+}
+
+/**
+ * 연간 봉 수(Sharpe/CAGR 연율화). 주식 일봉은 거래일 252, 주봉은 52, 코인은 24시간 365일 기준.
+ */
+export function barsPerYearFor(interval, assetClass = 'coin') {
+  if (interval === '1w') return 52;
+  if (interval === '1d') return assetClass === 'stock' ? 252 : 365;
+  return Math.round((365 * 24 * 60 * 60 * 1000) / INTERVAL_MS[interval]);
+}
+
+/**
+ * 실거래 편입에 필요한 검증(OOS) 거래 수 최소치. 3 fold 합산 기준.
+ * 거래가 한 자릿수면 한두 번의 큰 수익이 합산 수익률 전체를 결정한다(거래 수익 표준편차가
+ * 평균의 3~4배인 추세 추종에서 n<12면 평균 수익의 표준오차가 평균보다 크다). fold당 평균 4건,
+ * 12건은 가장 느린 장기 슬리브(주봉, 리밸런싱 4주)도 3 fold에서 도달 가능한 하한이다.
+ */
+export const MIN_OOS_TRADES = 12;
+
+/**
+ * 실거래 편입 판정. compounded/buyAndHoldCompounded는 배수(1 = 0%).
+ * 모든 fold 검증, OOS 복리 > 0, OOS 복리 > 같은 구간 바이앤홀드 복리, 2/3 이상 fold 비손실,
+ * OOS 거래 ≥ minTrades, 최악 fold 낙폭 ≤ 한도.
+ */
+export function passesGoLiveGate({ folds, testedFolds, compounded, buyAndHoldCompounded, nonNegativeFolds, trades, minTrades = MIN_OOS_TRADES, worstFoldDrawdown, maxDrawdownPercent }) {
+  return testedFolds === folds &&
+    compounded > 1 &&
+    compounded > buyAndHoldCompounded &&
+    nonNegativeFolds >= Math.ceil(folds * 2 / 3) &&
+    trades >= minTrades &&
+    worstFoldDrawdown <= maxDrawdownPercent;
 }
 
 function compact(result) {
@@ -112,14 +146,18 @@ export function studySleeve(series, profile, options = {}) {
     grid = DEFAULT_GRID,
     folds = DEFAULT_FOLDS,
     minTrades = 6,
-    maxDrawdownPercent = 35
+    minOosTrades = MIN_OOS_TRADES,
+    maxDrawdownPercent = 35,
+    // 시점별 거래대금 상위 N만 신규 진입(유니버스 미래 참조 방지). null이면 제한 없음.
+    universeSize = null
   } = options;
   const costs = ASSET_COSTS[assetClass];
-  const barsPerYear = Math.round((365 * 24 * 60 * 60 * 1000) / INTERVAL_MS[profile.interval]);
+  const barsPerYear = barsPerYearFor(profile.interval, assetClass);
   const times = [...new Set([...series.values()].flatMap(bars => bars.map(bar => bar.time)))].sort((a, b) => a - b);
   if (times.length < 80) return { horizon: profile.key, error: 'insufficient_history', bars: times.length, passed: false };
   const cache = precomputeAnalyses(series, profile.periods);
-  const common = { costs, benchmark, barsPerYear, analysisCache: cache, assetClass };
+  const common = { costs, benchmark, barsPerYear, analysisCache: cache, assetClass, universeSize,
+    turnoverPrefix: universeSize ? turnoverPrefixSums(series) : null };
   const at = ratio => times[Math.min(times.length - 1, Math.floor((times.length - 1) * ratio))];
 
   const foldResults = [];
@@ -133,6 +171,7 @@ export function studySleeve(series, profile, options = {}) {
       continue;
     }
     const test = runSleeveBacktest(series, { ...profile, ...chosen.params }, { ...common, startTime: split, endTime: end });
+    const buyAndHold = buyAndHoldReturn(series, split, end);
     foldResults.push({
       trainEnd: new Date(split).toISOString(),
       testEnd: new Date(end).toISOString(),
@@ -140,7 +179,8 @@ export function studySleeve(series, profile, options = {}) {
       train: compact(chosen.train),
       test: compact(test),
       overfitting: evaluateGridOverfitting(candidates, chosen),
-      buyAndHoldPercent: Math.round(buyAndHoldReturn(series, split, end) * 100) / 100,
+      buyAndHoldPercent: Math.round(buyAndHold * 100) / 100,
+      buyAndHoldRaw: buyAndHold,
       benchmarkPercent: benchmark ? Math.round(buyAndHoldReturn(series, split, end, [benchmark]) * 100) / 100 : null
     });
   }
@@ -151,20 +191,32 @@ export function studySleeve(series, profile, options = {}) {
   const oosTrades = tested.reduce((sum, f) => sum + f.test.trades, 0);
   const nonNegativeFolds = tested.filter(f => f.test.totalReturnPercent >= 0).length;
   const worstFoldDrawdown = tested.reduce((max, f) => Math.max(max, f.test.maxDrawdownPercent), 0);
+  // 같은 검증 구간의 동일가중 바이앤홀드 복리 수익(전략이 단순 보유를 이겨야 편입).
+  const buyAndHoldCompounded = tested.reduce((acc, f) => acc * (1 + f.buyAndHoldRaw / 100), 1);
+  for (const fold of foldResults) delete fold.buyAndHoldRaw;
   const outOfSample = {
     folds: folds.length,
     testedFolds: tested.length,
     compoundedReturnPercent: Math.round((compounded - 1) * 10000) / 100,
+    buyAndHoldCompoundedReturnPercent: Math.round((buyAndHoldCompounded - 1) * 10000) / 100,
+    beatsBuyAndHold: compounded > buyAndHoldCompounded,
     trades: oosTrades,
+    minTrades: minOosTrades,
     nonNegativeFolds,
     worstFoldDrawdownPercent: Math.round(worstFoldDrawdown * 100) / 100,
     averageSharpe: tested.length ? Math.round((tested.reduce((s, f) => s + f.test.sharpe, 0) / tested.length) * 100) / 100 : 0
   };
-  const passed = tested.length === folds.length &&
-    compounded > 1 &&
-    nonNegativeFolds >= Math.ceil(folds.length * 2 / 3) &&
-    oosTrades >= minTrades &&
-    worstFoldDrawdown <= maxDrawdownPercent;
+  const passed = passesGoLiveGate({
+    folds: folds.length,
+    testedFolds: tested.length,
+    compounded,
+    buyAndHoldCompounded,
+    nonNegativeFolds,
+    trades: oosTrades,
+    minTrades: minOosTrades,
+    worstFoldDrawdown,
+    maxDrawdownPercent
+  });
 
   // 실거래 파라미터: 전체 기간 학습
   const finalCandidates = evaluateGrid(series, profile, grid, common, {});
@@ -174,6 +226,7 @@ export function studySleeve(series, profile, options = {}) {
     horizon: profile.key,
     interval: profile.interval,
     symbols: series.size,
+    universeSize: universeSize ?? null,
     bars: times.length,
     period: { start: new Date(times[0]).toISOString(), end: new Date(times.at(-1)).toISOString() },
     candidatesPerFold: [...gridCombos(grid)].length,
