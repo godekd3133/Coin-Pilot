@@ -110,6 +110,7 @@ The Toss WebSocket has no candle channel and its trade frames can be lost withou
 `GET /api/status` (`src/api/routes/account.js`) also carries `engineActivity` (`src/api/engineActivity.js`): last analysis cycle time, markets analyzed, unique BUY signals (per market per minute) and entries in the last hour, and the last LIVE exchange sync time, so the home card can tell a quiet market from a stalled engine.
 
 Host hardening lives in `ops/` and is applied with `ops/lightsail/apply-host-hardening.sh`: OOM priorities (paper +500 and MemoryHigh 220M, LIVE -500, Upbit rate coordinator -300), journald capped at 300M/14 days, `vm.swappiness=10`, and nginx `limit_req` (login 10/min burst 5, everything else 20/s burst 100) for both `/` and `/live/`.
+Both trader units `Requires=coinpilot-upbit-rate.service`, so restarting the coordinator first stops paper and LIVE; LIVE then waits in its protective drain until every position closes. Restart the coordinator only when no LIVE position is open.
 
 ## Operator phone alerts
 
