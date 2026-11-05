@@ -148,15 +148,20 @@ export class OperatorAlertMonitor {
       this.lastHeldReminderAt = null;
     } else {
       this.stoppedSince ??= nowMs;
-      // A stopped trader does not run stop-loss/take-profit/max-hold for paper,
-      // and LIVE only does so in protective mode. Remind until it is resolved.
-      if (held.length > 0 && !state.protective &&
-        nowMs - this.stoppedSince >= this.heldWhileStoppedAfterMs &&
+      // A plain stop runs no stop-loss/take-profit/max-hold. Protective mode
+      // does, so positions should close within the max hold; if they are
+      // still open after twice the delay, its exits are not working either.
+      const remindAfter = state.protective ? this.heldWhileStoppedAfterMs * 2 : this.heldWhileStoppedAfterMs;
+      if (held.length > 0 &&
+        nowMs - this.stoppedSince >= remindAfter &&
         (this.lastHeldReminderAt === null || nowMs - this.lastHeldReminderAt >= this.heldWhileStoppedRepeatMs)) {
         this.lastHeldReminderAt = nowMs;
         const minutes = Math.round((nowMs - this.stoppedSince) / 60000);
+        const detail = state.protective
+          ? `보호 모드로 ${minutes}분째 감시 중인데 포지션이 정리되지 않았습니다. 시세 수신을 확인해 주세요.`
+          : `자동매매가 ${minutes}분째 멈춰 있어 손절·익절이 동작하지 않습니다.`;
         this.alert(`held|${minuteKey}`, '멈춘 채 포지션 보유 중',
-          `자동매매가 ${minutes}분째 멈춰 있어 손절·익절이 동작하지 않습니다. ${heldText}. ${describeStopReason(state.stopReason)}.`, 'safety');
+          `${detail} ${heldText}. ${describeStopReason(state.stopReason)}.`, 'safety');
       }
     }
 

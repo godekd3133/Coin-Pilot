@@ -1308,3 +1308,48 @@ test('a held market without a recent trade is quiet while a reference quote in t
   await trader.monitorOpenPositions();
   assert.ok((trader.riskMonitorState.consecutiveFailures || 0) >= 1, 'a feed-wide staleness still fails');
 });
+
+test('a paper safety stop keeps stop-loss protection for open paper positions until flat', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'coinpilot-paper-protective-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+
+  const trader = makeLiveTrader(root, { dryRun: true }, true);
+  const strategy = trader.getStrategy('KRW-BTC');
+  strategy.openPosition(100000, 1, 'BUY');
+  trader.isRunning = true;
+  trader.startPositionRiskMonitor();
+  t.after(() => trader.stopPositionRiskMonitor());
+
+  assert.equal(trader.pauseForSafetyIncident('analysis_data_gap'), true);
+  assert.equal(trader.isRunning, false);
+  assert.equal(trader._riskMonitorProtectiveOnly, true);
+  assert.equal(trader.stopReason, 'analysis_data_gap');
+  assert.notEqual(trader.positionRiskTimer, null);
+
+  let exits = 0;
+  trader.riskUpbit.getTicker = async () => [currentTicker('KRW-BTC', 98000)];
+  trader.executeOrder = async (coin, decision, price) => {
+    assert.equal(decision.action, 'SELL');
+    exits += 1;
+    strategy.closePosition(price, decision.reason);
+  };
+  await trader.monitorOpenPositions();
+
+  assert.equal(exits, 1, 'the stop-loss still fires while the paper trader is stopped');
+  assert.equal(strategy.currentPosition, null);
+  assert.equal(trader._riskMonitorProtectiveOnly, false);
+  assert.equal(trader.isRunning, false);
+});
+
+test('a paper safety stop without positions still stops plainly', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'coinpilot-paper-plain-stop-'));
+  try {
+    const trader = makeLiveTrader(root, { dryRun: true }, true);
+    trader.isRunning = true;
+    assert.equal(trader.pauseForSafetyIncident('analysis_data_gap'), false);
+    assert.equal(trader._riskMonitorProtectiveOnly, false);
+    assert.equal(trader.isRunning, false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

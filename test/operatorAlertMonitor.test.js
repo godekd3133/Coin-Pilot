@@ -79,7 +79,7 @@ test('the first start after boot is reported as a start, not a resume', async ()
   assert.match(alerts()[0].title, /자동매매 시작/);
 });
 
-test('protective mode is announced instead of a plain stop, and suppresses the held reminder', async () => {
+test('protective mode is announced instead of a plain stop and reminds only when exits stall', async () => {
   const trader = makeTrader({ positions: { 'KRW-BTC': { amount: 0.001, entryPrice: 100000000 } } });
   const { clock, monitor, alerts } = setup(trader, Date.parse('2026-11-05T01:00:00Z'));
   await monitor.tick();
@@ -87,10 +87,14 @@ test('protective mode is announced instead of a plain stop, and suppresses the h
   trader.state = { running: false, protective: true, stopReason: 'analysis_data_gap' };
   clock.value += 30000;
   await monitor.tick();
-  clock.value += 2 * 60 * 60 * 1000;
+  clock.value += 40 * 60 * 1000;
   await monitor.tick();
   assert.equal(alerts().length, 1);
   assert.match(alerts()[0].title, /보호 모드/);
+  clock.value += 30 * 60 * 1000;
+  await monitor.tick();
+  assert.equal(alerts().length, 2);
+  assert.match(alerts()[1].body, /보호 모드로 \d+분째 감시 중/);
 });
 
 test('the daily summary goes out once after 22:00 KST with KST-day realized P&L', async () => {

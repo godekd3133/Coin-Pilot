@@ -390,15 +390,19 @@ export class TradingLifecycle {
   }
 
   pauseForSafetyIncident(reason) {
-    const hasLivePosition = !this.owner.dryRun && this.owner.getCurrentPositionCount() > 0;
-    if (!hasLivePosition || this.owner.positionRiskCheckIntervalMs <= 0) {
+    // Paper positions get the same protection as LIVE ones: a stopped paper
+    // trader otherwise runs no stop-loss/take-profit/max-hold, so a data
+    // outage could leave a position open for weeks. Paper exits stay
+    // simulated; the session keeps its invalid-continuity marker.
+    const hasPosition = this.owner.getCurrentPositionCount() > 0;
+    if (!hasPosition || this.owner.positionRiskCheckIntervalMs <= 0) {
       this.owner.stop(reason);
       return false;
     }
 
     if (this.owner._riskMonitorProtectiveOnly) return true;
     console.error(
-      `\n🛡️  ${reason} - 분석과 신규 진입을 멈추고 기존 LIVE 포지션의 위험 감시를 유지합니다.`
+      `\n🛡️  ${reason} - 분석과 신규 진입을 멈추고 기존 ${this.owner.dryRun ? '모의' : 'LIVE'} 포지션의 위험 감시를 유지합니다.`
     );
     this.stopReason = reason;
     this.isRunning = false;
@@ -479,7 +483,7 @@ export class TradingLifecycle {
       return true;
     }
     this.owner.stopPositionRiskMonitor();
-    console.log('\n✅ 감시 중이던 LIVE 포지션이 모두 닫혀 위험 감시가 idle 상태가 됐습니다. 신규 진입은 재개하지 않습니다.');
+    console.log(`\n✅ 감시 중이던 ${this.owner.dryRun ? '모의' : 'LIVE'} 포지션이 모두 닫혀 위험 감시가 idle 상태가 됐습니다. 신규 진입은 재개하지 않습니다.`);
     return true;
   }
 
