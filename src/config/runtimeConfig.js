@@ -222,6 +222,8 @@ export function createConfig(env) {
     paperSlippage: env.SCALP_PAPER_SLIPPAGE ?? 0.002,
     entryCostFilterMode: env.SCALP_ENTRY_COST_FILTER || 'observe',
     entryCostMaxTakeProfitRatio: env.SCALP_ENTRY_COST_MAX_TP_RATIO ?? 0.15,
+    // 0 disables the new-listing entry block.
+    minListingAgeDays: env.SCALP_MIN_LISTING_AGE_DAYS || 0,
     dailyLossLimitKrw: env.SCALP_DAILY_LOSS_LIMIT_KRW || 0,
     lossCircuitBreakerWindowMinutes: (env.SCALP_LOSS_CIRCUIT_BREAKER_WINDOW_MINUTES ?? 30),
     lossCircuitBreakerCooldownMinutes: (env.SCALP_LOSS_CIRCUIT_BREAKER_COOLDOWN_MINUTES ?? 60),

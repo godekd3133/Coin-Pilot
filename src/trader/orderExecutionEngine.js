@@ -10,6 +10,7 @@ import { inspectLatestCandleFreshness } from '../risk/candleFreshness.js';
 import { inspectTraderMarketQuote } from './positionRiskMonitor.js';
 import { isUnsellableDust } from './positionRebalancer.js';
 import { measureEntryCost, judgeEntryCost, createEntryCostStats, loadEntryCostStats, saveEntryCostStats } from './entryCostFilter.js';
+import { ListingAgeFilter } from './listingAgeFilter.js';
 
 export function hasCompleteLiveFillResult(fillResult) {
   const order = fillResult?.order;
@@ -68,6 +69,19 @@ export class OrderExecutionEngine {
     return { measurement, limitPercent: verdict.limitPercent, block: verdict.tooHigh && mode === 'enforce' };
   }
 
+  /** Lazily built so tests and non-Upbit owners pay nothing when it is off. */
+  getListingAgeFilter() {
+    const minDays = Number(this.owner.config?.minListingAgeDays) || 0;
+    if (!(minDays > 0) || this.owner.exchange !== 'upbit' || typeof this.owner.upbit?.getDayCandles !== 'function') return null;
+    if (!this.owner.listingAgeFilter || this.owner.listingAgeFilter.minDays !== minDays) {
+      this.owner.listingAgeFilter = new ListingAgeFilter({
+        minDays,
+        fetchDayCandles: (market, count) => this.owner.upbit.getDayCandles(market, count)
+      });
+    }
+    return this.owner.listingAgeFilter;
+  }
+
   async confirmScalpingEntry(coin, decision, strategy, marketData = null) {
     const requestedDelay = Number(decision.entryDelayMs);
     const minDelay = Math.max(1000, Number(this.owner.entryDelayMinMs) || 1000);
@@ -87,6 +101,16 @@ export class OrderExecutionEngine {
       this.owner.recordPaperEntryConfirmation(coin, 'cancelled', 'stop_requested');
       this.owner.resolveWinnerShadowBlockedEntryAsNotFilled(coin, decision, 'stop_requested');
       console.log(`  ⛔ [${coin}] 중지 요청으로 진입 취소`);
+      return null;
+    }
+
+    const listingCheck = await this.getListingAgeFilter()?.check(coin);
+    if (listingCheck?.block) {
+      this.owner.recordPaperEntryConfirmation(coin, 'cancelled', listingCheck.reason);
+      this.owner.resolveWinnerShadowBlockedEntryAsNotFilled(coin, decision, listingCheck.reason);
+      console.log(listingCheck.reason === 'listing_too_recent'
+        ? `  ⛔ [${coin}] 상장 ${listingCheck.ageDays}일째 - 신규 상장 ${this.owner.listingAgeFilter.minDays}일 이내라 진입 취소`
+        : `  ⛔ [${coin}] 상장일 확인 실패 - 진입 취소`);
       return null;
     }
 

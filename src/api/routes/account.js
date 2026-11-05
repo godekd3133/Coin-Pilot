@@ -48,6 +48,7 @@ export default function createAccountRoutes(server) {
         targetCoins: server.tradingSystem.targetCoins || [server.tradingSystem.config.targetCoin],
         engineActivity: server.engineActivity?.getStatus(server.tradingSystem) ?? null,
         accountLossGuard: server.tradingSystem.getAccountLossGuardStatus?.() ?? null,
+        listingAgeFilter: server.tradingSystem.listingAgeFilter?.snapshot?.() || null,
         entryCostFilter: server.tradingSystem.entryCostStats
           ? { mode: server.tradingSystem.config?.entryCostFilterMode || 'observe', ...server.tradingSystem.entryCostStats }
           : null,

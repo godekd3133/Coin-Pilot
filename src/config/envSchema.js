@@ -119,6 +119,7 @@ export const ENV_SCHEMA = {
   SCALP_PAPER_SLIPPAGE: { type: 'number', min: 0, max: 0.05 },
   SCALP_ENTRY_COST_FILTER: { type: 'enum', values: ['off', 'observe', 'enforce'] },
   SCALP_ENTRY_COST_MAX_TP_RATIO: { type: 'number', min: 0.01, max: 1 },
+  SCALP_MIN_LISTING_AGE_DAYS: { type: 'number', min: 0, max: 199 },
   SCALP_DAILY_LOSS_LIMIT_KRW: { type: 'number', min: 0 },
   SCALP_LOSS_CIRCUIT_BREAKER_WINDOW_MINUTES: { type: 'number', min: 0 },
   SCALP_LOSS_CIRCUIT_BREAKER_COOLDOWN_MINUTES: { type: 'number', min: 0 },

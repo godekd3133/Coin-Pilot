@@ -158,6 +158,7 @@ function buildConfig(portfolioFile, paperFile, markets) {
     paperSlippage: envNumber('SCALP_PAPER_SLIPPAGE', 0.002),
     entryCostFilterMode: envString('SCALP_ENTRY_COST_FILTER', 'observe'),
     entryCostMaxTakeProfitRatio: envNumber('SCALP_ENTRY_COST_MAX_TP_RATIO', 0.15),
+    minListingAgeDays: envNumber('SCALP_MIN_LISTING_AGE_DAYS', 0),
     dailyLossLimitKrw: envNumber('SCALP_DAILY_LOSS_LIMIT_KRW', 0),
     lossCircuitBreakerWindowMinutes: envNumber('SCALP_LOSS_CIRCUIT_BREAKER_WINDOW_MINUTES', 30),
     lossCircuitBreakerCooldownMinutes: envNumber('SCALP_LOSS_CIRCUIT_BREAKER_COOLDOWN_MINUTES', 60),
