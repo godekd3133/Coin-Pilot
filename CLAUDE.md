@@ -107,7 +107,7 @@ The Toss WebSocket has no candle channel and its trade frames can be lost withou
 
 `src/trader/entryCostFilter.js` (`SCALP_ENTRY_COST_FILTER=off|observe|enforce`, default `observe`; `SCALP_ENTRY_COST_MAX_TP_RATIO`, default 0.15) reads the Upbit orderbook during the delayed revalidation and measures spread% plus one tick% (the tick is the orderbook ladder's smallest step, no tick table). `observe` only records `entryCostStats` (exposed as `entryCostFilter` in `/api/status`); `enforce` cancels the entry as `entry_cost_too_high`. Keep it in observe until the recorded would-reject samples justify enforcing; it is a candidate filter, not profitability evidence.
 
-`GET /api/status` also carries `engineActivity` (`src/api/engineActivity.js`): last analysis cycle time, markets analyzed, unique BUY signals (per market per minute) and entries in the last hour, and the last LIVE exchange sync time, so the home card can tell a quiet market from a stalled engine.
+`GET /api/status` (`src/api/routes/account.js`) also carries `engineActivity` (`src/api/engineActivity.js`): last analysis cycle time, markets analyzed, unique BUY signals (per market per minute) and entries in the last hour, and the last LIVE exchange sync time, so the home card can tell a quiet market from a stalled engine.
 
 Host hardening lives in `ops/` and is applied with `ops/lightsail/apply-host-hardening.sh`: OOM priorities (paper +500 and MemoryHigh 220M, LIVE -500, Upbit rate coordinator -300), journald capped at 300M/14 days, `vm.swappiness=10`, and nginx `limit_req` (login 10/min burst 5, everything else 20/s burst 100) for both `/` and `/live/`.
 

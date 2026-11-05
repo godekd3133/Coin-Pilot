@@ -72,6 +72,8 @@ test('account status exposes protective-only runtime state for read-only clients
     assert.equal(body.stopReason, 'risk_data_gap');
     assert.equal(body.exchangeStateKnown, true);
     assert.equal(body.maxCandleAgeSeconds, 90);
+    assert.ok('engineActivity' in body, 'the home heartbeat reads engineActivity from /api/status');
+    assert.ok('accountLossGuard' in body);
   } finally {
     await stopReadServer(ctx);
   }
