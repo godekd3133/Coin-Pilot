@@ -9,6 +9,9 @@
 // Modes: 'off', 'observe' (default: record what it would reject, never block),
 // 'enforce' (cancel entries whose cost exceeds takeProfit × maxTakeProfitRatio).
 
+import fs from 'node:fs';
+import { writeDurableJson } from '../runtime/durableJson.js';
+
 export function measureEntryCost(orderbook) {
   const units = Array.isArray(orderbook?.orderbook_units) ? orderbook.orderbook_units : [];
   const asks = units.map(unit => Number(unit.ask_price)).filter(price => price > 0);
@@ -34,6 +37,27 @@ export function measureEntryCost(orderbook) {
     tickPercent: Number(tickPercent.toFixed(4)),
     costPercent: Number((spreadPercent + tickPercent).toFixed(4))
   };
+}
+
+/** Observations survive restarts so observe mode can build up evidence. */
+export function loadEntryCostStats(file) {
+  if (!file || !fs.existsSync(file)) return null;
+  try {
+    const stats = JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (!Number.isFinite(stats?.checked) || !Array.isArray(stats?.lastSamples)) return null;
+    return { ...createEntryCostStats(), ...stats };
+  } catch {
+    return null;
+  }
+}
+
+export function saveEntryCostStats(file, stats) {
+  if (!file) return;
+  try {
+    writeDurableJson(file, stats);
+  } catch (error) {
+    console.error(`진입 비용 기록 저장 실패: ${error.message}`);
+  }
 }
 
 export function createEntryCostStats() {

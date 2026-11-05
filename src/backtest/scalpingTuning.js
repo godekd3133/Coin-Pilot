@@ -3,8 +3,10 @@
 import { number } from './numeric.js';
 import {
   analyzeHistoricalCandleContinuity,
+  candleTime,
   normalizeHistoricalCandles
 } from './historicalCandleIntegrity.js';
+import { assessSelectionOverfitting, sharpeRatio } from '../research/overfitting.js';
 import { evaluateStatisticalConfidenceGate } from './tradeConfidence.js';
 import {
   DEFAULT_CONFIG,
@@ -112,6 +114,60 @@ export const DEFAULT_TUNING_GRID = {
   trailingStopPercent: [0]
 };
 
+export const OVERFITTING_TIME_BUCKETS = 64;
+export const OVERFITTING_PARTITIONS = 8;
+
+const closedTradeReturns = trades => (trades || [])
+  .filter(trade => trade?.type === 'CLOSE' && Number.isFinite(Number(trade.profitPercent)))
+  .map(trade => Number(trade.profitPercent) / 100);
+
+/**
+ * Report-only selection-bias diagnostic for a tuned grid. DSR uses the
+ * selected candidate's per-trade returns and the cross-candidate variance of
+ * per-trade Sharpe. PBO (CSCV) uses every candidate's realized PnL bucketed by
+ * exit time into equal training-window slices (fraction of initial balance).
+ * Never feeds promotion; see CLAUDE.md "backtest overfitting".
+ */
+export function evaluateTuningOverfitting(ranked, best, candles, options = {}) {
+  const bucketCount = Math.max(1, Math.floor(number(options.timeBuckets, OVERFITTING_TIME_BUCKETS)));
+  const startTime = candleTime(candles?.[0], null);
+  const endTime = candleTime(candles?.[candles.length - 1], null);
+  const span = Number.isFinite(startTime) && Number.isFinite(endTime) ? endTime - startTime : NaN;
+  const matrixAvailable = ranked.length >= 2 && span > 0;
+  const columns = [];
+  const candidateSharpes = [];
+  for (const entry of ranked) {
+    const trades = entry.result?.trades || [];
+    candidateSharpes.push(sharpeRatio(closedTradeReturns(trades)));
+    if (!matrixAvailable) continue;
+    const column = new Float64Array(bucketCount);
+    const initialBalance = number(entry.result?.config?.initialBalance ?? entry.config?.initialBalance, 0);
+    if (initialBalance > 0) {
+      for (const trade of trades) {
+        if (trade?.type !== 'CLOSE') continue;
+        const exitTime = Number(trade.exitTime);
+        const profit = Number(trade.netProfit);
+        if (!Number.isFinite(exitTime) || !Number.isFinite(profit)) continue;
+        const index = Math.min(bucketCount - 1, Math.max(0, Math.floor(((exitTime - startTime) / span) * bucketCount)));
+        column[index] += profit / initialBalance;
+      }
+    }
+    columns.push(column);
+  }
+  const matrix = matrixAvailable
+    ? Array.from({ length: bucketCount }, (_, row) => columns.map(column => column[row]))
+    : null;
+  return assessSelectionOverfitting({
+    selectedReturns: closedTradeReturns(best?.result?.trades),
+    candidateSharpes,
+    trials: ranked.length,
+    matrix,
+    partitions: OVERFITTING_PARTITIONS,
+    pboUnavailableReason: ranked.length < 2 ? 'single_candidate_no_selection' : 'training_window_time_unavailable',
+    sampleKind: 'trade_returns'
+  });
+}
+
 /**
  * Tune only on the supplied training segment. The caller must evaluate the
  * selected config on a later holdout segment before promoting it.
@@ -144,7 +200,8 @@ export function tuneScalpingParameters(candles, baseConfig = {}, grid = DEFAULT_
     minimumTradeCount: selection.minimumTradeCount,
     eligibleCandidateCount: selection.eligibleCandidateCount,
     minimumTradeFallback: selection.minimumTradeFallback,
-    topCandidates: ranked.slice(0, 10).map(({ config, metrics }) => ({ config, metrics }))
+    topCandidates: ranked.slice(0, 10).map(({ config, metrics }) => ({ config, metrics })),
+    overfitting: evaluateTuningOverfitting(ranked, selection.best, candles)
   };
 }
 
@@ -606,6 +663,8 @@ export function walkForwardValidate(candles, baseConfig = {}, options = {}) {
       metrics: tuning.best.result.metrics
     },
     validation: validationMetrics,
+    // Report-only selection-bias diagnostic; never part of `promoted`.
+    overfitting: tuning.overfitting,
     gate: {
       minimumTrainingTrades,
       minimumTrainingProfitFactor,

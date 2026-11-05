@@ -12,6 +12,7 @@ import {
 import { pathToFileURL } from 'node:url';
 import { envBool, envList, envNumber, envString } from '../config/envConfig.js';
 import { fetchCompleteUpbitCandleHistory } from '../market-data/completeUpbitCandleHistory.js';
+import { summarizeOverfittingReport } from '../research/overfitting.js';
 
 dotenv.config();
 
@@ -266,6 +267,9 @@ async function main() {
           })
         : false
     },
+    // Report-only DSR/PBO selection-bias diagnostic. `wouldFailGate` is NOT
+    // part of `promoted`; it marks what a future overfitting gate would block.
+    overfitting: summarizeOverfittingReport(results),
     promotedMarkets: results.filter(result => result.validation?.promoted).map(result => result.market),
     promoted: results.length === markets.length &&
       results.length > 0 &&

@@ -871,3 +871,84 @@ test('known UUID recovery remains in managed universe after configured targets c
   assert.equal(restarted.canExecuteLiveOrder('KRW-BTC', { action: 'BUY' }), true);
   assert.equal(restarted.canExecuteLiveOrder('KRW-ETH', { action: 'BUY' }), true);
 });
+
+test('a full LIVE sync reads every open order in one bulk request when enabled', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'coinpilot-live-bulk-orders-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+
+  const trader = makeLiveTrader(root, { targetCoins: ['KRW-BTC', 'KRW-ETH', 'KRW-XRP'], liveBulkOpenOrders: true });
+  let perMarketReads = 0;
+  let bulkReads = 0;
+  trader.upbit.getOrders = async () => { perMarketReads += 1; return []; };
+  trader.upbit.getOpenOrders = async () => {
+    bulkReads += 1;
+    return [{ market: 'KRW-ETH', uuid: 'foreign-1', created_at: new Date().toISOString() }];
+  };
+  trader.upbit.getAccounts = async () => [{ currency: 'KRW', balance: '10000', locked: '0' }];
+
+  await trader.syncWithExchange();
+  assert.equal(bulkReads, 1);
+  assert.equal(perMarketReads, 0);
+  assert.equal(trader._livePendingOrderMarkets.has('KRW-ETH'), true);
+  assert.equal(trader._liveOrderStateUnknownMarkets.has('KRW-BTC'), false);
+});
+
+test('a failed bulk open-order read falls back to per-market reads', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'coinpilot-live-bulk-fallback-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+
+  const trader = makeLiveTrader(root, { targetCoins: ['KRW-BTC', 'KRW-ETH'], liveBulkOpenOrders: true });
+  let perMarketReads = 0;
+  trader.upbit.getOrders = async () => { perMarketReads += 1; return []; };
+  trader.upbit.getOpenOrders = async () => { throw new Error('404'); };
+  trader.upbit.getAccounts = async () => [{ currency: 'KRW', balance: '10000', locked: '0' }];
+
+  assert.equal(await trader.syncWithExchange(), true);
+  assert.equal(perMarketReads, 2);
+});
+
+test('a protective exit blocked by unknown exchange state triggers a throttled resync', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'coinpilot-live-protective-resync-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+
+  const trader = makeLiveTrader(root);
+  let syncs = 0;
+  trader.syncWithExchange = async () => { syncs += 1; return true; };
+  const monitor = trader._riskMonitor();
+  const now = Date.now();
+  assert.equal(monitor.requestProtectiveResync('KRW-BTC', now), true);
+  await new Promise(resolve => setImmediate(resolve));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(syncs, 1);
+  assert.equal(monitor.requestProtectiveResync('KRW-BTC', now + 1000), false, 'throttled within 15 seconds');
+  assert.equal(monitor.requestProtectiveResync('KRW-BTC', now + 16000), true);
+});
+
+test('a position missing on the exchange is closed at the last verified price, not break-even', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'coinpilot-live-sync-exit-price-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+
+  const trader = makeLiveTrader(root);
+  const strategy = trader.getStrategy('KRW-BTC');
+  strategy.openPosition(10000, 1, 'BUY');
+  trader.lastRiskPrices = { at: Date.now(), prices: new Map([['KRW-BTC', 9800]]) };
+  trader.upbit.getOrders = async () => [];
+  trader.upbit.getAccounts = async () => [{ currency: 'KRW', balance: '10000', locked: '0' }];
+
+  await trader.syncWithExchange();
+  assert.equal(strategy.currentPosition, null);
+  const close = strategy.tradeHistory.filter(trade => trade.action === 'CLOSE').at(-1);
+  assert.ok(close.profit < -150, `the 2% drop must be booked as a loss, got ${close.profit}`);
+  assert.match(close.reason, /최근 시세 추정/);
+});
+
+test('server paper charges fee and slippage even without a paper validation session', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'coinpilot-paper-costs-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const off = makeLiveTrader(root, { dryRun: true });
+  assert.equal(off.getStrictPaperExecutionCostModel(), null);
+  const on = makeLiveTrader(root, { dryRun: true, paperApplyCosts: true, paperSlippage: 0.002 });
+  assert.equal(on.getStrictPaperExecutionCostModel()?.slippageRate, 0.002);
+  const live = makeLiveTrader(root, { paperApplyCosts: true });
+  assert.equal(live.getStrictPaperExecutionCostModel(), null);
+});

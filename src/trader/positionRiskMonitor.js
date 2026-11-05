@@ -354,6 +354,29 @@ export class PositionRiskMonitor {
     return reference ? [...monitoredCoins, reference] : monitoredCoins;
   }
 
+  /**
+   * Re-read exchange state in the background (throttled) when a protective
+   * exit is blocked by unknown account/order state. It never places an order;
+   * the next risk tick sells once the market is verified again.
+   */
+  requestProtectiveResync(coin, now = Date.now()) {
+    if (this.owner.dryRun || typeof this.owner.syncWithExchange !== 'function') return false;
+    const intervalMs = Math.max(15000, Number(this.owner.exchangeSyncRetryMs) || 0);
+    if (this._protectiveResyncInFlight || now - (this._lastProtectiveResyncAt || 0) < intervalMs) return false;
+    this._lastProtectiveResyncAt = now;
+    this._protectiveResyncInFlight = true;
+    console.log(`🔄 [${coin}] 위험 청산이 거래소 상태 미확인으로 막혀 거래소를 다시 확인합니다.`);
+    Promise.resolve()
+      .then(() => this.owner.syncWithExchange())
+      .then(synchronized => {
+        if (synchronized === true) this.owner._lastSyncTime = Date.now();
+        else console.error(`🛑 [${coin}] 거래소 재확인 실패 - ${Math.round(intervalMs / 1000)}초 뒤 다시 시도합니다.`);
+      })
+      .catch(error => console.error(`🛑 [${coin}] 거래소 재확인 오류: ${error.message}`))
+      .finally(() => { this._protectiveResyncInFlight = false; });
+    return true;
+  }
+
   reportUnsellableDust(coin, value) {
     this.reportedDust ||= new Set();
     if (this.reportedDust.has(coin)) return;
@@ -465,6 +488,8 @@ export class PositionRiskMonitor {
         throw error;
       }
       this.recordRiskMonitorSuccess();
+      // Last verified prices for valuation and sync bookkeeping (not for orders).
+      this.owner.lastRiskPrices = { at: Date.now(), prices: new Map(priceMap) };
       if (priceMap.size === 0 ||
         (!this.owner.isRunning && !this._riskMonitorProtectiveOnly && !this.owner._manualRiskProtection)) return;
 
@@ -509,6 +534,9 @@ export class PositionRiskMonitor {
             if (!this._riskMonitorProtectiveOnly) {
               this.owner.pauseForSafetyIncident('exchange_state_unverified');
             }
+            // Protective mode has no trading cycle to resynchronize the
+            // exchange state, so a blocked exit would otherwise wait forever.
+            this.requestProtectiveResync(coin);
             continue;
           }
 

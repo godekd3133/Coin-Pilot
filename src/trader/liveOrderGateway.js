@@ -778,8 +778,15 @@ export class LiveOrderGateway {
 
         if (internalPosition && !exchangeData) {
           // 내부에는 포지션 있지만 거래소에 없음 - 이미 팔린 것
-          console.log(`  ⚠️  [${coin}] 동기화: 내부 포지션 있지만 거래소에 없음 → 포지션 제거`);
-          strategy.closePosition(internalPosition.entryPrice, '거래소 동기화: 보유량 없음');
+          // The sale happened off the engine's books (e.g. an unconfirmed fill).
+          // Record it at the last verified market price, not the entry price,
+          // so losses are not booked as break-even and the loss guard sees them.
+          const cached = this.owner.lastRiskPrices;
+          const cachedPrice = Number(cached?.prices?.get(coin));
+          const priceIsRecent = Number.isFinite(cachedPrice) && cachedPrice > 0 && Date.now() - Number(cached?.at) < 5 * 60 * 1000;
+          const exitPrice = priceIsRecent ? cachedPrice : internalPosition.entryPrice;
+          console.log(`  ⚠️  [${coin}] 동기화: 내부 포지션 있지만 거래소에 없음 → 포지션 제거 (${priceIsRecent ? '최근 시세' : '시세 없음, 매수가'} ${exitPrice.toLocaleString()}원으로 추정 기록)`);
+          strategy.closePosition(exitPrice, `거래소 동기화: 보유량 없음 (${priceIsRecent ? '최근 시세' : '매수가'} 추정 청산)`);
           syncIssues++;
         } else if (!internalPosition && exchangeData && exchangeData.balance > 0) {
           // 거래소에는 있지만 내부에 없음 - 수동 매수 또는 동기화 누락
@@ -887,10 +894,31 @@ export class LiveOrderGateway {
       this._liveOrderStateUnknownMarkets = new Set(this.owner.getLiveManagedMarkets());
       this._livePendingOrderMarkets = new Set();
     }
+    // A full sync reads every open order in a few paged requests instead of
+    // one request per market; risk exits are blocked while a sync runs.
+    let bulkOrders = null;
+    if (!preserveUntouchedMarkets && managedMarkets.length > 1 &&
+      this.owner.config?.liveBulkOpenOrders === true && typeof this.owner.upbit.getOpenOrders === 'function') {
+      try {
+        const rows = await this.owner.upbit.getOpenOrders(['wait', 'watch'], { priority: 'risk' });
+        if (rows.every(order => typeof order?.market === 'string')) {
+          bulkOrders = new Map();
+          for (const order of rows) {
+            if (!bulkOrders.has(order.market)) bulkOrders.set(order.market, []);
+            bulkOrders.get(order.market).push(order);
+          }
+        }
+      } catch (error) {
+        console.error(`  ⚠️  전체 미체결 주문 일괄 조회 실패 - 마켓별 조회로 대체: ${error.message}`);
+        bulkOrders = null;
+      }
+    }
     for (const coin of managedMarkets) {
       let pendingOrders;
       try {
-        pendingOrders = await this.owner.upbit.getOrders(coin, ['wait', 'watch'], { priority: 'risk' });
+        pendingOrders = bulkOrders
+          ? bulkOrders.get(coin) || []
+          : await this.owner.upbit.getOrders(coin, ['wait', 'watch'], { priority: 'risk' });
       } catch (error) {
         console.error(`  ❌ [${coin}] 미체결 주문 조회 실패: ${error.message}`);
         complete = false;

@@ -257,7 +257,15 @@ export class AutoRecoverySupervisor {
   async tick(nowMs = this._now()) {
     const trader = this.trader;
     if (nowMs - this._lastTrackingAt >= 15000) {
-      try { this.tracking.record('runtime'); this._lastTrackingAt = nowMs; }
+      try {
+        const safety = trader.getRuntimeSafetyStatus?.() || {};
+        this.tracking.record('runtime', {
+          isRunning: trader.isRunning === true,
+          runtimeState: safety.runtimeState || null,
+          stopReason: trader.stopReason || safety.stopReason || null
+        });
+        this._lastTrackingAt = nowMs;
+      }
       catch (error) { this._log('error', `자동매매 추적 저장 실패: ${error.message}`); }
     }
     if (!this.enabled || this._tickInFlight) return this.getStatus();

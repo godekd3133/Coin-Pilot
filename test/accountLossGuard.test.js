@@ -26,7 +26,15 @@ test('the daily loss limit counts only the current KST day', () => {
   assert.equal(evaluateAccountLossGuard({ dailyLossLimitKrw: 301, krwBalance: 10000, strategies: strategies({ closes }), now }).blocked, false);
 });
 
-test('the equity floor uses cash plus open-position cost', () => {
+test('the equity floor values positions at market when a price is known', () => {
+  const position = { amount: 2, entryPrice: 2500 };
+  const prices = new Map([['KRW-A', 2000]]);
+  const status = evaluateAccountLossGuard({ equityFloorKrw: 9000, krwBalance: 4100, strategies: strategies({ position }), prices, now });
+  assert.equal(status.equity, 8100);
+  assert.equal(status.blocked, true);
+});
+
+test('the equity floor falls back to open-position cost without a price', () => {
   const position = { amount: 2, entryPrice: 2500 };
   assert.equal(evaluateAccountLossGuard({ equityFloorKrw: 9000, krwBalance: 4100, strategies: strategies({ position }), now }).blocked, false);
   const low = evaluateAccountLossGuard({ equityFloorKrw: 9000, krwBalance: 3900, strategies: strategies({ position }), now });

@@ -295,28 +295,19 @@ export class PositionRebalancer {
     console.log('📊 포트폴리오 요약');
     console.log('='.repeat(80));
 
+    // With the full KRW universe this used to print ~600 lines every cycle and
+    // pushed older (LIVE) journal entries out of the size-capped journal.
+    // Only held positions are printed; the rest is one count line.
+    let held = 0;
     for (const coin of this.owner.targetCoins) {
-      const strategy = this.owner.getStrategy(coin);
+      const strategy = this.owner.strategies.get(coin);
+      if (!strategy?.currentPosition) continue;
+      held++;
       const stats = strategy.getStatistics();
-
-      console.log(`\n[${coin}]`);
-
-      if (strategy.currentPosition) {
-        console.log(`  📍 포지션: 보유중`);
-        console.log(`    진입가: ${strategy.currentPosition.entryPrice.toLocaleString()} 원`);
-        console.log(`    수량: ${strategy.currentPosition.amount.toFixed(8)}`);
-      } else {
-        console.log(`  📍 포지션: 없음`);
-      }
-
-      if (stats.totalTrades > 0) {
-        console.log(`  거래 통계:`);
-        console.log(`    총 거래: ${stats.totalTrades}회`);
-        console.log(`    승률: ${stats.winRate}`);
-        console.log(`    총 손익: ${stats.totalProfit}`);
-      }
+      console.log(`\n[${coin}] 📍 보유 · 진입가 ${strategy.currentPosition.entryPrice.toLocaleString()} 원 · 수량 ${strategy.currentPosition.amount.toFixed(8)}` +
+        (stats.totalTrades > 0 ? ` · 누적 ${stats.totalTrades}회 승률 ${stats.winRate} 손익 ${stats.totalProfit}` : ''));
     }
-
-    console.log('\n' + '='.repeat(80));
+    console.log(`보유 ${held}개 / 감시 ${this.owner.targetCoins.length}개`);
+    console.log('='.repeat(80));
   }
 }

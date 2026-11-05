@@ -154,6 +154,8 @@ function buildConfig(portfolioFile, paperFile, markets) {
     maxConsecutiveLosses: envNumber('SCALP_MAX_CONSECUTIVE_LOSSES', 3),
     lossCircuitBreakerCount: envNumber('SCALP_LOSS_CIRCUIT_BREAKER_COUNT', 0),
     equityFloorKrw: envNumber('SCALP_EQUITY_FLOOR_KRW', 0),
+    paperApplyCosts: envBool('SCALP_PAPER_APPLY_COSTS', true),
+    paperSlippage: envNumber('SCALP_PAPER_SLIPPAGE', 0.002),
     entryCostFilterMode: envString('SCALP_ENTRY_COST_FILTER', 'observe'),
     entryCostMaxTakeProfitRatio: envNumber('SCALP_ENTRY_COST_MAX_TP_RATIO', 0.15),
     dailyLossLimitKrw: envNumber('SCALP_DAILY_LOSS_LIMIT_KRW', 0),

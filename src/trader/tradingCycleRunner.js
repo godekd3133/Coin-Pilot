@@ -271,7 +271,7 @@ export class TradingCycleRunner {
     // 5. 상위 코인부터 매매 실행
     // A full KRW universe prints hundreds of rows every few seconds; show the
     // top of the ranking and any actionable market, and count the rest.
-    const printLimit = 10;
+    const printLimit = 3;
     const printed = coinAnalyses.filter((analysis, index) =>
       index < printLimit || analysis.decision?.action !== 'HOLD');
     const inactiveCount = coinAnalyses.filter(analysis => analysis.inactiveMarket).length;
@@ -286,11 +286,7 @@ export class TradingCycleRunner {
         'NONE': '⏸️'
       }[strength?.level] || '⏸️';
 
-      console.log(`\n${index + 1}. ${analysis.coin}`);
-      console.log(`  현재가: ${analysis.currentPrice.toLocaleString()} 원`);
-      console.log(`  점수: ${analysis.decision.scores.total}`);
-      console.log(`  추천: ${analysis.decision.action} ${strengthEmoji} ${strength?.level || 'NONE'}`);
-      console.log(`  이유: ${analysis.decision.reason}`);
+      console.log(`${index + 1}. ${analysis.coin} ${analysis.currentPrice.toLocaleString()}원 · 점수 ${analysis.decision.scores.total} · ${analysis.decision.action} ${strengthEmoji} ${strength?.level || 'NONE'} · ${analysis.decision.reason}`);
     });
 
     // 6. 현재 포지션 수 확인

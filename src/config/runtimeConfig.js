@@ -217,6 +217,9 @@ export function createConfig(env) {
     // 0 disables the process-wide sliding-window circuit breaker.
     lossCircuitBreakerCount: env.SCALP_LOSS_CIRCUIT_BREAKER_COUNT || 0,
     equityFloorKrw: env.SCALP_EQUITY_FLOOR_KRW || 0,
+    liveBulkOpenOrders: env.UPBIT_BULK_OPEN_ORDERS ?? true,
+    paperApplyCosts: env.SCALP_PAPER_APPLY_COSTS ?? true,
+    paperSlippage: env.SCALP_PAPER_SLIPPAGE ?? 0.002,
     entryCostFilterMode: env.SCALP_ENTRY_COST_FILTER || 'observe',
     entryCostMaxTakeProfitRatio: env.SCALP_ENTRY_COST_MAX_TP_RATIO ?? 0.15,
     dailyLossLimitKrw: env.SCALP_DAILY_LOSS_LIMIT_KRW || 0,

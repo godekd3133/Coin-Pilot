@@ -9,6 +9,7 @@
 
 import { runSleeveBacktest, precomputeAnalyses, buyAndHoldReturn } from './horizonBacktest.js';
 import { ASSET_COSTS, INTERVAL_MS } from './horizonProfiles.js';
+import { assessSelectionOverfitting, sharpeRatio } from '../research/overfitting.js';
 
 export const DEFAULT_GRID = Object.freeze({
   entryScore: [20, 30, 40, 50],
@@ -64,6 +65,29 @@ function selectCandidate(candidates, { minTrades, maxDrawdownPercent }) {
   return traded.sort((a, b) => calmar(b) - calmar(a))[0];
 }
 
+/**
+ * 선택 편향 진단(report-only). 학습 구간 모든 후보의 봉별 수익률로 CSCV PBO를,
+ * 선택 후보의 봉별 수익률 + 후보 간 봉당 Sharpe 분산으로 DSR을 계산한다.
+ * 승격(passed)/비중 판정에는 쓰지 않는다.
+ */
+export function evaluateGridOverfitting(candidates, chosen) {
+  const series = candidates.map(c => c.train?.barReturns || []);
+  const length = series[0]?.length ?? 0;
+  const aligned = candidates.length >= 2 && length > 0 && series.every(s => s.length === length);
+  const matrix = aligned
+    ? Array.from({ length }, (_, row) => series.map(s => s[row]))
+    : null;
+  return assessSelectionOverfitting({
+    selectedReturns: chosen?.train?.barReturns || [],
+    candidateSharpes: series.map(s => sharpeRatio(s)),
+    trials: candidates.length,
+    matrix,
+    partitions: 8,
+    pboUnavailableReason: candidates.length < 2 ? 'single_candidate_no_selection' : 'candidate_bar_returns_misaligned',
+    sampleKind: 'bar_returns'
+  });
+}
+
 function evaluateGrid(series, profile, grid, common, window) {
   const candidates = [];
   for (const combo of gridCombos(grid)) {
@@ -115,6 +139,7 @@ export function studySleeve(series, profile, options = {}) {
       chosenParams: chosen.params,
       train: compact(chosen.train),
       test: compact(test),
+      overfitting: evaluateGridOverfitting(candidates, chosen),
       buyAndHoldPercent: Math.round(buyAndHoldReturn(series, split, end) * 100) / 100,
       benchmarkPercent: benchmark ? Math.round(buyAndHoldReturn(series, split, end, [benchmark]) * 100) / 100 : null
     });
@@ -156,6 +181,8 @@ export function studySleeve(series, profile, options = {}) {
     outOfSample,
     chosenParams: finalChoice?.params ?? null,
     full: compact(finalChoice?.train),
+    // report-only: passed/recommendedWeightMultiplier 판정에 쓰지 않는다.
+    overfitting: finalChoice ? evaluateGridOverfitting(finalCandidates, finalChoice) : null,
     passed: passed && Boolean(finalChoice),
     recommendedWeightMultiplier: passed && finalChoice ? 1 : 0
   };

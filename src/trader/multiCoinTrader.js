@@ -581,7 +581,8 @@ class MultiCoinTrader {
       equityFloorKrw: this.config?.equityFloorKrw,
       dailyLossLimitKrw: this.config?.dailyLossLimitKrw,
       krwBalance: this.lastKnownKrwBalance,
-      strategies: this.strategies
+      strategies: this.strategies,
+      prices: this.lastRiskPrices && Date.now() - this.lastRiskPrices.at < 5 * 60 * 1000 ? this.lastRiskPrices.prices : null
     });
   }
 
@@ -923,7 +924,10 @@ class MultiCoinTrader {
   stopAnalysisDataWatchdog(...args) { return this._riskMonitor().stopAnalysisDataWatchdog(...args); }
 
   getStrictPaperExecutionCostModel(position = null) {
-    if (!this.dryRun || this.paperValidation?.active !== true) return null;
+    // Outside a paper validation session the server paper used to fill at the
+    // last trade price with zero slippage, which flattered it against LIVE.
+    const sessionActive = this.paperValidation?.active === true;
+    if (!this.dryRun || (!sessionActive && this.config?.paperApplyCosts !== true)) return null;
 
     const version = 'strict_paper_cost_model_v1';
     if (position && position.paperExecutionCostModel !== version) return null;
@@ -933,7 +937,9 @@ class MultiCoinTrader {
       !Number.isFinite(Number(position.paperExecutionTradingFeeRate)))) return null;
     const configuredSlippageRate = position
       ? position.paperExecutionSlippageRate
-      : this.config?.slippage ?? this.strategyConfig?.slippage;
+      : sessionActive
+        ? this.config?.slippage ?? this.strategyConfig?.slippage
+        : this.config?.paperSlippage ?? this.config?.slippage ?? this.strategyConfig?.slippage;
     const configuredTradingFeeRate = position
       ? position.paperExecutionTradingFeeRate
       : this.config?.tradingFee ?? this.strategyConfig?.tradingFee;

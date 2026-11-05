@@ -385,6 +385,40 @@ class UpbitAPI {
   }
 
   /**
+   * 모든 마켓의 체결 대기 주문을 한 번에 조회한다 (GET /orders/open).
+   * 마켓마다 /orders를 부르면 KRW 전체(약 300개)에서 40초가 걸려 그동안
+   * 위험 청산이 막히므로, 전체 동기화는 이 경로로 몇 번의 페이지 조회만 한다.
+   * 페이지가 상한을 넘으면 불완전하다고 보고 오류를 던진다(caller는 마켓별 조회로 대체).
+   */
+  async getOpenOrders(states = ['wait', 'watch'], requestOptions = {}) {
+    const priorityOptions = {
+      ...requestOptions,
+      priority: 'risk',
+      rateLimitGroup: 'default',
+      rateLimitScope: 'pocket'
+    };
+    const limit = 100;
+    const maxPages = 10;
+    const orders = [];
+    for (let page = 1; page <= maxPages; page++) {
+      const query = { 'states[]': states, page, limit, order_by: 'desc' };
+      const rows = await this.requestWithRetry(async () => {
+        const token = this.generateToken(query);
+        const response = await this.axios.get(`${this.baseURL}/orders/open`, this.getRequestConfigWithOptions({
+          params: query,
+          headers: { Authorization: `Bearer ${token}` }
+        }, priorityOptions));
+        await this.observeRateLimitResponse(response, priorityOptions);
+        return response.data;
+      }, 3, priorityOptions);
+      if (!Array.isArray(rows)) throw new Error('체결 대기 주문 응답이 올바르지 않습니다.');
+      orders.push(...rows);
+      if (rows.length < limit) return orders;
+    }
+    throw new Error(`체결 대기 주문이 ${maxPages * limit}건을 넘어 한 번에 확인할 수 없습니다.`);
+  }
+
+  /**
    * UUID 또는 client identifier로 개별 주문 조회
    * @param {string} uuidOrIdentifier - UUID 또는 사전 기록한 client identifier
    * @param {{ identifier?: boolean }} options - identifier 조회인지 여부

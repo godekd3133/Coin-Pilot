@@ -25,3 +25,17 @@ test('an empty or crossed orderbook is not measurable', () => {
   assert.equal(measureEntryCost(null), null);
   assert.equal(measureEntryCost(book([[100, 101]])), null);
 });
+
+test('entry cost observations survive a restart', async () => {
+  const fs = await import('node:fs');
+  const os = await import('node:os');
+  const path = await import('node:path');
+  const { loadEntryCostStats, saveEntryCostStats, createEntryCostStats } = await import('../src/trader/entryCostFilter.js');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'entry-cost-'));
+  const file = path.join(dir, 'stats.json');
+  assert.equal(loadEntryCostStats(file), null);
+  const stats = { ...createEntryCostStats(), checked: 3, wouldReject: 2 };
+  saveEntryCostStats(file, stats);
+  assert.equal(loadEntryCostStats(file).wouldReject, 2);
+  fs.rmSync(dir, { recursive: true, force: true });
+});

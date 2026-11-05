@@ -8,7 +8,7 @@
 // 상태는 전부 owner(트레이더)를 통해 조회한다 — 순수 오케스트레이션.
 import { inspectLatestCandleFreshness } from '../risk/candleFreshness.js';
 import { inspectTraderMarketQuote } from './positionRiskMonitor.js';
-import { measureEntryCost, judgeEntryCost, createEntryCostStats } from './entryCostFilter.js';
+import { measureEntryCost, judgeEntryCost, createEntryCostStats, loadEntryCostStats, saveEntryCostStats } from './entryCostFilter.js';
 
 export function hasCompleteLiveFillResult(fillResult) {
   const order = fillResult?.order;
@@ -37,7 +37,8 @@ export class OrderExecutionEngine {
   async checkEntryCost(coin) {
     const mode = this.owner.config?.entryCostFilterMode || 'observe';
     if (mode === 'off' || this.owner.exchange !== 'upbit' || typeof this.owner.upbit?.getOrderbook !== 'function') return null;
-    const stats = this.owner.entryCostStats ||= createEntryCostStats();
+    const statsFile = this.owner.virtualPortfolioFile ? `${this.owner.virtualPortfolioFile}.entry-cost.json` : null;
+    const stats = this.owner.entryCostStats ||= loadEntryCostStats(statsFile) || createEntryCostStats();
     let measurement;
     try {
       const books = await this.owner.upbit.getOrderbook(coin);
@@ -59,6 +60,7 @@ export class OrderExecutionEngine {
       else stats.wouldReject++;
     }
     stats.lastSamples = [{ coin, at: new Date().toISOString(), ...measurement, limitPercent: verdict.limitPercent, tooHigh: verdict.tooHigh }, ...stats.lastSamples].slice(0, 20);
+    saveEntryCostStats(statsFile, stats);
     if (verdict.tooHigh && mode !== 'enforce') {
       console.log(`  👀 [${coin}] 관찰: 진입 비용 ${measurement.costPercent}%가 한도 ${verdict.limitPercent}%를 넘음 (enforce 모드였다면 취소)`);
     }

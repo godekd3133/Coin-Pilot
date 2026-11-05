@@ -176,7 +176,7 @@ export function precomputeAnalyses(seriesBySymbol, periods) {
 
 export function summarize({ equityCurve, trades, initialEquity, barsPerYear, exposureBars }) {
   if (equityCurve.length < 2) {
-    return { bars: equityCurve.length, totalReturnPercent: 0, cagrPercent: 0, maxDrawdownPercent: 0, sharpe: 0, trades: trades.length, winRatePercent: 0, exposurePercent: 0, tradeList: trades };
+    return { bars: equityCurve.length, totalReturnPercent: 0, cagrPercent: 0, maxDrawdownPercent: 0, sharpe: 0, trades: trades.length, winRatePercent: 0, exposurePercent: 0, tradeList: trades, barReturns: [] };
   }
   const finalEquity = equityCurve.at(-1).equity;
   let peak = initialEquity;
@@ -206,7 +206,9 @@ export function summarize({ equityCurve, trades, initialEquity, barsPerYear, exp
     winRatePercent: trades.length > 0 ? (wins / trades.length) * 100 : 0,
     avgTradeReturnPercent: trades.length > 0 ? trades.reduce((s, t) => s + t.returnPercent, 0) / trades.length : 0,
     exposurePercent: (exposureBars / equityCurve.length) * 100,
-    tradeList: trades
+    tradeList: trades,
+    // 봉별 자산 수익률(같은 창의 후보끼리 시간축이 같다) — 과적합 진단(CSCV/DSR)용.
+    barReturns: returns
   };
 }
 

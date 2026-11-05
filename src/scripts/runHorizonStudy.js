@@ -116,6 +116,10 @@ async function main() {
     }
     console.log(`  OOS 합산: ${result.outOfSample.compoundedReturnPercent}% / 거래 ${result.outOfSample.trades} / 손실없는 fold ${result.outOfSample.nonNegativeFolds}/${result.outOfSample.folds} / 최악 MDD ${result.outOfSample.worstFoldDrawdownPercent}%`);
     console.log(`  실거래 파라미터: ${JSON.stringify(result.chosenParams)}`);
+    if (result.overfitting) {
+      const o = result.overfitting;
+      console.log(`  과적합 진단(report-only): 후보 ${o.trials} · DSR ${o.dsr ?? 'n/a'} · PBO ${o.pbo ?? `n/a (${o.pboReason})`}${o.wouldFailGate ? ' · ⚠️ 장래 게이트 기준 미달' : ''}`);
+    }
     console.log(`  판정: ${result.passed ? '✅ 실거래 편입' : '⛔ 비활성 (워크포워드 검증 미통과)'}`);
   }
 
