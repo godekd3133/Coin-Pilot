@@ -2,8 +2,12 @@
 // 모의(paper)/실전(live) 트레이더를 상시 실행한다(기본은 프로세스의 코인 프로필과 같은 모드).
 // - 장이 열리면 자동으로 매매하고, 장외 시간에는 대기한다(프로세스는 계속 실행).
 // - 운영자가 중지한 트레이더는 desiredRunning=false로 기록되어 재부팅 후에도 중지 상태를 유지한다.
-// - 대상 종목: STOCK_SYMBOLS가 비어 있으면 실시간 거래대금 상위 종목 중
-//   현재 시드로 1주 이상 살 수 있는 가격대를 자동 선별한다.
+// - 대상 종목: STOCK_SYMBOLS가 비어 있으면 실시간 거래대금·거래량·토스 거래대금·
+//   하락률·상승률 순위(각 최대 100)를 합쳐 현재 시드로 1주 이상 살 수 있는 종목을 고른다.
+// - 토스 WebSocket에는 분봉 채널이 없고 체결 프레임은 유실·누적거래량 부재로 분봉을
+//   복원할 수 없다(공식 스펙). 그래서 1분봉은 분이 바뀔 때마다 한 번만 REST로 훑고,
+//   10초 사이클은 그 분의 스냅샷과 현재가로 진입·청산을 판단한다. 이전 분의 스냅샷은
+//   진입에 쓰지 않는다(스캔이 끝나기 전에는 신규 진입 없이 보유 청산만 점검).
 
 import path from 'node:path';
 import TossInvestClient, { toNumber } from './tossInvestClient.js';
@@ -12,6 +16,15 @@ import StockTrader from './stockTrader.js';
 import { createStockHorizonRuntime } from '../portfolio/horizonService.js';
 
 const UNIVERSE_REFRESH_MS = 30 * 60 * 1000;
+const MINUTE_MS = 60 * 1000;
+// 순위 API는 종류당 최대 100건이다. 거래대금 순서를 우선하고 나머지로 넓힌다.
+const UNIVERSE_RANKING_TYPES = [
+  'MARKET_TRADING_AMOUNT',
+  'TOSS_SECURITIES_TRADING_AMOUNT',
+  'MARKET_TRADING_VOLUME',
+  'TOP_LOSERS',
+  'TOP_GAINERS'
+];
 
 export function createStockConfig(env = {}) {
   return {
@@ -24,7 +37,7 @@ export function createStockConfig(env = {}) {
     paperEnabled: env.STOCK_PAPER_ENABLED ?? env.DRY_RUN !== false,
     liveEnabled: env.STOCK_LIVE_ENABLED ?? env.DRY_RUN === false,
     symbols: Array.isArray(env.STOCK_SYMBOLS) ? env.STOCK_SYMBOLS.map(s => String(s).trim()).filter(Boolean) : [],
-    maxSymbols: env.STOCK_MAX_SYMBOLS ?? 20,
+    maxSymbols: env.STOCK_MAX_SYMBOLS ?? 300,
     minPrice: env.STOCK_MIN_PRICE ?? 1000,
     cycleIntervalMs: env.STOCK_CYCLE_INTERVAL_MS ?? 10000,
     trader: {
@@ -96,6 +109,9 @@ export class StockTradingService {
     this.universe = [];
     this.universeUpdatedAt = 0;
     this.lastUniverseError = null;
+    this.candleSnapshot = null;
+    this.lastCandleScan = null;
+    this._candleScanInFlight = null;
     this._timer = null;
     this._tickInFlight = null;
   }
@@ -130,16 +146,28 @@ export class StockTradingService {
     }
     try {
       const ceiling = await this._affordablePriceCeiling();
-      const rankings = await this.client.getRankings({ type: 'MARKET_TRADING_AMOUNT', duration: 'realtime', count: 100 });
-      this.universe = rankings
-        .filter(item => item?.currency === 'KRW' || item?.currency === undefined)
-        .filter(item => {
+      const seen = new Set();
+      const universe = [];
+      let rankingFailures = 0;
+      for (const type of UNIVERSE_RANKING_TYPES) {
+        let rankings;
+        try {
+          rankings = await this.client.getRankings({ type, duration: 'realtime', count: 100 });
+        } catch (error) {
+          rankingFailures++;
+          if (rankingFailures === UNIVERSE_RANKING_TYPES.length) throw error;
+          continue;
+        }
+        for (const item of rankings) {
+          if (item?.currency !== 'KRW' && item?.currency !== undefined) continue;
           const price = toNumber(item?.price?.lastPrice, null);
-          return price !== null && price >= this.config.minPrice && price <= ceiling;
-        })
-        .map(item => item.symbol)
-        .filter(Boolean)
-        .slice(0, this.config.maxSymbols);
+          if (price === null || price < this.config.minPrice || price > ceiling) continue;
+          if (!item.symbol || seen.has(item.symbol)) continue;
+          seen.add(item.symbol);
+          universe.push(item.symbol);
+        }
+      }
+      this.universe = universe.slice(0, this.config.maxSymbols);
       this.universeUpdatedAt = this.now();
       this.lastUniverseError = this.universe.length === 0 ? `시드로 살 수 있는 종목이 없습니다 (1주 상한 ${Math.floor(ceiling).toLocaleString()}원)` : null;
     } catch (error) {
@@ -158,25 +186,59 @@ export class StockTradingService {
         for (const trader of running) await trader.runCycle([]);
         return;
       }
-      const universe = await this.refreshUniverse();
+      const fullUniverse = await this.refreshUniverse();
+      const minute = Math.floor(this.now() / MINUTE_MS);
+      if (market.canEnter && this.candleSnapshot?.minute !== minute) this._startCandleScan(fullUniverse, minute);
+      // 진입 후보는 이번 분의 1분봉 스냅샷이 있는 종목만이다. 스캔 중이면 보유 청산만 점검한다.
+      const snapshot = market.canEnter && this.candleSnapshot?.minute === minute ? this.candleSnapshot : null;
+      const universe = snapshot ? fullUniverse.filter(symbol => snapshot.candles.has(symbol)) : [];
       const symbols = [...new Set(running.flatMap(trader => trader.requiredSymbols(universe)))];
       // 같은 사이클의 모의/실전이 동일 시세·캔들을 보도록 한 번만 조회해 공유한다.
       const prices = symbols.length > 0 ? await this.client.getPrices(symbols) : new Map();
-      const candlesBySymbol = new Map();
-      if (market.canEnter) {
-        for (const symbol of universe) {
-          try {
-            candlesBySymbol.set(symbol, await this.client.getMinuteCandles(symbol, 120));
-          } catch {
-            candlesBySymbol.set(symbol, []);
-          }
-        }
-      }
+      const candlesBySymbol = snapshot?.candles ?? new Map();
       for (const trader of running) await trader.runCycle(universe, { prices, candlesBySymbol });
     })()
       .catch(error => this.log.error?.(`❌ [주식] 사이클 오류: ${error.message}`))
       .finally(() => { this._tickInFlight = null; });
     return this._tickInFlight;
+  }
+
+  /**
+   * 분이 바뀌면 유니버스 전체의 1분봉을 한 번 훑는다(MARKET_DATA_CHART 그룹 직렬화).
+   * 보유 청산 사이클을 막지 않도록 tick과 별도로 실행하고, 끝나면 바로 진입을 판단한다.
+   */
+  _startCandleScan(universe, minute) {
+    if (this._candleScanInFlight || universe.length === 0) return this._candleScanInFlight;
+    const startedAt = this.now();
+    this._candleScanInFlight = (async () => {
+      const candles = new Map();
+      let failed = 0;
+      for (const symbol of universe) {
+        if (this._stopping || Math.floor(this.now() / MINUTE_MS) !== minute) break;
+        try {
+          candles.set(symbol, await this.client.getMinuteCandles(symbol, 120));
+        } catch {
+          failed++;
+        }
+      }
+      const completedInMinute = Math.floor(this.now() / MINUTE_MS) === minute;
+      this.lastCandleScan = {
+        minute: new Date(minute * MINUTE_MS).toISOString(),
+        scanned: candles.size,
+        failed,
+        universe: universe.length,
+        durationMs: this.now() - startedAt,
+        completed: completedInMinute
+      };
+      // 다음 분으로 넘어간 스캔 결과는 이미 낡았으므로 버린다.
+      if (completedInMinute) this.candleSnapshot = { minute, candles };
+    })()
+      .catch(error => this.log.error?.(`❌ [주식] 1분봉 스캔 오류: ${error.message}`))
+      .finally(() => {
+        this._candleScanInFlight = null;
+        if (!this._stopping && this.candleSnapshot?.minute === minute) this.tick();
+      });
+    return this._candleScanInFlight;
   }
 
   /** 상시 실행: 각 트레이더의 저장된 의사(desiredRunning)를 따라 시작한다. */
@@ -194,6 +256,7 @@ export class StockTradingService {
         }
       }
     }
+    this._stopping = false;
     if (!this._timer) {
       this._timer = setInterval(() => { this.tick(); }, Math.max(2000, this.config.cycleIntervalMs));
       this._timer.unref?.();
@@ -206,11 +269,13 @@ export class StockTradingService {
   }
 
   async stop() {
+    this._stopping = true;
     if (this._timer) clearInterval(this._timer);
     this._timer = null;
     for (const trader of Object.values(this.traders)) trader.stop({ source: 'shutdown', persistIntent: false });
     for (const horizon of Object.values(this.horizons)) await horizon.stop();
     if (this._tickInFlight) await this._tickInFlight;
+    if (this._candleScanInFlight) await this._candleScanInFlight;
   }
 
   getTrader(mode) {
@@ -240,6 +305,7 @@ export class StockTradingService {
       universe: this.universe,
       universeUpdatedAt: this.universeUpdatedAt ? new Date(this.universeUpdatedAt).toISOString() : null,
       universeError: this.lastUniverseError,
+      candleScan: this.lastCandleScan,
       paper: this.traders.paper?.getStatus() ?? null,
       live: this.traders.live?.getStatus() ?? null,
       horizons: Object.fromEntries(Object.entries(this.horizons).map(([mode, runtime]) => [mode, runtime.getStatus()]))

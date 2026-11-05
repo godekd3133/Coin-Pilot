@@ -30,7 +30,7 @@ export const ENV_SCHEMA = {
   STOCK_LIVE_ENABLED: { type: 'bool' },
   STOCK_PAPER_SEED_MONEY: { type: 'number', min: 1000 },
   STOCK_SYMBOLS: { type: 'list' },
-  STOCK_MAX_SYMBOLS: { type: 'int', min: 1, max: 100 },
+  STOCK_MAX_SYMBOLS: { type: 'int', min: 1, max: 500 },
   STOCK_MIN_PRICE: { type: 'number', min: 0 },
   STOCK_MAX_POSITIONS: { type: 'int', min: 1, max: 20 },
   STOCK_INVESTMENT_RATIO: { type: 'number', min: 0.01, max: 1 },
