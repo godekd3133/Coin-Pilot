@@ -67,6 +67,18 @@ test('a safety stop, the held-while-stopped reminder, and the resume each push o
   assert.match(alerts().at(-1).title, /자동매매 재개/);
 });
 
+test('the first start after boot is reported as a start, not a resume', async () => {
+  const trader = makeTrader({ running: false });
+  const { clock, monitor, alerts } = setup(trader, Date.parse('2026-11-05T01:00:00Z'));
+  await monitor.tick();
+  trader.isRunning = true;
+  trader.state = { running: true, protective: false, stopReason: null };
+  clock.value += 30000;
+  await monitor.tick();
+  assert.equal(alerts().length, 1);
+  assert.match(alerts()[0].title, /자동매매 시작/);
+});
+
 test('protective mode is announced instead of a plain stop, and suppresses the held reminder', async () => {
   const trader = makeTrader({ positions: { 'KRW-BTC': { amount: 0.001, entryPrice: 100000000 } } });
   const { clock, monitor, alerts } = setup(trader, Date.parse('2026-11-05T01:00:00Z'));

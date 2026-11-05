@@ -7,7 +7,7 @@ import { readLogTail } from '../../utils/readLogTail.js';
 import { parseRecentLogErrors } from '../../utils/parseRecentLogErrors.js';
 import { quoteOfSystem } from '../../exchange/marketCodes.js';
 import { roundQuoteAmount, floorQuoteAmount } from '../manualOrderLegs.js';
-import { startOfKstDay } from '../operatorAlertMonitor.js';
+import { startOfKstDay, kstDateKey } from '../operatorAlertMonitor.js';
 
 // 상태·요약·분석 read-model 라우트 — DashboardServer의 인라인 핸들러에서 추출.
 // 서버 소유 상태(tradingSystem, 캐시, logger)는 server 파라미터를 통해 접근한다.
@@ -154,7 +154,7 @@ export default function createStatusRoutes(server) {
       }
 
       res.json({
-        date: today.toISOString().split('T')[0],
+        date: kstDateKey(today.getTime()),
         totalTrades: buyCount + sellCount,
         buyCount,
         sellCount,

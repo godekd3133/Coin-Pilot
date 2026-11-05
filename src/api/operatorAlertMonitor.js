@@ -134,6 +134,8 @@ export class OperatorAlertMonitor {
       } else if (!previous.protective && state.protective) {
         this.alert(`protective|${minuteKey}`, '보호 모드',
           `${describeStopReason(state.stopReason)}. 신규 매수는 멈추고 ${heldText}의 손절·익절 감시는 계속합니다.`, 'safety');
+      } else if (!previous.running && state.running && !this.sawRunning) {
+        this.alert(`boot|${minuteKey}`, '자동매매 시작', '서버가 시작돼 자동매매가 실행 중입니다.', 'status');
       } else if (!previous.running && state.running) {
         const after = this.stoppedSince ? ` (${Math.max(1, Math.round((nowMs - this.stoppedSince) / 60000))}분 만에)` : '';
         this.alert(`resume|${minuteKey}`, '자동매매 재개', `자동매매가 다시 실행 중입니다${after}.`, 'status');
@@ -141,6 +143,7 @@ export class OperatorAlertMonitor {
     }
 
     if (state.running) {
+      this.sawRunning = true;
       this.stoppedSince = null;
       this.lastHeldReminderAt = null;
     } else {
