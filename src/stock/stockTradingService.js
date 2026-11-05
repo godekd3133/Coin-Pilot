@@ -4,6 +4,9 @@
 // - 운영자가 중지한 트레이더는 desiredRunning=false로 기록되어 재부팅 후에도 중지 상태를 유지한다.
 // - 대상 종목: STOCK_SYMBOLS가 비어 있으면 실시간 거래대금·거래량·토스 거래대금·
 //   하락률·상승률 순위(각 최대 100)를 합쳐 현재 시드로 1주 이상 살 수 있는 종목을 고른다.
+// - 전체 종목 감시: 코스피·코스닥 상장 보통주 전체(약 2,500개)의 현재가를 10초마다 받아
+//   분 단위 가격 이력을 만들고, 최근 5분 고점 대비 급락한 종목을 그 분의 1분봉 스캔에
+//   우선 넣는다(전 종목 1분봉을 매분 받는 것은 rate limit상 약 2.5분이 걸려 불가능).
 // - 토스 WebSocket에는 분봉 채널이 없고 체결 프레임은 유실·누적거래량 부재로 분봉을
 //   복원할 수 없다(공식 스펙). 그래서 1분봉은 분이 바뀔 때마다 한 번만 REST로 훑고,
 //   10초 사이클은 그 분의 스냅샷과 현재가로 진입·청산을 판단한다. 이전 분의 스냅샷은
@@ -17,6 +20,12 @@ import { createStockHorizonRuntime } from '../portfolio/horizonService.js';
 
 const UNIVERSE_REFRESH_MS = 30 * 60 * 1000;
 const MINUTE_MS = 60 * 1000;
+const LISTING_REFRESH_MS = 12 * 60 * 60 * 1000;
+const LISTING_MARKETS = ['KOSPI', 'KOSDAQ'];
+const MOVER_LOOKBACK_MINUTES = 5;
+const MOVER_MIN_DROP_PERCENT = 1;
+// 마지막 체결이 이보다 오래된 종목은 유동성이 없다고 보고 급락 후보에서 뺀다.
+const MOVER_MAX_QUOTE_AGE_MS = 2 * MINUTE_MS;
 // 순위 API는 종류당 최대 100건이다. 거래대금 순서를 우선하고 나머지로 넓힌다.
 const UNIVERSE_RANKING_TYPES = [
   'MARKET_TRADING_AMOUNT',
@@ -38,6 +47,7 @@ export function createStockConfig(env = {}) {
     liveEnabled: env.STOCK_LIVE_ENABLED ?? env.DRY_RUN === false,
     symbols: Array.isArray(env.STOCK_SYMBOLS) ? env.STOCK_SYMBOLS.map(s => String(s).trim()).filter(Boolean) : [],
     maxSymbols: env.STOCK_MAX_SYMBOLS ?? 300,
+    watchAllStocks: env.STOCK_WATCH_ALL ?? true,
     minPrice: env.STOCK_MIN_PRICE ?? 1000,
     cycleIntervalMs: env.STOCK_CYCLE_INTERVAL_MS ?? 10000,
     trader: {
@@ -110,6 +120,12 @@ export class StockTradingService {
     this.universeUpdatedAt = 0;
     this.lastUniverseError = null;
     this.candleSnapshot = null;
+    this.allSymbols = [];
+    this.allSymbolsUpdatedAt = 0;
+    this.lastListingError = null;
+    this.priceHistory = new Map();
+    this.priceCeiling = Infinity;
+    this.lastMovers = [];
     this.lastCandleScan = null;
     this._candleScanInFlight = null;
     this._timer = null;
@@ -146,6 +162,7 @@ export class StockTradingService {
     }
     try {
       const ceiling = await this._affordablePriceCeiling();
+      this.priceCeiling = ceiling;
       const seen = new Set();
       const universe = [];
       let rankingFailures = 0;
@@ -176,6 +193,78 @@ export class StockTradingService {
     return this.universe;
   }
 
+  /** 코스피·코스닥 상장 보통주 전체 목록. 실패하면 순위 기반 유니버스만 쓴다. */
+  async refreshListings() {
+    if (this.config.symbols.length > 0 || this.config.watchAllStocks === false) return this.allSymbols;
+    if (this.allSymbols.length > 0 && this.now() - this.allSymbolsUpdatedAt < LISTING_REFRESH_MS) return this.allSymbols;
+    try {
+      const symbols = new Set();
+      for (const market of LISTING_MARKETS) {
+        for (const item of await this.client.listStocks(market)) {
+          if (item?.symbol) symbols.add(String(item.symbol));
+        }
+      }
+      if (symbols.size > 0) {
+        this.allSymbols = [...symbols];
+        this.allSymbolsUpdatedAt = this.now();
+        this.lastListingError = null;
+      }
+    } catch (error) {
+      this.lastListingError = `전체 종목 목록 조회 실패: ${error.message}`;
+      // 다음 시도까지 반복 호출하지 않도록 잠시 미룬다.
+      this.allSymbolsUpdatedAt = this.now() - LISTING_REFRESH_MS + 10 * MINUTE_MS;
+    }
+    return this.allSymbols;
+  }
+
+  /** 분마다 마지막 현재가를 기록한다(종목당 최근 몇 분만 유지). */
+  recordPrices(prices, nowMs) {
+    const minute = Math.floor(nowMs / MINUTE_MS);
+    for (const [symbol, quote] of prices) {
+      let history = this.priceHistory.get(symbol);
+      if (!history) {
+        history = [];
+        this.priceHistory.set(symbol, history);
+      }
+      const last = history.at(-1);
+      const entry = { minute, price: quote.price, quoteMs: Date.parse(quote.timestamp) || null };
+      if (last?.minute === minute) history[history.length - 1] = entry;
+      else history.push(entry);
+      while (history.length > MOVER_LOOKBACK_MINUTES + 1) history.shift();
+    }
+  }
+
+  /** 최근 5분 고점 대비 급락했고 최근 체결이 있는 종목, 하락폭 큰 순. */
+  findMovers(nowMs, limit) {
+    const movers = [];
+    for (const [symbol, history] of this.priceHistory) {
+      if (history.length < 3) continue;
+      const latest = history.at(-1);
+      if (latest.quoteMs === null || nowMs - latest.quoteMs > MOVER_MAX_QUOTE_AGE_MS) continue;
+      if (latest.price < this.config.minPrice || latest.price > this.priceCeiling) continue;
+      const high = Math.max(...history.map(item => item.price));
+      const dropPercent = (latest.price - high) / high * 100;
+      if (dropPercent <= -MOVER_MIN_DROP_PERCENT) movers.push({ symbol, dropPercent });
+    }
+    movers.sort((a, b) => a.dropPercent - b.dropPercent);
+    return movers.slice(0, limit);
+  }
+
+  /** 이번 분 1분봉 스캔 대상: 급락 종목을 먼저, 나머지는 순위 유니버스로 채운다. */
+  composeScanUniverse(rankingUniverse, nowMs) {
+    const moverLimit = this.allSymbols.length > 0 ? Math.floor(this.config.maxSymbols / 3) : 0;
+    this.lastMovers = moverLimit > 0 ? this.findMovers(nowMs, moverLimit) : [];
+    const scan = [];
+    const seen = new Set();
+    for (const symbol of [...this.lastMovers.map(item => item.symbol), ...rankingUniverse]) {
+      if (seen.has(symbol)) continue;
+      seen.add(symbol);
+      scan.push(symbol);
+      if (scan.length >= this.config.maxSymbols) break;
+    }
+    return scan;
+  }
+
   async tick() {
     if (this._tickInFlight) return this._tickInFlight;
     this._tickInFlight = (async () => {
@@ -186,15 +275,20 @@ export class StockTradingService {
         for (const trader of running) await trader.runCycle([]);
         return;
       }
-      const fullUniverse = await this.refreshUniverse();
-      const minute = Math.floor(this.now() / MINUTE_MS);
-      if (market.canEnter && this.candleSnapshot?.minute !== minute) this._startCandleScan(fullUniverse, minute);
+      const rankingUniverse = await this.refreshUniverse();
+      const allSymbols = await this.refreshListings();
+      const nowMs = this.now();
+      const minute = Math.floor(nowMs / MINUTE_MS);
       // 진입 후보는 이번 분의 1분봉 스냅샷이 있는 종목만이다. 스캔 중이면 보유 청산만 점검한다.
       const snapshot = market.canEnter && this.candleSnapshot?.minute === minute ? this.candleSnapshot : null;
-      const universe = snapshot ? fullUniverse.filter(symbol => snapshot.candles.has(symbol)) : [];
-      const symbols = [...new Set(running.flatMap(trader => trader.requiredSymbols(universe)))];
+      const universe = snapshot ? snapshot.symbols.filter(symbol => snapshot.candles.has(symbol)) : [];
+      const symbols = [...new Set([...running.flatMap(trader => trader.requiredSymbols(universe)), ...allSymbols])];
       // 같은 사이클의 모의/실전이 동일 시세·캔들을 보도록 한 번만 조회해 공유한다.
       const prices = symbols.length > 0 ? await this.client.getPrices(symbols) : new Map();
+      this.recordPrices(prices, nowMs);
+      if (market.canEnter && this.candleSnapshot?.minute !== minute) {
+        this._startCandleScan(this.composeScanUniverse(rankingUniverse, nowMs), minute);
+      }
       const candlesBySymbol = snapshot?.candles ?? new Map();
       for (const trader of running) await trader.runCycle(universe, { prices, candlesBySymbol });
     })()
@@ -231,7 +325,7 @@ export class StockTradingService {
         completed: completedInMinute
       };
       // 다음 분으로 넘어간 스캔 결과는 이미 낡았으므로 버린다.
-      if (completedInMinute) this.candleSnapshot = { minute, candles };
+      if (completedInMinute) this.candleSnapshot = { minute, candles, symbols: universe };
     })()
       .catch(error => this.log.error?.(`❌ [주식] 1분봉 스캔 오류: ${error.message}`))
       .finally(() => {
@@ -306,6 +400,9 @@ export class StockTradingService {
       universeUpdatedAt: this.universeUpdatedAt ? new Date(this.universeUpdatedAt).toISOString() : null,
       universeError: this.lastUniverseError,
       candleScan: this.lastCandleScan,
+      watchedStocks: this.allSymbols.length,
+      listingError: this.lastListingError,
+      movers: this.lastMovers.slice(0, 10),
       paper: this.traders.paper?.getStatus() ?? null,
       live: this.traders.live?.getStatus() ?? null,
       horizons: Object.fromEntries(Object.entries(this.horizons).map(([mode, runtime]) => [mode, runtime.getStatus()]))

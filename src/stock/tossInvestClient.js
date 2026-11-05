@@ -17,6 +17,7 @@ const GROUP_MIN_INTERVAL_MS = {
   MARKET_DATA: 80,
   MARKET_DATA_CHART: 60,
   RANKING: 250,
+  STOCK_ALL: 1000,
   ORDER: 120,
   ORDER_HISTORY: 250,
   ORDER_INFO: 350
@@ -253,6 +254,15 @@ export class TossInvestClient {
       before = result.nextBefore;
     }
     return candles;
+  }
+
+  /** 시장별 상장 종목 전체 목록(보통주 등 STOCK, 상장 중). 일 1회 갱신 데이터. */
+  async listStocks(market) {
+    const result = await this.request('GET', '/api/v1/stocks/all', {
+      group: 'STOCK_ALL',
+      query: { market, status: 'ACTIVE', securityType: 'STOCK' }
+    });
+    return Array.isArray(result) ? result : [];
   }
 
   async getRankings({ type = 'MARKET_TRADING_AMOUNT', duration = 'realtime', count = 100 } = {}) {

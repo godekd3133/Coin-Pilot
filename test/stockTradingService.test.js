@@ -109,3 +109,33 @@ test('다음 분으로 넘어간 1분봉 스캔 결과는 버린다', async () =
   assert.deepEqual(candleCalls, ['A']);
   assert.ok(cycles.every(cycle => cycle.universe.length === 0));
 });
+
+test('전체 종목 현재가를 감시해 5분 고점 대비 급락한 유동 종목을 1분봉 스캔에 먼저 넣는다', async () => {
+  const now = { value: Date.parse('2026-11-05T01:00:05Z') };
+  const candleCalls = [];
+  const { service } = makeService({
+    now,
+    candleCalls,
+    rankings: { MARKET_TRADING_AMOUNT: [ranking('A'), ranking('B')] }
+  });
+  service.traders.paper.availableCash = async () => 100000;
+  const quotes = { DROP: 10000, FLAT: 10000, STALE: 10000, A: 5000, B: 5000 };
+  service.client.listStocks = async market => (market === 'KOSPI'
+    ? [{ symbol: 'DROP' }, { symbol: 'FLAT' }]
+    : [{ symbol: 'STALE' }]);
+  service.client.getPrices = async symbols => new Map(symbols.map(symbol => [symbol, {
+    price: quotes[symbol] ?? 5000,
+    timestamp: new Date(symbol === 'STALE' ? now.value - 10 * 60000 : now.value - 1000).toISOString()
+  }]));
+
+  for (let minute = 0; minute < 3; minute++) {
+    if (minute === 2) { quotes.DROP = 9700; quotes.STALE = 9000; }
+    await service.tick();
+    await service._candleScanInFlight;
+    await service._tickInFlight;
+    now.value += 60000;
+  }
+  assert.equal(service.getStatus().watchedStocks, 3);
+  assert.deepEqual(service.lastMovers.map(item => item.symbol), ['DROP']);
+  assert.deepEqual(service.candleSnapshot.symbols, ['DROP', 'A', 'B']);
+});
