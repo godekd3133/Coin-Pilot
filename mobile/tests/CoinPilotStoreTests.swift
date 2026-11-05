@@ -1051,7 +1051,7 @@ struct CoinPilotStoreTests {
                      "Preview should normalize a restored LIVE workspace to its sample Paper view.")
         precondition(store.account == nil && store.status == nil && store.trades.isEmpty,
                      "A missing Preview resource must not display data from the saved LIVE server profile.")
-        precondition(store.dashboardMessage?.contains("앱에 포함된 예시 자료") == true,
+        precondition(store.dashboardMessage?.contains("앱 내장 예시 자료") == true,
                      "A missing Preview pack should show a local data error instead of a server error.")
         let networkCalls = await api.networkCallCount()
         precondition(networkCalls == 0,
@@ -2120,15 +2120,15 @@ struct CoinPilotStoreTests {
 
         precondition(store.state(for: "market-prices").isCurrent,
                      "One thinly traded market must not make the freshly collected full snapshot unavailable.")
-        precondition(store.freshnessLabel(for: "market-prices").contains("종목 1개 시세가 오래됐어요"),
+        precondition(store.freshnessLabel(for: "market-prices").contains("종목 1개 시세 오래됨"),
                      "The dashboard must visibly identify the stale market count.")
         precondition(store.manualOrderBlockReason(for: "KRW-BTC") == nil,
                      "One old market must not block a fresh order target.")
-        precondition(store.manualOrderBlockReason(for: "KRW-ETH")?.contains("오래됐어요") == true,
+        precondition(store.manualOrderBlockReason(for: "KRW-ETH")?.contains("오래됨") == true,
                      "A recent server fetch must not make the stale exchange-price timestamp orderable.")
         precondition(store.marketQuoteFreshnessMessage(for: "KRW-BTC") == "최근 체결 시각을 확인했습니다.",
                      "Market details should describe a fresh selected quote using the same order-age rule.")
-        precondition(store.marketQuoteFreshnessMessage(for: "KRW-ETH").contains("오래됐어요"),
+        precondition(store.marketQuoteFreshnessMessage(for: "KRW-ETH").contains("오래됨"),
                      "Market details should explain when this selected quote is stale.")
         let submitted = await store.submitManualBuy(coin: "KRW-ETH", amount: 5_000)
         let mutationPaths = await api.recordedMutationPaths()
@@ -2155,7 +2155,7 @@ struct CoinPilotStoreTests {
             fetchedAt: recentFetchTime
         ))
         await store.refresh()
-        precondition(store.manualOrderBlockReason(for: "KRW-BTC")?.contains("앞서") == true,
+        precondition(store.manualOrderBlockReason(for: "KRW-BTC")?.contains("앞섬") == true,
                      "A future-dated quote beyond the clock-skew allowance must be blocked.")
         precondition(store.manualOrderBlockReason(for: "KRW-ETH") == nil,
                      "A future timestamp for one market must not block a different fresh order target.")
@@ -2181,9 +2181,9 @@ struct CoinPilotStoreTests {
             fetchedAt: recentFetchTime
         ))
         await store.refresh()
-        precondition(store.marketQuoteFreshnessIssue(for: "KRW-BTC")?.contains("최신 여부를 확인할 수") == true,
+        precondition(store.marketQuoteFreshnessIssue(for: "KRW-BTC")?.contains("최신 여부 확인 불가") == true,
                      "A server freshness=false result must not be shown or treated as current solely because its timestamp is young.")
-        precondition(store.manualOrderBlockReason(for: "KRW-BTC")?.contains("최신 여부를 확인할 수") == true,
+        precondition(store.manualOrderBlockReason(for: "KRW-BTC")?.contains("최신 여부 확인 불가") == true,
                      "An explicitly unverified quote must fail closed for its selected order target.")
         precondition(store.manualOrderBlockReason(for: "KRW-ETH") == nil,
                      "A server freshness failure for one market must not block another verified fresh target.")
@@ -2298,7 +2298,7 @@ struct CoinPilotStoreTests {
             fatalError("A stale market list must prevent the snapshot from being current.")
         }
         precondition(staleListSuccess == previousSuccess &&
-                     store.freshnessLabel(for: "market-prices").contains("종목 목록 갱신이 필요"),
+                     store.freshnessLabel(for: "market-prices").contains("종목 목록 갱신 필요"),
                      "A stale market list should retain the last complete time and explain the list issue.")
 
         await api.setMarketSnapshot(marketSnapshotBody(
@@ -2313,7 +2313,7 @@ struct CoinPilotStoreTests {
             fatalError("An invalid fetchedAt timestamp must prevent the snapshot from being current.")
         }
         precondition(invalidTimeSuccess == previousSuccess &&
-                     store.freshnessLabel(for: "market-prices").contains("수집 시각을 확인할 수 없어요"),
+                     store.freshnessLabel(for: "market-prices").contains("수집 시각 확인 불가"),
                      "An invalid fetchedAt should retain the last complete time and explain the bad timestamp.")
 
         let validFetchTime = "2026-09-29T12:02:03.000Z"
@@ -2331,7 +2331,7 @@ struct CoinPilotStoreTests {
         }
         precondition(invalidSourceSuccess == previousSuccess &&
                      store.marketSnapshotFetchedAt == validFetchTime &&
-                     store.freshnessLabel(for: "market-prices").contains("원본 시세 시각을 확인할 수 없어요"),
+                     store.freshnessLabel(for: "market-prices").contains("원본 시세 시각 확인 불가"),
                      "An invalid sourceAsOf should remain unverified while preserving the valid fetchedAt.")
 
         await api.setMarketSnapshot(marketSnapshotBody(
@@ -2348,7 +2348,7 @@ struct CoinPilotStoreTests {
         }
         precondition(missingSourceSuccess == previousSuccess &&
                      store.marketSnapshotFetchedAt == validFetchTime &&
-                     store.freshnessLabel(for: "market-prices").contains("원본 시세 시각을 확인할 수 없어요"),
+                     store.freshnessLabel(for: "market-prices").contains("원본 시세 시각 확인 불가"),
                      "A missing sourceAsOf should remain unverified while preserving the valid fetchedAt.")
 
         await api.setMarketSnapshot(marketSnapshotBody(
@@ -2363,7 +2363,7 @@ struct CoinPilotStoreTests {
             fatalError("A missing fetchedAt timestamp must prevent the snapshot from being current.")
         }
         precondition(missingTimeSuccess == previousSuccess &&
-                     store.freshnessLabel(for: "market-prices").contains("수집 시각을 확인할 수 없어요"),
+                     store.freshnessLabel(for: "market-prices").contains("수집 시각 확인 불가"),
                      "A missing fetchedAt should remain visibly unverified.")
     }
 
@@ -2471,7 +2471,7 @@ struct CoinPilotStoreTests {
         precondition(paperStore.serverModeMatchesWorkspace == false, "A mode mismatch must keep the workspace locked.")
         precondition(paperStore.workspaceModeMismatchMessage?.contains("모의투자 서버가 연결") == true,
                      "The connection explanation should name the actual server mode.")
-        precondition(paperStore.workspaceModeMismatchMessage?.contains("실거래 서버 주소를 확인") == true,
+        precondition(paperStore.workspaceModeMismatchMessage?.contains("실거래 서버 주소 확인") == true,
                      "A mismatch should tell the user which account connection to correct.")
         precondition(defaults.string(forKey: "coinpilot.dashboardUrl.live") == nil,
                      "A mismatched Paper URL must not be saved as the LIVE profile address.")
@@ -2749,7 +2749,7 @@ struct CoinPilotStoreTests {
         await configureTuningReads(api)
         await api.setFailedPaths(["/api/investment-config"])
         let saved = await store.saveTuning(["rsiPeriod": 25])
-        precondition(saved && !store.lastTuningSaveRefreshed && store.tuningMessage?.contains("저장은 완료됐지만") == true,
+        precondition(saved && !store.lastTuningSaveRefreshed && store.tuningMessage?.contains("최신 값 확인 실패") == true,
                      "An accepted write with a failed read must not pretend the refreshed values are confirmed.")
     }
 
@@ -2954,7 +2954,7 @@ struct CoinPilotStoreTests {
         await api.setFailedPaths(["/api/account"])
         await store.refresh()
         precondition(store.dashboardMessage?.contains(reason) == true &&
-                     store.dashboardMessage?.contains("일부 정보를 새로 확인하지 못했어요") == true,
+                     store.dashboardMessage?.contains("일부 정보 갱신 실패") == true,
                      "A read failure must remain visible alongside the last rejected control request.")
         await api.setFailedPaths(["/api/status"])
         await store.refresh()
@@ -3267,7 +3267,7 @@ struct CoinPilotStoreTests {
                      "A sample isRunning flag must not appear as an active server state.")
         precondition(!automationPresentation.showsControls,
                      "Bundled preview must not show server auto-trading controls.")
-        precondition(automationPresentation.explanation.contains("실제 서버에서 자동매매를 실행하지 않습니다"),
+        precondition(automationPresentation.explanation.contains("실제 서버 자동매매 없음"),
                      "Preview must explicitly say the server engine is not running.")
         let previewOrderPresentation = CoinPilotOrderReviewPresentation(
             isBundledPreview: true,
@@ -3280,7 +3280,7 @@ struct CoinPilotStoreTests {
                      "Bundled preview must distinguish sample orders from server orders.")
         precondition(previewOrderPresentation.accountTitle == "예시 계좌",
                      "Bundled preview must not imply an editable server wallet.")
-        precondition(previewOrderPresentation.buttonTitle == "예시에서는 주문할 수 없어요",
+        precondition(previewOrderPresentation.buttonTitle == "예시 데이터: 주문 불가",
                      "Preview order CTA must describe the unavailable action.")
         precondition(!previewOrderPresentation.isEnabled && !previewOrderPresentation.showsWalletControls,
                      "Bundled preview must never expose enabled order or wallet controls.")
@@ -3398,7 +3398,7 @@ struct CoinPilotStoreTests {
             fatalError("A partial failure should leave successfully refreshed resources current.")
         }
         precondition(store.dashboardMessage?.contains("일부 정보") == true, "The dashboard should explain a partial refresh.")
-        precondition(store.freshnessLabel(for: "market-prices").contains("앱에서 시세를 새로 확인하지 못했어요"),
+        precondition(store.freshnessLabel(for: "market-prices").contains("시세 갱신 실패"),
                      "A failed market refresh should be distinguished from the exchange quote timestamp.")
     }
 
@@ -3480,9 +3480,9 @@ struct CoinPilotStoreTests {
         precondition(connected, "Protective-only status should not make read-only account data unavailable.")
         precondition(store.status?.runtimeState == "PROTECTIVE_ONLY", "The runtime state should reach the app model.")
         precondition(store.status?.protectiveMonitorActive == true, "The app should know that position monitoring remains active.")
-        precondition(store.runtimeSafetyMessage?.contains("시세가 끊겨") == true &&
+        precondition(store.runtimeSafetyMessage?.contains("시세 끊김") == true &&
                      store.runtimeSafetyMessage?.contains("위험 감시") == true &&
-                     store.runtimeSafetyMessage?.contains("서버의 복구 설정") == true,
+                     store.runtimeSafetyMessage?.contains("서버 복구 설정") == true,
                      "The home screen should explain the price interruption, active protection, and server recovery policy.")
     }
 

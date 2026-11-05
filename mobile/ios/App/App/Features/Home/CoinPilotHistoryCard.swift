@@ -31,7 +31,7 @@ struct CoinPilotHistoryCard: View {
                         : "저장된 기록의 평가액을 확인할 수 없습니다."
                 )
                 if store.history.contains(where: { $0.valuationStatus == "unknown_legacy" }) {
-                    Text("일부 이전 기록은 당시 시세 평가 근거를 확인할 수 없어요.")
+                    Text("일부 이전 기록은 당시 시세 평가 근거 없음.")
                         .font(.footnote)
                         .foregroundColor(CPColor.amber)
                         .fixedSize(horizontal: false, vertical: true)

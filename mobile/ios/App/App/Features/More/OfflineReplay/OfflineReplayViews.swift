@@ -15,10 +15,10 @@ struct CoinPilotLocalMarketView: View {
             VStack(alignment: .leading, spacing: 14) {
                 NativeCard {
                     VStack(alignment: .leading, spacing: 10) {
-                        Label("오프라인 시세", systemImage: "internaldrive")
+                        Text("오프라인 시세")
                             .font(.subheadline.weight(.semibold))
                             .foregroundColor(CPColor.blue)
-                        Text("앱에 저장된 고정 시세로 가격 흐름을 보고 과거 구간을 계산해요. 출처와 최신 여부는 온라인에서 확인하지 않으며, 계좌 연결이나 주문 기능은 없습니다.")
+                        Text("앱 내장 고정 시세로 과거 구간 계산. 온라인 확인·계좌 연결·주문 없음.")
                             .font(.subheadline)
                             .foregroundColor(CPColor.secondaryInk)
                             .fixedSize(horizontal: false, vertical: true)
@@ -279,7 +279,7 @@ struct CoinPilotLocalMarketDetailView: View {
                     NativeCard {
                         VStack(alignment: .leading, spacing: 10) {
                             SectionHeading(title: "과거 시세 재생")
-                            Text("선택한 간격의 전체 캔들로 기본 전략을 계산해요. 결과는 이 기기에 저장하고 주문은 보내지 않습니다.")
+                            Text("선택 간격 전체 캔들로 기본 전략 계산. 결과는 기기에 저장, 주문 없음.")
                                 .font(.subheadline)
                                 .foregroundColor(CPColor.secondaryInk)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -302,7 +302,7 @@ struct CoinPilotLocalMarketDetailView: View {
                                         Image(systemName: "play.fill")
                                             .accessibilityHidden(true)
                                     }
-                                    Text(store.isRunningOfflineReplay ? "과거 시세를 살펴보고 있어요" : "과거 구간 돌려보기")
+                                    Text(store.isRunningOfflineReplay ? "과거 시세 재생 중" : "과거 구간 돌려보기")
                                 }
                                 .frame(maxWidth: .infinity)
                             }
@@ -438,7 +438,7 @@ struct CoinPilotLocalMarketDetailView: View {
                     }
                     .buttonStyle(CoinPilotSecondaryButtonStyle())
                 } else if !sessionMatchesSelection {
-                    Text("다른 시장 또는 간격의 재생 기록이 있습니다. 처음부터 다시 설정한 뒤 시작하세요.")
+                    Text("다른 시장·간격의 재생 기록 있음. 처음부터 재설정 필요.")
                         .font(.footnote)
                         .foregroundColor(CPColor.amber)
                         .fixedSize(horizontal: false, vertical: true)

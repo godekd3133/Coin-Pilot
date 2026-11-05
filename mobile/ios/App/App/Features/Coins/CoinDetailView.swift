@@ -99,7 +99,7 @@ struct CoinPilotMarketDetailView: View {
                             MetadataLine(text: store.marketCandleOriginLabel(candleCount: store.candles.count))
                                 .font(.caption2).foregroundColor(CPColor.secondaryInk)
                             if store.loadingFeatures.contains("market") {
-                                Text("가격 흐름을 새로 확인하고 있어요.")
+                                Text("가격 흐름 갱신 중")
                                     .font(.caption2).foregroundColor(CPColor.secondaryInk)
                             }
                         }
@@ -108,7 +108,7 @@ struct CoinPilotMarketDetailView: View {
                             store.selectedMarket = coin
                             showsOrderSheet = true
                         } label: {
-                            Label("이 종목 주문 열기", systemImage: "arrow.left.arrow.right")
+                            Text("이 종목 주문 열기")
                                 .frame(maxWidth: .infinity, minHeight: 45)
                         }
                         .buttonStyle(CoinPilotSecondaryButtonStyle())
@@ -247,9 +247,9 @@ struct CoinPilotPriceRangeBar: View {
         VStack(spacing: 5) {
             GeometryReader { geometry in
                 ZStack(alignment: .leading) {
-                    Capsule()
+                    Rectangle()
                         .fill(CPColor.line)
-                        .frame(height: 4)
+                        .frame(height: 2)
                         .frame(maxHeight: .infinity, alignment: .center)
                     Circle()
                         .fill(CPColor.blue)
@@ -525,7 +525,6 @@ struct CoinPilotRsiGauge: View {
                         Rectangle().fill(CPColor.red.opacity(0.18)).frame(width: geometry.size.width * 0.3, height: 4)
                     }
                     .frame(maxHeight: .infinity, alignment: .center)
-                    .clipShape(Capsule())
                     if let value, value.isFinite {
                         Circle()
                             .fill(zone.tint)

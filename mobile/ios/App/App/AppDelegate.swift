@@ -61,7 +61,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
 
     func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
-        CoinPilotOrderNotifications.shared.registrationError = "기기 알림 등록을 완료하지 못했습니다. 다시 연결해 주세요."
+        CoinPilotOrderNotifications.shared.registrationError = "기기 알림 등록 실패. 다시 연결 필요."
     }
 
     func applicationWillResignActive(_ application: UIApplication) {

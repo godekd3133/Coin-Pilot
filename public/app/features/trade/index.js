@@ -91,7 +91,7 @@ export default {
       const market = markets.find(row => row.coin === selectedCoin) || null;
       const position = coinPositions(s.account).find(row => row.coin === selectedCoin) || null;
       const { gate } = context(market);
-      const quoteIssue = market ? marketQuoteFreshnessIssue(market, s.freshnessOptions) : '이 종목의 시세를 확인할 수 없어요.';
+      const quoteIssue = market ? marketQuoteFreshnessIssue(market, s.freshnessOptions) : '시세 없음.';
       const marketPrice = quoteIssue === null ? Number(market.price) : null;
       const holdingValue = hasFiniteValue(position?.currentValue) ? Number(position.currentValue) : null;
       const estQuantity = marketPrice ? amount / marketPrice : null;
@@ -117,7 +117,7 @@ export default {
             <div><span>보유 평가</span><strong>${holdingValue !== null ? won(holdingValue) : position ? '평가액 미제공' : '보유 없음'}</strong></div>
             <div><span>예상 수수료 (0.05%)</span><strong>${amount ? won(amount * FEE_RATE) : '—'}</strong></div>
           </div>
-          <p class="cp-lock-line">${icon(gate.allowed ? (s.isLive ? 'alert' : 'unlock') : 'lock', { size: 16 })}<span>${gate.allowed ? (s.isLive ? '실제 자금으로 체결됩니다. 체결 가격은 예상과 다를 수 있어요.' : '모의 체결로 기록되며 실제 자금은 사용되지 않아요.') : gate.reason}</span></p>
+          <p class="cp-lock-line">${icon(gate.allowed ? (s.isLive ? 'alert' : 'unlock') : 'lock', { size: 16 })}<span>${gate.allowed ? (s.isLive ? '실제 자금 체결. 체결가는 예상과 다를 수 있음.' : '모의 체결 · 실제 자금 미사용.') : gate.reason}</span></p>
           ${button({ label: submitLabel, variant: side === 'buy' ? 'up' : 'down', size: 'block', attrs: { 'data-action': 'submit-order' }, disabled: blocked })}
         </div>`
       }));
@@ -153,7 +153,7 @@ export default {
       render(slot('smart'), card({
         index: 2,
         title: '조건 주문',
-        subtitle: '거래대금 상위 시장에서 점수 순으로 분산 매수하거나, 정한 우선순위로 매도해요.',
+        subtitle: '거래대금 상위 시장 점수순 분산 매수 / 우선순위 매도.',
         body: html`<div class="cp-stack">
           <div data-slot="smart-lock">${gate.allowed ? '' : lockedNotice(gate.reason)}</div>
           <form class="cp-form" data-form="smart-buy">
@@ -182,16 +182,16 @@ export default {
       render(slot('bundles'), card({
         index: 3,
         title: '리밸런싱 제안',
-        subtitle: '매도 신호가 있는 보유 코인과 매수 신호가 있는 코인을 묶어 제안해요.',
+        subtitle: '매도 신호 보유 코인 + 매수 신호 코인 묶음.',
         action: button({ label: state.status === 'loading' ? '분석 중…' : '제안 받기', size: 'sm', iconName: 'refresh', attrs: { 'data-action': 'load-bundles' }, disabled: state.status === 'loading' }),
-        body: state.status === 'idle' ? emptyState({ iconName: 'swap', title: '제안을 받아 보세요', body: '보유 코인과 시장 신호를 분석합니다. 주문은 직접 확인한 뒤에만 실행돼요.' })
+        body: state.status === 'idle' ? emptyState({ iconName: 'swap', title: '제안 없음', body: '보유 코인·시장 신호 분석. 주문은 확인 후 수동 실행.' })
           : state.status === 'loading' && !state.data ? skeleton({ lines: 3 })
-            : state.status === 'error' && !state.data ? emptyState({ iconName: 'alert', title: '제안을 불러오지 못했어요', body: ctx.toUserText(state.error?.message || '') })
+            : state.status === 'error' && !state.data ? emptyState({ iconName: 'alert', title: '제안 불러오기 실패', body: ctx.toUserText(state.error?.message || '') })
               : list(bundles.slice(0, 5).map((bundle, index) => html`<div class="cp-list-row">
                   <span class="cp-row-main"><span class="cp-row-title">${bundle.summary || `${symbolOf(bundle.sell?.coin)} → ${symbolOf(bundle.buy?.coin)}`}</span>
                   <span class="cp-row-sub">${ctx.toUserText(bundle.rationale || '')} · 점수 ${bundle.totalScore ?? '—'} · 매도 ${won(bundle.sell?.value)}</span></span>
                   ${button({ label: '실행', size: 'sm', variant: 'primary', disabled: !gate.allowed, attrs: { 'data-bundle': index } })}
-                </div>`), { empty: emptyState({ iconName: 'check', title: '지금은 제안이 없어요', body: ctx.toUserText(state.data?.note || '') }) })
+                </div>`), { empty: emptyState({ iconName: 'check', title: '제안 없음', body: ctx.toUserText(state.data?.note || '') }) })
       }));
     }
 
@@ -209,8 +209,8 @@ export default {
         index: 4,
         title: '매수·매도 검토',
         action: button({ label: state.status === 'loading' ? '분석 중…' : '분석', size: 'sm', iconName: 'refresh', attrs: { 'data-action': 'load-review' }, disabled: state.status === 'loading' }),
-        body: state.status === 'idle' ? emptyState({ iconName: 'pulse', title: '검토 결과를 받아 보세요', body: '거래대금이 많은 시장과 보유 포지션을 분석해요. 결과는 참고용이며 주문은 직접 실행해요.' })
-          : !data ? (state.status === 'error' ? emptyState({ iconName: 'alert', title: '검토 결과를 불러오지 못했어요', body: ctx.toUserText(state.error?.message || '') }) : skeleton({ lines: 4 }))
+        body: state.status === 'idle' ? emptyState({ iconName: 'pulse', title: '검토 결과 없음', body: '거래대금 상위 시장·보유 포지션 분석. 참고용, 주문은 수동.' })
+          : !data ? (state.status === 'error' ? emptyState({ iconName: 'alert', title: '검토 결과 불러오기 실패', body: ctx.toUserText(state.error?.message || '') }) : skeleton({ lines: 4 }))
             : html`<p class="cp-section-title" style="margin-bottom:4px">매수 검토</p>${list(rows(data.buyRecommendations, 'buy'), { empty: html`<p class="cp-caption">매수 조건에 맞는 종목이 없습니다.</p>` })}
               <p class="cp-section-title" style="margin:12px 0 4px">매도 검토</p>${list(rows(data.sellRecommendations, 'sell'), { empty: html`<p class="cp-caption">매도할 자산이 없습니다.</p>` })}`
       }));
@@ -222,14 +222,14 @@ export default {
       const position = coinPositions(s.account).find(row => row.coin === selectedCoin) || null;
       const { gate } = context(market);
       if (!gate.allowed) { ctx.ui.toast(gate.reason, 'warning'); return; }
-      if (!selectedCoin || amount <= 0) { ctx.ui.toast('자산과 주문 금액을 확인해주세요.', 'warning'); return; }
+      if (!selectedCoin || amount <= 0) { ctx.ui.toast('자산·주문 금액 확인 필요.', 'warning'); return; }
       if (side === 'buy' && amount < MIN_ORDER_KRW) { ctx.ui.toast('최소 매수 금액은 5,000원입니다.', 'warning'); return; }
       const unitPrice = Number(market?.price) > 0 ? Number(market.price) : number(position?.currentPrice);
       const sellQuantity = unitPrice > 0 ? amount / unitPrice : 0;
       if (side === 'sell' && !(sellQuantity > 0)) { ctx.ui.toast('매도할 수량을 계산할 수 없습니다.', 'warning'); return; }
       const actionText = side === 'buy' ? '매수' : '매도';
       const confirmed = await ctx.confirm({
-        title: `${symbolOf(selectedCoin)} ${actionText}를 실행할까요?`,
+        title: `${symbolOf(selectedCoin)} ${actionText} 실행`,
         message: side === 'buy' ? `${won(amount)} 시장가 매수 주문입니다.` : `${quantity(sellQuantity)} ${symbolOf(selectedCoin)} 시장가 매도 주문입니다.`,
         details: [
           ['작업공간', s.isLive ? '실전 (실제 자금)' : '모의투자'],
@@ -254,10 +254,10 @@ export default {
       const values = Object.fromEntries(new FormData(form).entries());
       const buy = kind === 'buy';
       const value = number(buy ? values.totalAmount : values.targetAmount);
-      if (!value || value < (buy ? 5000 : 1000)) { ctx.ui.toast(`최소 ${won(buy ? 5000 : 1000)} 이상 입력해주세요.`, 'warning'); return; }
+      if (!value || value < (buy ? 5000 : 1000)) { ctx.ui.toast(`최소 ${won(buy ? 5000 : 1000)} 이상`, 'warning'); return; }
       const strategyLabel = SMART_SELL_STRATEGIES.find(option => option.value === values.strategy)?.label;
       const confirmed = await ctx.confirm({
-        title: buy ? '조건 매수를 실행할까요?' : '우선순위 매도를 실행할까요?',
+        title: buy ? '조건 매수 실행' : '우선순위 매도 실행',
         message: buy ? `상위 마켓에 ${won(value)}을 분산 매수합니다.` : `보유 자산에서 ${won(value)}을 목표로 매도합니다.`,
         details: buy
           ? [['작업공간', s.isLive ? '실전 (실제 자금)' : '모의투자'], ['최소 점수', values.minScore], ['최대 종목', `${values.maxCoins}개`]]

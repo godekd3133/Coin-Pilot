@@ -39,17 +39,17 @@ export function createApi({ fetchImpl = (...args) => globalThis.fetch(...args), 
       if (!response.ok) {
         const serverMessage = data?.message || (typeof data?.error === 'string' ? data.error : data?.error?.message);
         const fallback = response.status >= 500
-          ? '서버에서 요청을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.'
-          : '요청을 처리하지 못했습니다. 다시 시도해 주세요.';
+          ? '서버 요청 처리 실패. 잠시 후 재시도.'
+          : '요청 처리 실패. 재시도 필요.';
         throw new ApiError(toUserText(serverMessage || fallback), { status: response.status, code: data?.code || data?.error?.code || null, body: data });
       }
       return data;
     } catch (error) {
       if (error instanceof ApiError) throw error;
       if (error?.name === 'AbortError') {
-        throw new ApiError('서버 응답이 늦습니다. 연결 상태를 확인한 뒤 다시 시도하세요.', { code: 'timeout', cause: error });
+        throw new ApiError('서버 응답 지연. 연결 확인 후 재시도.', { code: 'timeout', cause: error });
       }
-      throw new ApiError('서버에 연결하지 못했습니다. 연결 상태를 확인해 주세요.', { code: 'network', cause: error });
+      throw new ApiError('서버 연결 실패. 연결 확인 필요.', { code: 'network', cause: error });
     } finally {
       clearTimeout(timer);
       signal?.removeEventListener?.('abort', onAbort);

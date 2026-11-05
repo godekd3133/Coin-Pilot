@@ -90,7 +90,7 @@ struct CoinPilotAIDeskView: View {
                     error: store.featureMessages["ai"]
                 )
                 providerStatus
-                Text("AI 의견은 참고 정보이며 자동 주문에 사용하지 않습니다. 주문 화면에서 직접 확인해 주세요.")
+                Text("AI 의견은 참고용. 자동 주문에 쓰지 않음.")
                     .font(.caption).foregroundColor(CPColor.secondaryInk)
             }
         }

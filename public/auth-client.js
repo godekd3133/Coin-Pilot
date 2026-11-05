@@ -171,13 +171,13 @@
     style.textContent = `
       #cp-auth-gate{position:fixed;inset:0;z-index:99999;display:flex;align-items:center;justify-content:center;padding:24px;background:#f9fafb;font-family:inherit;color:#191f28;overflow-y:auto;box-sizing:border-box}
       #cp-auth-gate[hidden]{display:none}
-      #cp-auth-gate .cp-auth-card{width:min(100%,400px);background:#fff;border:1px solid #e5e8eb;border-top:2px solid #027648;border-radius:10px;padding:24px;box-shadow:none;color:#191f28}
+      #cp-auth-gate .cp-auth-card{width:min(100%,400px);background:#fff;border:1px solid #e5e8eb;border-radius:8px;padding:24px;box-shadow:none;color:#191f28}
       #cp-auth-gate h1{font-size:22px;margin:0 0 8px;font-weight:680;letter-spacing:-.035em}
       #cp-auth-gate p{font-size:14px;line-height:1.55;color:#6b7684;margin:0 0 16px}
       #cp-auth-gate label{display:block;margin:0 0 8px;color:#191f28;font-size:12px;font-weight:650}
-      #cp-auth-gate input{width:100%;box-sizing:border-box;min-height:50px;padding:11px 12px;border-radius:8px;border:1px solid #d1d6db;background:#fff;color:#191f28;font-size:14px;outline:none}
+      #cp-auth-gate input{width:100%;box-sizing:border-box;min-height:50px;padding:11px 12px;border-radius:6px;border:1px solid #d1d6db;background:#fff;color:#191f28;font-size:14px;outline:none}
       #cp-auth-gate input:focus{border-color:#1b64da;box-shadow:0 0 0 2px rgba(27,100,218,.12)}
-      #cp-auth-gate button{width:100%;min-height:48px;margin-top:12px;padding:11px 12px;border:0;border-radius:8px;background:#1b64da;color:#fff;font-size:14px;font-weight:650;cursor:pointer}
+      #cp-auth-gate button{width:100%;min-height:48px;margin-top:12px;padding:11px 12px;border:0;border-radius:6px;background:#1b64da;color:#fff;font-size:14px;font-weight:650;cursor:pointer}
       #cp-auth-gate button:disabled{opacity:.5;cursor:default}
       #cp-auth-gate .cp-auth-error{min-height:18px;margin-top:10px;font-size:12px;color:#a51926}
       #cp-auth-gate .cp-auth-hint{margin-top:14px;font-size:12px;color:#6b7684;line-height:1.5}
@@ -197,13 +197,7 @@
     overlay.innerHTML = `
       <form class="cp-auth-card" novalidate>
         <p class="cp-auth-brand">CoinPilot</p>
-        <h1>내 자산과 거래를 한눈에</h1>
-        <p>연결한 계좌의 변화와 자동매매 상태를 함께 확인하세요.</p>
-        <ul class="cp-auth-benefits">
-          <li><strong>얼마나 달라졌는지</strong>자산 평가액과 실현 손익을 구분해 확인해요.</li>
-          <li><strong>어떤 거래가 있었는지</strong>최근 거래와 보유 코인을 살펴봐요.</li>
-          <li><strong>지금 확인할 일이 있는지</strong>시세 갱신과 자동매매 중단 상태를 확인해요.</li>
-        </ul>
+        <h1>접속</h1>
         <div class="cp-auth-fields cp-auth-password-fields" hidden>
           <label for="cp-auth-username">아이디</label>
           <input id="cp-auth-username" type="text" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" aria-describedby="cp-auth-error">
@@ -212,12 +206,12 @@
         </div>
         <div class="cp-auth-fields cp-auth-token-fields">
           <label for="cp-auth-token">서버 접속 토큰</label>
-          <input id="cp-auth-token" type="password" name="token" autocomplete="off" autocapitalize="none" spellcheck="false" aria-describedby="cp-auth-help cp-auth-error" placeholder="관리자에게 받은 접속 토큰">
+          <input id="cp-auth-token" type="password" name="token" autocomplete="off" autocapitalize="none" spellcheck="false" aria-describedby="cp-auth-help cp-auth-error" placeholder="접속 토큰">
         </div>
-        <button type="submit" class="cp-auth-submit">연결하고 내 현황 보기</button>
+        <button type="submit" class="cp-auth-submit">접속</button>
         <div id="cp-auth-error" class="cp-auth-error" role="alert"></div>
         <button type="button" class="cp-auth-switch" hidden>토큰으로 접속</button>
-        <div id="cp-auth-help" class="cp-auth-hint">토큰은 서버 관리자에게 받을 수 있어요. 거래소 API 키와는 다른 값입니다. 입력한 토큰은 이 브라우저에 저장됩니다.</div>
+        <div id="cp-auth-help" class="cp-auth-hint">서버 관리자 발급 토큰. 거래소 API 키와 다름. 이 브라우저에 저장됨.</div>
       </form>`;
     document.body.appendChild(overlay);
 
@@ -239,8 +233,8 @@
       switchButton.hidden = !passwordLoginAvailable;
       switchButton.textContent = loginMode === 'password' ? '토큰으로 접속' : '아이디로 로그인';
       helpBox.textContent = loginMode === 'password'
-        ? '한 번 로그인하면 모의투자와 실전을 앱 안에서 바로 오갈 수 있어요. 접속 권한은 이 브라우저에 저장됩니다.'
-        : '토큰은 서버 관리자에게 받을 수 있어요. 거래소 API 키와는 다른 값입니다. 입력한 토큰은 이 브라우저에 저장됩니다.';
+        ? '로그인 후 모의투자·실전 전환 가능. 접속 권한은 이 브라우저에 저장됨.'
+        : '서버 관리자 발급 토큰. 거래소 API 키와 다름. 이 브라우저에 저장됨.';
       errorBox.textContent = '';
     };
     switchButton.addEventListener('click', () => {
@@ -253,7 +247,7 @@
       const username = usernameInput.value.trim();
       const password = passwordInput.value;
       if (!username || !password) {
-        errorBox.textContent = '아이디와 비밀번호를 입력해 주세요.';
+        errorBox.textContent = '아이디와 비밀번호를 입력하십시오.';
         return;
       }
       button.disabled = true;
@@ -278,12 +272,12 @@
           return;
         }
         errorBox.textContent = response.status === 429
-          ? '로그인 시도가 많습니다. 잠시 후 다시 시도해 주세요.'
+          ? '로그인 시도 초과. 잠시 후 재시도.'
           : response.status === 401
             ? '아이디 또는 비밀번호가 맞지 않습니다.'
-            : '서버가 로그인 요청을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.';
+            : '서버가 로그인 요청을 처리하지 못했습니다. 잠시 후 재시도.';
       } catch {
-        errorBox.textContent = '서버에 연결하지 못했습니다. 인터넷 연결을 확인해 주세요.';
+        errorBox.textContent = '서버 연결 실패. 네트워크 확인 필요.';
       } finally {
         button.disabled = false;
         button.textContent = '연결하고 내 현황 보기';
@@ -299,7 +293,7 @@
       const token = input.value.trim();
       const previousToken = getToken();
       if (!token) {
-        errorBox.textContent = '접속 토큰을 입력해 주세요.';
+        errorBox.textContent = '접속 토큰을 입력하십시오.';
         return;
       }
       button.disabled = true;
@@ -322,7 +316,7 @@
             setTokenScope(data.tokenScope);
             setAuthState({ authRequired: true, tokenScope: data.tokenScope, authenticated: true, resolved: true, verification: 'verified', tokenPresent: true, error: null }, true);
           } else {
-            errorBox.textContent = '접속 권한을 확인하지 못했습니다. 다시 시도해 주세요.';
+            errorBox.textContent = '접속 권한 확인 실패. 재시도 필요.';
             return;
           }
           window.location.reload();
@@ -333,12 +327,12 @@
           setAuthState({ authRequired: true, tokenScope: null, authenticated: false, resolved: true, verification: 'invalid', tokenPresent: false, error: 'invalid' }, true);
         }
         errorBox.textContent = response.status === 429
-          ? '접속 시도가 많습니다. 잠시 후 다시 시도해 주세요.'
+          ? '접속 시도 초과. 잠시 후 재시도.'
           : response.status === 401 || response.status === 403
-            ? '접속 토큰이 맞지 않거나 권한이 없습니다. 관리자에게 토큰을 확인해 주세요.'
-            : '서버가 접속 요청을 처리하지 못했습니다. 입력한 토큰은 유지되니 잠시 후 다시 시도해 주세요.';
+            ? '토큰 불일치 또는 권한 없음. 관리자에게 토큰 확인 필요.'
+            : '서버가 접속 요청을 처리하지 못했습니다. 입력한 토큰은 유지됨. 잠시 후 재시도.';
       } catch {
-        errorBox.textContent = '서버에 연결하지 못했습니다. 인터넷 연결을 확인해 주세요.';
+        errorBox.textContent = '서버 연결 실패. 네트워크 확인 필요.';
         setAuthState({ authRequired: true, tokenScope: null, authenticated: null, resolved: true, verification: 'unavailable', tokenPresent: Boolean(getToken()), error: 'network' }, true);
       } finally {
         button.disabled = false;
@@ -364,7 +358,7 @@
     }
     // A first connection has no token to reject. Keep the prompt, but reserve
     // the red error state for a token that was actually sent and refused.
-    showLogin(hadSavedToken ? '저장된 접속 토큰이 맞지 않습니다. 다시 입력해 주세요.' : '');
+    showLogin(hadSavedToken ? '저장된 접속 토큰 불일치. 다시 입력하십시오.' : '');
   }
 
   // ------------------------------------------------------------- fetch patch
@@ -494,7 +488,7 @@
       if (scopeResponse.status === 401) {
         clearToken();
         setAuthState({ authRequired: true, tokenScope: null, authenticated: false, resolved: true, verification: 'invalid', tokenPresent: false, error: 'invalid' }, true);
-        showLogin('저장된 접속 토큰이 맞지 않습니다. 다시 입력해 주세요.');
+        showLogin('저장된 접속 토큰 불일치. 다시 입력하십시오.');
         return;
       }
 
@@ -502,13 +496,13 @@
       // the token is invalid. Keep it, but leave the client restricted.
       setAuthState({ authRequired: true, tokenScope: null, authenticated: null, resolved: true, verification: 'unavailable', tokenPresent: true, error: 'verification' }, true);
       showLogin(scopeResponse.status === 429
-        ? '접속 권한 확인 요청이 많습니다. 잠시 후 다시 시도해 주세요.'
-        : '서버에서 접속 권한을 확인하지 못했습니다. 연결을 확인하고 다시 시도해 주세요.');
+        ? '접속 권한 확인 요청 초과. 잠시 후 재시도.'
+        : '서버 접속 권한 확인 실패. 연결 확인 후 재시도.');
     } catch {
       // Preserve a saved token on a network failure. The PWA remains blocked
       // until its scope can be verified, without reporting a false rejection.
       setAuthState({ authRequired: savedToken ? true : null, tokenScope: null, authenticated: null, resolved: true, verification: 'unavailable', tokenPresent: Boolean(savedToken), error: 'network' }, true);
-      if (savedToken) showLogin('서버에서 접속 권한을 확인하지 못했습니다. 연결을 확인하고 다시 시도해 주세요.');
+      if (savedToken) showLogin('서버 접속 권한 확인 실패. 연결 확인 후 재시도.');
     }
   }
 

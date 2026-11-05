@@ -181,7 +181,7 @@ enum CoinPilotOfflineReplay {
                 return "이 설정의 신호 탐색과 다음 캔들 진입을 위해 캔들 \(minimum)개 이상이 필요합니다."
             case let .intervalTooCoarse(intervalMinutes, maximumHoldMinutes):
                 let intervalLabel = intervalMinutes == 60 ? "1시간" : "\(intervalMinutes)분"
-                return "\(intervalLabel) 자료로는 \(maximumHoldMinutes)분 보유 한도를 확인할 수 없습니다. 1분·5분·15분 자료를 선택하세요."
+                return "\(intervalLabel) 자료로는 \(maximumHoldMinutes)분 보유 한도를 확인할 수 없습니다. 1분·5분·15분 자료 필요."
             case .tooManyCandles:
                 return "리플레이 캔들 수가 지원 한도를 넘었습니다."
             case .invalidCandle:

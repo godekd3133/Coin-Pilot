@@ -55,20 +55,20 @@ export function isCoreTradingSnapshotReady({ status, account, marketPrices, sele
 
 /** Null when the quote is fresh enough to order against; otherwise the reason. */
 export function marketQuoteFreshnessIssue(market, { maxCandleAgeSeconds, snapshotSource, now = Date.now() } = {}) {
-  if (!market) return '이 종목의 시세를 확인할 수 없어요.';
+  if (!market) return '시세 없음.';
   const marketPrice = Number(market.price);
-  if (!Number.isFinite(marketPrice) || marketPrice <= 0) return '현재가를 확인할 수 없어 주문할 수 없어요.';
+  if (!Number.isFinite(marketPrice) || marketPrice <= 0) return '현재가 없음 · 주문 불가.';
   const configured = Number(maxCandleAgeSeconds);
   const maximumAgeMs = (Number.isFinite(configured) && configured > 0 ? configured : 90) * 1000;
   const sourceTimestamp = Date.parse(market.sourceAsOf || '');
-  if (!Number.isFinite(sourceTimestamp)) return '최근 체결 시각을 확인할 수 없어 주문할 수 없어요.';
+  if (!Number.isFinite(sourceTimestamp)) return '체결 시각 없음 · 주문 불가.';
   if (market.quoteFresh === false && (snapshotSource === 'last_good' || market.quoteFreshnessReason === 'market_snapshot_last_good')) {
-    return '저장된 최근 시세를 표시 중이에요. 새 시세를 확인한 뒤 주문해 주세요.';
+    return '저장된 이전 시세 표시 중 · 새 시세 확인 후 주문.';
   }
   const sourceAgeMs = now - sourceTimestamp;
-  if (sourceAgeMs < -5000) return '최근 체결 시각이 현재보다 앞서 있어요. 서버 시각을 확인해 주세요.';
-  if (sourceAgeMs > maximumAgeMs) return '최근 체결 시각이 오래됐어요. 새로고침 후 다시 시도해 주세요.';
-  if (market.quoteFresh === false) return '현재 시세 최신 여부를 확인할 수 없어요.';
+  if (sourceAgeMs < -5000) return '체결 시각이 현재보다 앞섬 · 서버 시각 확인 필요.';
+  if (sourceAgeMs > maximumAgeMs) return '체결 시각 오래됨 · 새로고침 후 재시도.';
+  if (market.quoteFresh === false) return '시세 최신 여부 확인 불가.';
   return null;
 }
 
@@ -160,17 +160,17 @@ export function marketSnapshotPresentation(snapshot, loaded, prices, freshnessOp
     tone = 'unavailable';
   } else if (usingLastGood) {
     label = missingCount > 0
-      ? `거래소 응답이 없어 저장된 최근 시세를 표시합니다 · ${missingCount}개 시장 누락`
-      : '거래소 응답이 없어 저장된 최근 시세를 표시합니다';
+      ? `거래소 응답 없음 · 저장된 이전 시세 표시 · ${missingCount}개 시장 누락`
+      : '거래소 응답 없음 · 저장된 이전 시세 표시';
     tone = 'stale';
   } else if (snapshot?.complete === false || missingCount > 0) {
     label = missingCount > 0 ? `${missingCount}개 시장 시세를 확인할 수 없습니다` : '일부 시장 시세를 확인할 수 없습니다';
     tone = 'partial';
   } else if (snapshot?.complete === true && rows.some(row => issue(row))) {
-    label = `${rows.filter(row => issue(row)).length}개 시장의 시세가 오래됐어요`;
+    label = `${rows.filter(row => issue(row)).length}개 시장 시세 오래됨`;
     tone = 'stale';
   } else if (snapshot?.complete === true) {
-    label = '모든 시장의 시세를 확인했어요';
+    label = '전체 시장 시세 확인됨';
     tone = 'complete';
   } else {
     label = '시세 상태를 확인할 수 없습니다';
@@ -178,10 +178,10 @@ export function marketSnapshotPresentation(snapshot, loaded, prices, freshnessOp
   }
   const state = tone === 'complete' && (snapshot?.legacyFallback === true || snapshot?.marketListStale !== false) ? 'stale' : tone;
   const marketListStatus = !loaded
-    ? '시장 목록을 확인할 수 없어요'
+    ? '시장 목록 확인 불가'
     : snapshot?.marketListStale === true
-      ? '시장 목록을 새로 확인해야 해요'
-      : snapshot?.marketListStale === false ? '시장 목록을 확인했어요' : '시장 목록을 확인할 수 없어요';
+      ? '시장 목록 갱신 필요'
+      : snapshot?.marketListStale === false ? '시장 목록 확인됨' : '시장 목록 확인 불가';
   const listTime = marketTimestamp(snapshot?.marketListFetchedAt);
   const freshnessNote = snapshot?.legacyFallback === true ? '시세의 최신 여부는 확인할 수 없습니다' : null;
   const detailLabel = [label, freshnessNote].filter(Boolean).join(' · ');
@@ -201,8 +201,8 @@ export function marketRowQuotePresentation(marketData, latestReadSucceeded, fres
   if (latestReadSucceeded !== true) return { label: `갱신 실패 · 마지막 수집 ${fetchedAt}`, state: 'stale' };
   const quoteIssue = marketQuoteFreshnessIssue(marketData, freshnessOptions);
   if (!quoteIssue) return { label: `최근 시세 · 수집 ${fetchedAt}`, state: 'current' };
-  if (quoteIssue.includes('저장된 최근 시세')) return { label: `저장 시세 · 수집 ${fetchedAt}`, state: 'stale' };
-  if (quoteIssue.includes('오래됐')) return { label: `오래된 시세 · ${fetchedAt}`, state: 'stale' };
+  if (quoteIssue.includes('저장된 이전 시세')) return { label: `저장 시세 · 수집 ${fetchedAt}`, state: 'stale' };
+  if (quoteIssue.includes('오래됨')) return { label: `오래된 시세 · ${fetchedAt}`, state: 'stale' };
   return { label: `시세 확인 필요 · ${fetchedAt}`, state: 'unavailable' };
 }
 
@@ -282,10 +282,10 @@ export function modeBannerPresentation({ paper, modeKnown, liveReady, offline, r
   if (runtimeBlocked && manualOrdersAllowed) {
     return paper
       ? { title: '자동매매 중지 · 모의 주문 가능', copy: '자동매매는 중지되어 있습니다. 수동 주문은 모의투자로 기록되며 실제 자금은 사용되지 않습니다.', tone: 'info', isLive: false }
-      : { title: '자동매매 중지 · 실거래 가능', copy: '운영자가 자동매매를 중지했습니다. 거래소 상태 확인이 끝난 상태에서 수동 주문을 보낼 수 있습니다. 주문 전 자산, 수량, 위험 한도를 확인하세요.', tone: 'danger', isLive: false };
+      : { title: '자동매매 중지 · 실거래 가능', copy: '운영자가 자동매매를 중지했습니다. 거래소 상태 확인됨 · 수동 주문 가능 (실제 자금).', tone: 'danger', isLive: false };
   }
   if (runtimeBlocked) return { title: '매매 중지 · 신규 주문 잠금', copy: runtimeReason || '자동매매가 중지되어 신규 주문을 보낼 수 없습니다.', tone: 'warning', isLive: false };
-  if (!paper && liveReady) return { title: '실거래 활성', copy: '주문 전 자산, 수량, 위험 한도를 확인하세요. 실제 체결 여부는 거래 내역에서 확인할 수 있습니다.', tone: 'danger', isLive: true };
+  if (!paper && liveReady) return { title: '실거래 활성', copy: '실제 자금 주문. 체결 여부는 거래 내역에서 확인.', tone: 'danger', isLive: true };
   if (paper && manualOrdersAllowed) return { title: '모의투자 · 실제 주문 잠금', copy: '수동 주문은 모의투자로 기록되며 실제 자금은 사용되지 않습니다.', tone: 'info', isLive: false };
   if (!paper && manualOrdersAllowed) return { title: '실거래 · 수동 주문 가능', copy: '실거래 수동 주문이 허용된 상태입니다. 자동매매 승인 상태는 별도 점검 결과를 따릅니다.', tone: 'danger', isLive: false };
   return { title: '실거래 주문 잠금', copy: tradeReason || '실제 주문 전 점검을 마칠 때까지 주문할 수 없습니다.', tone: 'warning', isLive: false };

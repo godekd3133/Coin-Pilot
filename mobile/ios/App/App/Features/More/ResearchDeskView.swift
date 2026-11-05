@@ -162,7 +162,7 @@ struct CoinPilotResearchDeskView: View {
         .navigationTitle("주문 전 점검")
         .cpInlineTitle()
         .confirmationDialog(
-            requestedPaperAction == true ? "모의투자 점검을 시작할까요?" : "모의투자 점검을 중지할까요?",
+            requestedPaperAction == true ? "모의투자 점검 시작" : "모의투자 점검 중지",
             isPresented: Binding(get: { requestedPaperAction != nil }, set: { if !$0 { requestedPaperAction = nil } }),
             titleVisibility: .visible
         ) {

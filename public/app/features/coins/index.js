@@ -61,7 +61,7 @@ function mountList(root, ctx) {
       subtitle: s.account ? `현금 ${won(s.account.krwBalance)}` : null,
       action: linkButton({ label: '주문하기', href: '#/trade', variant: 'primary' }),
       body: resourceView(accountState, account => list(coinPositions(account).map(position => coinPositionRow(position)), {
-        empty: emptyState({ iconName: 'coin', title: '보유한 코인이 없어요', body: '자동매매나 직접 주문으로 매수하면 여기에 표시돼요.' })
+        empty: emptyState({ iconName: 'coin', title: '보유 없음', body: '' })
       }), { lines: 3 })
     }));
   }
@@ -73,11 +73,11 @@ function mountList(root, ctx) {
     const statusEl = slot('market-status');
     if (statusEl) {
       statusEl.className = `cp-caption ${presentation.tone === 'complete' ? '' : presentation.tone === 'unavailable' ? 'cp-danger' : 'cp-warn'}`;
-      statusEl.textContent = pricesState.data === null && pricesState.status !== 'error' ? '시세를 불러오는 중이에요' : `${presentation.detail} · 목록 ${presentation.listTime}`;
+      statusEl.textContent = pricesState.data === null && pricesState.status !== 'error' ? '시세 불러오는 중' : `${presentation.detail} · 목록 ${presentation.listTime}`;
     }
     const target = slot('market-list');
     if (!target) return;
-    if (pricesState.data === null) { render(target, pricesState.status === 'error' ? emptyState({ iconName: 'alert', title: '시세를 불러오지 못했어요', body: ctx.toUserText(pricesState.error?.message || '') }) : skeleton({ lines: 6 })); return; }
+    if (pricesState.data === null) { render(target, pricesState.status === 'error' ? emptyState({ iconName: 'alert', title: '시세 불러오기 실패', body: ctx.toUserText(pricesState.error?.message || '') }) : skeleton({ lines: 6 })); return; }
     const owned = new Set(coinPositions(s.account).map(position => position.coin));
     const rows = sortedMarkets(s.marketPrices, state.sort, state.query);
     const shown = rows.slice(0, state.visible);
@@ -92,7 +92,7 @@ function mountList(root, ctx) {
         valueTone: tone(row.change),
         href: `#/coins/${encodeURIComponent(row.coin)}`
       });
-    }), { empty: emptyState({ iconName: 'search', title: state.query ? '검색 결과가 없어요' : '표시할 시세가 없어요', action: state.query ? button({ label: '검색 초기화', attrs: { 'data-action': 'reset-search' } }) : null }) })}
+    }), { empty: emptyState({ iconName: 'search', title: state.query ? '검색 결과 없음' : '시세 없음', action: state.query ? button({ label: '검색 초기화', attrs: { 'data-action': 'reset-search' } }) : null }) })}
     ${rows.length > shown.length ? html`<div style="margin-top:12px">${button({ label: `더 보기 (${shown.length}/${rows.length})`, attrs: { 'data-action': 'more' }, variant: 'secondary' })}</div>` : rows.length ? html`<p class="cp-caption" style="margin-top:8px">${rows.length}개 시장 표시</p>` : ''}`);
   }
 
@@ -149,7 +149,7 @@ function mountDetail(root, ctx, coin) {
           <p class="cp-hero-label">${marketDisplayName({ coin, ...(market || {}) })} · ${symbolOf(coin)}/KRW</p>
           <p class="cp-hero-value cp-num">${market ? `${price(market.price)}원` : '—'}</p>
           ${market ? html`<p class="cp-hero-change cp-num cp-${tone(market.change)}">${percent(market.change)} ${hasFiniteValue(market.changePrice) ? `(${signedWon(market.changePrice)})` : ''}</p>` : ''}
-          <p class="cp-hero-sub">${market ? (issue ? issue : `최근 체결 ${marketTimestamp(market.sourceAsOf)}`) : s.marketPricesLoaded ? '이 시장의 시세가 없어요' : '시세를 불러오는 중이에요'}</p>
+          <p class="cp-hero-sub">${market ? (issue ? issue : `최근 체결 ${marketTimestamp(market.sourceAsOf)}`) : s.marketPricesLoaded ? '시세 없음' : '시세 불러오는 중'}</p>
         </div>
       </div>
       ${market ? html`<div style="margin-top:14px">${statGrid([
@@ -174,8 +174,8 @@ function mountDetail(root, ctx, coin) {
       title: '가격',
       action: button({ label: '새로고침', size: 'sm', iconName: 'refresh', attrs: { 'data-action': 'reload-candles' } }),
       body: html`<div class="cp-row" style="margin-bottom:12px">${segmented({ name: 'unit', label: '캔들 간격', value: view.unit, options: INTERVALS })}${segmented({ name: 'range', label: '표시 구간', value: view.range, options: RANGES })}</div>
-        ${candles.error ? notice({ tone: 'warning', body: shown.length ? '가격 자료를 새로 불러오지 못해 마지막 자료를 표시합니다.' : `가격 자료를 불러오지 못했어요: ${ctx.toUserText(candles.error.message)}` }) : ''}
-        ${shown.length >= 2 ? candleChart(shown, { formatValue: value => price(value) }) : candles.loading ? skeleton({ lines: 5 }) : emptyState({ iconName: 'chart', title: '표시할 캔들이 없어요' })}
+        ${candles.error ? notice({ tone: 'warning', body: shown.length ? '가격 자료를 새로 불러오지 못해 마지막 자료를 표시합니다.' : `가격 자료 불러오기 실패: ${ctx.toUserText(candles.error.message)}` }) : ''}
+        ${shown.length >= 2 ? candleChart(shown, { formatValue: value => price(value) }) : candles.loading ? skeleton({ lines: 5 }) : emptyState({ iconName: 'chart', title: '캔들 없음' })}
         ${shown.length ? html`<p class="cp-caption" style="margin-top:8px">${INTERVALS.find(item => item.value === view.unit)?.label} 캔들 ${shown.length}개 · 마지막 ${shown.at(-1)?.time ? shown.at(-1).time.replace('T', ' ').slice(0, 16) : ''}</p>` : ''}`
     }));
   }
@@ -192,7 +192,7 @@ function mountDetail(root, ctx, coin) {
         { label: '수량', value: quantity(position.amount) },
         { label: '평균 매수가', value: `${price(position.avgPrice || position.entryPrice)}원` }
       ], { columns: 2 })}<p class="cp-caption" style="margin-top:10px">${position.source === 'strategy' ? '자동매매 포지션' : position.source === 'exchange' ? '거래소 잔고 기준' : '직접 주문 포지션'}</p>`
-        : emptyState({ iconName: 'coin', title: '보유하고 있지 않아요', body: `사용 가능 현금 ${won(s.account?.krwBalance)}` })
+        : emptyState({ iconName: 'coin', title: '미보유', body: `사용 가능 현금 ${won(s.account?.krwBalance)}` })
     }));
   }
 
@@ -208,7 +208,7 @@ function mountDetail(root, ctx, coin) {
         { label: 'MACD 히스토그램', value: detail.indicators.macd ?? '—', tone: tone(detail.indicators.macd) },
         { label: '볼린저 %B', value: detail.indicators.bb ?? '—' },
         { label: '최대 매수 가능', value: won(detail.maxBuyAmount) }
-      ]) : state.status === 'loading' || state.data === null && state.status !== 'error' ? skeleton({ lines: 2 }) : emptyState({ title: '지표를 계산하지 못했어요', body: '시세 또는 캔들 자료가 부족할 수 있어요.' })
+      ]) : state.status === 'loading' || state.data === null && state.status !== 'error' ? skeleton({ lines: 2 }) : emptyState({ title: '지표 계산 실패', body: '시세·캔들 자료 부족 가능.' })
     }));
   }
 

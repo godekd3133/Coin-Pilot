@@ -1,5 +1,9 @@
 # CoinPilot — Design QA
 
+## Plain-UI rule (2026-11-05)
+
+Web and iOS avoid patterns that read as generated UI: no decorative motion (entrance/stagger, count-up, pulse, shimmer, spring, press scale; only a ≤120ms opacity change for sheets/screens), no gradients, glows or rainbow allocation hues (one ink hue in steps), no capsule buttons/badges (status is coloured text; only the LIVE marker keeps a red fill), no card-inside-card tiles (divider rows), no decorative icons or illustrations, and terse noun-style Korean copy without "~해요" explanations or taglines. Safety meaning (paper/LIVE, order lock, stale data, stop reason and recovery) stays explicit. `test/webMotion.test.js` guards the web CSS part.
+
 ## Active reference: Toss Design System (2026-09-30)
 
 - Toss Design System is the sole visual reference for new design work. Use its [foundation colors](https://tossmini-docs.toss.im/tds-mobile/foundation/colors/), [Typography](https://tossmini-docs.toss.im/tds-react-native/foundation/typography/), [Top](https://tossmini-docs.toss.im/tds-mobile/components/top/), [Paragraph](https://tossmini-docs.toss.im/tds-mobile/components/paragraph/), [Segmented Control](https://tossmini-docs.toss.im/tds-mobile/components/segmented-control/), and [Border](https://tossmini-docs.toss.im/tds-mobile/components/border/) docs as the source for tokens, hierarchy, selection, badges, and separators.

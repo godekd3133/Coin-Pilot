@@ -29,7 +29,7 @@ struct CoinPilotHomeSummary {
                 if trader.isLive {
                     if trader.positionsValue > 0 {
                         parts.append(("주식", trader.positionsValue))
-                        notes.append("실전 주식은 보유 종목 평가만 포함했어요. 예수금은 증권 계좌 기준이에요.")
+                        notes.append("실전 주식은 보유 종목 평가만 포함. 예수금은 증권 계좌 기준.")
                     }
                     if let unrealized = trader.unrealizedProfit { profit = (profit ?? 0) + unrealized }
                 } else if let value = trader.totalAssets {
@@ -54,10 +54,10 @@ struct CoinPilotHomeSummary {
             if horizonValue > 0 { parts.append(("포트폴리오", horizonValue)) }
             if let horizonProfit { profit = (profit ?? 0) + horizonProfit }
             if workspace == .live, store.horizonsStatus?.coin?.isLive == true {
-                notes.append("실전 코인 포트폴리오는 코인 계좌 평가에 포함돼 있어요.")
+                notes.append("실전 코인 포트폴리오는 코인 계좌 평가에 포함.")
             }
             if store.canOperate && (store.stocksStatus == nil || store.horizonsStatus == nil) {
-                notes.append("주식·포트폴리오 상태를 확인하는 중이에요. 확인되면 합계에 더해집니다.")
+                notes.append("주식·포트폴리오 확인 중 · 확인 후 합계에 반영")
             }
         }
 

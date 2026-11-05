@@ -45,13 +45,13 @@ struct CoinPilotPortfoliosView: View {
     private var content: some View {
         if store.isBundledPreview {
             NativeCard {
-                CPEmptyState(symbol: "square.stack.3d.up", title: "예시 데이터에는 포트폴리오 자료가 없어요",
-                             message: "서버에 연결하면 기간별 포트폴리오의 비중과 검증 결과를 볼 수 있어요.")
+                CPEmptyState(symbol: "square.stack.3d.up", title: "예시 데이터: 포트폴리오 자료 없음",
+                             message: "서버 연결 필요")
             }
         } else if !store.canOperate {
             NativeCard {
-                CPEmptyState(symbol: "lock", title: "운영 토큰이 필요해요",
-                             message: "포트폴리오 상태는 운영 권한이 있는 토큰으로 로그인해야 볼 수 있어요.")
+                CPEmptyState(symbol: "lock", title: "운영 토큰 필요",
+                             message: "운영 권한 토큰으로 로그인 필요")
             }
         } else if isLoading {
             NativeCard {
@@ -72,12 +72,12 @@ struct CoinPilotPortfoliosView: View {
             tradesCard(runtime)
         } else if status != nil {
             NativeCard {
-                CPEmptyState(symbol: "pause.circle", title: "\(asset.title) 기간별 포트폴리오가 꺼져 있어요",
+                CPEmptyState(symbol: "pause.circle", title: "\(asset.title) 기간별 포트폴리오 꺼짐",
                              message: "서버 설정에서 기간별 포트폴리오를 켜면 이곳에 슬리브가 표시됩니다.")
             }
         } else {
             NativeCard {
-                CPEmptyState(symbol: "wifi.exclamationmark", title: "포트폴리오 상태를 불러오지 못했어요",
+                CPEmptyState(symbol: "wifi.exclamationmark", title: "포트폴리오 상태 불러오기 실패",
                              actionTitle: "다시 시도") {
                     Task { await store.loadHorizonsStatus(force: true) }
                 }
@@ -102,8 +102,8 @@ struct CoinPilotPortfoliosView: View {
                         changeLabel: "평가 손익"
                     )
                     Text(asset == .coin
-                         ? "실전 코인 포트폴리오는 코인 계좌 안에서 운용돼 홈 총자산에 이미 포함돼 있어요."
-                         : "실전 주식 포트폴리오의 예수금은 증권 계좌 기준이에요.")
+                         ? "실전 코인 포트폴리오는 코인 계좌에서 운용 · 홈 총자산에 포함"
+                         : "실전 주식 포트폴리오 예수금은 증권 계좌 기준")
                         .font(.caption)
                         .foregroundColor(CPColor.secondaryInk)
                         .fixedSize(horizontal: false, vertical: true)
@@ -137,7 +137,7 @@ struct CoinPilotPortfoliosView: View {
                 name: "\(asset.title) 기간별 포트폴리오",
                 symbol: "square.stack.3d.up",
                 isRunning: runtime.running,
-                detail: runtime.desiredRunning == false ? "중지 선택이 저장돼 있어요." : nil,
+                detail: runtime.desiredRunning == false ? "중지 상태 저장됨" : nil,
                 lastRun: runtime.lastCycleAt.map { "마지막 실행 · \(CoinPilotFormatting.dateTime($0))" },
                 pausedReason: runtime.pauseLabel,
                 isLive: runtime.isLive,
@@ -146,13 +146,13 @@ struct CoinPilotPortfoliosView: View {
                 confirmation = toggleConfirmation(runtime)
             }
             if runtime.paramsValidated == false {
-                CPNotice(text: "검증을 통과한 연구 결과가 아직 없어 신규 진입을 하지 않아요.", tone: .warning)
+                CPNotice(text: "검증 통과한 연구 결과 없음 · 신규 진입 안 함", tone: .warning)
             }
             if let gate = runtime.gate, gate.canEnter == false {
-                CPNotice(text: gate.reason.map { "지금은 신규 진입을 하지 않아요 · \($0)" } ?? "지금은 신규 진입을 하지 않아요.", tone: .info)
+                CPNotice(text: gate.reason.map { "신규 진입 안 함 · \($0)" } ?? "신규 진입 안 함", tone: .info)
             }
             if let pending = runtime.pendingOrders, pending > 0 {
-                CPNotice(text: "체결을 확인하지 못한 주문 \(pending)건이 있어 신규 진입이 잠겨 있어요.", tone: .warning)
+                CPNotice(text: "체결을 확인하지 못한 주문 \(pending)건 · 신규 진입 잠금", tone: .warning)
             }
             if let error = runtime.lastError, !error.isEmpty {
                 CPNotice(text: error, tone: .danger)
@@ -164,12 +164,12 @@ struct CoinPilotPortfoliosView: View {
         let start = runtime.running != true
         let target = asset
         return CPConfirmation(
-            title: start ? "\(target.title) 포트폴리오를 시작할까요?" : "\(target.title) 포트폴리오를 중지할까요?",
+            title: start ? "\(target.title) 포트폴리오 시작" : "\(target.title) 포트폴리오 중지",
             message: start
                 ? (runtime.isLive
-                    ? "검증을 통과한 슬리브만 실제 자금으로 주문합니다. 손절과 최대 보유 기간 규칙이 적용돼요."
+                    ? "검증 통과 슬리브만 실제 자금으로 주문. 손절·최대 보유 기간 적용."
                     : "가상 자금으로만 운용합니다.")
-                : "새 진입과 리밸런싱을 멈춥니다. 보유 종목은 그대로 남아 있어요.",
+                : "신규 진입·리밸런싱 정지. 보유 종목은 유지.",
             confirmTitle: start ? (runtime.isLive ? "실전 시작" : "시작") : "중지",
             isDestructive: start && runtime.isLive,
             isLive: runtime.isLive
@@ -191,7 +191,7 @@ struct CoinPilotPortfoliosView: View {
         }
         return CPCard("슬리브 비중") {
             if slices.isEmpty {
-                Text("비중이 배정된 슬리브가 없어요. 검증을 통과한 슬리브만 비중을 받습니다.")
+                Text("비중 배정 슬리브 없음 · 검증 통과 슬리브만 배정")
                     .font(.caption)
                     .foregroundColor(CPColor.secondaryInk)
                     .fixedSize(horizontal: false, vertical: true)
@@ -299,7 +299,7 @@ struct CoinPilotPortfoliosView: View {
                 Text("\(research.sleeves.count)개 슬리브 중 \(passed)개 통과")
                     .font(.headline)
                     .foregroundColor(CPColor.ink)
-                Text("훈련 구간에서 고른 설정을 이후 구간(OOS)에서 검증합니다. 수익이 양수이고 대부분의 구간이 손실이 아니며 최악 낙폭이 기준 이내여야 비중을 받아요.")
+                Text("훈련 구간에서 고른 설정을 이후 구간(OOS)에서 검증. 수익 양수, 대부분 구간 손실 없음, 최악 낙폭 기준 이내일 때만 비중 배정.")
                     .font(.caption)
                     .foregroundColor(CPColor.secondaryInk)
                     .fixedSize(horizontal: false, vertical: true)
@@ -313,7 +313,7 @@ struct CoinPilotPortfoliosView: View {
                     }
                 }
             } else {
-                Text("아직 연구 결과가 없어요. 서버가 주기적으로 연구를 실행합니다.")
+                Text("연구 결과 없음 · 서버가 주기적으로 실행")
                     .font(.caption)
                     .foregroundColor(CPColor.secondaryInk)
             }
@@ -323,7 +323,7 @@ struct CoinPilotPortfoliosView: View {
             if let error = runtime.research?.schedulerLastError, !error.isEmpty {
                 CPNotice(text: error, tone: .warning)
             }
-            Text("과거 성과는 미래 수익을 보장하지 않아요. 현재 거래량 상위 종목으로 연구해 생존 편향이 있을 수 있어요.")
+            Text("과거 성과는 미래 수익을 보장하지 않음. 현재 거래량 상위 종목 기준이라 생존 편향 가능.")
                 .font(.caption2)
                 .foregroundColor(CPColor.secondaryInk)
                 .fixedSize(horizontal: false, vertical: true)
@@ -333,7 +333,7 @@ struct CoinPilotPortfoliosView: View {
     private func tradesCard(_ runtime: CoinPilotHorizonRuntime) -> some View {
         CPCard("최근 체결") {
             if runtime.recentTrades.isEmpty {
-                Text("아직 체결 기록이 없어요.").font(.caption).foregroundColor(CPColor.secondaryInk)
+                Text("체결 기록 없음").font(.caption).foregroundColor(CPColor.secondaryInk)
             } else {
                 let trades = Array(runtime.recentTrades.prefix(8))
                 VStack(spacing: 0) {
@@ -371,16 +371,15 @@ struct CPAllocationLegendBar: View {
                     }
                     Spacer(minLength: 0)
                 }
-                .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
             }
-            .frame(height: 12)
-            .background(CPColor.surface2.clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous)))
+            .frame(height: 8)
+            .background(CPColor.surface2)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("비중")
             .accessibilityValue(slices.map { "\($0.label) \(Int($0.weight.rounded()))%" }.joined(separator: ", "))
             ForEach(slices) { slice in
                 HStack(spacing: 8) {
-                    Circle().fill(slice.tint).frame(width: 8, height: 8)
+                    Rectangle().fill(slice.tint).frame(width: 8, height: 8)
                     Text(slice.label).font(.caption.weight(.medium)).foregroundColor(CPColor.ink)
                     Spacer(minLength: 8)
                     if let value = slice.value {

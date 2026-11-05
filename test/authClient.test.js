@@ -138,7 +138,7 @@ test('a saved token rejected by the API is cleared and shown as an error', async
   assert.equal(client.tokenScope(), '');
   assert.equal(client.authState().verification, 'invalid');
   assert.equal(client.gate()?.hidden, false);
-  assert.equal(client.error(), '저장된 접속 토큰이 맞지 않습니다. 다시 입력해 주세요.');
+  assert.equal(client.error(), '저장된 접속 토큰 불일치. 다시 입력하십시오.');
 });
 
 test('an unauthenticated first socket connection does not show a false rejection error', async () => {
@@ -162,7 +162,7 @@ test('an unauthorized socket clears and reports a saved token', async () => {
 
   assert.equal(client.token(), '');
   assert.equal(client.gate()?.hidden, false);
-  assert.equal(client.error(), '저장된 접속 토큰이 맞지 않습니다. 다시 입력해 주세요.');
+  assert.equal(client.error(), '저장된 접속 토큰 불일치. 다시 입력하십시오.');
 });
 
 test('valid saved tokens continue to be sent on same-origin API calls', async () => {
@@ -232,7 +232,7 @@ test('saved-token lookup network failure preserves token but keeps mutations and
   assert.equal(client.window.coinPilotAuth.canMutate, false);
   assert.equal(client.window.coinPilotAuth.canOpenSocket, false);
   assert.equal(client.socketCalls.length, 0);
-  assert.match(client.error(), /확인하지 못했습니다/);
+  assert.match(client.error(), /확인 실패/);
 });
 
 test('a token rejected by the scope lookup is invalid and removed', async () => {
@@ -246,7 +246,7 @@ test('a token rejected by the scope lookup is invalid and removed', async () => 
   assert.equal(client.tokenScope(), '');
   assert.equal(client.authState().verification, 'invalid');
   assert.equal(client.authState().authenticated, false);
-  assert.equal(client.error(), '저장된 접속 토큰이 맞지 않습니다. 다시 입력해 주세요.');
+  assert.equal(client.error(), '저장된 접속 토큰 불일치. 다시 입력하십시오.');
 });
 
 test('new login preserves the tokenScope returned by the login endpoint', async () => {
@@ -277,7 +277,7 @@ test('login server errors preserve input and do not blame or store the token', a
 });
 
 test('rejected and rate-limited login attempts explain different recovery actions', async () => {
-  for (const [status, expected] of [[401, /토큰이 맞지 않거나 권한이 없습니다/], [429, /잠시 후 다시 시도/]]) {
+  for (const [status, expected] of [[401, /토큰 불일치 또는 권한 없음/], [429, /잠시 후 재시도/]]) {
     const client = await loadAuthClient({ loginResponse: { status, body: { success: false } } });
     const gate = client.gate();
     gate.querySelector('#cp-auth-token').value = 'not-accepted';

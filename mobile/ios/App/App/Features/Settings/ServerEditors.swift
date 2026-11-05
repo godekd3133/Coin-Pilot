@@ -22,7 +22,7 @@ struct CoinPilotServerEditor: View {
                 } header: {
                     Text("서버 주소")
                 } footer: {
-                    Text("같은 Wi-Fi의 서버는 내부 주소로, 외부 서버는 HTTPS 주소로 연결해 주세요.")
+                    Text("같은 Wi-Fi 서버는 내부 주소, 외부 서버는 HTTPS 주소.")
                 }
                 if !store.bundledServerPresets.isEmpty {
                     Section {
@@ -42,7 +42,7 @@ struct CoinPilotServerEditor: View {
                     } header: {
                         Text("등록된 서버")
                     } footer: {
-                        Text("서버를 선택하면 주소가 채워집니다. 연결 후 거래소를 확인할 수 있어요.")
+                        Text("서버 선택 시 주소 자동 입력.")
                     }
                 }
                 if let message {
@@ -97,7 +97,7 @@ struct CoinPilotTokenEditor: View {
                 } header: {
                     Text("서버 토큰")
                 } footer: {
-                    Text("\(store.serverAddress) 서버의 운영 토큰을 입력해 주세요. 기존 토큰은 새 토큰이 확인된 뒤 교체됩니다. 거래소 API 키는 서버에만 보관합니다.")
+                    Text("\(store.serverAddress) 서버 운영 토큰. 새 토큰 확인 후 기존 토큰 교체. 거래소 API 키는 서버에만 보관.")
                 }
                 if let message {
                     Text(message).foregroundColor(CPColor.red)

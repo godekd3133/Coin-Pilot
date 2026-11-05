@@ -37,12 +37,6 @@ struct CoinPilotAutomationControl: View {
                         .foregroundColor(!store.isBundledPreview && isRunning == true
                                          ? CPColor.green
                                          : CPColor.secondaryInk)
-                        .padding(.horizontal, 9)
-                        .padding(.vertical, 5)
-                        .background((!store.isBundledPreview && isRunning == true
-                                     ? CPColor.green
-                                     : CPColor.secondaryInk).opacity(0.10))
-                        .clipShape(Capsule())
                 }
                 .accessibilityElement(children: .combine)
                 .accessibilityLabel("\(store.isBundledPreview ? "자동매매 예시" : "운영 상태") · \(presentation.stateLabel). \(presentation.explanation)")
@@ -60,10 +54,10 @@ struct CoinPilotAutomationControl: View {
                     .disabled(!isEnabled || store.isWorking)
                     if !isEnabled {
                         Text(!store.canOperate
-                             ? "현재 권한으로는 조회만 할 수 있어요. 주문과 설정 권한은 더보기의 설정에서 확인하세요."
+                             ? "조회 전용 권한. 주문·설정 권한은 설정에서 확인."
                              : isRunning == nil
-                                ? "서버의 실행 상태를 확인한 뒤 사용할 수 있어요."
-                                : "보유 포지션의 보호가 끝나야 다시 시작할 수 있어요. 주문 전 점검에서 현재 상태를 확인하세요.")
+                                ? "서버 실행 상태 확인 후 사용 가능."
+                                : "보유 포지션 보호 종료 후 재시작 가능. 상태는 주문 전 점검에서 확인.")
                             .font(.caption)
                             .foregroundColor(CPColor.secondaryInk)
                             .fixedSize(horizontal: false, vertical: true)
@@ -88,7 +82,7 @@ struct CoinPilotAutomationControl: View {
                                     .fixedSize(horizontal: false, vertical: true)
                                 if store.status?.liveManualPrepareOnBoot == true {
                                     if store.status?.liveManualPrepared == true {
-                                        Label("실거래 계좌 확인 완료", systemImage: "checkmark.circle.fill")
+                                        Text("실거래 계좌 확인 완료")
                                             .font(.footnote.weight(.semibold))
                                             .foregroundColor(CPColor.green)
                                     } else {
@@ -111,16 +105,16 @@ struct CoinPilotAutomationControl: View {
                                         .frame(width: 7, height: 7)
                                         .accessibilityHidden(true)
                                     Text(store.liveEventsConnected
-                                         ? "서버 알림을 실시간으로 받고 있어요"
-                                         : "앱을 보는 동안 30초마다 상태를 확인해요")
+                                         ? "실시간 서버 알림 수신 중"
+                                         : "앱 사용 중 30초마다 갱신")
                                         .font(.caption2)
                                         .foregroundColor(CPColor.secondaryInk)
                                 }
                                 .accessibilityElement(children: .combine)
                             }
                             if let desired = store.status?.desiredAutomationRunning {
-                                Text(desired ? "자동매매 켜짐 선택이 저장돼 있어요. 서버 재시작 후 계좌와 시세를 확인하고 재개합니다."
-                                     : "자동매매 꺼짐 선택이 저장돼 있어요. 서버가 재시작돼도 자동으로 켜지지 않아요.")
+                                Text(desired ? "자동매매 켜짐 저장됨. 서버 재시작 시 계좌·시세 확인 후 재개."
+                                     : "자동매매 꺼짐 저장됨. 서버 재시작 시에도 꺼진 상태 유지.")
                                     .font(.caption).foregroundColor(CPColor.secondaryInk)
                                 if let savedAt = store.status?.automationTrackingSavedAt {
                                     MetadataLine(text: "진행 기록 저장 · \(savedAt)")
@@ -167,7 +161,7 @@ struct CoinPilotAutomationControl: View {
     private func confirmation(forStart startRequest: Bool) -> CPConfirmation {
         let isLive = store.activeWorkspace == .live
         return CPConfirmation(
-            title: startRequest ? "자동매매를 시작할까요?" : "자동매매 중지를 요청할까요?",
+            title: startRequest ? "자동매매 시작" : "자동매매 중지",
             message: startRequest && isLive
                 ? "서버의 시작 조건을 통과해야 자동매매가 시작됩니다. 시작 후에는 서버에서 실제 주문이 발생할 수 있습니다."
                 : !startRequest && isLive

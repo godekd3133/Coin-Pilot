@@ -8,11 +8,11 @@ import { runtimeBlockReason } from '../domain/trading.js';
 import { toUserText } from '../domain/text.js';
 
 /** Loading/empty/error wrapper for one resource state. */
-export function resourceView(state, renderData, { lines = 3, emptyTitle = '자료가 없어요', isEmpty = data => data === null || data === undefined, errorTitle = '자료를 불러오지 못했어요' } = {}) {
+export function resourceView(state, renderData, { lines = 3, emptyTitle = '자료 없음', isEmpty = data => data === null || data === undefined, errorTitle = '불러오기 실패' } = {}) {
   if (!state || state.status === 'idle' || (state.status === 'loading' && state.data === null)) return skeleton({ lines });
   if (state.data === null && state.status === 'error') {
     const denied = state.error?.status === 401 || state.error?.status === 403;
-    return emptyState({ iconName: denied ? 'lock' : 'alert', title: denied ? '이 접속에서는 볼 수 없어요' : errorTitle, body: toUserText(state.error?.message || '연결 상태를 확인한 뒤 다시 시도해 주세요.') });
+    return emptyState({ iconName: denied ? 'lock' : 'alert', title: denied ? '조회 권한 없음' : errorTitle, body: toUserText(state.error?.message || '연결 확인 후 재시도.') });
   }
   if (isEmpty(state.data)) return emptyState({ title: emptyTitle });
   const staleNote = state.status === 'error' && state.lastSuccessAt
@@ -55,7 +55,7 @@ export function recordRow(item) {
 export function scalperEngine(session, { compact = false } = {}) {
   const status = session.status;
   if (!status) {
-    return engineStatus({ name: '코인 스캘퍼', stateLabel: '확인 중', tone: 'neutral', detail: '자동매매 상태를 불러오고 있어요.' });
+    return engineStatus({ name: '코인 스캘퍼', stateLabel: '확인 중', tone: 'neutral', detail: '상태 불러오는 중' });
   }
   const state = status.runtimeState;
   const running = status.isRunning === true || state === 'RUNNING';
@@ -64,7 +64,7 @@ export function scalperEngine(session, { compact = false } = {}) {
   const breaker = status.lossCircuitBreaker;
   const detail = state === 'PROTECTIVE_ONLY' || state === 'SYNC_REQUIRED' ? runtimeBlockReason(status)
     : running ? `${(status.targetCoins || []).length}개 시장 감시 · 최대 ${status.maxPositions ?? '—'}개 보유 · 1분봉 과매도 반등`
-      : status.stopReason ? `중지 사유: ${stopReasonLabel(status.stopReason)}` : '자동매매가 꺼져 있어요.';
+      : status.stopReason ? `중지 사유: ${stopReasonLabel(status.stopReason)}` : '자동매매 꺼짐';
   const activity = status.engineActivity;
   const meta = [
     activity?.lastCycleAt ? `마지막 분석 ${relativeTime(activity.lastCycleAt)}` : null,
@@ -100,24 +100,24 @@ export async function confirmScalper(ctx, action) {
   const current = ctx.session();
   if (action === 'start') {
     const ok = await ctx.confirm({
-      title: '코인 자동매매를 시작할까요?',
-      message: current.isLive ? '실제 자금으로 1분봉 스캘핑 주문을 냅니다. 시작 전에 계좌와 미체결 주문을 확인합니다.' : '가상 자금으로 1분봉 스캘핑을 실행합니다.',
+      title: '코인 자동매매 시작',
+      message: current.isLive ? '실제 자금 1분봉 스캘핑. 시작 전 계좌·미체결 주문 확인.' : '가상 자금 1분봉 스캘핑.',
       details: [['작업공간', current.isLive ? '실전' : '모의투자'], ['감시 시장', `${(current.status?.targetCoins || []).length}개`], ['최대 보유', `${current.status?.maxPositions ?? '—'}개`]],
       confirmLabel: '시작',
       live: current.isLive
     });
     if (!ok) return;
-    await ctx.control(api => api.control.startScalper(), { success: '자동매매 시작을 요청했습니다.', failure: '자동매매를 시작하지 못했습니다', refresh: ['status'] });
+    await ctx.control(api => api.control.startScalper(), { success: '자동매매 시작 요청됨', failure: '자동매매 시작 실패', refresh: ['status'] });
   } else {
     const ok = await ctx.confirm({
-      title: '코인 자동매매를 정지할까요?',
-      message: '신규 진입을 멈춥니다. 보유 포지션이 있으면 위험 감시를 유지하며 정리 상태를 확인합니다.',
+      title: '코인 자동매매 정지',
+      message: '신규 진입 중지. 보유 포지션은 위험 감시 유지.',
       confirmLabel: '정지',
       tone: 'danger',
       live: current.isLive
     });
     if (!ok) return;
-    await ctx.control(api => api.control.stopScalper(), { success: '자동매매 정지를 요청했습니다.', failure: '자동매매를 정지하지 못했습니다', refresh: ['status'] });
+    await ctx.control(api => api.control.stopScalper(), { success: '자동매매 정지 요청됨', failure: '자동매매 정지 실패', refresh: ['status'] });
   }
 }
 

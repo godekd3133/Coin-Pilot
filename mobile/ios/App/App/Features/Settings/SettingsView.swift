@@ -19,7 +19,7 @@ struct CoinPilotSettingsView: View {
                             .font(.caption)
                             .foregroundColor(CPColor.secondaryInk)
                     } else {
-                        Text("모의 작업공간은 가상 자금만 사용합니다. 실전 서버의 자산은 섞이지 않아요.")
+                        Text("모의 작업공간은 가상 자금만 사용. 실전 자산과 분리.")
                             .font(.caption)
                             .foregroundColor(CPColor.secondaryInk)
                     }
@@ -232,7 +232,7 @@ struct CoinPilotSettingsView: View {
         .sheet(isPresented: $showingTuningEditor) {
             CoinPilotTuningEditor(store: store)
         }
-        .confirmationDialog("이 기기에서 로그아웃할까요?", isPresented: $showingLogoutConfirmation, titleVisibility: .visible) {
+        .confirmationDialog("이 기기에서 로그아웃", isPresented: $showingLogoutConfirmation, titleVisibility: .visible) {
             Button("로그아웃", role: .destructive) { store.logOut() }
             Button("취소", role: .cancel) {}
         } message: {

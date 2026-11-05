@@ -114,10 +114,10 @@ struct CoinPilotConnectionView: View {
                             .font(.headline.weight(.semibold))
                     }
                     .frame(maxWidth: .infinity)
-                    .frame(minHeight: 54)
+                    .frame(minHeight: 50)
                     .foregroundColor(.white)
                     .background(CPColor.blueFill)
-                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .clipShape(RoundedRectangle(cornerRadius: CPRadius.sm, style: .continuous))
                 }
                 .buttonStyle(CoinPilotPressableButtonStyle())
                 .disabled(store.isWorking)
@@ -139,9 +139,9 @@ struct CoinPilotConnectionView: View {
                     .buttonStyle(CoinPilotPressableButtonStyle())
                 }
 
-                Label(store.usesManagedServerConnection
+                Text(store.usesManagedServerConnection
                       ? "계좌에 맞는 서버로 자동 연결됩니다. 거래소 API 키는 서버에만 보관합니다."
-                      : "거래소 API 키는 서버에만 보관합니다.", systemImage: "lock.shield")
+                      : "거래소 API 키는 서버에만 보관합니다.")
                     .font(.footnote)
                     .foregroundColor(CPColor.secondaryInk)
                     .fixedSize(horizontal: false, vertical: true)
@@ -188,18 +188,18 @@ struct CoinPilotConnectionView: View {
 
     private var tokenStorageNotice: String {
 #if targetEnvironment(simulator) || COINPILOT_TEST_SIMULATOR_TOKEN_STORE
-        return "검증 환경에서는 앱이 실행되는 동안만 임시 보관됩니다. 앱을 다시 열면 토큰을 입력해 주세요."
+        return "검증 환경: 앱 실행 중에만 임시 보관. 재실행 시 토큰 재입력."
 #else
         return "토큰은 이 기기의 보안 저장소에 보관됩니다."
 #endif
     }
 
     private var connectionTitle: String {
-        if store.workspaceModeMismatchMessage != nil { return "다른 모드의 서버가 연결됐어요" }
-        if store.phase == .dashboard && !store.serverModeMatchesWorkspace { return "서버 연결을 확인해 주세요" }
-        if store.phase == .login { return "내 계좌에 로그인하세요" }
+        if store.workspaceModeMismatchMessage != nil { return "다른 모드 서버 연결됨" }
+        if store.phase == .dashboard && !store.serverModeMatchesWorkspace { return "서버 연결 확인 필요" }
+        if store.phase == .login { return "로그인" }
         if store.usesManagedServerConnection {
-            return store.isWorking ? "내 계좌에 연결하고 있어요" : "계좌 연결을 확인해 주세요"
+            return store.isWorking ? "연결 중" : "계좌 연결 확인 필요"
         }
         return "계좌 연결"
     }
@@ -213,14 +213,14 @@ struct CoinPilotConnectionView: View {
         }
         if store.phase == .login {
             return store.showsPasswordLogin
-                ? "서버에 등록한 아이디와 비밀번호로 로그인하세요."
-                : "연결한 서버에서 발급한 토큰을 입력하세요."
+                ? "서버 아이디와 비밀번호"
+                : "서버 발급 토큰"
         }
         return ""
     }
 
     private var serverAddressHelp: String {
-        "\(store.activeWorkspace.title) 계좌의 서버 주소를 입력하세요. 외부에서 연결할 때는 HTTPS 주소를 사용하세요."
+        "\(store.activeWorkspace.title) 계좌 서버 주소. 외부 연결은 HTTPS."
     }
 }
 

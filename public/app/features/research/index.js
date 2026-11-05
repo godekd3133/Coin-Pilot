@@ -21,7 +21,7 @@ function readinessCard(state) {
       <p class="cp-headline">${verdict.headline}</p>
       ${verdict.description ? html`<p class="cp-caption" style="margin-top:4px">${verdict.description}</p>` : ''}
       ${verdict.reasons.length ? html`<ul style="margin:10px 0 0;padding-left:18px" class="cp-caption">${verdict.reasons.map(reason => html`<li>${reason}</li>`)}</ul>` : ''}
-      <div style="margin-top:12px">${disclosure({ summary: '점검 결과와 사용 범위', meta: '작성 시점과 적용 여부', body: html`${kv(readinessAuditRows(readiness).map(([key, value]) => [key, key === '점검 시각' ? (value ? fullDateTime(value) : '확인 불가') : value]))}<p class="cp-caption" style="margin-top:8px">점검 결과의 작성 시점과 현재 주문 조건을 보여줘요. 실제 체결 여부나 지속적인 수익은 확인할 수 없어요.</p>` })}</div>`, { lines: 3 })
+      <div style="margin-top:12px">${disclosure({ summary: '점검 결과와 사용 범위', meta: '작성 시점과 적용 여부', body: html`${kv(readinessAuditRows(readiness).map(([key, value]) => [key, key === '점검 시각' ? (value ? fullDateTime(value) : '확인 불가') : value]))}<p class="cp-caption" style="margin-top:8px">점검 작성 시점과 현재 주문 조건. 실제 체결·수익 근거 아님.</p>` })}</div>`, { lines: 3 })
   });
 }
 
@@ -32,7 +32,7 @@ function validationCard(state) {
     title: '고정 설정 검증 리포트',
     subtitle: '수수료·슬리피지 반영, 시장별 95% 신뢰 기준',
     body: resourceView(state, () => (report.available === false
-      ? emptyState({ iconName: 'shield', title: '검증 리포트가 없어요', body: '서버에서 고정 설정 검증(validate:scalping:fixed)을 실행하면 결과가 표시돼요.' })
+      ? emptyState({ iconName: 'shield', title: '검증 리포트 없음', body: '서버에서 validate:scalping:fixed 실행 후 표시.' })
       : html`${statGrid([
         { label: '실거래 적용 후보', value: report.promoted ? '예' : '아니요', tone: report.promoted ? 'ok' : 'warn', mono: false },
         { label: '작성', value: validationReportFreshness(report.generatedAt, report.reportFreshness), mono: false },
@@ -61,7 +61,7 @@ function paperCard(ctx) {
   const coreReady = isCoreTradingSnapshotReady({ status: s.status, account: s.account, marketPrices: s.marketPricesLoaded ? s.marketPrices : null, selectedCoin: s.marketPrices[0]?.coin });
   const exchangeUnsafe = s.status?.runtimeState === 'SYNC_REQUIRED' || s.status?.runtimeState === 'PROTECTIVE_ONLY' || s.status?.exchangeStateKnown === false;
   const startBlocked = !s.canMutate || readOnly || !known || running || !s.isPaper || !coreReady || exchangeUnsafe;
-  const startReason = !s.canMutate ? s.mutationBlockedReason : !s.isPaper ? '모의투자 서버에서만 시작할 수 있어요.' : !known ? '모의투자 상태를 확인할 수 없어 시작하거나 초기화할 수 없어요.' : exchangeUnsafe ? '거래소 상태를 확인하는 중이에요.' : !coreReady ? '계좌와 시세를 확인한 뒤 시작할 수 있어요.' : '';
+  const startReason = !s.canMutate ? s.mutationBlockedReason : !s.isPaper ? '모의투자 서버 전용' : !known ? '모의투자 상태 확인 불가 · 시작/초기화 불가' : exchangeUnsafe ? '거래소 상태 확인 중' : !coreReady ? '계좌·시세 확인 후 시작 가능' : '';
   const actions = readOnly ? '' : html`<div class="cp-actions" style="margin-top:12px">
     ${running ? button({ label: '모의투자 중지', iconName: 'stop', attrs: { 'data-paper': 'stop' }, disabled: !s.canMutate }) : html`
       ${button({ label: '현재 자산으로 시작', variant: 'primary', iconName: 'play', attrs: { 'data-paper': 'start' }, disabled: startBlocked, title: startReason || undefined })}
@@ -70,9 +70,9 @@ function paperCard(ctx) {
 
   if (!status) return card({ index: 2, title: '모의투자 실행', body: resourceView(state, () => '', { lines: 3 }) });
   if (notStarted) {
-    return card({ index: 2, title: '모의투자 실행', action: badge('시작 전', 'neutral'), body: html`<p>진행 중인 모의투자가 없어요. 현재 가상 자산을 유지하거나 처음 금액으로 다시 시작할 수 있어요.</p>${actions}<p class="cp-caption" style="margin-top:8px">초기화하면 가상 잔액과 보유 코인, 전략별 포지션·매매 기록이 삭제돼요.</p>` });
+    return card({ index: 2, title: '모의투자 실행', action: badge('시작 전', 'neutral'), body: html`<p>진행 중인 모의투자 없음.</p>${actions}<p class="cp-caption" style="margin-top:8px">초기화 시 가상 잔액·보유 코인·전략별 포지션·매매 기록 삭제.</p>` });
   }
-  if (!known) return card({ index: 2, title: '모의투자 실행', action: badge('확인 필요', 'warning'), body: html`<p class="cp-caption">모의투자 상태를 불러오지 못해 시작하거나 초기화할 수 없어요.</p>` });
+  if (!known) return card({ index: 2, title: '모의투자 실행', action: badge('확인 필요', 'warning'), body: html`<p class="cp-caption">모의투자 상태 불러오기 실패 · 시작/초기화 불가</p>` });
 
   const problem = status.orphaned === true || status.riskMonitor?.failClosed === true || status.analysisDataHealth?.failClosed === true;
   const openCount = hasFiniteValue(status.strictEvaluation?.activePositions) ? Number(status.strictEvaluation.activePositions) : null;
@@ -100,10 +100,10 @@ function paperCard(ctx) {
         ['기록 연속성', status.continuityEligible === false ? '공백 기록으로 근거 제외' : '정상'],
         ['진입 재확인', hasFiniteValue(confirmations.entryConfirmationAttempts) ? `시도 ${confirmations.entryConfirmationAttempts} · 성공 ${confirmations.entryConfirmationSucceeded ?? 0} · 취소 ${confirmations.entryConfirmationCancelled ?? 0}` : '—']
       ])}</div>
-      ${openCount > 0 ? html`<p class="cp-caption" style="margin-top:8px">평가 자산·수익률에는 미청산 포지션 평가손익이 포함돼요. 실현 손익은 청산된 거래만 반영해요.</p>` : ''}
-      ${funnelAvailable ? html`<div style="margin-top:12px"><p class="cp-caption" style="margin-bottom:6px">신호 흐름 · 완료된 캔들 기준 집계 · 참고용</p><div class="cp-funnel">${[['분석 완료', funnel.availableWindows], ['과매도', funnel.oversoldWindows], ['양봉 확인', funnel.bullishWindows], ['반등', funnel.priceReboundWindows], ['확정', funnel.confirmedWindows]].map(([label, value]) => html`<div><span>${label}</span><strong>${number(value)}</strong></div>`)}</div><p class="cp-caption" style="margin-top:6px">거래 횟수나 수익을 뜻하지 않으며, 이 수치에 따라 조건을 자동으로 낮추지 않아요.</p></div>` : ''}
-      ${problem ? html`<div style="margin-top:12px">${notice({ tone: 'danger', body: '연결이나 시세에 문제가 있어 새 매매를 중지했어요.' })}</div>` : ''}
-      ${status.configConsistent === false ? html`<div style="margin-top:12px">${notice({ tone: 'warning', body: '설정이 바뀌어 이 모의투자 기록은 현재 설정과 일치하지 않아요.' })}</div>` : ''}
+      ${openCount > 0 ? html`<p class="cp-caption" style="margin-top:8px">평가 자산·수익률은 미청산 평가손익 포함. 실현 손익은 청산분만.</p>` : ''}
+      ${funnelAvailable ? html`<div style="margin-top:12px"><p class="cp-caption" style="margin-bottom:6px">신호 흐름 · 완료된 캔들 기준 집계 · 참고용</p><div class="cp-funnel">${[['분석 완료', funnel.availableWindows], ['과매도', funnel.oversoldWindows], ['양봉 확인', funnel.bullishWindows], ['반등', funnel.priceReboundWindows], ['확정', funnel.confirmedWindows]].map(([label, value]) => html`<div><span>${label}</span><strong>${number(value)}</strong></div>`)}</div><p class="cp-caption" style="margin-top:6px">거래 횟수·수익 아님. 이 수치로 조건을 자동 완화하지 않음.</p></div>` : ''}
+      ${problem ? html`<div style="margin-top:12px">${notice({ tone: 'danger', body: '연결·시세 문제로 신규 매매 중지.' })}</div>` : ''}
+      ${status.configConsistent === false ? html`<div style="margin-top:12px">${notice({ tone: 'warning', body: '설정 변경됨 · 이 기록은 현재 설정과 불일치.' })}</div>` : ''}
       ${actions}`
   });
 }
@@ -121,14 +121,14 @@ function historyCard(ctx) {
         subtitle: `거래 ${item.totalTrades || item.tradeCount || 0}회 · 이익/손실 비율 ${item.profitFactor ?? '—'} · 최대 낙폭 ${hasFiniteValue(item.maxDrawdown) ? `${number(item.maxDrawdown).toFixed(1)}%` : '—'}`,
         value: percent(item.totalReturnPercent ?? item.returnPercent),
         valueTone: tone(item.totalReturnPercent ?? item.returnPercent)
-      })), { empty: html`<p class="cp-caption">과거 데이터 점검 결과가 없어요.</p>` }), { lines: 2 })}
+      })), { empty: html`<p class="cp-caption">과거 데이터 점검 결과 없음</p>` }), { lines: 2 })}
       <p class="cp-section-title" style="margin:14px 0 4px">설정 후보 비교 기록</p>
       ${resourceView(optimization, rows => list(rows.slice(0, 8).map(item => listRow({
         leading: avatar('비교', { tone: 'neutral' }),
         title: toUserText(item.type || item.strategy || '설정 비교'),
         subtitle: `${fullDateTime(item.timestamp || item.date)} · ${toUserText(item.description || item.message || '비교한 설정 기록')}`,
         value: String(item.fitness ?? item.score ?? '—')
-      })), { empty: html`<p class="cp-caption">설정 비교 기록이 없어요.</p>` }), { lines: 2 })}`
+      })), { empty: html`<p class="cp-caption">설정 비교 기록 없음</p>` }), { lines: 2 })}`
   });
 }
 
@@ -140,15 +140,15 @@ function researchCard(ctx) {
   return card({
     index: 4,
     title: '연구 자료',
-    subtitle: '참고용 · 실제 주문 조건에 반영되지 않아요',
+    subtitle: '참고용 · 주문 조건 미반영',
     body: html`${resourceView(state, () => (report?.available ? html`${kv([
       ['자료', toUserText(report.study || report.reportFile || '연구 리포트')],
       ['작성', `${fullDateTime(report.generatedAt)} · ${validationReportFreshness(report.generatedAt, report.reportFreshness)}`],
       ['대상 시장', `${number(report.requestedMarketCount, Array.isArray(report.markets) ? report.markets.length : 0)}개`],
       ['조건 후보', `${Array.isArray(report.variants) ? report.variants.length : Object.keys(report.variants || {}).length}개`],
       ['실거래 적용', '불가 (연구 전용)']
-    ])}${report.reportFreshness?.fresh === false ? html`<div style="margin-top:8px">${notice({ tone: 'warning', body: '오래된 비교 결과예요. 최신 데이터를 다시 모으기 전까지 수익성 판단에 쓰지 마세요.' })}</div>` : ''}`
-      : emptyState({ iconName: 'shield', title: report?.reason === 'research_report_not_found' ? '지정한 연구 자료를 찾을 수 없어요' : '연구 자료가 등록되지 않았어요', body: '장기 비교 결과는 서버에서 별도 리포트를 지정하면 표시돼요.' })), { lines: 2 })}
+    ])}${report.reportFreshness?.fresh === false ? html`<div style="margin-top:8px">${notice({ tone: 'warning', body: '오래된 비교 결과 · 수익성 판단에 사용 불가.' })}</div>` : ''}`
+      : emptyState({ iconName: 'shield', title: report?.reason === 'research_report_not_found' ? '지정한 연구 자료 없음' : '연구 자료 없음', body: '서버에서 리포트 지정 시 표시.' })), { lines: 2 })}
       ${cohort ? html`<div style="margin-top:12px">${disclosure({ summary: '모의투자 누적 비교 그룹', body: kv([
         ['실행', `${cohort.sessionCount ?? '—'}회`],
         ['기본 조건 청산', `${cohort.strictTradeCount ?? '—'}건`],
@@ -176,7 +176,7 @@ export default {
       const s = ctx.session();
       if (!s.canMutate) { ctx.ui.toast(s.mutationBlockedReason, 'warning'); return; }
       if (kind === 'stop') {
-        const ok = await ctx.confirm({ title: '모의투자를 중지할까요?', message: '중지할 때 보유 포지션이 있으면 기록에 남기고, 같은 기록에서 자동으로 이어서 시작하지 않아요.', confirmLabel: '중지', tone: 'danger' });
+        const ok = await ctx.confirm({ title: '모의투자 중지', message: '중지 시 보유 포지션은 기록에 남고, 같은 기록에서 자동 재시작하지 않음.', confirmLabel: '중지', tone: 'danger' });
         if (!ok) return;
         await ctx.control(api => api.control.stopPaper(), { success: '모의투자를 중지했습니다.', failure: '모의투자 중지 실패', refresh: ['paper', 'status'] });
         return;
@@ -184,7 +184,7 @@ export default {
       const reset = kind === 'reset';
       const seed = number(s.account?.initialSeedMoney);
       const ok = await ctx.confirm({
-        title: reset ? '초기화 후 새 모의투자를 시작할까요?' : '모의투자를 시작할까요?',
+        title: reset ? '초기화 후 새 모의투자 시작' : '모의투자 시작',
         message: reset ? `${seed > 0 ? `초기 금액 ${won(seed)}` : '저장된 초기 금액'}으로 새 모의투자를 시작합니다. 보유 코인과 전략별 포지션·매매 기록은 사라집니다.` : '현재 가상 자산과 포지션을 유지한 채 모의투자 실행을 시작합니다.',
         confirmLabel: reset ? '초기화 후 시작' : '시작',
         tone: reset ? 'danger' : 'primary'

@@ -71,7 +71,7 @@ export function mutationBlockReason(auth, { online = true, readOnlyObserver = fa
     return '모바일 운영 토큰은 모바일 앱 전용입니다. 브라우저에서는 주문과 설정 변경을 사용할 수 없습니다.';
   }
   if (auth?.authRequired === true && ['missing', 'invalid'].includes(auth?.verification)) {
-    return '유효한 서버 접속 토큰이 필요합니다. 로그인 창에서 다시 로그인해 주세요.';
+    return '유효한 접속 토큰 필요 · 다시 로그인.';
   }
   if (readOnlyObserver) return '읽기 전용 관찰 서버입니다. 주문과 설정을 변경할 수 없습니다.';
   return online === false

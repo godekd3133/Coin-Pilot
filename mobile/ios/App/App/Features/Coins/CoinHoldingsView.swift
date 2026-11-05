@@ -7,7 +7,7 @@ struct CoinPilotAssetsView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 if store.isBundledPreview {
-                    InlineNotice(text: "앱에 포함된 예시 자료예요. 실제 계좌 정보가 아닙니다.", color: CPColor.blue, symbol: "info.circle.fill")
+                    InlineNotice(text: "앱 내장 예시 자료. 실제 계좌 아님.", color: CPColor.blue, symbol: "info.circle.fill")
                 }
                 if let message = store.dashboardMessage {
                     InlineNotice(text: message, color: CPColor.amber)
@@ -57,12 +57,12 @@ struct CoinPilotAssetsView: View {
                                 Task { await store.refresh() }
                             }
                         } else if store.account?.hasPositionsField != true {
-                            EmptyMessage(text: "보유 자산을 확인할 수 없어요.", image: "CoinPilotEmptyHoldings",
+                            EmptyMessage(text: "보유 자산 확인 불가", image: "CoinPilotEmptyHoldings",
                                          actionTitle: "다시 확인", isActionDisabled: store.isRefreshing) {
                                 Task { await store.refresh() }
                             }
                         } else if store.account?.positions.isEmpty != false {
-                            EmptyMessage(text: "아직 보유한 코인이 없어요. 시장에서 관심 있는 코인의 가격과 흐름을 살펴보세요.", image: "CoinPilotEmptyHoldings",
+                            EmptyMessage(text: "보유 코인 없음", image: "CoinPilotEmptyHoldings",
                                          actionTitle: "시장 둘러보기") { CPNavigation.openCoins(.market) }
                         } else {
                             VStack(spacing: 0) {
@@ -108,7 +108,7 @@ struct CoinPilotAssetsView: View {
                         .foregroundColor(CPColor.secondaryInk)
                 }
                 if store.account?.valuationAvailable == false {
-                    Text("현재 시세를 확인하지 못해 손익을 표시하지 않았어요.")
+                    Text("현재 시세 없음 · 손익 미표시")
                         .font(.footnote)
                         .foregroundColor(CPColor.secondaryInk)
                 }
@@ -148,15 +148,15 @@ struct CoinPilotAssetsView: View {
             VStack(alignment: .leading, spacing: 10) {
                 SectionHeading(title: "자산 배분")
                 if store.account?.valuationAvailable == false {
-                    EmptyMessage(text: "시세를 확인하지 못해 비중을 계산할 수 없어요.")
+                    EmptyMessage(text: "시세 없음 · 비중 계산 불가")
                 } else if allocation.slices.isEmpty {
                     EmptyMessage(text: allocation.unvaluedCount > 0
-                        ? "보유 코인의 평가액을 확인할 수 없어 비중을 나눌 수 없어요."
+                        ? "평가액 확인 불가 · 비중 계산 불가"
                         : "비중을 계산할 자산이 없습니다.")
                 } else {
                     CoinPilotAllocationBar(slices: allocation.slices)
                     if allocation.unvaluedCount > 0 {
-                        Text("시세를 확인하지 못한 코인 \(allocation.unvaluedCount)개는 비중에서 제외했어요.")
+                        Text("시세를 확인하지 못한 코인 \(allocation.unvaluedCount)개는 비중에서 제외")
                             .font(.caption2)
                             .foregroundColor(CPColor.amber)
                     }

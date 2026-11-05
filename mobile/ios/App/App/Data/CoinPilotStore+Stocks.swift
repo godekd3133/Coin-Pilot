@@ -142,7 +142,7 @@ struct CoinPilotStockMarketState: Decodable, Equatable {
 
     var detail: String? {
         switch reason {
-        case "flatten_before_close": return "마감 동시호가 전에 보유 종목을 모두 정리합니다. 오버나이트 보유는 하지 않아요."
+        case "flatten_before_close": return "마감 동시호가 전 전량 정리. 오버나이트 보유 없음."
         case "entry_cutoff": return "장 마감이 가까워 새 종목은 사지 않고 보유 종목만 관리합니다."
         case "before_open", "after_close", "market_holiday": return "정규장 시간에만 주문합니다."
         default: return nil

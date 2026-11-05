@@ -33,9 +33,9 @@ export default {
         index: 0,
         title: '시장 분위기',
         action: button({ label: state.status === 'loading' ? '수집 중…' : '새로고침', size: 'sm', iconName: 'refresh', attrs: { 'data-action': 'reload' }, disabled: state.status === 'loading' }),
-        body: !data ? (state.status === 'error' ? emptyState({ iconName: 'alert', title: '뉴스를 불러오지 못했어요', body: '연결 상태를 확인한 뒤 새로고침해 주세요.' }) : skeleton({ lines: 2 }))
-          : html`<div class="cp-row-between"><div><p class="cp-headline">${info ? `${info.label} 기사 분위기` : all.length ? '기사 분위기 미제공' : '분석할 뉴스가 없어요'}</p><p class="cp-caption">${info ? `${info.copy} · 기사 ${all.length}건` : ''}</p></div>${hasFiniteValue(score) && all.length ? html`<strong class="cp-num cp-${Number(score) > 0 ? 'up' : Number(score) < 0 ? 'down' : ''}" style="font-size:24px">${Number(score) >= 0 ? '+' : ''}${Number(score).toFixed(2)}</strong>` : ''}</div>
-            ${state.status === 'error' ? html`<div style="margin-top:8px">${notice({ tone: 'warning', body: '최신 뉴스를 확인하지 못해 마지막 자료를 표시해요.' })}</div>` : ''}`
+        body: !data ? (state.status === 'error' ? emptyState({ iconName: 'alert', title: '뉴스 불러오기 실패', body: '연결 확인 후 새로고침.' }) : skeleton({ lines: 2 }))
+          : html`<div class="cp-row-between"><div><p class="cp-headline">${info ? `${info.label} 기사 분위기` : all.length ? '기사 분위기 미제공' : '분석할 뉴스 없음'}</p><p class="cp-caption">${info ? `${info.copy} · 기사 ${all.length}건` : ''}</p></div>${hasFiniteValue(score) && all.length ? html`<strong class="cp-num cp-${Number(score) > 0 ? 'up' : Number(score) < 0 ? 'down' : ''}" style="font-size:24px">${Number(score) >= 0 ? '+' : ''}${Number(score).toFixed(2)}</strong>` : ''}</div>
+            ${state.status === 'error' ? html`<div style="margin-top:8px">${notice({ tone: 'warning', body: '최신 뉴스 조회 실패 · 마지막 자료 표시' })}</div>` : ''}`
       }));
       render(slot('list'), card({
         index: 1,
@@ -50,7 +50,7 @@ export default {
             subtitle: `${item.source || item.publisher || '출처 미상'} · ${fullDateTime(item.timestamp || item.pubDate || item.publishedAt)}`,
             trailing: badge(itemInfo?.label || '분류 없음', itemInfo?.key === 'positive' ? 'up' : itemInfo?.key === 'negative' ? 'down' : 'neutral')
           });
-        }), { empty: emptyState({ iconName: 'news', title: all.length ? '선택한 분류의 뉴스가 없어요' : '표시할 뉴스가 없어요' }) })
+        }), { empty: emptyState({ iconName: 'news', title: all.length ? '해당 분류 뉴스 없음' : '뉴스 없음' }) })
       }));
     }
 
@@ -61,7 +61,7 @@ export default {
       const info = articleSentimentInfo(item);
       ctx.ui.openSheet({
         title: '뉴스 확인',
-        content: String(html`<p class="cp-caption">${item.source || '출처 미상'} · ${fullDateTime(item.timestamp || item.pubDate || item.publishedAt)}</p><h3 class="cp-headline">${item.title || '제목 없음'}</h3><p>${toUserText(item.description || item.content || '요약이 없습니다.')}</p><p class="cp-caption">기사 분위기: ${info?.label || '분류 자료 없음'}</p>`),
+        content: String(html`<p class="cp-caption">${item.source || '출처 미상'} · ${fullDateTime(item.timestamp || item.pubDate || item.publishedAt)}</p><h3 class="cp-headline">${item.title || '제목 없음'}</h3><p>${toUserText(item.description || item.content || '요약 없음')}</p><p class="cp-caption">기사 분위기: ${info?.label || '분류 자료 없음'}</p>`),
         footer: link && SAFE_LINK.test(link) ? String(html`<a class="cp-btn is-primary" href="${link}" target="_blank" rel="noopener noreferrer">원문 보기</a><button type="button" class="cp-btn is-secondary" data-sheet-close>닫기</button>`) : undefined
       });
     }

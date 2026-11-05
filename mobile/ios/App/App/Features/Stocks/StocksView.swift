@@ -51,19 +51,19 @@ struct CoinPilotStocksView: View {
     private var content: some View {
         if store.isBundledPreview {
             NativeCard {
-                CPEmptyState(symbol: "chart.bar.xaxis", title: "예시 데이터에는 주식 자료가 없어요",
-                             message: "서버에 연결하면 모의·실전 주식 자동매매 상태를 볼 수 있어요.")
+                CPEmptyState(symbol: "chart.bar.xaxis", title: "예시 데이터: 주식 자료 없음",
+                             message: "서버 연결 필요")
             }
         } else if !store.canOperate {
             NativeCard {
-                CPEmptyState(symbol: "lock", title: "운영 토큰이 필요해요",
-                             message: "주식 상태는 운영 권한이 있는 토큰으로 로그인해야 볼 수 있어요.")
+                CPEmptyState(symbol: "lock", title: "운영 토큰 필요",
+                             message: "운영 권한 토큰으로 로그인 필요")
             }
         } else if isLoading {
             skeleton
         } else if let status, !status.isEnabled {
             NativeCard {
-                CPEmptyState(symbol: "pause.circle", title: "주식 자동매매가 꺼져 있어요",
+                CPEmptyState(symbol: "pause.circle", title: "주식 자동매매 꺼짐",
                              message: "서버 설정에서 주식 자동매매를 켜면 이곳에 상태가 표시됩니다.")
             }
         } else if let status {
@@ -75,7 +75,7 @@ struct CoinPilotStocksView: View {
                 )
             }
             if status.credentialsConfigured == false {
-                CPNotice(text: "증권사 API 키가 서버에 등록되지 않아 주식 자동매매를 시작할 수 없어요.", tone: .warning)
+                CPNotice(text: "증권사 API 키 미등록 · 주식 자동매매 시작 불가", tone: .warning)
             }
             if let trader {
                 summaryCard(trader)
@@ -88,13 +88,13 @@ struct CoinPilotStocksView: View {
                 universeCard(status)
             } else {
                 NativeCard {
-                    CPEmptyState(symbol: "questionmark.circle", title: "이 서버에는 \(mode == "live" ? "실전" : "모의") 주식 트레이더가 없어요",
+                    CPEmptyState(symbol: "questionmark.circle", title: "이 서버에는 \(mode == "live" ? "실전" : "모의") 주식 트레이더 없음",
                                  message: "모의 서버는 모의 주식, 실전 서버는 실전 주식을 운용합니다.")
                 }
             }
         } else {
             NativeCard {
-                CPEmptyState(symbol: "wifi.exclamationmark", title: "주식 상태를 불러오지 못했어요",
+                CPEmptyState(symbol: "wifi.exclamationmark", title: "주식 상태 불러오기 실패",
                              actionTitle: "다시 시도") {
                     Task { await store.loadStocksStatus(force: true) }
                 }
@@ -128,7 +128,7 @@ struct CoinPilotStocksView: View {
                         change: trader.unrealizedProfit,
                         changeLabel: "평가 손익"
                     )
-                    Text("실전 계좌의 예수금은 증권 계좌 기준이라 이 화면 합계에 포함하지 않아요.")
+                    Text("실전 예수금은 증권 계좌 기준 · 합계 제외")
                         .font(.caption)
                         .foregroundColor(CPColor.secondaryInk)
                         .fixedSize(horizontal: false, vertical: true)
@@ -165,7 +165,7 @@ struct CoinPilotStocksView: View {
                 name: trader.isLive ? "실전 주식 스캘퍼" : "모의 주식 스캘퍼",
                 symbol: "bolt.horizontal.circle",
                 isRunning: trader.running,
-                detail: trader.desiredRunning == false ? "중지 선택이 저장돼 있어요. 서버가 재시작돼도 자동으로 켜지지 않아요." : nil,
+                detail: trader.desiredRunning == false ? "중지 상태 저장됨 · 서버 재시작 시에도 유지" : nil,
                 lastRun: trader.lastCycleAt.map { "마지막 실행 · \(CoinPilotFormatting.dateTime($0))" },
                 pausedReason: trader.pauseLabel,
                 isLive: trader.isLive,
@@ -174,7 +174,7 @@ struct CoinPilotStocksView: View {
                 confirmation = toggleConfirmation(trader)
             }
             if let pending = trader.pendingOrders, pending > 0 {
-                CPNotice(text: "체결을 확인하지 못한 주문 \(pending)건이 있어 신규 진입이 잠겨 있어요.", tone: .warning)
+                CPNotice(text: "체결을 확인하지 못한 주문 \(pending)건 · 신규 진입 잠금", tone: .warning)
             }
             if let error = trader.lastError, !error.isEmpty {
                 CPNotice(text: error, tone: .danger)
@@ -186,13 +186,13 @@ struct CoinPilotStocksView: View {
         let start = trader.running != true
         let modeKey = trader.isLive ? "live" : "paper"
         return CPConfirmation(
-            title: start ? (trader.isLive ? "실전 주식 자동매매를 시작할까요?" : "모의 주식 자동매매를 시작할까요?")
-                : "주식 자동매매를 중지할까요?",
+            title: start ? (trader.isLive ? "실전 주식 자동매매 시작" : "모의 주식 자동매매 시작")
+                : "주식 자동매매 중지",
             message: start
                 ? (trader.isLive
-                    ? "정규장 동안 실제 계좌로 시장가 주문이 나갈 수 있어요. 장 마감 전에는 보유 종목을 모두 정리합니다."
-                    : "가상 자금으로만 주문합니다. 실제 계좌에는 영향이 없어요.")
-                : "새 진입을 멈춥니다. 이미 보유한 종목은 서버의 정리 규칙에 따라 관리될 수 있어요.",
+                    ? "정규장 중 실제 계좌로 시장가 주문. 장 마감 전 전량 정리."
+                    : "가상 자금으로만 주문. 실제 계좌 영향 없음.")
+                : "신규 진입 정지. 보유 종목은 서버 정리 규칙에 따름.",
             confirmTitle: start ? (trader.isLive ? "실전 시작" : "모의 시작") : "중지",
             isDestructive: start && trader.isLive,
             isLive: trader.isLive
@@ -238,8 +238,8 @@ struct CoinPilotStocksView: View {
             Text("\(trader.positions.count)종목").font(.caption).foregroundColor(CPColor.secondaryInk)
         }) {
             if trader.positions.isEmpty {
-                CPEmptyState(symbol: "tray", title: "보유한 종목이 없어요",
-                             message: "자동매매가 진입하면 이곳에 표시됩니다. 장 마감 전에는 모두 정리해요.")
+                CPEmptyState(symbol: "tray", title: "보유 종목 없음",
+                             message: "")
             } else {
                 VStack(spacing: 0) {
                     ForEach(trader.positions) { position in
@@ -264,7 +264,7 @@ struct CoinPilotStocksView: View {
     private func tradesCard(_ trader: CoinPilotStockTrader) -> some View {
         CPCard("최근 체결") {
             if trader.recentTrades.isEmpty {
-                Text("아직 체결 기록이 없어요.").font(.caption).foregroundColor(CPColor.secondaryInk)
+                Text("체결 기록 없음").font(.caption).foregroundColor(CPColor.secondaryInk)
             } else {
                 VStack(spacing: 0) {
                     let trades = Array(trader.recentTrades.prefix(10))
@@ -313,15 +313,15 @@ struct CoinPilotStocksView: View {
         let blocked = !trader.positions.isEmpty
         return CPCard("모의 계좌 초기화") {
             Text(blocked
-                 ? "보유 종목이 있으면 초기화할 수 없어요. 정리된 뒤 다시 시도해 주세요."
-                 : "모의 주식 거래 기록과 현금을 시드머니로 되돌립니다. 실전 계좌에는 영향이 없어요.")
+                 ? "보유 종목이 있어 초기화 불가. 정리 후 다시 시도."
+                 : "모의 주식 거래 기록과 현금을 시드머니로 초기화. 실전 계좌 영향 없음.")
                 .font(.caption)
                 .foregroundColor(CPColor.secondaryInk)
                 .fixedSize(horizontal: false, vertical: true)
             Button("모의 계좌 초기화") {
                 confirmation = CPConfirmation(
-                    title: "모의 주식 계좌를 초기화할까요?",
-                    message: "거래 기록과 현금이 시드머니\(trader.initialSeedMoney.map { " \(CoinPilotFormatting.won($0))" } ?? "")로 돌아갑니다. 되돌릴 수 없어요.",
+                    title: "모의 주식 계좌 초기화",
+                    message: "거래 기록과 현금이 시드머니\(trader.initialSeedMoney.map { " \(CoinPilotFormatting.won($0))" } ?? "")로 초기화. 되돌릴 수 없음.",
                     confirmTitle: "초기화",
                     isDestructive: true
                 ) {

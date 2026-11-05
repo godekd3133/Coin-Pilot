@@ -62,7 +62,7 @@ export default {
       if (tradesState.data === null && tradesState.status !== 'error') { render(slot('records'), skeleton({ lines: 6 })); return; }
       const filtered = filters.side !== 'all' || filters.asset !== 'all' || filters.query.trim();
       render(slot('records'), list(rows.slice(0, 120).map(recordRow), {
-        empty: emptyState({ iconName: 'list', title: tradesState.status === 'error' && tradesState.data === null ? '거래 기록을 불러오지 못했어요' : filtered ? '조건에 맞는 기록이 없어요' : '아직 거래 기록이 없어요', body: filtered ? '종목이나 거래 유형을 바꿔 보세요.' : '조건에 맞는 거래가 생기면 이곳에 기록돼요.' })
+        empty: emptyState({ iconName: 'list', title: tradesState.status === 'error' && tradesState.data === null ? '거래 기록 불러오기 실패' : filtered ? '조건에 맞는 기록 없음' : '거래 기록 없음', body: '' })
       }));
     }
 
@@ -109,13 +109,13 @@ export default {
         index: 2,
         title: '자동매매 기록',
         subtitle: '시작·정지·자동 복구 이력',
-        body: history === null ? skeleton({ lines: 3 }) : history.available === false ? emptyState({ iconName: 'clock', title: '자동 복구 기록이 없어요' })
+        body: history === null ? skeleton({ lines: 3 }) : history.available === false ? emptyState({ iconName: 'clock', title: '자동 복구 기록 없음' })
           : list(events.map(event => listRow({
             leading: avatar(event.desiredRunning === false || /stop/i.test(event.type || event.reason || '') ? '정지' : '시작', { tone: /fail|error|gap/i.test(event.type || event.reason || '') ? 'amber' : 'neutral' }),
             title: toUserText(event.label || event.type || event.reason || '상태 변경'),
             subtitle: [dateTime(event.at || event.timestamp || event.createdAt), toUserText(event.source || event.detail || '')].filter(Boolean).join(' · '),
             value: event.runtimeState ? badge(toUserText(event.runtimeState), 'neutral') : ''
-          })), { empty: emptyState({ iconName: 'clock', title: '기록된 상태 변경이 없어요' }) })
+          })), { empty: emptyState({ iconName: 'clock', title: '상태 변경 기록 없음' }) })
       }));
     }
 

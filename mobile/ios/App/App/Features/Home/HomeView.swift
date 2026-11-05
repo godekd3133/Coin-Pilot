@@ -11,7 +11,7 @@ struct CoinPilotHomeView: View {
             VStack(alignment: .leading, spacing: 14) {
                 workspaceIdentity
                 if store.isBundledPreview {
-                    CPNotice(text: "앱에 포함된 예시 자료예요. 실제 계좌 정보가 아닙니다.", tone: .info)
+                    CPNotice(text: "앱 내장 예시 자료. 실제 계좌 아님.", tone: .info)
                 }
                 if let message = store.dashboardMessage {
                     CPNotice(text: message, tone: .warning)
@@ -87,7 +87,7 @@ struct CoinPilotHomeView: View {
             NativeCard {
                 VStack(alignment: .leading, spacing: 8) {
                     SectionHeading(title: "실거래 계좌 확인 중")
-                    Text("\(store.exchangeDisplayName) 키가 등록됐어요. 서버가 잔고와 미체결 주문을 확인할 때까지 실거래 주문은 잠겨 있습니다.")
+                    Text("\(store.exchangeDisplayName) 키 등록됨. 서버의 잔고·미체결 주문 확인 전까지 실거래 주문 잠금.")
                         .font(.footnote)
                         .foregroundColor(CPColor.secondaryInk)
                         .fixedSize(horizontal: false, vertical: true)
@@ -110,15 +110,15 @@ struct CoinPilotHomeView: View {
                 }
                 if summary.continuityEligible == false || summary.analysisContinuityEligible == false ||
                     summary.riskContinuityEligible == false {
-                    InlineNotice(text: "기록이 끊겨 이어진 성과로 판단할 수 없어요.", color: CPColor.amber)
+                    InlineNotice(text: "기록 끊김 · 연속 성과로 볼 수 없음", color: CPColor.amber)
                 }
                 if summary.configSnapshotComplete == false || summary.configurationConsistent == false {
-                    InlineNotice(text: "전략 설정 기록이 완전하지 않아 이 결과를 같은 조건의 비교로 볼 수 없어요.", color: CPColor.amber)
+                    InlineNotice(text: "전략 설정 기록 불완전 · 동일 조건 비교 불가", color: CPColor.amber)
                 }
                 if summary.cohort.available && !summary.cohort.complete {
-                    InlineNotice(text: "일부 기록을 읽지 못해 전체 집계를 사용할 수 없어요.", color: CPColor.amber)
+                    InlineNotice(text: "일부 기록 읽기 실패 · 전체 집계 사용 불가", color: CPColor.amber)
                 } else if summary.cohort.available && !summary.cohort.fresh {
-                    InlineNotice(text: "전체 집계가 오래돼 최신 상태로 볼 수 없어요.", color: CPColor.amber)
+                    InlineNotice(text: "전체 집계 오래됨", color: CPColor.amber)
                 }
             }
         }
@@ -175,35 +175,34 @@ struct CoinPilotHomeView: View {
         store.account?.valuationAvailable == false || (store.account?.unvaluedPositionCount ?? 0) > 0
     }
 
+    /// Only shown when something needs attention; a healthy account shows nothing here.
+    private var needsFocus: Bool {
+        store.runtimeSafetyMessage != nil
+            || (store.isRefreshing && !store.hasLoadedResource("account"))
+            || accountNeedsRefresh
+            || store.account?.valuationAvailable == false
+            || (store.account?.unvaluedPositionCount ?? 0) > 0
+    }
+
+    @ViewBuilder
     private var currentFocus: some View {
-        NativeCard {
-            VStack(alignment: .leading, spacing: 10) {
-                Text("지금 확인할 내용")
-                    .font(.caption.weight(.semibold))
-                    .foregroundColor(CPColor.blue)
-                if let safetyMessage = store.runtimeSafetyMessage {
-                    focusDescription("자동매매 상태를 확인해 주세요", detail: safetyMessage)
-                    NavigationLink("주문 전 점검 보기", destination: CoinPilotResearchDeskView(store: store))
-                        .buttonStyle(CoinPilotSecondaryButtonStyle())
-                } else if store.isRefreshing && !store.hasLoadedResource("account") {
-                    focusDescription("자산 정보를 확인하고 있어요", detail: "계좌를 불러오면 보유 비중과 손익을 보여드릴게요.")
-                    ProgressView().tint(CPColor.blue)
-                } else if accountNeedsRefresh {
-                    focusDescription("자산 정보를 다시 확인해 주세요", detail: "최신 계좌 정보를 불러오지 못했어요. 마지막으로 확인한 정보가 표시될 수 있습니다.")
-                    refreshAction
-                } else if store.account?.valuationAvailable == false || (store.account?.unvaluedPositionCount ?? 0) > 0 {
-                    focusDescription("일부 코인의 시세를 확인해야 해요", detail: "시세가 없는 코인은 평가액과 손익을 계산하지 않았어요. 보유 자산에서 확인할 수 있습니다.")
-                    Button("보유 자산 확인") { CPNavigation.openCoins(.holdings) }
-                        .buttonStyle(CoinPilotSecondaryButtonStyle())
-                } else if store.account?.hasPositionsField == true, store.account?.positions.isEmpty == true {
-                    focusDescription("아직 보유한 코인이 없어요", detail: "시장 화면에서 가격과 최근 흐름을 살펴보세요. 보유 코인이 생기면 여기에서 자산 변화를 확인할 수 있어요.")
-                    Button("시장 둘러보기") { CPNavigation.openCoins(.market) }
-                        .buttonStyle(CoinPilotSecondaryButtonStyle())
-                } else {
-                    focusDescription(store.isBundledPreview ? "예시 자산의 구성을 살펴보세요" : "내 자산이 어떻게 나뉘어 있는지 확인하세요",
-                                     detail: "보유 비중과 코인별 손익을 함께 보면 전체 자산의 변화를 이해하기 쉬워요.")
-                    Button("보유 비중과 손익 보기") { CPNavigation.openCoins(.holdings) }
-                        .buttonStyle(CoinPilotSecondaryButtonStyle())
+        if needsFocus {
+            NativeCard {
+                VStack(alignment: .leading, spacing: 10) {
+                    if let safetyMessage = store.runtimeSafetyMessage {
+                        focusDescription("자동매매 상태 확인 필요", detail: safetyMessage)
+                        NavigationLink("주문 전 점검 보기", destination: CoinPilotResearchDeskView(store: store))
+                            .buttonStyle(CoinPilotSecondaryButtonStyle())
+                    } else if store.isRefreshing && !store.hasLoadedResource("account") {
+                        focusDescription("자산 불러오는 중", detail: "")
+                    } else if accountNeedsRefresh {
+                        focusDescription("자산 갱신 실패", detail: "최신 계좌 정보 불러오기 실패. 마지막 확인 정보 표시 중일 수 있음.")
+                        refreshAction
+                    } else {
+                        focusDescription("일부 코인 시세 없음", detail: "시세 없는 코인은 평가액·손익 제외.")
+                        Button("보유 자산 확인") { CPNavigation.openCoins(.holdings) }
+                            .buttonStyle(CoinPilotSecondaryButtonStyle())
+                    }
                 }
             }
         }
@@ -212,8 +211,10 @@ struct CoinPilotHomeView: View {
     private func focusDescription(_ title: String, detail: String) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title).font(.headline.weight(.semibold)).foregroundColor(CPColor.ink)
-            Text(detail).font(.footnote).foregroundColor(CPColor.secondaryInk)
-                .fixedSize(horizontal: false, vertical: true)
+            if !detail.isEmpty {
+                Text(detail).font(.footnote).foregroundColor(CPColor.secondaryInk)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 
@@ -257,7 +258,7 @@ struct CoinPilotHomeView: View {
                         name: "코인 스캘퍼",
                         symbol: "bolt.circle",
                         isRunning: store.isBundledPreview ? nil : store.status?.isRunning,
-                        detail: store.isBundledPreview ? "예시 데이터에서는 실행하지 않아요." : store.runtimeSafetyMessage,
+                        detail: store.isBundledPreview ? "예시 데이터: 실행 안 함" : store.runtimeSafetyMessage,
                         isLive: store.activeWorkspace == .live && !store.isBundledPreview
                     )
                 }
@@ -297,7 +298,7 @@ struct CoinPilotHomeView: View {
     private var stockEngineRow: some View {
         let trader = store.stocksStatus?.trader(for: store.activeWorkspace)
         if let status = store.stocksStatus, !status.isEnabled {
-            CPEngineStatus(name: "주식 스캘퍼", symbol: "chart.bar.xaxis", isRunning: false, detail: "서버에서 꺼져 있어요")
+            CPEngineStatus(name: "주식 스캘퍼", symbol: "chart.bar.xaxis", isRunning: false, detail: "서버에서 꺼짐")
         } else {
             CPEngineStatus(
                 name: "주식 스캘퍼",
@@ -320,7 +321,7 @@ struct CoinPilotHomeView: View {
             symbol: "square.stack.3d.up",
             isRunning: store.horizonsStatus == nil ? nil : (runtime?.running ?? false),
             detail: runtime == nil
-                ? (store.horizonsStatus == nil ? "상태 확인 중" : "서버에서 꺼져 있어요")
+                ? (store.horizonsStatus == nil ? "상태 확인 중" : "서버에서 꺼짐")
                 : passed.map { "검증 통과 슬리브 \($0)개" } ?? "연구 결과 대기",
             lastRun: runtime?.lastCycleAt.map { "마지막 실행 · \(CoinPilotFormatting.dateTime($0))" },
             pausedReason: runtime?.pauseLabel,
@@ -426,7 +427,7 @@ struct CoinPilotHomeView: View {
                             )
                         }
                         } else {
-                            Text("현재 모의 실행은 없어요. 이전 실행의 전체 검증 집계를 표시합니다.")
+                            Text("현재 모의 실행 없음 · 이전 실행 집계 표시")
                                 .font(.caption)
                                 .foregroundColor(CPColor.secondaryInk)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -463,12 +464,12 @@ struct CoinPilotHomeView: View {
                                             tint: profitColor(evidenceProfit)
                                         )
                                     } else if (summary.cohort.profitabilityEvidenceTradeCount ?? 0) > 0 {
-                                        Text("적격 거래는 있지만, 설정별로 나뉘어 손익 합계는 표시하지 않아요.")
+                                        Text("적격 거래 있음 · 설정별로 나뉘어 손익 합계 미표시")
                                             .font(.caption2)
                                             .foregroundColor(CPColor.secondaryInk)
                                             .fixedSize(horizontal: false, vertical: true)
                                     } else if (summary.cohort.strictTradeCount ?? 0) > 0 {
-                                        Text("기록은 있지만, 전체 조건을 통과한 수익성 표본은 아직 없어요.")
+                                        Text("전체 조건을 통과한 수익성 표본 없음")
                                             .font(.caption2)
                                             .foregroundColor(CPColor.secondaryInk)
                                             .fixedSize(horizontal: false, vertical: true)
@@ -495,7 +496,7 @@ struct CoinPilotHomeView: View {
                                         )
                                     }
                                     if summary.cohort.totalStrictProfitComparable == false {
-                                        Text("조건이 다른 실행의 기록 손익은 하나로 합산하지 않아요.")
+                                        Text("조건이 다른 실행의 손익은 합산하지 않음")
                                             .font(.caption2)
                                             .foregroundColor(CPColor.secondaryInk)
                                             .fixedSize(horizontal: false, vertical: true)
@@ -517,7 +518,7 @@ struct CoinPilotHomeView: View {
                             .tint(CPColor.blue)
                         }
 
-                        Label("실제 체결·정산 자료 없음", systemImage: "info.circle.fill")
+                        Text("실제 체결·정산 자료 없음")
                             .font(.caption2.weight(.medium))
                             .foregroundColor(CPColor.blue)
                     }
@@ -527,11 +528,11 @@ struct CoinPilotHomeView: View {
                     EmptyMessage(text: store.hasLoadedResource("paper-validation-summary")
                         ? store.emptyResourceMessage(
                             for: "paper-validation-summary",
-                            whenLoadedEmpty: "연결된 서버에 아직 모의투자 기록이 없어요."
+                            whenLoadedEmpty: "모의투자 기록 없음"
                         )
                         : store.emptyResourceMessage(
                             for: "paper-validation-summary",
-                            whenLoadedEmpty: "모의투자 기록을 확인할 수 없어요."
+                            whenLoadedEmpty: "모의투자 기록 확인 불가"
                         ))
                 }
             }
@@ -586,7 +587,7 @@ struct CoinPilotHomeView: View {
                     .font(.caption2)
                     .foregroundColor(CPColor.secondaryInk)
                 if fills.isEmpty {
-                    EmptyMessage(text: store.emptyResourceMessage(for: "trades", whenLoadedEmpty: "아직 거래 내역이 없어요."), image: "CoinPilotEmptyTrades",
+                    EmptyMessage(text: store.emptyResourceMessage(for: "trades", whenLoadedEmpty: "거래 내역 없음"), image: "CoinPilotEmptyTrades",
                                  actionTitle: store.hasLoadedResource("trades") ? "시장 둘러보기" : "다시 불러오기",
                                  isActionDisabled: store.isRefreshing) {
                         if store.hasLoadedResource("trades") { CPNavigation.openCoins(.market) }

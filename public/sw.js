@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'coinpilot-shell-v304';
+const CACHE_VERSION = 'coinpilot-shell-v305';
 // The shell has no build step: every module is fetched network-first so a new
 // deploy is picked up immediately, with the cache as the offline fallback.
 // The worker is registered with the scope of the page that loaded it: `/` for

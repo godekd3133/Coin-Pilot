@@ -6,10 +6,8 @@ struct CoinPilotNativeRootView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @AppStorage(CPAppearance.storageKey) private var appearance = CPAppearance.system.rawValue
 
-    /// Connection ⇄ dashboard: a fade with a slight scale; Reduce Motion fades only.
-    private var phaseTransition: AnyTransition {
-        reduceMotion ? .opacity : .opacity.combined(with: .scale(scale: 0.98))
-    }
+    /// Connection ⇄ dashboard: a plain short fade.
+    private var phaseTransition: AnyTransition { .opacity }
 
     var body: some View {
         Group {
@@ -114,7 +112,7 @@ struct CoinPilotStartupView: View {
                 .foregroundColor(CPColor.blue)
             ProgressView()
                 .progressViewStyle(CircularProgressViewStyle(tint: CPColor.blue))
-            Text("계좌 화면을 준비하고 있어요")
+            Text("계좌 불러오는 중")
                 .font(.body.weight(.medium))
                 .foregroundColor(CPColor.secondaryInk)
         }
@@ -179,7 +177,8 @@ struct CoinPilotLiveWorkspaceBanner: ViewModifier {
                 }
                 .padding(.horizontal, CPSpace.page)
                 .padding(.vertical, 7)
-                .background(CPColor.red.opacity(0.08).background(CPColor.paper))
+                .background(CPColor.paper)
+                .overlay(Rectangle().fill(CPColor.red).frame(height: 1), alignment: .bottom)
                 .accessibilityElement(children: .combine)
             }
         }
@@ -201,7 +200,6 @@ struct CoinPilotShellView: View {
                     CoinPilotFeatureScreen(store: store, feature: feature)
                 }
                 .modifier(CoinPilotTabBarContentInset())
-                .modifier(CoinPilotTabEntrance(isActive: selectedFeature == feature.id))
                 .tabItem { Label(feature.label, systemImage: feature.icon) }
                 .tag(feature.id)
             }
@@ -211,7 +209,6 @@ struct CoinPilotShellView: View {
                 selectedFeature = "home"
             }
         }
-        .cpOnChange(of: selectedFeature) { _ in CPHaptics.selection() }
         #endif
     }
 }

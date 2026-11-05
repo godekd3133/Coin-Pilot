@@ -60,18 +60,19 @@ enum CPSpace {
 }
 
 enum CPRadius {
-    static let sm: CGFloat = 10
-    static let md: CGFloat = 14
-    static let lg: CGFloat = 20
-    static let xl: CGFloat = 28
-    static let pill: CGFloat = 999
+    static let sm: CGFloat = 8
+    static let md: CGFloat = 10
+    static let lg: CGFloat = 12
+    static let xl: CGFloat = 12
+    /// Kept for source compatibility; nothing is drawn as a capsule.
+    static let pill: CGFloat = 8
     static let card: CGFloat = lg
 }
 
 /// Type scale from the spec (px / weight). Sizes scale with Dynamic Type via
 /// `relativeTo:`; numbers should add `.monospacedDigit()`.
 enum CPFont {
-    static let display = Font.system(size: 34, weight: .bold, design: .rounded)
+    static let display = Font.system(size: 32, weight: .bold)
     static let title = Font.system(.title2, design: .default).weight(.bold)
     static let headline = Font.headline.weight(.semibold)
     static let body = Font.body
@@ -81,20 +82,20 @@ enum CPFont {
 
 // MARK: - Motion
 
-/// Motion language shared by every screen: ease-out for entering/settling,
-/// a soft spring for press feedback. Reduce Motion swaps both for a short fade.
+/// The app does not animate content. The only transition left is a short
+/// linear fade for whole-screen phase changes (boot → login → app).
 enum CPMotion {
-    static let fast: Double = 0.14
-    static let base: Double = 0.24
-    static let slow: Double = 0.32
-    static let easeOut = Animation.timingCurve(0.22, 1, 0.36, 1, duration: base)
-    static let spring = Animation.spring(response: 0.34, dampingFraction: 0.86)
-    static let press = Animation.spring(response: 0.26, dampingFraction: 0.62)
-    static let countDuration: Double = 0.55
-    static let pressScale: CGFloat = 0.97
+    static let fast: Double = 0.1
+    static let base: Double = 0.1
+    static let slow: Double = 0.1
+    static let easeOut = Animation.linear(duration: 0.1)
+    static let spring = Animation.linear(duration: 0.1)
+    static let press = Animation.linear(duration: 0)
+    static let countDuration: Double = 0
+    static let pressScale: CGFloat = 1
 
     static func resolved(_ animation: Animation, reduceMotion: Bool) -> Animation? {
-        reduceMotion ? .easeOut(duration: 0.12) : animation
+        reduceMotion ? nil : animation
     }
 }
 

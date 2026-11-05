@@ -63,7 +63,7 @@ struct CoinPilotActivityView: View {
                     .foregroundColor(CPColor.secondaryInk)
                 if store.trades.isEmpty {
                     NativeCard {
-                        EmptyMessage(text: store.emptyResourceMessage(for: "trades", whenLoadedEmpty: "아직 거래 내역이 없어요. 거래가 생기면 날짜별로 확인할 수 있습니다."),
+                        EmptyMessage(text: store.emptyResourceMessage(for: "trades", whenLoadedEmpty: "거래 내역 없음"),
                                      image: "CoinPilotEmptyTrades",
                                      actionTitle: store.hasLoadedResource("trades") ? "시장 둘러보기" : "다시 불러오기",
                                      isActionDisabled: store.isRefreshing) {
@@ -76,7 +76,7 @@ struct CoinPilotActivityView: View {
                     activitySummary
                     if filteredTrades.isEmpty {
                         NativeCard {
-                            EmptyMessage(text: "선택한 조건의 거래가 없어요. 기간이나 종목을 바꿔서 다시 확인해 보세요.",
+                            EmptyMessage(text: "조건에 맞는 거래 없음",
                                          actionTitle: "필터 초기화") {
                                 actionFilter = "전체"
                                 period = .all
@@ -244,10 +244,10 @@ struct CoinPilotEngineActivityList: View {
         CPCard(source == "stock" ? "주식 체결" : "포트폴리오 체결") {
             if !loaded {
                 Text(store.featureMessages[source == "stock" ? CoinPilotStore.stocksFeatureKey : CoinPilotStore.horizonsFeatureKey]
-                     ?? "상태를 불러오는 중이에요.")
+                     ?? "불러오는 중")
                     .font(.caption).foregroundColor(CPColor.secondaryInk)
             } else if rows.isEmpty {
-                CPEmptyState(symbol: "tray", title: "체결 기록이 없어요")
+                CPEmptyState(symbol: "tray", title: "체결 기록 없음")
             } else {
                 VStack(spacing: 0) {
                     ForEach(rows) { row in
@@ -262,7 +262,7 @@ struct CoinPilotEngineActivityList: View {
                     }
                 }
             }
-            Text("서버가 엔진별로 최근 체결만 보관해 보여줘요. 전체 기록은 서버 로그를 확인하세요.")
+            Text("엔진별 최근 체결만 표시. 전체 기록은 서버 로그.")
                 .font(.caption2).foregroundColor(CPColor.secondaryInk)
                 .fixedSize(horizontal: false, vertical: true)
         }

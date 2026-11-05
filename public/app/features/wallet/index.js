@@ -15,7 +15,7 @@ export default {
 
     function walletLock(s) {
       if (!s.canMutate) return s.mutationBlockedReason;
-      if (!s.isPaper) return s.modeKnown ? '실거래 모드에서는 모의투자 지갑을 조작할 수 없습니다.' : '서버 거래 모드를 확인하고 있어요.';
+      if (!s.isPaper) return s.modeKnown ? '실거래 모드에서는 모의투자 지갑을 조작할 수 없습니다.' : '서버 거래 모드 확인 중';
       if (s.pendingLocked) return '처리 중인 요청 결과를 확인한 뒤 가상 지갑을 변경할 수 있습니다.';
       return null;
     }
@@ -25,7 +25,7 @@ export default {
     function renderLayout(kind) {
       layout = kind;
       if (kind === 'live') {
-        render(page, card({ index: 0, body: emptyState({ iconName: 'wallet', title: '실전 작업공간이에요', body: '모의 지갑은 모의투자 서버에서만 사용할 수 있어요. 실전 계좌의 입출금은 거래소에서 해 주세요.' }) }));
+        render(page, card({ index: 0, body: emptyState({ iconName: 'wallet', title: '실전 작업공간', body: '모의 지갑은 모의투자 서버 전용. 실전 입출금은 거래소에서.' }) }));
         return;
       }
       render(page, html`
@@ -39,7 +39,7 @@ export default {
             <div class="cp-chips">${[100_000, 500_000].map(value => html`<button type="button" class="cp-chip" data-fill="withdraw" data-value="${value}">-${value / 10000}만</button>`)}</div>
             ${button({ label: '출금', type: 'submit', attrs: { 'data-wallet-control': '' } })}</form>` })}
         </div>
-        ${card({ index: 3, title: '계좌 초기화', body: html`${notice({ tone: 'warning', body: '초기화하면 가상 잔액과 보유 코인, 전략별 포지션·매매 기록이 모두 사라져요.' })}
+        ${card({ index: 3, title: '계좌 초기화', body: html`${notice({ tone: 'warning', body: '초기화 시 가상 잔액·보유 코인·전략별 포지션·매매 기록 전부 삭제.' })}
           <div class="cp-actions" style="margin-top:12px">${button({ label: '모의 계좌 초기화', variant: 'danger', attrs: { 'data-action': 'reset', 'data-wallet-control': '' } })}${button({ label: '현재 자산 기록', iconName: 'chart', attrs: { 'data-action': 'snapshot', 'data-mutate-control': '' } })}</div>` })}`);
     }
 
@@ -63,8 +63,8 @@ export default {
       const lock = walletLock(s);
       if (lock) { ctx.ui.toast(lock, 'warning'); return; }
       const amount = number(new FormData(form).get('amount'));
-      if (!amount || amount < 1000) { ctx.ui.toast('최소 1,000원 이상 입력해주세요.', 'warning'); return; }
-      const ok = await ctx.confirm({ title: kind === 'deposit' ? '모의 계좌에 입금할까요?' : '모의 계좌에서 출금할까요?', details: [['금액', won(Math.floor(amount))], ['현재 현금', won(s.account?.krwBalance)]], confirmLabel: kind === 'deposit' ? '입금' : '출금' });
+      if (!amount || amount < 1000) { ctx.ui.toast('최소 1,000원', 'warning'); return; }
+      const ok = await ctx.confirm({ title: kind === 'deposit' ? '모의 계좌 입금' : '모의 계좌 출금', details: [['금액', won(Math.floor(amount))], ['현재 현금', won(s.account?.krwBalance)]], confirmLabel: kind === 'deposit' ? '입금' : '출금' });
       if (!ok) return;
       const result = await ctx.mutate(`/virtual/${kind}`, { amount: Math.floor(amount) }, { label: '지갑 변경' });
       if (result.ok) form.reset();
@@ -76,14 +76,14 @@ export default {
       if (lock) { ctx.ui.toast(lock, 'warning'); return; }
       const values = await ctx.ui.formSheet({
         title: '모의 계좌 초기화',
-        message: '모의 계좌를 얼마로 다시 시작할까요?',
+        message: '모의 계좌 초기화 금액',
         fields: [{ name: 'seedMoney', label: '시작 금액 (원)', type: 'number', value: s.account?.initialSeedMoney || 10_000_000, min: 100000, step: 100000 }],
         confirmLabel: '다음',
         validate: input => (Number(input.seedMoney) >= 100000 ? null : '시작 금액은 100,000원 이상이어야 합니다.')
       });
       if (!values) return;
       const seed = Math.floor(Number(values.seedMoney));
-      const ok = await ctx.confirm({ title: `${won(seed)}으로 다시 시작할까요?`, message: '보유 코인과 전략별 포지션·매매 기록은 사라집니다. 되돌릴 수 없어요.', confirmLabel: '초기화', tone: 'danger' });
+      const ok = await ctx.confirm({ title: `${won(seed)}으로 초기화`, message: '보유 코인·전략별 포지션·매매 기록 삭제. 되돌릴 수 없음.', confirmLabel: '초기화', tone: 'danger' });
       if (!ok) return;
       await ctx.mutate('/virtual/reset', { seedMoney: seed }, { label: '초기화 요청' });
     }

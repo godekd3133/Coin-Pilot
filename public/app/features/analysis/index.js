@@ -17,7 +17,7 @@ export default {
     const view = { filter: 'all', sort: 'score' };
     ctx.use(['analysis']);
     render(root, html`<div class="cp-page">
-      ${card({ index: 0, title: '전체 코인 신호', subtitle: '기술지표 요약 · 자동매매 조건과 다를 수 있어요', action: button({ label: '분석 실행', variant: 'primary', iconName: 'play', attrs: { 'data-action': 'run' } }), body: html`
+      ${card({ index: 0, title: '전체 코인 신호', subtitle: '기술지표 요약 · 자동매매 조건과 별개', action: button({ label: '분석 실행', variant: 'primary', iconName: 'play', attrs: { 'data-action': 'run' } }), body: html`
         <div data-slot="summary"></div>
         <div class="cp-toolbar" style="margin:12px 0">
           <select class="cp-input" data-input="filter" aria-label="판정 필터">${FILTERS.map(([value, label]) => html`<option value="${value}">${label}</option>`)}</select>
@@ -35,7 +35,7 @@ export default {
       if (runButton) { runButton.disabled = state.status === 'loading'; runButton.querySelector('span').textContent = state.status === 'loading' ? '분석 중…' : '분석 실행'; }
       if (!result) {
         render(slot('summary'), '');
-        render(slot('rows'), state.status === 'loading' ? skeleton({ lines: 6 }) : state.status === 'error' ? emptyState({ iconName: 'alert', title: '분석을 불러오지 못했어요', body: toUserText(state.error?.message || '') }) : emptyState({ iconName: 'pulse', title: '분석을 실행해 보세요', body: '거래대금 상위 시장의 RSI, MACD, 볼린저 밴드, 거래량을 점수로 요약해요.' }));
+        render(slot('rows'), state.status === 'loading' ? skeleton({ lines: 6 }) : state.status === 'error' ? emptyState({ iconName: 'alert', title: '분석 불러오기 실패', body: toUserText(state.error?.message || '') }) : emptyState({ iconName: 'pulse', title: '분석 결과 없음', body: '거래대금 상위 시장 RSI·MACD·볼린저·거래량 점수.' }));
         return;
       }
       render(slot('summary'), html`${statGrid([
@@ -43,7 +43,7 @@ export default {
         { label: '매수 판정', value: coins.filter(item => item.recommendation === 'BUY').length, tone: 'up' },
         { label: '매도 판정', value: coins.filter(item => item.recommendation === 'SELL').length, tone: 'down' },
         { label: '강한 신호', value: coins.filter(item => ['STRONG', 'VERY_STRONG'].includes(item.signalStrength)).length }
-      ])}<p class="cp-caption" style="margin-top:8px">${hasFiniteValue(Date.parse(result.timestamp || '')) ? `${fullDateTime(result.timestamp)} 분석` : '분석 시각 미제공'} · 현재 시세와 다를 수 있어요</p>`);
+      ])}<p class="cp-caption" style="margin-top:8px">${hasFiniteValue(Date.parse(result.timestamp || '')) ? `${fullDateTime(result.timestamp)} 분석` : '분석 시각 미제공'} · 현재 시세와 다를 수 있음</p>`);
       const by = {
         buy: (a, b) => number(b.buyScore) - number(a.buyScore), sell: (a, b) => number(b.sellScore) - number(a.sellScore),
         volume: (a, b) => number(b.volume24h) - number(a.volume24h), change: (a, b) => number(b.change24h) - number(a.change24h),
@@ -59,7 +59,7 @@ export default {
         value: `${hasFiniteValue(item.totalScore) ? Number(item.totalScore).toFixed(0) : '—'}점`,
         valueSub: hasFiniteValue(item.change24h) ? percent(item.change24h) : '',
         valueTone: tone(item.change24h)
-      })), { empty: emptyState({ iconName: 'search', title: view.filter !== 'all' ? '선택한 판정의 종목이 없어요' : '조건에 맞는 신호가 없어요' }) }));
+      })), { empty: emptyState({ iconName: 'search', title: view.filter !== 'all' ? '해당 판정 종목 없음' : '조건에 맞는 신호 없음' }) }));
     }
 
     function openDetail(coin) {
@@ -76,8 +76,8 @@ export default {
           ['24시간 변동', percent(item.change24h)],
           ['총점 / 매수 / 매도', `${number(item.totalScore).toFixed(0)} / ${number(item.buyScore).toFixed(0)} / ${number(item.sellScore).toFixed(0)}`],
           ['신호 강도', toUserText(item.signalStrength || '—')]
-        ])}${signals.length ? html`<ul class="cp-caption" style="padding-left:18px">${signals.map(value => html`<li>${toUserText(value)}</li>`)}</ul>` : html`<p class="cp-caption">상세 판단 이유가 제공되지 않았어요.</p>`}
-          <p class="cp-caption">${icon('info', { size: 14 })} 기술지표를 요약한 참고 자료예요. 주문은 실행되지 않아요.${item.recommendation === 'SELL' && !owned ? ' 보유 수량이 없어 매도 검토를 열 수 없어요.' : ''}</p>`),
+        ])}${signals.length ? html`<ul class="cp-caption" style="padding-left:18px">${signals.map(value => html`<li>${toUserText(value)}</li>`)}</ul>` : html`<p class="cp-caption">판단 이유 없음</p>`}
+          <p class="cp-caption">${icon('info', { size: 14 })} 기술지표 요약 · 참고용, 주문 없음.${item.recommendation === 'SELL' && !owned ? ' 보유 수량 없음 · 매도 검토 불가.' : ''}</p>`),
         footer: `<a class="cp-btn is-secondary" href="#/coins/${encodeURIComponent(coin)}">현재 시세 보기</a>${reviewSide ? `<a class="cp-btn ${reviewSide === 'buy' ? 'is-up' : 'is-down'}" href="#/trade?coin=${encodeURIComponent(coin)}&side=${reviewSide}">${reviewSide === 'sell' ? '보유 자산 매도 검토' : '매수 금액 검토'}</a>` : ''}`
       });
       sheet.root.querySelectorAll('a').forEach(link => link.addEventListener('click', () => sheet.close()));

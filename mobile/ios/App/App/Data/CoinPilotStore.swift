@@ -141,7 +141,7 @@ struct CoinPilotAutomationPresentation: Equatable {
         if isBundledPreview {
             sectionTitle = "자동매매 예시"
             stateLabel = "예시 상태"
-            explanation = "앱에 포함된 예시 상태예요. 실제 서버에서 자동매매를 실행하지 않습니다."
+            explanation = "앱 내장 예시. 실제 서버 자동매매 없음."
             showsControls = false
             return
         }
@@ -174,7 +174,7 @@ struct CoinPilotOrderReviewPresentation: Equatable {
         if isBundledPreview {
             sectionTitle = "주문 미리보기"
             accountTitle = "예시 계좌"
-            buttonTitle = "예시에서는 주문할 수 없어요"
+            buttonTitle = "예시 데이터: 주문 불가"
             isEnabled = false
             showsWalletControls = false
             return
@@ -397,7 +397,7 @@ enum CoinPilotTuningEdits {
             }
             guard let raw = numeric[field.key] else { continue }
             guard let displayed = Double(raw), displayed.isFinite else {
-                throw CoinPilotTuningEditError.message("\(field.label) 값을 숫자로 입력해 주세요.")
+                throw CoinPilotTuningEditError.message("\(field.label) 값은 숫자만 가능.")
             }
             let multiplier = field.displayMultiplier == 0 ? 1 : field.displayMultiplier
             let value = displayed / multiplier
@@ -463,25 +463,25 @@ enum CoinPilotAPIError: Error, Sendable {
     var message: String {
         switch self {
         case .invalidAddress:
-            return "서버 주소를 확인해 주세요."
+            return "서버 주소 확인 필요."
         case .connection:
-            return "서버에 연결하지 못했습니다. 인터넷 연결과 서버 주소를 확인해 주세요."
+            return "서버 연결 실패. 인터넷과 서버 주소 확인 필요."
         case .cancelled:
             return "요청이 취소되었습니다."
         case .invalidResponse:
-            return "서버 응답을 받지 못했습니다. 잠시 후 다시 시도해 주세요."
+            return "서버 응답 없음. 잠시 후 다시 시도."
         case .unauthorized:
-            return "서버 토큰을 확인해 주세요."
+            return "서버 토큰 확인 필요."
         case .forbidden:
             return "이 요청을 처리할 권한이 없습니다."
         case .rateLimited:
-            return "로그인 시도가 많습니다. 잠시 후 다시 시도해 주세요."
+            return "로그인 시도 초과. 잠시 후 다시 시도."
         case .server:
-            return "서버에서 요청을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요."
+            return "서버 요청 처리 실패. 잠시 후 다시 시도."
         case .invalidData:
             return "서버에서 받은 정보를 확인할 수 없습니다."
         case .keychain:
-            return "서버 토큰을 이 기기에 저장하지 못했습니다. 다시 시도해 주세요."
+            return "기기에 서버 토큰 저장 실패. 다시 시도."
         }
     }
 
@@ -1312,13 +1312,13 @@ struct CoinPilotMarketPrice: Identifiable {
 
     func freshnessIssue(at now: Date, maximumAgeSeconds: TimeInterval) -> String? {
         guard let price, price.isFinite, price > 0 else {
-            return "현재가를 확인할 수 없어요"
+            return "현재가 없음"
         }
         if quoteFreshnessReason == "market_snapshot_last_good" {
-            return "저장된 최근 시세를 표시 중이에요. 새 시세를 확인한 뒤 주문해 주세요."
+            return "저장된 최근 시세 표시 중. 새 시세 확인 후 주문 가능."
         }
         guard let sourceAsOfDate else {
-            return "최근 체결 시각을 확인할 수 없어요"
+            return "최근 체결 시각 없음"
         }
         if let issue = CoinPilotTimestampFreshness.issue(
             sourceAsOfDate,
@@ -1329,7 +1329,7 @@ struct CoinPilotMarketPrice: Identifiable {
             return issue
         }
         if quoteFresh == false {
-            return "현재 시세 최신 여부를 확인할 수 없어요"
+            return "시세 최신 여부 확인 불가"
         }
         return nil
     }
@@ -1394,10 +1394,10 @@ struct CoinPilotMarketSnapshotMetadata: Equatable {
 
     var freshnessIssue: String? {
         if snapshotSource == "last_good" {
-            return "거래소 응답이 없어 저장된 최근 시세를 표시 중이에요"
+            return "거래소 응답 없음 · 저장된 최근 시세 표시 중"
         }
         if marketListStale == true {
-            return "시세 종목 목록 갱신이 필요해요"
+            return "시세 종목 목록 갱신 필요"
         }
         if complete == false || missingMarkets?.isEmpty == false {
             if let missingCount = missingMarkets?.count, missingCount > 0 {
@@ -1406,13 +1406,13 @@ struct CoinPilotMarketSnapshotMetadata: Equatable {
             return "일부 종목 시세 누락"
         }
         guard complete == true, missingMarkets?.isEmpty == true, marketListStale == false else {
-            return "시세 상태를 확인할 수 없어요"
+            return "시세 상태 확인 불가"
         }
         guard sourceAsOfDate != nil else {
-            return "원본 시세 시각을 확인할 수 없어요"
+            return "원본 시세 시각 확인 불가"
         }
         guard fetchedAtDate != nil else {
-            return "시세 수집 시각을 확인할 수 없어요"
+            return "시세 수집 시각 확인 불가"
         }
         return nil
     }
@@ -1437,13 +1437,13 @@ private enum CoinPilotTimestampFreshness {
         at now: Date,
         maximumAgeSeconds: TimeInterval
     ) -> String? {
-        guard let date else { return "\(label) 시각을 확인할 수 없어요" }
+        guard let date else { return "\(label) 시각 확인 불가" }
         let ageSeconds = now.timeIntervalSince(date)
         if ageSeconds < -futureToleranceSeconds {
-            return "\(label) 시각이 현재보다 앞서 있어요"
+            return "\(label) 시각이 현재보다 앞섬"
         }
         if ageSeconds > maximumAgeSeconds {
-            return "\(label) 시각이 오래됐어요"
+            return "\(label) 시각 오래됨"
         }
         return nil
     }
@@ -2234,7 +2234,7 @@ final class CoinPilotStore: ObservableObject {
             guard let localMarketData else {
                 return localMarketDataError == nil
                     ? "앱에 저장된 고정 시세 자료를 불러오는 중"
-                    : "앱에 저장된 고정 시세 자료를 사용할 수 없어요"
+                    : "앱 내장 시세 자료 사용 불가"
             }
             return "자료 생성 시각 · \(CoinPilotFormatting.utcMarketTimestamp(localMarketData.generatedAt))"
         }
@@ -2261,7 +2261,7 @@ final class CoinPilotStore: ObservableObject {
                 $0.freshnessIssue(at: now(), maximumAgeSeconds: marketPriceMaximumAgeSeconds) != nil
             }.count
             if staleMarketCount > 0 {
-                return "종목 \(staleMarketCount)개 시세가 오래됐어요 · 서버 수집 \(CoinPilotFormatting.time(marketSnapshotMetadata?.fetchedAtDate))"
+                return "종목 \(staleMarketCount)개 시세 오래됨 · 서버 수집 \(CoinPilotFormatting.time(marketSnapshotMetadata?.fetchedAtDate))"
             }
         }
         switch state(for: resource) {
@@ -2278,15 +2278,15 @@ final class CoinPilotStore: ObservableObject {
             return "\(checkedLabel) \(CoinPilotFormatting.time(date))"
         case .stale(let date):
             if isMarketPreview {
-                return "예시 시세 자료를 불러오지 못했어요 · \(CoinPilotFormatting.time(date))"
+                return "예시 시세 자료 불러오기 실패 · \(CoinPilotFormatting.time(date))"
             }
             if isMarketPrices {
-                return "앱에서 시세를 새로 확인하지 못했어요 · 마지막 앱 확인 \(CoinPilotFormatting.time(date))"
+                return "시세 갱신 실패 · 마지막 앱 확인 \(CoinPilotFormatting.time(date))"
             }
-            return "새로 확인하지 못했어요 · \(CoinPilotFormatting.time(date))"
+            return "갱신 실패 · \(CoinPilotFormatting.time(date))"
         case .unavailable:
-            if isMarketPreview { return "예시 시세 자료를 불러올 수 없어요" }
-            return isMarketPrices ? "앱에서 시세를 확인할 수 없어요" : "확인할 수 없어요"
+            if isMarketPreview { return "예시 시세 자료 없음" }
+            return isMarketPrices ? "시세 확인 불가" : "확인 불가"
         }
     }
 
@@ -2316,18 +2316,18 @@ final class CoinPilotStore: ObservableObject {
     func emptyResourceMessage(for resource: String, whenLoadedEmpty: String) -> String {
         switch state(for: resource) {
         case .notRequested:
-            return "불러오는 중이에요."
+            return "불러오는 중"
         case .loading:
             if let lastSuccess = lastSuccessfulResourceAt[resource] {
-                return "새 정보를 확인하는 중이에요 · 마지막 확인 \(CoinPilotFormatting.time(lastSuccess))"
+                return "갱신 중 · 마지막 확인 \(CoinPilotFormatting.time(lastSuccess))"
             }
-            return "불러오는 중이에요."
+            return "불러오는 중"
         case .unavailable:
-            return "정보를 불러오지 못했어요. 다시 시도해 주세요."
+            return "불러오기 실패. 다시 시도."
         case .current:
             return whenLoadedEmpty
         case .stale(let date):
-            return "새 정보를 확인하지 못했어요 · 마지막 확인 \(CoinPilotFormatting.time(date))"
+            return "갱신 실패 · 마지막 확인 \(CoinPilotFormatting.time(date))"
         }
     }
 
@@ -2338,16 +2338,16 @@ final class CoinPilotStore: ObservableObject {
     var runtimeSafetyMessage: String? {
         guard !isBundledPreview, !isBundledLocalMarketData else { return nil }
         if status?.runtimeState == "SYNC_REQUIRED" || status?.exchangeStateKnown == false {
-            return "설정한 시장의 거래소 잔고와 미체결 주문을 확인하고 있어요. 확인이 끝날 때까지 신규 주문을 잠급니다."
+            return "거래소 잔고·미체결 주문 확인 중. 확인 전까지 신규 주문 잠금."
         }
         guard status?.runtimeState == "PROTECTIVE_ONLY" || status?.protectiveMonitorActive == true else { return nil }
         switch status?.stopReason {
         case "risk_data_gap":
-            return "시세가 끊겨 분석과 신규 진입을 멈췄어요. 보유 포지션은 위험 감시 중이며, 재개 여부는 서버의 복구 설정과 점검 결과에 따라 달라집니다."
+            return "시세 끊김으로 분석·신규 진입 정지. 보유 포지션은 위험 감시 중. 재개는 서버 복구 설정과 점검 결과에 따름."
         case "analysis_data_gap":
-            return "분석 자료 공백으로 신규 진입을 멈췄어요. 열린 포지션은 위험 감시를 계속합니다."
+            return "분석 자료 공백으로 신규 진입 정지. 보유 포지션 위험 감시 계속."
         default:
-            return "안전 점검으로 신규 진입을 멈추고 기존 포지션을 감시하고 있어요."
+            return "안전 점검으로 신규 진입 정지. 기존 포지션 감시 중."
         }
     }
 
@@ -2433,7 +2433,7 @@ final class CoinPilotStore: ObservableObject {
     var workspaceModeMismatchMessage: String? {
         guard let serverMode = tradingMode, serverMode != activeWorkspace.serverMode else { return nil }
         let actual = serverMode == "LIVE" ? "실거래" : serverMode == "DRY_RUN" ? "모의투자" : "확인 불가"
-        return "\(activeWorkspace.title) 계좌를 선택했지만 \(actual) 서버가 연결됐습니다. \(activeWorkspace.title) 서버 주소를 확인해 주세요."
+        return "\(activeWorkspace.title) 계좌를 선택했지만 \(actual) 서버가 연결됐습니다. \(activeWorkspace.title) 서버 주소 확인 필요."
     }
 
     var tuningFields: [CoinPilotTuningField] {
@@ -2473,11 +2473,11 @@ final class CoinPilotStore: ObservableObject {
         if isBundledLocalMarketData { return "앱에 저장된 고정 시세만 제공하는 모드라 계좌 연결이나 주문을 사용할 수 없습니다." }
         guard phase == .dashboard, !isBundledPreview else { return "서버 작업공간에서만 주문할 수 있습니다." }
         guard serverModeMatchesWorkspace, status?.mode == activeWorkspace.serverMode,
-              account?.mode == activeWorkspace.serverMode else { return "선택한 실거래/모의투자 서버를 확인해 주세요." }
+              account?.mode == activeWorkspace.serverMode else { return "선택한 실거래/모의 서버 확인 필요." }
         guard !authenticationRequired || authenticationScope.canOperate else { return "조회 전용 토큰입니다. 운영 토큰을 연결해야 주문할 수 있습니다." }
         guard !isObserverAccount else { return "읽기 전용 서버에서는 주문할 수 없습니다." }
         guard supportsAmountCurrency else {
-            return "\(quoteCurrency) 기준통화의 주문 금액 규칙을 아직 지원하지 않아요. 시세와 계좌는 조회할 수 있어요."
+            return "\(quoteCurrency) 기준통화 주문 미지원. 시세·계좌 조회만 가능."
         }
         guard !pendingManualOrderLocked else { return "이전 주문 결과를 확인한 뒤에 새 주문을 보낼 수 있습니다." }
         guard !isSubmittingManualOrder else { return "주문 결과를 확인하고 있습니다." }
@@ -2494,10 +2494,10 @@ final class CoinPilotStore: ObservableObject {
             return "모의투자 성과 점검 중에는 계좌를 변경할 수 없습니다."
         }
 #if targetEnvironment(simulator)
-        if activeWorkspace == .live { return "실거래 주문은 Simulator에서 잠겨 있습니다. 실제 기기의 TestFlight 앱을 사용하세요." }
+        if activeWorkspace == .live { return "Simulator에서는 실거래 주문 잠금. 실제 기기 TestFlight 앱 필요." }
 #endif
         if marketSnapshotMetadata?.snapshotSource == "last_good" {
-            return marketSnapshotMetadata?.freshnessIssue ?? "저장된 최근 시세를 표시 중이에요. 새 시세를 확인한 뒤 주문해 주세요."
+            return marketSnapshotMetadata?.freshnessIssue ?? "저장된 최근 시세 표시 중. 새 시세 확인 후 주문 가능."
         }
         guard state(for: "account").isCurrent, state(for: "market-prices").isCurrent else {
             return "계좌와 시세를 새로 확인한 뒤 주문할 수 있습니다."
@@ -2513,7 +2513,7 @@ final class CoinPilotStore: ObservableObject {
     func marketQuoteFreshnessIssue(for marketCode: String) -> String? {
         if isBundledLocalMarketData || isBundledPreview { return nil }
         guard let market = markets.first(where: { $0.coin == marketCode }) else {
-            return "이 종목의 시세를 확인할 수 없어요"
+            return "이 종목 시세 없음"
         }
         return market.freshnessIssue(at: now(), maximumAgeSeconds: marketPriceMaximumAgeSeconds)
     }
@@ -2568,7 +2568,7 @@ final class CoinPilotStore: ObservableObject {
         guard !isBundledLocalMarketData else { return "앱에 저장된 고정 시세만 제공하는 모드라 설정 변경·계좌 연결·주문을 사용할 수 없습니다." }
         guard phase == .dashboard, !isBundledPreview else { return "서버 작업공간에서만 설정을 바꿀 수 있습니다." }
         guard !authenticationRequired || authenticationScope.canOperate else { return "운영 토큰이 있어야 설정을 변경할 수 있습니다." }
-        guard serverModeMatchesWorkspace, status?.mode == activeWorkspace.serverMode else { return "선택한 서버 모드를 확인해 주세요." }
+        guard serverModeMatchesWorkspace, status?.mode == activeWorkspace.serverMode else { return "서버 모드 확인 필요." }
         if status?.isRunning == true { return "자동매매를 중지한 뒤 튜닝값을 바꿀 수 있습니다." }
         if tuningMutationLocked || paperValidationSummary?.active == true {
             return tuningMutationReason ?? "모의투자 성과 점검 중에는 설정을 바꿀 수 없습니다."
@@ -2580,7 +2580,7 @@ final class CoinPilotStore: ObservableObject {
         guard !isBundledLocalMarketData else { return "앱에 저장된 고정 시세만 제공하는 모드라 후보 비교·계좌 연결·주문을 사용할 수 없습니다." }
         guard phase == .dashboard, !isBundledPreview else { return "서버 작업공간에서만 후보 비교를 사용할 수 있습니다." }
         guard canOperate else { return "운영 토큰이 있어야 후보 비교를 바꿀 수 있습니다." }
-        guard serverModeMatchesWorkspace, status?.mode == activeWorkspace.serverMode else { return "선택한 서버 모드를 확인해 주세요." }
+        guard serverModeMatchesWorkspace, status?.mode == activeWorkspace.serverMode else { return "서버 모드 확인 필요." }
         if tuningMutationLocked || paperValidationSummary?.active == true {
             return tuningMutationReason ?? "모의투자 성과 점검 중에는 후보 비교를 바꿀 수 없습니다."
         }
@@ -2593,9 +2593,9 @@ final class CoinPilotStore: ObservableObject {
         }
         guard canOperate else { return "운영 토큰이 있어야 모의 지갑을 변경할 수 있습니다." }
         guard supportsAmountCurrency else {
-            return "\(quoteCurrency) 기준통화는 모의 지갑 금액 변경을 아직 지원하지 않아요. 계좌 조회는 계속 이용할 수 있어요."
+            return "\(quoteCurrency) 기준통화 모의 지갑 변경 미지원. 계좌 조회만 가능."
         }
-        if pendingManualOrderLocked { return "이전 지갑 변경 결과를 확인한 뒤 다시 시도해 주세요." }
+        if pendingManualOrderLocked { return "이전 지갑 변경 결과 확인 후 다시 시도." }
         if status?.isRunning == true { return "모의 자동매매를 중지한 뒤 가상 잔액을 바꿀 수 있습니다." }
         if paperValidationSummary?.active == true || tuningMutationLocked {
             return tuningMutationReason ?? "성과 점검 세션 중에는 모의 지갑을 바꿀 수 없습니다."
@@ -2654,8 +2654,8 @@ final class CoinPilotStore: ObservableObject {
 
     private var authenticationFailureMessage: String {
         usesManagedServerConnection
-            ? "계좌 연결 인증을 확인하지 못했어요. 서버 토큰으로 다시 로그인해 주세요."
-            : "서버 인증을 확인할 수 없습니다. 서버 토큰을 다시 입력해 주세요."
+            ? "계좌 연결 인증 실패. 서버 토큰으로 다시 로그인."
+            : "서버 인증 실패. 서버 토큰 다시 입력."
     }
 
     func primaryConnectionAction() async {
@@ -2765,7 +2765,7 @@ final class CoinPilotStore: ObservableObject {
             return
         }
         guard bundledPreview.isAvailable else {
-            connectionMessage = "예시 데이터가 포함된 앱 빌드에서만 미리보기를 사용할 수 있어요."
+            connectionMessage = "미리보기는 예시 데이터 포함 빌드에서만 가능."
             return
         }
         _ = beginRequestGeneration()
@@ -2813,7 +2813,7 @@ final class CoinPilotStore: ObservableObject {
             : rawAddress
         guard let url = validatedServerURL(address) else {
             phase = .setup
-            connectionMessage = "같은 Wi-Fi의 서버는 내부 주소로 연결하고, 외부 서버는 HTTPS 주소를 입력해 주세요."
+            connectionMessage = "같은 Wi-Fi 서버는 내부 주소, 외부 서버는 HTTPS 주소."
             return false
         }
 
@@ -2936,7 +2936,7 @@ final class CoinPilotStore: ObservableObject {
             ? bundledServers.url(for: activeWorkspace)?.absoluteString ?? ""
             : serverDraft
         guard let url = validatedServerURL(address) else {
-            connectionMessage = "같은 Wi-Fi의 서버는 내부 주소로 연결하고, 외부 서버는 HTTPS 주소를 입력해 주세요."
+            connectionMessage = "같은 Wi-Fi 서버는 내부 주소, 외부 서버는 HTTPS 주소."
             phase = .setup
             return false
         }
@@ -2947,12 +2947,12 @@ final class CoinPilotStore: ObservableObject {
         if usesPassword {
             guard !username.isEmpty, !password.isEmpty,
                   username.utf8.count <= 128, password.utf8.count <= 1024 else {
-                connectionMessage = "아이디와 비밀번호를 입력해 주세요."
+                connectionMessage = "아이디와 비밀번호 입력 필요."
                 return false
             }
         } else {
             guard !token.isEmpty, token.utf8.count <= 4096 else {
-                connectionMessage = "서버 토큰을 입력해 주세요."
+                connectionMessage = "서버 토큰 입력 필요."
                 return false
             }
         }
@@ -2987,7 +2987,7 @@ final class CoinPilotStore: ObservableObject {
         if authRequired {
             if usesPassword && statusBody["passwordLogin"] as? Bool != true {
                 phase = .login
-                connectionMessage = "이 서버는 아이디 로그인을 쓰지 않아요. 서버 토큰으로 로그인해 주세요."
+                connectionMessage = "이 서버는 아이디 로그인 미사용. 서버 토큰으로 로그인."
                 return false
             }
             let loginResponse = usesPassword
@@ -3065,13 +3065,13 @@ final class CoinPilotStore: ObservableObject {
               serverModeMatchesWorkspace,
               status?.mode == "LIVE",
               activeWorkspace == .live else {
-            liveCredentialMessage = "실거래 모드가 확인된 HTTPS 서버에서만 키를 등록할 수 있어요."
+            liveCredentialMessage = "키 등록은 실거래 모드가 확인된 HTTPS 서버에서만 가능."
             return false
         }
         guard authenticationRequired
                 ? authenticationScope.canOperate && tokens.token(for: serverURL)?.isEmpty == false
                 : true else {
-            liveCredentialMessage = "운영 권한이 있는 서버 토큰으로 로그인해 주세요."
+            liveCredentialMessage = "운영 권한 서버 토큰으로 로그인 필요."
             return false
         }
         let token = requestBearerToken(for: serverURL)
@@ -3081,7 +3081,7 @@ final class CoinPilotStore: ObservableObject {
               !secretKey.isEmpty,
               accessKey.utf8.count <= 4096,
               secretKey.utf8.count <= 4096 else {
-            liveCredentialMessage = "Upbit Access Key와 Secret Key를 확인해 주세요."
+            liveCredentialMessage = "Upbit Access Key와 Secret Key 확인 필요."
             return false
         }
 
@@ -3104,14 +3104,14 @@ final class CoinPilotStore: ObservableObject {
                 throw CoinPilotAPIError.forStatusCode(response.statusCode)
             }
 
-            liveCredentialMessage = "Upbit 키 등록 요청을 보냈어요. 서버의 등록 상태와 거래소 계좌 동기화를 확인하고 있습니다."
+            liveCredentialMessage = "Upbit 키 등록 요청 완료. 서버 등록 상태와 거래소 계좌 동기화 확인 중."
             await refresh()
             if isLiveCredentialSetupReady {
-                liveCredentialMessage = "Upbit 키 등록과 거래소 계좌 동기화가 확인됐어요."
+                liveCredentialMessage = "Upbit 키 등록·거래소 계좌 동기화 확인됨."
             } else if status?.upbitCredentialsConfigured == true {
-                liveCredentialMessage = "Upbit 키가 등록됐어요. 잔고와 미체결 주문 확인이 끝날 때까지 실거래 주문은 잠겨 있습니다."
+                liveCredentialMessage = "Upbit 키 등록됨. 잔고·미체결 주문 확인 전까지 실거래 주문 잠금."
             } else {
-                liveCredentialMessage = "서버에서 키 등록 상태를 확인하지 못했어요. 키는 입력란에서 지웠습니다."
+                liveCredentialMessage = "서버 키 등록 상태 확인 실패. 입력란의 키는 삭제함."
             }
             return true
         } catch let error as CoinPilotAPIError {
@@ -3130,7 +3130,7 @@ final class CoinPilotStore: ObservableObject {
             return false
         }
         guard let url = validatedServerURL(rawAddress) else {
-            connectionMessage = "같은 Wi-Fi의 서버는 내부 주소로 연결하고, 외부 서버는 HTTPS 주소를 입력해 주세요."
+            connectionMessage = "같은 Wi-Fi 서버는 내부 주소, 외부 서버는 HTTPS 주소."
             return false
         }
         return await connect(using: url.absoluteString)
@@ -3141,19 +3141,19 @@ final class CoinPilotStore: ObservableObject {
             return "앱에 저장된 고정 시세만 제공하는 모드라 서버 토큰·계좌 연결·주문을 사용할 수 없습니다."
         }
         guard !isBundledPreview else {
-            return "예시 데이터 화면에서는 토큰을 입력할 수 없습니다. 실제 서버에 연결해 주세요."
+            return "예시 데이터에서는 토큰 입력 불가. 실제 서버 연결 필요."
         }
         guard let serverURL = currentServerURL else {
-            return "먼저 실제 서버에 연결해 주세요."
+            return "실제 서버 연결 필요."
         }
         guard !isWorking, !isSubmittingManualOrder, !isRunningFeatureAction,
               !isRecordingSnapshot, !isSavingTuning else {
-            return "진행 중인 서버 작업이 끝난 뒤 토큰을 변경해 주세요."
+            return "진행 중인 서버 작업 완료 후 토큰 변경 가능."
         }
 
         let token = rawToken.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !token.isEmpty, token.utf8.count <= 4096 else {
-            return "서버 토큰을 입력해 주세요."
+            return "서버 토큰 입력 필요."
         }
 
         let generation = beginRequestGeneration()
@@ -3164,7 +3164,7 @@ final class CoinPilotStore: ObservableObject {
 
         do {
             let statusResponse = try await api.authenticationStatus(at: serverURL)
-            guard generation == requestGeneration, currentServerURL == serverURL else { return "서버 연결 정보가 변경되었습니다. 다시 시도해 주세요." }
+            guard generation == requestGeneration, currentServerURL == serverURL else { return "서버 연결 정보 변경됨. 다시 시도." }
             guard (200..<300).contains(statusResponse.statusCode),
                   let statusBody = try? Self.jsonObject(statusResponse.body) as? [String: Any],
                   let authRequired = statusBody["authRequired"] as? Bool else {
@@ -3178,11 +3178,11 @@ final class CoinPilotStore: ObservableObject {
                 authenticationRequired = false
                 authenticationScope = .unauthenticated
                 await refresh()
-                return "이 서버는 토큰 인증을 사용하지 않습니다. 서버 인증 설정을 확인해 주세요."
+                return "이 서버는 토큰 인증 미사용. 서버 인증 설정 확인 필요."
             }
 
             let loginResponse = try await api.login(token: token, at: serverURL)
-            guard generation == requestGeneration, currentServerURL == serverURL else { return "서버 연결 정보가 변경되었습니다. 다시 시도해 주세요." }
+            guard generation == requestGeneration, currentServerURL == serverURL else { return "서버 연결 정보 변경됨. 다시 시도." }
             guard (200..<300).contains(loginResponse.statusCode),
                   let loginBody = try? Self.jsonObject(loginResponse.body) as? [String: Any],
                   loginBody["success"] as? Bool == true else {
@@ -3195,16 +3195,16 @@ final class CoinPilotStore: ObservableObject {
             authenticationRequired = true
             await refresh()
             guard phase == .dashboard else {
-                return connectionMessage ?? "새 토큰으로 서버 정보를 불러오지 못했습니다. 토큰과 서버 설정을 확인해 주세요."
+                return connectionMessage ?? "새 토큰으로 서버 정보 불러오기 실패. 토큰과 서버 설정 확인 필요."
             }
             if canOperate { _ = await loadSystemStatus() }
             return nil
         } catch let error as CoinPilotAPIError {
-            guard generation == requestGeneration else { return "서버 연결 정보가 변경되었습니다. 다시 시도해 주세요." }
+            guard generation == requestGeneration else { return "서버 연결 정보 변경됨. 다시 시도." }
             await refresh()
             return error.message
         } catch {
-            guard generation == requestGeneration else { return "서버 연결 정보가 변경되었습니다. 다시 시도해 주세요." }
+            guard generation == requestGeneration else { return "서버 연결 정보 변경됨. 다시 시도." }
             await refresh()
             return CoinPilotAPIError.connection.message
         }
@@ -3322,11 +3322,11 @@ final class CoinPilotStore: ObservableObject {
         let generation = requestGeneration
         let notifications = CoinPilotOrderNotifications.shared
         guard await notifications.prepare() else {
-            orderNotificationMessage = "주문 알림을 받으려면 iPhone 설정에서 CoinPilot 알림을 허용해 주세요."
+            orderNotificationMessage = "주문 알림 꺼짐. iPhone 설정에서 CoinPilot 알림 허용 필요."
             return
         }
         guard let deviceToken = notifications.deviceToken else {
-            orderNotificationMessage = notifications.registrationError ?? "주문 알림 기기를 연결하고 있어요."
+            orderNotificationMessage = notifications.registrationError ?? "주문 알림 기기 연결 중"
             return
         }
         var registrations = 0
@@ -3362,10 +3362,10 @@ final class CoinPilotStore: ObservableObject {
             } catch { continue }
         }
         guard generation == requestGeneration else { return }
-        orderNotificationMessage = registrations == 0 ? "주문 알림 서버에 연결하지 못했어요. 다시 확인합니다."
-            : !providerReady ? "기기는 등록됐지만 서버 알림 설정을 확인해야 해요."
-            : registrations == 2 ? "실거래·모의거래 주문 푸시 알림이 켜져 있어요."
-            : "현재 계좌의 주문 푸시 알림이 켜져 있어요."
+        orderNotificationMessage = registrations == 0 ? "주문 알림 서버 연결 실패. 재시도 예정."
+            : !providerReady ? "기기 등록됨. 서버 알림 설정 확인 필요."
+            : registrations == 2 ? "실거래·모의 주문 알림 켜짐"
+            : "현재 계좌 주문 알림 켜짐"
         #endif
     }
 
@@ -3381,7 +3381,7 @@ final class CoinPilotStore: ObservableObject {
         let serverURL = currentServerURL
         let usesBundledPreview = isBundledPreview
         guard usesBundledPreview || serverURL != nil else {
-            dashboardMessage = "서버 주소를 입력해 주세요."
+            dashboardMessage = "서버 주소 입력 필요."
             return
         }
         isRefreshing = true
@@ -3445,7 +3445,7 @@ final class CoinPilotStore: ObservableObject {
                 resourceStates[name] = .unavailable
             }
             updateDashboardRefreshMessage(usesBundledPreview
-                ? "앱에 포함된 예시 자료를 불러오지 못했어요."
+                ? "앱 내장 예시 자료 불러오기 실패."
                 : preflightStatus == nil
                     ? {
                         if case .failure(let error) = statusResult { return error.message }
@@ -3633,11 +3633,11 @@ final class CoinPilotStore: ObservableObject {
             lastCheckedAt = updatedAt
             updateDashboardRefreshMessage(nil)
         } else if successes > 0 {
-            updateDashboardRefreshMessage("일부 정보를 새로 확인하지 못했어요. 표시된 항목의 마지막 확인 시각을 살펴봐 주세요.")
+            updateDashboardRefreshMessage("일부 정보 갱신 실패. 항목별 마지막 확인 시각 참고.")
         } else {
             updateDashboardRefreshMessage(usesBundledPreview
-                ? "앱에 포함된 예시 자료를 불러오지 못했어요."
-                : "서버에서 정보를 불러오지 못했어요. 연결 상태를 확인한 뒤 다시 시도해 주세요.")
+                ? "앱 내장 예시 자료 불러오기 실패."
+                : "서버 정보 불러오기 실패. 연결 확인 후 다시 시도.")
         }
     }
 
@@ -3655,7 +3655,7 @@ final class CoinPilotStore: ObservableObject {
             offlineReplayMessage = nil
         }
         guard selectedMarket.range(of: "^[A-Z0-9]{2,10}-[A-Z0-9]{2,15}$", options: .regularExpression) != nil else {
-            featureMessages["market"] = "시장 코드를 확인해 주세요."
+            featureMessages["market"] = "시장 코드 확인 필요."
             candles = []
             marketCoinDetail = nil
             return
@@ -3691,7 +3691,7 @@ final class CoinPilotStore: ObservableObject {
             return
         }
         guard markets.contains(where: { $0.coin == selectedMarket }) || !markets.isEmpty else {
-            featureMessages["market"] = "현재 작업공간의 시세 목록을 먼저 불러와 주세요."
+            featureMessages["market"] = "현재 작업공간 시세 목록 먼저 필요."
             return
         }
         let path = "/api/market/candles/\(selectedMarket)?unit=\(selectedCandleInterval)&count=100"
@@ -3726,7 +3726,7 @@ final class CoinPilotStore: ObservableObject {
         guard !isPreparingOfflineReplaySession,
               offlineReplaySessionCheckpoint?.status != .playing,
               offlineReplaySessionCheckpoint?.status != .paused else {
-            offlineReplayMessage = "재생 세션을 먼저 일시정지하거나 처음부터 다시 설정해 주세요."
+            offlineReplayMessage = "재생 일시정지 또는 처음부터 재설정 필요."
             return false
         }
         guard !isRunningOfflineReplay else { return false }
@@ -3875,7 +3875,7 @@ final class CoinPilotStore: ObservableObject {
         }
         guard !isRunningOfflineReplay, !isPreparingOfflineReplaySession else { return false }
         guard offlineReplaySessionRecoveryMessage == nil else {
-            offlineReplaySessionMessage = "저장 상태를 복구하거나 지운 뒤 재생을 시작해 주세요."
+            offlineReplaySessionMessage = "저장 상태 복구 또는 삭제 후 재생 가능."
             return false
         }
         if let blockReason = offlineReplayBlockReason(forMarket: marketCode, intervalMinutes: intervalMinutes) {
@@ -3889,7 +3889,7 @@ final class CoinPilotStore: ObservableObject {
                 return true
             }
             guard checkpoint.status == .stopped else {
-                offlineReplaySessionMessage = "현재 재생 상태를 먼저 일시정지하거나 처음부터 다시 설정해 주세요."
+                offlineReplaySessionMessage = "재생 일시정지 또는 처음부터 재설정 필요."
                 return false
             }
         }
@@ -4142,7 +4142,7 @@ final class CoinPilotStore: ObservableObject {
             request: request,
             result: result
         ) else {
-            offlineReplaySessionRecoveryMessage = "재생 위치와 앱 저장 자료가 맞지 않습니다. 저장 상태를 지우고 다시 시작해 주세요."
+            offlineReplaySessionRecoveryMessage = "재생 위치와 앱 저장 자료 불일치. 저장 상태 삭제 후 다시 시작."
             return nil
         }
 
@@ -4335,7 +4335,7 @@ final class CoinPilotStore: ObservableObject {
     private func markSessionRecoveryIfCheckpointExists() async {
         do {
             if try await offlineReplaySessionStore.loadCheckpoint() != nil {
-                requireOfflineReplaySessionRecovery("저장된 재생을 복원할 앱 자료가 없습니다. 자료를 확인한 뒤 저장 상태를 지우고 다시 시작해 주세요.")
+                requireOfflineReplaySessionRecovery("저장된 재생을 복원할 앱 자료 없음. 저장 상태 삭제 후 다시 시작.")
             }
         } catch {
             requireOfflineReplaySessionRecovery((error as? LocalizedError)?.errorDescription ??
@@ -4354,14 +4354,14 @@ final class CoinPilotStore: ObservableObject {
                 marketCode: checkpoint.market,
                 intervalMinutes: checkpoint.intervalMinutes
             ) else {
-                requireOfflineReplaySessionRecovery("저장된 재생이 현재 앱 저장 자료와 맞지 않습니다. 재생 상태를 지우고 다시 시작해 주세요.")
+                requireOfflineReplaySessionRecovery("저장된 재생과 앱 저장 자료 불일치. 재생 상태 삭제 후 다시 시작.")
                 return
             }
             let result = try await Task.detached(priority: .userInitiated) {
                 try CoinPilotOfflineReplay.run(request)
             }.value
             guard checkpoint.matches(result.metadata, candleCount: request.candles.count) else {
-                requireOfflineReplaySessionRecovery("저장된 재생과 앱 저장 자료가 달라 이어서 열지 않았습니다. 재생 상태를 지우고 다시 시작해 주세요.")
+                requireOfflineReplaySessionRecovery("저장된 재생과 앱 저장 자료가 달라 이어 열지 않음. 재생 상태 삭제 후 다시 시작.")
                 return
             }
 
@@ -4381,7 +4381,7 @@ final class CoinPilotStore: ObservableObject {
                 )
                 : nil
             guard normalized.nextCandleIndex == 0 || currentFrame != nil else {
-                requireOfflineReplaySessionRecovery("저장된 재생 위치를 복원할 수 없습니다. 재생 상태를 지우고 다시 시작해 주세요.")
+                requireOfflineReplaySessionRecovery("저장된 재생 위치 복원 불가. 재생 상태 삭제 후 다시 시작.")
                 return
             }
 
@@ -4392,7 +4392,7 @@ final class CoinPilotStore: ObservableObject {
             offlineReplayPlaybackSpeed = normalized.playbackSpeed ?? .tenCandlesPerSecond
             offlineReplaySessionRecoveryMessage = nil
             offlineReplaySessionMessage = normalized == checkpoint ? nil :
-                "이전 재생을 일시정지 상태로 복원했습니다. 이어서 보려면 재생을 눌러 주세요."
+                "이전 재생을 일시정지 상태로 복원함."
             offlineReplaySessionPersistedCursor = normalized.nextCandleIndex
             offlineReplaySessionLastCheckpointUptime = offlineReplaySessionUptime()
             offlineReplayResult = result
@@ -4458,7 +4458,7 @@ final class CoinPilotStore: ObservableObject {
         guard canOperate,
               let serverURL = currentServerURL,
               hasRequestCredentials(for: serverURL) else {
-            featureMessages[featureKey] = "이 화면의 서버 권한을 확인할 수 없습니다. 운영 토큰으로 로그인해 주세요."
+            featureMessages[featureKey] = "서버 권한 확인 불가. 운영 토큰으로 로그인 필요."
             return nil
         }
         let token = requestBearerToken(for: serverURL)
@@ -4525,8 +4525,8 @@ final class CoinPilotStore: ObservableObject {
             let detail = featureMessages[group]
             let summary = featureLastSuccessfulAt[group] == nil
                 ? "자료를 불러오지 못했습니다."
-                : "새 자료를 확인하지 못했습니다. 마지막 정상 확인 시각을 참고해 주세요."
-            featureMessages[group] = detail.map { "\(summary) \($0)" } ?? "\(summary) 연결 상태를 확인해 주세요."
+                : "새 자료 확인 실패. 마지막 정상 확인 시각 참고."
+            featureMessages[group] = detail.map { "\(summary) \($0)" } ?? "\(summary) 연결 확인 필요."
         }
         refreshingFeatureGroups.remove(group)
         let shouldRefreshAgain = pendingMobileFeatureGroupRefreshes.remove(group) != nil
@@ -4546,7 +4546,7 @@ final class CoinPilotStore: ObservableObject {
 
     private func loadAIDesk(force: Bool) async -> Bool {
         guard canOperate else {
-            featureMessages["ai"] = "AI 자문을 사용하려면 운영 토큰으로 로그인해 주세요."
+            featureMessages["ai"] = "AI 자문은 운영 토큰 로그인 필요."
             return false
         }
         return await refreshMobileFeatureGroup("ai", force: force) { context in
@@ -4805,7 +4805,7 @@ final class CoinPilotStore: ObservableObject {
     func setOptimizationInterval(_ interval: Int) async -> Bool {
         guard [3_600_000, 7_200_000, 10_800_000, 21_600_000, 43_200_000, 86_400_000].contains(interval),
               optimizationBlockReason == nil else {
-            featureMessages["optimization"] = optimizationBlockReason ?? "비교 간격을 확인해 주세요."
+            featureMessages["optimization"] = optimizationBlockReason ?? "비교 간격 확인 필요."
             return false
         }
         guard let response = await performFeatureMutation("optimization", path: "/api/optimization/interval", body: ["interval": interval]),
@@ -4851,7 +4851,7 @@ final class CoinPilotStore: ObservableObject {
         await loadAIDesk()
         guard generation == requestGeneration, server == currentServerURL, workspace == activeWorkspace else { return false }
         guard canOperate, !selected.isEmpty, readyAIProviderIDs.isSuperset(of: selected) else {
-            featureMessages["ai"] = "선택한 의견 서비스를 사용할 수 없습니다. 연결 상태를 확인해 주세요."
+            featureMessages["ai"] = "선택한 의견 서비스 사용 불가. 연결 확인 필요."
             return false
         }
         return true
@@ -4871,11 +4871,11 @@ final class CoinPilotStore: ObservableObject {
         let selectedTypes = Array(Set(eventTypes.filter(allowedTypes.contains))).sorted()
         let selectedProviders = Array(Set(providers.map { $0.lowercased() }.filter { ["gpt", "claude"].contains($0) })).sorted()
         guard !selectedTypes.isEmpty else {
-            featureMessages["ai"] = "관심 신호를 하나 이상 선택해 주세요."
+            featureMessages["ai"] = "관심 신호 1개 이상 선택 필요."
             return false
         }
         guard !selectedProviders.isEmpty else {
-            featureMessages["ai"] = "의견을 받을 서비스를 하나 이상 선택해 주세요."
+            featureMessages["ai"] = "의견 서비스 1개 이상 선택 필요."
             return false
         }
         if autoConsult, !(await verifyAIProviders(Set(selectedProviders))) { return false }
@@ -4904,7 +4904,7 @@ final class CoinPilotStore: ObservableObject {
 
     func requestAIConsultation(eventId: String, provider: String? = nil) async -> Bool {
         guard !eventId.isEmpty else {
-            aiConsultationMessage = "의견을 요청할 시장 신호를 선택해 주세요."
+            aiConsultationMessage = "시장 신호 선택 필요."
             return false
         }
         let choice = (provider ?? "both").lowercased()
@@ -4978,7 +4978,7 @@ final class CoinPilotStore: ObservableObject {
 
     func performFeatureMutation(_ key: String, path: String, body: [String: Any]) async -> [String: Any]? {
         guard canOperate, let serverURL = currentServerURL, hasRequestCredentials(for: serverURL) else {
-            featureMessages[key] = "운영 토큰으로 로그인해 주세요."
+            featureMessages[key] = "운영 토큰 로그인 필요."
             return nil
         }
         let token = requestBearerToken(for: serverURL)
@@ -5058,7 +5058,7 @@ final class CoinPilotStore: ObservableObject {
             _ = beginRequestGeneration()
             clearLoadedData()
             phase = .login
-            connectionMessage = "서버 인증을 확인할 수 없습니다. 서버 토큰을 다시 입력해 주세요."
+            connectionMessage = "서버 인증 실패. 서버 토큰 다시 입력."
         } else {
             markResourceFailed("portfolio-history")
             updateDashboardRefreshMessage("자산 기록을 불러오지 못했습니다.")
@@ -5109,7 +5109,7 @@ final class CoinPilotStore: ObservableObject {
             return false
         }
         guard quantity.isFinite, quantity > 0 else {
-            orderMessage = "매도 수량을 확인해 주세요."
+            orderMessage = "매도 수량 확인 필요."
             return false
         }
         let requestURL = currentServerURL
@@ -5128,7 +5128,7 @@ final class CoinPilotStore: ObservableObject {
             return false
         }
         guard quantity <= available else {
-            orderMessage = "입력한 수량이 현재 보유량보다 많습니다. 새로고침 후 다시 입력해 주세요."
+            orderMessage = "입력 수량이 보유량 초과. 새로고침 후 다시 입력."
             return false
         }
         let price = position.currentPrice ?? markets.first(where: { $0.coin == coin })?.price
@@ -5146,7 +5146,7 @@ final class CoinPilotStore: ObservableObject {
         guard manualOrderBlockReason == nil else { orderMessage = manualOrderBlockReason; return false }
         guard totalAmount.isFinite, totalAmount >= minimumOrderAmount,
               (0...100).contains(minimumScore), (1...30).contains(maximumCoins) else {
-            orderMessage = "금액, 최소 점수, 최대 종목 수를 확인해 주세요."
+            orderMessage = "금액·최소 점수·최대 종목 수 확인 필요."
             return false
         }
         let requestURL = currentServerURL
@@ -5177,7 +5177,7 @@ final class CoinPilotStore: ObservableObject {
         guard manualOrderBlockReason == nil else { orderMessage = manualOrderBlockReason; return false }
         guard targetAmount.isFinite, targetAmount >= minimumSmartSellAmount,
               ["worst", "best", "overbought"].contains(strategy) else {
-            orderMessage = "매도 목표 금액과 우선순위를 확인해 주세요."
+            orderMessage = "매도 목표 금액과 우선순위 확인 필요."
             return false
         }
         let requestURL = currentServerURL
@@ -5214,7 +5214,7 @@ final class CoinPilotStore: ObservableObject {
         guard sellCoin != buyCoin,
               sellCoin.range(of: "^[A-Z0-9]{2,10}-[A-Z0-9]{2,15}$", options: .regularExpression) != nil,
               buyCoin.range(of: "^[A-Z0-9]{2,10}-[A-Z0-9]{2,15}$", options: .regularExpression) != nil else {
-            orderMessage = "매도·매수 종목을 확인해 주세요."
+            orderMessage = "매도·매수 종목 확인 필요."
             return false
         }
         let requestURL = currentServerURL
@@ -5232,15 +5232,15 @@ final class CoinPilotStore: ObservableObject {
               let available = holding.amount, available > 0,
               let destination = markets.first(where: { $0.coin == buyCoin }),
               let destinationPrice = destination.price, destinationPrice > 0 else {
-            orderMessage = "매도할 보유량과 매수 종목의 시세를 다시 확인해 주세요."
+            orderMessage = "매도 보유량과 매수 종목 시세 재확인 필요."
             return false
         }
         if let sellAmount, (!sellAmount.isFinite || sellAmount <= 0 || sellAmount > available) {
-            orderMessage = "매도 수량이 현재 보유량을 넘었습니다. 새로고침 후 다시 확인해 주세요."
+            orderMessage = "매도 수량이 보유량 초과. 새로고침 후 재확인."
             return false
         }
         if let buyAmount, (!buyAmount.isFinite || buyAmount < minimumOrderAmount || buyAmount > (holding.currentValue ?? 0)) {
-            orderMessage = "매수 금액을 확인해 주세요. 매도 예상 금액 안에서 \(CoinPilotFormatting.won(minimumOrderAmount)) 이상이어야 합니다."
+            orderMessage = "매수 금액 확인 필요. 매도 예상 금액 안에서 \(CoinPilotFormatting.won(minimumOrderAmount)) 이상이어야 합니다."
             return false
         }
         var body: [String: Any] = ["sellCoin": sellCoin, "buyCoin": buyCoin]
@@ -5324,7 +5324,7 @@ final class CoinPilotStore: ObservableObject {
             return false
         }
         guard amount.isFinite, amount >= minimumWalletAmount else {
-            orderMessage = "최소 \(CoinPilotFormatting.won(minimumWalletAmount)) 이상 입력해 주세요."
+            orderMessage = "최소 \(CoinPilotFormatting.won(minimumWalletAmount)) 이상 입력."
             return false
         }
         if storePaperWalletLocked {
@@ -5363,7 +5363,7 @@ final class CoinPilotStore: ObservableObject {
             return false
         }
         guard seedMoney.isFinite, seedMoney >= minimumSeedAmount else {
-            orderMessage = "초기 금액은 \(CoinPilotFormatting.won(minimumSeedAmount)) 이상으로 입력해 주세요."
+            orderMessage = "초기 금액은 \(CoinPilotFormatting.won(minimumSeedAmount)) 이상 입력."
             return false
         }
         if storePaperWalletLocked {
@@ -5447,7 +5447,7 @@ final class CoinPilotStore: ObservableObject {
               record.mode == activeWorkspace.serverMode,
               tradingMode == record.mode,
               serverModeMatchesWorkspace else {
-            orderMessage = "이전 주문이 시작된 서버 모드와 현재 작업공간이 다릅니다. 원래 작업공간으로 돌아가 결과를 확인하세요."
+            orderMessage = "이전 주문의 서버 모드와 현재 작업공간이 다름. 원래 작업공간에서 결과 확인."
             return false
         }
 
@@ -5475,7 +5475,7 @@ final class CoinPilotStore: ObservableObject {
 
             if state == "pending" || state == "unknown" || state == "conflict" || response.statusCode == 202 {
                 pendingManualOrderLocked = true
-                orderMessage = serverMessage ?? "거래 결과를 아직 확인할 수 없습니다. 같은 요청으로 결과 확인을 반복하세요. 새 주문은 잠겨 있습니다."
+                orderMessage = serverMessage ?? "거래 결과 미확인. 같은 요청으로 결과 재확인. 새 주문 잠금."
                 return false
             }
 
@@ -5497,7 +5497,7 @@ final class CoinPilotStore: ObservableObject {
                     await refresh()
                     return true
                 }
-                orderMessage = serverMessage ?? "주문 요청이 완료되지 않았습니다. 잔액·거래소 상태를 확인해 주세요."
+                orderMessage = serverMessage ?? "주문 요청 미완료. 잔액·거래소 상태 확인 필요."
                 await refresh()
                 return false
             }
@@ -5508,7 +5508,7 @@ final class CoinPilotStore: ObservableObject {
         } catch {
             guard isCurrentRequest() else { return false }
             pendingManualOrderLocked = true
-            orderMessage = "서버 응답이 끊겨 주문 결과를 확정하지 못했습니다. 같은 요청으로 결과를 확인하세요. 새 주문은 잠겨 있습니다."
+            orderMessage = "서버 응답 끊김으로 주문 결과 미확정. 같은 요청으로 결과 확인. 새 주문 잠금."
             return false
         }
     }
@@ -5525,7 +5525,7 @@ final class CoinPilotStore: ObservableObject {
 
     func setAutomationRunning(_ shouldRun: Bool) async -> Bool {
         guard canOperate else {
-            dashboardMessage = "조회 전용 연결에서는 자동매매를 변경할 수 없습니다. 운영 토큰을 연결해 주세요."
+            dashboardMessage = "조회 전용 연결: 자동매매 변경 불가. 운영 토큰 필요."
             return false
         }
         guard !isWorking, let serverURL = currentServerURL,
@@ -5575,7 +5575,7 @@ final class CoinPilotStore: ObservableObject {
         }
         let token = authenticationRequired ? tokens.token(for: serverURL) : nil
         if authenticationRequired && token == nil {
-            tuningMessage = "서버 토큰을 다시 입력해 주세요."
+            tuningMessage = "서버 토큰 다시 입력 필요."
             return false
         }
         guard !isLoadingTuning else { return false }
@@ -5639,7 +5639,7 @@ final class CoinPilotStore: ObservableObject {
         let token = requestBearerToken(for: serverURL)
         guard !updates.isEmpty,
               CoinPilotAPIClient.isAllowedMobileMutation("/api/config/update", body: updates) else {
-            tuningMessage = "변경할 설정 항목을 확인해 주세요."
+            tuningMessage = "변경할 설정 항목 확인 필요."
             return false
         }
         lastTuningSaveRefreshed = false
@@ -5672,7 +5672,7 @@ final class CoinPilotStore: ObservableObject {
             lastTuningSaveRefreshed = refreshed
             tuningMessage = refreshed
                 ? "변경한 설정을 저장했습니다."
-                : "설정 저장은 완료됐지만 최신 값을 확인하지 못했습니다. 다시 불러와 주세요."
+                : "설정 저장됨. 최신 값 확인 실패. 다시 불러오기 필요."
             return true
         } catch {
             guard requestGeneration == generation, currentServerURL == requestURL, activeWorkspace == requestWorkspace else { return false }
@@ -5769,12 +5769,12 @@ final class CoinPilotStore: ObservableObject {
                 orderMessage = "\(order.market) \(order.side) 요청이 미확정 상태로 저장되어 있습니다. 같은 요청으로 결과를 확인할 때까지 새 주문은 잠겨 있습니다."
             } else {
                 pendingManualOrder = nil
-                orderMessage = "이전 주문 결과 기록을 읽을 수 없어 새 주문을 잠갔습니다. 서버의 주문 기록을 먼저 확인해 주세요."
+                orderMessage = "이전 주문 결과 기록을 읽지 못해 새 주문 잠금. 서버 주문 기록 확인 필요."
             }
         case .unavailable:
             pendingManualOrder = nil
             pendingManualOrderLocked = true
-            orderMessage = "이 기기에서 이전 주문 기록을 읽을 수 없어 새 주문을 잠갔습니다. 기기 잠금을 해제한 뒤 다시 시도해 주세요."
+            orderMessage = "기기의 이전 주문 기록을 읽지 못해 새 주문 잠금. 기기 잠금 해제 후 다시 시도."
         }
     }
 
@@ -5968,7 +5968,7 @@ final class CoinPilotStore: ObservableObject {
 
     func localMarketTimestampLabel(for marketCode: String, interval: Int? = nil) -> String {
         guard let timestamp = localMarketLatestCandle(for: marketCode, interval: interval)?.timestamp else {
-            return "캔들 시각 정보가 없어요"
+            return "캔들 시각 정보 없음"
         }
         return "캔들 시각 · \(CoinPilotFormatting.utcMarketTimestamp(timestamp))"
     }

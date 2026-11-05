@@ -206,7 +206,7 @@ function renderChrome() {
   render(app.querySelector('[data-slot="workspace"]'), html`
     <div class="${current.isLive ? 'cp-workspace is-live' : 'cp-workspace'}">
       ${current.isLive ? liveBadge() : current.modeKnown ? paperBadge() : ''}
-      <div><strong>${current.isLive ? '실전 작업공간' : current.isPaper ? '모의투자 작업공간' : '작업공간 확인 중'}</strong><span>${current.isLive ? '실제 자금으로 주문합니다' : current.isPaper ? '가상 자금으로만 주문합니다' : '서버 모드를 확인하고 있어요'}</span></div>
+      <div><strong>${current.isLive ? '실전 작업공간' : current.isPaper ? '모의투자 작업공간' : '작업공간 확인 중'}</strong><span>${current.isLive ? '실제 자금 주문' : current.isPaper ? '가상 자금 주문' : '서버 모드 확인 중'}</span></div>
     </div>
     ${switcher ? button({ label: switcher.label, size: 'sm', iconName: 'swap', attrs: { 'data-action': 'switch-workspace' } }) : ''}`);
   document.documentElement.dataset.workspace = current.isLive ? 'live' : current.isPaper ? 'paper' : 'unknown';
@@ -217,17 +217,17 @@ function renderBanners(current) {
   const banners = [];
   const auth = current.auth;
   if (!current.online) {
-    banners.push(notice({ tone: 'danger', title: '오프라인 · 주문 잠금', body: '서버 연결이 복구될 때까지 최신 자산과 시세를 확인할 수 없으며 주문을 중지합니다.' }));
+    banners.push(notice({ tone: 'danger', title: '오프라인 · 주문 잠금', body: '서버 연결 복구 전까지 자산·시세 갱신 없음, 주문 중지.' }));
   }
   if (auth?.authRequired === true && auth.resolved === true && auth.tokenScope === 'read_only') {
-    banners.push(notice({ tone: 'neutral', iconName: 'lock', title: '읽기 전용 접속', body: '자산과 손익만 조회할 수 있습니다. 주문, 설정 변경, 엔진 제어는 운영자 토큰이 필요합니다.', action: button({ label: '다시 로그인', size: 'sm', attrs: { 'data-action': 'login' } }) }));
+    banners.push(notice({ tone: 'neutral', iconName: 'lock', title: '읽기 전용 접속', body: '조회 전용. 주문·설정 변경·엔진 제어는 운영자 토큰 필요.', action: button({ label: '다시 로그인', size: 'sm', attrs: { 'data-action': 'login' } }) }));
   } else if (auth?.authRequired === true && auth.resolved === true && auth.tokenScope === 'mobile_operator') {
-    banners.push(notice({ tone: 'warning', iconName: 'lock', title: '모바일 앱 전용 토큰', body: '이 토큰은 모바일 앱에서만 사용할 수 있습니다. 브라우저에서는 운영자 토큰으로 다시 연결해 주세요.', action: button({ label: '다시 로그인', size: 'sm', attrs: { 'data-action': 'login' } }) }));
+    banners.push(notice({ tone: 'warning', iconName: 'lock', title: '모바일 앱 전용 토큰', body: '모바일 앱 전용 토큰. 브라우저는 운영자 토큰으로 재접속 필요.', action: button({ label: '다시 로그인', size: 'sm', attrs: { 'data-action': 'login' } }) }));
   } else if (auth?.authRequired === true && auth.resolved === true && auth.verification === 'unavailable') {
     banners.push(notice({ tone: 'warning', title: '접속 권한 확인 필요', body: mutationBlockReason(auth, { online: current.online }), action: button({ label: '다시 연결', size: 'sm', attrs: { 'data-action': 'login' } }) }));
   }
   if (current.readOnlyObserver) {
-    banners.push(notice({ tone: 'neutral', iconName: 'lock', title: '읽기 전용 관찰 서버', body: '기록된 모의투자 결과를 보여주는 관찰용 서버입니다. 주문과 설정 변경은 비활성화되어 있습니다.' }));
+    banners.push(notice({ tone: 'neutral', iconName: 'lock', title: '읽기 전용 관찰 서버', body: '기록된 모의투자 결과 관찰용. 주문·설정 변경 비활성.' }));
   }
   const pending = pendingMutationPresentation(current.pending, { online: current.online });
   if (pending.visible) {
@@ -237,7 +237,7 @@ function renderBanners(current) {
     banners.push(notice({ tone: current.status.runtimeState === 'PROTECTIVE_ONLY' ? 'danger' : 'warning', title: current.status.runtimeState === 'PROTECTIVE_ONLY' ? '위험 감시 전용 · 신규 주문 잠금' : '거래소 상태 확인 중 · 주문 잠금', body: trading.runtimeBlockReason(current.status) }));
   }
   if (store.get('swWaiting')) {
-    banners.push(notice({ tone: 'info', iconName: 'refresh', title: '새 버전이 준비됐어요', body: '업데이트하면 최신 화면으로 다시 불러옵니다.', action: button({ label: '업데이트', size: 'sm', variant: 'primary', attrs: { 'data-action': 'sw-update' } }) }));
+    banners.push(notice({ tone: 'info', iconName: 'refresh', title: '새 버전 있음', body: '업데이트 시 새로고침.', action: button({ label: '업데이트', size: 'sm', variant: 'primary', attrs: { 'data-action': 'sw-update' } }) }));
   }
   render(app.querySelector('[data-slot="banners"]'), banners);
 }
@@ -325,7 +325,7 @@ const router = createRouter({
   },
   onError(error, entry) {
     console.error(error);
-    render(content, ui.card({ body: emptyState({ iconName: 'alert', title: `${entry?.label || '화면'}을 열지 못했어요`, body: '네트워크 연결을 확인한 뒤 다시 시도해 주세요.', action: button({ label: '다시 시도', variant: 'primary', attrs: { 'data-action': 'reload-route' } }) }) }));
+    render(content, ui.card({ body: emptyState({ iconName: 'alert', title: `${entry?.label || '화면'} 열기 실패`, body: '네트워크 확인 후 재시도.', action: button({ label: '다시 시도', variant: 'primary', attrs: { 'data-action': 'reload-route' } }) }) }));
   }
 });
 on(content, 'click', '[data-action="reload-route"]', () => router.resolve());
@@ -386,5 +386,5 @@ async function boot() {
 
 boot().catch(error => {
   console.error(error);
-  content.innerHTML = `<div class="cp-card"><p>${escapeHtml('앱을 시작하지 못했습니다. 새로고침해 주세요.')}</p></div>`;
+  content.innerHTML = `<div class="cp-card"><p>${escapeHtml('앱 시작 실패. 새로고침 필요.')}</p></div>`;
 });

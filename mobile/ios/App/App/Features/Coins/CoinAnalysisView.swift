@@ -33,11 +33,6 @@ struct CoinPilotAnalysisView: View {
                         HStack(alignment: .center) {
                             SectionHeading(title: "시장 신호")
                             Spacer()
-                            Image("CoinPilotAnalysisHero")
-                                .resizable()
-                                .scaledToFit()
-                                .frame(width: 48, height: 48)
-                                .accessibilityHidden(true)
                             Button(store.loadingFeatures.contains("analysis") ? "분석 중" : "분석 실행") {
                                 Task { await store.loadAnalysisFeatures() }
                             }
@@ -104,7 +99,7 @@ struct CoinPilotAnalysisView: View {
                                 HStack(spacing: 8) {
                                     if result.coin.range(of: "^[A-Z0-9]{2,10}-[A-Z0-9]{2,15}$", options: .regularExpression) != nil {
                                         NavigationLink(destination: CoinPilotMarketDetailView(store: store, coin: result.coin)) {
-                                            Label("시세", systemImage: "chart.line.uptrend.xyaxis")
+                                            Text("시세")
                                                 .frame(maxWidth: .infinity, minHeight: 40)
                                         }
                                         .buttonStyle(CoinPilotSecondaryButtonStyle())
@@ -113,7 +108,7 @@ struct CoinPilotAnalysisView: View {
                                         store.selectedMarket = result.coin
                                         showsOrderSheet = true
                                     } label: {
-                                        Label("주문 열기", systemImage: "arrow.left.arrow.right")
+                                        Text("주문 열기")
                                             .frame(maxWidth: .infinity, minHeight: 40)
                                     }
                                     .buttonStyle(CoinPilotSecondaryButtonStyle())

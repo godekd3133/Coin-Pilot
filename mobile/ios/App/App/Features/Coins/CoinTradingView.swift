@@ -172,28 +172,28 @@ struct CoinPilotTradingView: View {
             let minimum = smartSide == .buy ? store.minimumOrderAmount : store.minimumSmartSellAmount
             if let amount = Double(smartAmount), amount.isFinite {
                 if amount < minimum {
-                    messages.append("\(smartSide == .buy ? "총 투자 금액" : "목표 매도 금액")은 \(CoinPilotFormatting.won(minimum)) 이상 입력해 주세요.")
+                    messages.append("\(smartSide == .buy ? "총 투자 금액" : "목표 매도 금액")은 \(CoinPilotFormatting.won(minimum)) 이상 입력.")
                 } else if smartSide == .buy {
                     if let balance = store.account?.krwBalance, balance.isFinite {
                         if amount > balance {
                             messages.append("총 투자 금액이 주문 가능 잔액 \(CoinPilotFormatting.won(balance))을 넘었습니다.")
                         }
                     } else {
-                        messages.append("주문 가능 잔액을 확인하지 못했습니다. 계좌 정보를 새로고침해 주세요.")
+                        messages.append("주문 가능 잔액 확인 실패. 계좌 새로고침 필요.")
                     }
                 }
             } else {
-                messages.append("금액을 올바른 숫자로 입력해 주세요.")
+                messages.append("금액은 숫자만 가능.")
             }
         }
         if smartSide == .buy {
             if !smartMinimumScore.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                Int(smartMinimumScore).map({ !(0...100).contains($0) }) ?? true {
-                messages.append("신호 점수 기준은 0~100 사이의 정수로 입력해 주세요.")
+                messages.append("신호 점수 기준: 0~100 정수.")
             }
             if !smartMaximumCoins.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                Int(smartMaximumCoins).map({ !(1...30).contains($0) }) ?? true {
-                messages.append("최대 매수 종목 수는 1~30 사이의 정수로 입력해 주세요.")
+                messages.append("최대 매수 종목 수: 1~30 정수.")
             }
         }
         return messages
@@ -391,7 +391,7 @@ struct CoinPilotTradingView: View {
             Text(conditionalOrderConfirmationMessage)
         }
         .confirmationDialog(
-            "추천 주문을 확인해 주세요",
+            "추천 주문 확인",
             isPresented: Binding(get: { requestedRecommendation != nil }, set: { if !$0 { requestedRecommendation = nil } }),
             titleVisibility: .visible
         ) {
@@ -531,10 +531,6 @@ struct CoinPilotTradingView: View {
                                 Text(recommendation.action == "BUY" ? "매수 검토" : "매도 검토")
                                     .font(.caption2.weight(.bold))
                                     .foregroundColor(actionTint)
-                                    .padding(.horizontal, 7)
-                                    .padding(.vertical, 3)
-                                    .background(actionTint.opacity(0.10))
-                                    .clipShape(Capsule())
                                 Spacer()
                                 if let confidence = recommendation.confidence {
                                     Text("점수 \(Int(confidence))")
@@ -656,13 +652,10 @@ struct CoinPilotTradingView: View {
                         if !store.isBundledPreview && !store.isBundledLocalMarketData,
                            market.range(of: "^[A-Z0-9]{2,10}-[A-Z0-9]{2,15}$", options: .regularExpression) != nil {
                             NavigationLink(destination: CoinPilotMarketDetailView(store: store, coin: market)) {
-                                Label("시세", systemImage: "chart.line.uptrend.xyaxis")
-                                    .font(.caption.weight(.semibold))
+                                Text("시세")
+                                    .font(.footnote.weight(.semibold))
                                     .foregroundColor(CPColor.blue)
-                                    .padding(.horizontal, 10)
-                                    .padding(.vertical, 6)
-                                    .background(CPColor.blue.opacity(0.08))
-                                    .clipShape(Capsule())
+                                    .frame(minWidth: 44, minHeight: 44)
                             }
                             .buttonStyle(CoinPilotPressableButtonStyle())
                         }
@@ -763,14 +756,14 @@ struct CoinPilotTradingView: View {
                                 .font(.headline.weight(.semibold))
                             Spacer()
                         }
-                        .frame(minHeight: 56)
+                        .frame(minHeight: 50)
                         .foregroundColor(orderReviewPresentation.isEnabled
                                          ? .white
                                          : CPColor.secondaryInk)
                         .background(orderReviewPresentation.isEnabled
                                     ? (store.activeWorkspace == .live ? CPColor.redFill : CPColor.blueFill)
                                     : CPColor.line)
-                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        .clipShape(RoundedRectangle(cornerRadius: CPRadius.sm, style: .continuous))
                     }
                     .disabled(!orderReviewPresentation.isEnabled)
                     if !store.isBundledPreview {
@@ -852,7 +845,7 @@ struct CoinPilotTradingView: View {
                         .foregroundColor(CPColor.ink)
                         .fixedSize(horizontal: false, vertical: true)
                 } else {
-                    Text("기기에 저장된 주문 확인 기록을 읽지 못했습니다. 새 주문을 보내지 말고 서버 주문 기록을 먼저 확인하세요.")
+                    Text("기기의 주문 확인 기록을 읽지 못함. 새 주문 전에 서버 주문 기록 확인 필요.")
                         .font(.subheadline)
                         .foregroundColor(CPColor.secondaryInk)
                 }

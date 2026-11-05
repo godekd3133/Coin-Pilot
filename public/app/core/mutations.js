@@ -110,7 +110,7 @@ export function createPendingMutationClient({ storage, createKey, sendRequest, o
     return callback();
   }
 
-  function blockedResult(intent, message = '먼저 저장된 요청의 결과를 확인해 주세요.') {
+  function blockedResult(intent, message = '저장된 요청 결과 확인 필요.') {
     return { kind: 'blocked', intent: intent || null, message };
   }
 
@@ -166,7 +166,7 @@ export function createPendingMutationClient({ storage, createKey, sendRequest, o
       outcome = 'processing';
       message = '서버가 요청을 처리 중입니다. 같은 요청을 다시 보내 확인할 수 있습니다.';
     } else if (status >= 200 && status < 300) {
-      if (!clearIntent()) return lockedTerminal(status, body, sendingIntent, '요청은 처리됐지만 안전 기록을 정리하지 못했습니다. 같은 요청으로 결과를 다시 확인하세요.');
+      if (!clearIntent()) return lockedTerminal(status, body, sendingIntent, '요청은 처리됐지만 안전 기록 정리 실패 · 같은 요청으로 결과 재확인 필요.');
       publish();
       return { kind: 'terminal', status, body, intent };
     } else if (status >= 400 && status < 500) {
@@ -338,13 +338,13 @@ export function pendingMutationPresentation(snapshot, { online = true } = {}) {
   const name = mutationActionName(intent);
   if (snapshot.storageError === 'invalid') {
     title = '저장된 요청 기록을 읽을 수 없습니다';
-    copy = '요청 기록을 확인할 수 없어 새 주문과 가상 지갑 변경을 차단했습니다. 앱 데이터를 지우지 말고 기존 요청 결과를 확인해 주세요.';
+    copy = '요청 기록 확인 불가 · 새 주문과 가상 지갑 변경 차단. 앱 데이터를 지우지 말고 기존 요청 결과 확인 필요.';
   } else if (snapshot.storageError === 'unavailable' && !intent) {
     title = '요청 기록 저장소를 사용할 수 없습니다';
-    copy = '안전 기록을 읽거나 저장하지 못해 변경 요청을 보내지 않았습니다. 브라우저 저장 공간을 확인해 주세요.';
+    copy = '안전 기록 읽기/저장 실패 · 변경 요청 미전송. 브라우저 저장 공간 확인 필요.';
   } else if (snapshot.storageError === 'write_failed' && !intent) {
     title = '요청을 저장하지 못했습니다';
-    copy = '안전 기록을 저장하지 못해 요청을 전송하지 않았습니다. 브라우저 저장 공간을 확인한 뒤 다시 시도해 주세요.';
+    copy = '안전 기록 저장 실패 · 요청 미전송. 브라우저 저장 공간 확인 후 재시도.';
   } else if (snapshot.sending) {
     title = `${name} 전송 중`;
     copy = '서버 응답을 기다리는 동안 다른 주문과 가상 지갑 변경을 잠갔습니다.';
@@ -390,7 +390,7 @@ export function protectedMutationError(outcome, fallback, { toUserText = value =
         : `${Math.floor(ageSeconds)}초 전`;
       return `${market} 최근 체결 ${ageLabel} · 허용 ${Math.floor(maximumSeconds)}초`;
     });
-    return `${details.join(' / ')}. 최신 시세를 확인한 뒤 다시 시도해 주세요.`;
+    return `${details.join(' / ')}. 최신 시세 확인 후 재시도.`;
   }
   const error = body?.error;
   if (error?.code === 'idempotency_key_required') return '서버가 요청 키를 확인하지 못했습니다. 결과를 확인할 때까지 새 변경은 잠겨 있습니다.';

@@ -85,7 +85,7 @@ struct CoinPilotPresetView: View {
                             applicationMessage = "\(name) 설정을 \(workspace.title) 서버에 적용했습니다.\n\(serverAddress)"
                         } else {
                             applicationMessage = store.featureMessages["preset"] ?? store.tuningMessage
-                                ?? "설정을 적용하지 못했습니다. 다시 시도해 주세요."
+                                ?? "설정 적용 실패. 다시 시도."
                         }
                     }
                 }
@@ -162,7 +162,7 @@ struct CoinPilotPresetCard: View {
                         .foregroundColor(CPColor.secondaryInk)
                 }
                 if isApplied {
-                    Label("적용 완료", systemImage: "checkmark.circle.fill")
+                    Text("적용 완료")
                         .font(.caption.weight(.semibold))
                         .foregroundColor(CPColor.green)
                 }

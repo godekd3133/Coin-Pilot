@@ -38,11 +38,11 @@ export function badge(text, tone = 'neutral', { dot = false, title } = {}) {
 }
 
 export function liveBadge() {
-  return html`<span class="cp-badge is-live" title="실제 자금으로 거래하는 작업공간입니다"><i class="cp-badge-dot" aria-hidden="true"></i>실전</span>`;
+  return html`<span class="cp-badge is-live" title="실제 자금 작업공간"><i class="cp-badge-dot" aria-hidden="true"></i>실전</span>`;
 }
 
 export function paperBadge() {
-  return html`<span class="cp-badge is-info" title="가상 자금으로 거래하는 작업공간입니다">모의</span>`;
+  return html`<span class="cp-badge is-info" title="가상 자금 작업공간">모의</span>`;
 }
 
 /** Big amount + change. The value counts up from its last shown value (data-countup). */
@@ -156,8 +156,6 @@ export function prefersReducedMotion() {
   try { return globalThis.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches === true; } catch { return false; }
 }
 
-const countMemory = new Map();
-const countRuns = new WeakMap();
 const formatters = {
   won: value => won(value),
   signedWon: value => signedWon(Math.round(value)),
@@ -166,42 +164,18 @@ const formatters = {
 };
 
 /**
- * Count-up for [data-countup] elements from the last value shown for the same
- * key. A new run on the same element replaces the previous one, so a data
- * refresh mid-roll never leaves a stale frame behind. The final text is always
- * the exact formatted target.
+ * Writes the exact formatted value of every [data-countup] element. Numbers
+ * change in place with no roll or tick animation.
  */
-export function runCountUps(root, { duration = 560 } = {}) {
+export function runCountUps(root) {
   if (!root?.querySelectorAll) return;
   const elements = [...(root.matches?.('[data-countup]') ? [root] : []), ...root.querySelectorAll('[data-countup]')];
   for (const element of elements) {
     const target = Number(element.dataset.countup);
-    const key = element.dataset.countupKey || '';
-    const format = formatters[element.dataset.countupFormat] || formatters.won;
     if (!Number.isFinite(target)) continue;
-    const running = countRuns.get(element);
-    if (running && running.target === target) continue;
-    const from = countMemory.has(key) ? countMemory.get(key) : target * 0.96;
-    countMemory.set(key, target);
-    const token = { target };
-    countRuns.set(element, token);
-    if (prefersReducedMotion() || from === target || typeof requestAnimationFrame !== 'function') {
-      element.textContent = format(target);
-      continue;
-    }
-    element.classList.remove('is-ticking');
-    void element.offsetWidth;
-    element.classList.add('is-ticking');
-    const start = performance.now();
-    const ease = t => 1 - (1 - t) ** 3;
-    const frame = now => {
-      if (!element.isConnected || countRuns.get(element) !== token) return;
-      const t = Math.min(1, (now - start) / duration);
-      element.textContent = format(from + (target - from) * ease(t));
-      if (t < 1) requestAnimationFrame(frame);
-      else { element.textContent = format(target); countRuns.delete(element); element.classList.remove('is-ticking'); }
-    };
-    requestAnimationFrame(frame);
+    const format = formatters[element.dataset.countupFormat] || formatters.won;
+    const text = format(target);
+    if (element.textContent !== text) element.textContent = text;
   }
 }
 
@@ -238,7 +212,7 @@ export function toast(message, tone = 'info', { route, duration = 4200 } = {}) {
   item.innerHTML = `${icon(tone === 'success' ? 'check' : tone === 'error' || tone === 'warning' ? 'alert' : 'info', { size: 18 })}<span>${escapeHtml(message)}</span>`;
   toastHost.appendChild(item);
   while (toastHost.children.length > 3) toastHost.firstElementChild.remove();
-  const remove = () => { item.classList.add('is-leaving'); setTimeout(() => item.remove(), 220); };
+  const remove = () => item.remove();
   setTimeout(remove, duration);
   item.addEventListener('click', remove);
 }
@@ -283,7 +257,7 @@ export function openSheet({ title, content, footer, tone, onClose, labelledBy } 
       host.remove();
       if (!document.querySelector('.cp-sheet-host')) document.body.classList.remove('cp-sheet-open');
       previousFocus?.focus?.({ preventScroll: true });
-    }, prefersReducedMotion() ? 0 : 260);
+    }, 120);
     onClose?.(result);
   }
   host.addEventListener('click', event => {
@@ -339,46 +313,19 @@ export function formSheet({ title, message, fields = [], confirmLabel = '확인'
   });
 }
 
-const ENTRANCE_CARD_CAP = 8;
-const ENTRANCE_ROW_CAP = 8;
-let entranceTimer = null;
 
 /**
  * Marks a mount root so its cards, list rows and stat tiles play the staggered
  * entrance once. Indexes are capped so long screens never wait on the tail;
  * explicit --i values from card({ index }) win. Reduce Motion skips it.
  */
-export function playEntrance(root) {
-  if (!root || prefersReducedMotion()) return;
-  let cardIndex = 0;
-  for (const cardElement of root.querySelectorAll('.cp-card, .cp-enter')) {
-    if (cardElement.closest('.cp-sheet')) continue;
-    if (!cardElement.style.getPropertyValue('--i')) cardElement.style.setProperty('--i', String(Math.min(cardIndex, ENTRANCE_CARD_CAP)));
-    cardIndex += 1;
-  }
-  for (const group of root.querySelectorAll('.cp-list, .cp-stat-grid')) {
-    let rowIndex = 0;
-    for (const row of group.children) {
-      row.style.setProperty('--j', String(Math.min(rowIndex, ENTRANCE_ROW_CAP)));
-      rowIndex += 1;
-    }
-  }
-  root.classList.remove('is-entering', 'is-route-in');
-  void root.offsetWidth;
-  root.classList.add('is-entering', 'is-route-in');
-  clearTimeout(entranceTimer);
-  entranceTimer = setTimeout(() => root.classList.remove('is-entering', 'is-route-in'), 1100);
+export function playEntrance() {
+  // No entrance animation: screens appear in their final state.
 }
 
 /** Replays a short text reveal on an element whose text just changed. */
 export function revealText(element, text) {
-  if (!element) return;
-  if (element.textContent === text) return;
-  element.textContent = text;
-  if (prefersReducedMotion()) return;
-  element.classList.remove('is-revealing');
-  void element.offsetWidth;
-  element.classList.add('is-revealing');
+  if (element && element.textContent !== text) element.textContent = text;
 }
 
 export const ui = {

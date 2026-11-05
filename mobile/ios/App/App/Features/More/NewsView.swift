@@ -102,10 +102,6 @@ struct CoinPilotNewsView: View {
                                         Text(sentimentLabel(article.sentiment))
                                             .font(.caption2.weight(.semibold))
                                             .foregroundColor(sentimentTint(article.sentiment))
-                                            .padding(.horizontal, 7)
-                                            .padding(.vertical, 3)
-                                            .background(sentimentTint(article.sentiment).opacity(0.09))
-                                            .clipShape(Capsule())
                                         }
                                         Spacer()
                                         if let url = article.url {

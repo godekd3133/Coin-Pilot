@@ -38,7 +38,7 @@ export default {
             ${auth.authRequired === true ? button({ label: '다시 로그인', iconName: 'key', attrs: { 'data-action': 'change-token' } }) : ''}
             ${auth.authRequired === true ? button({ label: '이 기기에서 로그아웃', iconName: 'logout', attrs: { 'data-action': 'logout' } }) : ''}
           </div>
-          <p class="cp-caption" style="margin-top:8px">접속 토큰은 이 브라우저에만 저장돼요. 거래소 API 키와는 다른 값이에요.</p>`
+          <p class="cp-caption" style="margin-top:8px">접속 토큰은 이 브라우저에만 저장. 거래소 API 키와 다름.</p>`
         })}
         ${card({
           index: 1,
@@ -53,16 +53,16 @@ export default {
             ['전략', status?.strategyMode === 'oversold_reaction_scalping' ? '1분봉 과매도 반등 스캘핑' : status?.strategyMode || '—'],
             ['최대 보유', status?.maxPositions ? `${status.maxPositions}개` : '—']
           ])}
-          ${s.isLive && !status?.upbitCredentialsConfigured ? html`<div style="margin-top:12px">${notice({ tone: 'warning', iconName: 'key', title: '거래소 키 등록', body: '보안을 위해 거래소 키는 모바일 앱에서만 등록할 수 있어요 (HTTPS · 모바일 운영 토큰 · 서버 정지 상태). 키는 어떤 화면에서도 다시 표시되지 않아요.' })}</div>` : ''}
+          ${s.isLive && !status?.upbitCredentialsConfigured ? html`<div style="margin-top:12px">${notice({ tone: 'warning', iconName: 'key', title: '거래소 키 등록', body: '거래소 키는 모바일 앱에서만 등록 (HTTPS · 모바일 운영 토큰 · 서버 정지 상태). 등록 후 재표시 안 함.' })}</div>` : ''}
           ${ctx.store.get('siblingWorkspace') ? html`<div class="cp-actions" style="margin-top:12px">${button({ label: s.isLive ? '모의투자로 전환' : '실전으로 전환', iconName: 'swap', attrs: { 'data-action': 'switch-workspace' } })}</div>
-          <p class="cp-caption" style="margin-top:8px">한 번 로그인하면 모의투자와 실전을 여기서 바로 오갈 수 있어요. 지금 화면 그대로 전환돼요.</p>` : html`<p class="cp-caption" style="margin-top:8px">이 서버에는 다른 작업공간이 연결되어 있지 않아요.</p>`}`
+          <p class="cp-caption" style="margin-top:8px">로그인 후 모의투자·실전 전환. 현재 화면 유지.</p>` : html`<p class="cp-caption" style="margin-top:8px">연결된 다른 작업공간 없음</p>`}`
         })}
         ${card({
           index: 2,
           title: '화면',
-          body: html`<div class="cp-setting-row"><div class="cp-setting-copy"><strong>테마</strong><span>시스템 설정을 따르거나 직접 고를 수 있어요.</span></div>${segmented({ name: 'theme', label: '테마', value: theme, options: [{ value: 'system', label: '시스템' }, { value: 'light', label: '라이트' }, { value: 'dark', label: '다크' }] })}</div>
+          body: html`<div class="cp-setting-row"><div class="cp-setting-copy"><strong>테마</strong><span>시스템 설정 또는 직접 선택</span></div>${segmented({ name: 'theme', label: '테마', value: theme, options: [{ value: 'system', label: '시스템' }, { value: 'light', label: '라이트' }, { value: 'dark', label: '다크' }] })}</div>
             <div class="cp-setting-row"><div class="cp-setting-copy"><strong>손익 색상</strong><span>국내 관례: <b class="cp-up">상승·수익은 빨강</b>, <b class="cp-down">하락·손실은 파랑</b></span></div></div>
-            <div class="cp-setting-row"><div class="cp-setting-copy"><strong>앱으로 설치</strong><span>${install ? '홈 화면에 추가해 앱처럼 사용할 수 있어요.' : '이미 설치했거나 이 브라우저에서 지원하지 않아요. iOS는 공유 → 홈 화면에 추가를 사용하세요.'}</span></div>${install ? button({ label: '설치', size: 'sm', variant: 'primary', attrs: { 'data-action': 'install' } }) : ''}</div>`
+            <div class="cp-setting-row"><div class="cp-setting-copy"><strong>앱으로 설치</strong><span>${install ? '홈 화면에 추가.' : '설치됨 또는 미지원. iOS: 공유 → 홈 화면에 추가.'}</span></div>${install ? button({ label: '설치', size: 'sm', variant: 'primary', attrs: { 'data-action': 'install' } }) : ''}</div>`
         })}
         ${card({
           index: 3,
@@ -72,8 +72,8 @@ export default {
             ['등록 기기', `${notifications.registeredDevices ?? 0}대 (모바일 앱)`],
             ['알림 기록', `${notifications.events ?? 0}건 · 대기 ${notifications.queued ?? 0} · 실패 ${notifications.failed ?? 0}`],
             ['마지막 알림', notifications.lastEventAt ? dateTime(notifications.lastEventAt) : '—']
-          ])}${notifications.error ? html`<div style="margin-top:10px">${notice({ tone: 'warning', body: ctx.toUserText(notifications.error) })}</div>` : ''}<p class="cp-caption" style="margin-top:8px">체결 푸시는 모바일 앱에서 기기를 등록하면 받을 수 있어요. 웹에서는 화면 안 알림으로 표시해요.</p>`
-            : html`<p class="cp-caption">${ctx.resource('notifications').status === 'error' ? '알림 상태를 불러오지 못했어요.' : '불러오는 중…'}</p>`
+          ])}${notifications.error ? html`<div style="margin-top:10px">${notice({ tone: 'warning', body: ctx.toUserText(notifications.error) })}</div>` : ''}<p class="cp-caption" style="margin-top:8px">체결 푸시는 모바일 앱 기기 등록 필요. 웹은 화면 내 알림.</p>`
+            : html`<p class="cp-caption">${ctx.resource('notifications').status === 'error' ? '알림 상태 불러오기 실패' : '불러오는 중…'}</p>`
         })}`);
       renderTools();
     }
@@ -91,7 +91,7 @@ export default {
     ctx.on('click', '[data-segment="theme"]', (event, target) => ctx.store.setTheme?.(target.dataset.value));
     ctx.on('click', '[data-action="change-token"]', () => window.coinPilotAuth?.requestLogin?.(''));
     ctx.on('click', '[data-action="logout"]', async () => {
-      const ok = await ctx.confirm({ title: '이 기기에서 로그아웃할까요?', message: '모의투자와 실전 모두에서 로그아웃해요. 다시 접속하려면 로그인해야 해요.', confirmLabel: '로그아웃', tone: 'danger' });
+      const ok = await ctx.confirm({ title: '이 기기에서 로그아웃', message: '모의투자·실전 모두 로그아웃.', confirmLabel: '로그아웃', tone: 'danger' });
       if (!ok) return;
       for (const key of TOKEN_KEYS) { try { localStorage.removeItem(key); } catch { /* ignore */ } }
       window.coinPilotAuth?.signOutEverywhere?.();

@@ -73,10 +73,6 @@ struct PositionRow: View {
                     Text(CoinPilotFormatting.signedWon(position.profit))
                     if let percent = position.profitPercent {
                         Text(CoinPilotFormatting.percent(percent))
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(profitColor(position.profit).opacity(0.09))
-                            .clipShape(Capsule())
                     }
                 }
                 .font(.caption.weight(.medium))
@@ -217,13 +213,6 @@ struct TradeRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: actionSymbol)
-                .font(.body.weight(.medium))
-                .foregroundColor(actionTint)
-                .frame(width: 34, height: 34)
-                .background(actionTint.opacity(0.10))
-                .clipShape(Circle())
-                .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 5) {
                 HStack(spacing: 8) {
                     Text(trade.coin.map(CoinPilotFormatting.ticker) ?? "자산 미제공")
@@ -232,9 +221,6 @@ struct TradeRow: View {
                     Text(trade.action)
                         .font(.caption.weight(.medium))
                         .foregroundColor(actionTint)
-                        .padding(.horizontal, 7).padding(.vertical, 3)
-                        .background(actionTint.opacity(0.08))
-                        .clipShape(RoundedRectangle(cornerRadius: 6))
                 }
                 Text(CoinPilotFormatting.dateTime(trade.timestamp, unavailable: "거래 시각 미제공"))
                     .font(.caption)

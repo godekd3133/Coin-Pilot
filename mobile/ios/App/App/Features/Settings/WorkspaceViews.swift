@@ -29,12 +29,12 @@ struct CoinPilotLiveCredentialSetupView: View {
             VStack(alignment: .leading, spacing: 13) {
                 SectionHeading(title: "\(store.exchangeDisplayName) API 키 등록")
                 if store.canUseLiveCredentialRegistration {
-                    Text("\(store.exchangeDisplayName) Open API에서 발급한 키를 입력하세요.")
+                    Text("\(store.exchangeDisplayName) Open API 발급 키")
                         .font(.subheadline).foregroundColor(CPColor.secondaryInk)
                     DisclosureGroup("발급과 권한 설정") {
                         VStack(alignment: .leading, spacing: 8) {
-                            Text("자산조회, 주문조회, 주문하기 권한을 선택하세요. 출금 권한은 필요하지 않습니다.")
-                            Text("허용 IP에는 거래 서버가 외부 통신에 사용하는 고정 공인 IP를 등록하세요.")
+                            Text("권한: 자산조회·주문조회·주문하기. 출금 권한 불필요.")
+                            Text("허용 IP: 거래 서버의 고정 공인 IP.")
                         }
                         .font(.footnote).foregroundColor(CPColor.secondaryInk)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -82,7 +82,7 @@ struct CoinPilotLiveCredentialSetupView: View {
                         .frame(minHeight: 48)
                         .foregroundColor(.white)
                         .background(CPColor.blueFill)
-                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .clipShape(RoundedRectangle(cornerRadius: CPRadius.sm, style: .continuous))
                     }
                     .disabled(!store.canSubmitLiveCredentials)
                     .opacity(store.canSubmitLiveCredentials ? 1 : 0.45)
@@ -90,8 +90,8 @@ struct CoinPilotLiveCredentialSetupView: View {
                         .font(.caption).foregroundColor(CPColor.secondaryInk)
                 } else {
                     Text(store.currentLiveCredentialTransportIsSecure == false
-                         ? "키를 등록하려면 HTTPS 서버를 연결해 주세요."
-                         : "키를 등록하려면 운영 토큰을 연결해 주세요.")
+                         ? "키 등록에는 HTTPS 서버 연결 필요."
+                         : "키 등록에는 운영 토큰 필요.")
                         .font(.subheadline).foregroundColor(CPColor.secondaryInk)
                     NavigationLink(destination: CoinPilotSettingsView(store: store)) {
                         Text("연결 설정")

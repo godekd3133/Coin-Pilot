@@ -303,7 +303,7 @@ struct CoinPilotTuningEditor: View {
                       codes.allSatisfy({
                           $0.range(of: "^[A-Z0-9]{2,10}-[A-Z0-9]{2,15}$", options: .regularExpression) != nil
                       }) else {
-                    validationMessage = "대상 코인은 KRW-·USDT- 형식 코드를 쉼표로 구분하거나 ALL로 입력해 주세요."
+                    validationMessage = "대상 코인: KRW-·USDT- 코드를 쉼표로 구분하거나 ALL."
                     return nil
                 }
                 updates["targetCoins"] = codes
@@ -313,7 +313,7 @@ struct CoinPilotTuningEditor: View {
         let originalMaxMarkets = (store.tuningValues["scalpMaxMarkets"] as? Double).map(numberText) ?? ""
         if trimmedMaxMarkets != originalMaxMarkets {
             guard let value = Int(trimmedMaxMarkets), (1...500).contains(value) else {
-                validationMessage = "스캔 마켓 수 상한은 1~500 정수로 입력해 주세요."
+                validationMessage = "스캔 마켓 수 상한: 1~500 정수."
                 return nil
             }
             updates["scalpMaxMarkets"] = value
@@ -322,7 +322,7 @@ struct CoinPilotTuningEditor: View {
         let originalMaxPositions = (store.tuningValues["maxPositions"] as? Double).map(numberText) ?? ""
         if trimmedMaxPositions != originalMaxPositions {
             guard let value = Int(trimmedMaxPositions), (1...50).contains(value) else {
-                validationMessage = "최대 동시 포지션은 1~50 정수로 입력해 주세요."
+                validationMessage = "최대 동시 포지션: 1~50 정수."
                 return nil
             }
             updates["maxPositions"] = value

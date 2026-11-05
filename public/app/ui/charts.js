@@ -33,13 +33,10 @@ export function areaChart(points, { height = 168, tone = 'auto', label = '자산
   const resolved = tone === 'auto' ? (values.at(-1) > values[0] ? 'up' : values.at(-1) < values[0] ? 'down' : 'flat') : tone;
   const coords = scale(values, width, height, 6);
   const line = pathOf(coords);
-  const area = `${line} L${coords.at(-1)[0].toFixed(1)} ${height} L${coords[0][0].toFixed(1)} ${height} Z`;
   const max = Math.max(...values);
   const min = Math.min(...values);
   return html`<figure class="cp-area is-${resolved}" style="height:${height}px">
     <svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" role="img" aria-label="${label}: 최저 ${formatValue(min)}, 최고 ${formatValue(max)}">
-      <defs><linearGradient id="cp-area-fill-${resolved}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" class="cp-area-stop-a"/><stop offset="1" class="cp-area-stop-b"/></linearGradient></defs>
-      <path class="cp-area-fill" d="${area}" fill="url(#cp-area-fill-${resolved})"/>
       <path class="cp-area-line" d="${line}" vector-effect="non-scaling-stroke"/>
     </svg>
     <figcaption class="cp-area-scale"><span>${formatValue(max)}</span><span>${formatValue(min)}</span></figcaption>

@@ -47,7 +47,7 @@ struct CoinPilotHistoryChart: View {
                     Text(CoinPilotFormatting.dateTime(record.point.timestamp))
                         .font(.footnote)
                         .foregroundColor(CPColor.secondaryInk)
-                    Text("기록이 더 쌓이면 자산 변화를 그래프로 볼 수 있어요.")
+                    Text("기록 2개부터 그래프 표시")
                         .font(.footnote)
                         .foregroundColor(CPColor.secondaryInk)
                         .fixedSize(horizontal: false, vertical: true)
@@ -55,7 +55,7 @@ struct CoinPilotHistoryChart: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.vertical, 4)
             } else {
-                Label(emptyMessage, systemImage: "chart.line.uptrend.xyaxis")
+                Text(emptyMessage)
                     .font(.footnote)
                     .foregroundColor(CPColor.secondaryInk)
                     .fixedSize(horizontal: false, vertical: true)
@@ -85,10 +85,8 @@ struct CoinPilotHistoryChart: View {
                         }
                         .padding(.vertical, 8)
                         ForEach(Array(segments.enumerated()), id: \.offset) { segment in
-                            filledPath(segment: segment.element, bounds: bounds, size: geometry.size)
-                                .fill(CPColor.green.opacity(0.08))
                             linePath(segment: segment.element, bounds: bounds, size: geometry.size)
-                                .stroke(CPColor.blue, style: StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
+                                .stroke(CPColor.blue, style: StrokeStyle(lineWidth: 1.5, lineJoin: .round))
                         }
                         if let reference, reference.isFinite,
                            reference > bounds.lowerBound, reference < bounds.upperBound {
@@ -266,14 +264,15 @@ struct CoinPilotAllocationSlice: Identifiable {
 struct CoinPilotAllocationBar: View {
     let slices: [CoinPilotAllocationSlice]
 
+    /// Ink shades only; slices are told apart by their labels, not by hue.
     private static let assetTints: [Color] = [
-        Color(red: 27 / 255, green: 100 / 255, blue: 218 / 255),
-        Color(red: 69 / 255, green: 146 / 255, blue: 252 / 255),
-        Color(red: 143 / 255, green: 181 / 255, blue: 245 / 255),
-        Color(red: 195 / 255, green: 215 / 255, blue: 250 / 255)
+        CPColor.ink.opacity(0.85),
+        CPColor.ink.opacity(0.62),
+        CPColor.ink.opacity(0.42),
+        CPColor.ink.opacity(0.26)
     ]
-    private static let krwTint = Color(red: 176 / 255, green: 184 / 255, blue: 193 / 255)
-    private static let otherTint = Color(red: 139 / 255, green: 149 / 255, blue: 161 / 255)
+    private static let krwTint = CPColor.line
+    private static let otherTint = CPColor.ink.opacity(0.16)
 
     /// 원화 + 평가액이 확인된 보유 코인을 총자산 비중 순으로 정리합니다.
     /// 시세를 확인하지 못한 코인 수를 반환해 범례에서 따로 표시합니다.
@@ -363,16 +362,15 @@ struct CoinPilotAllocationBar: View {
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel("자산 배분")
                 .accessibilityValue(slices.map { "\($0.label) \(Int($0.weight.rounded()))%" }.joined(separator: ", "))
             }
-            .frame(height: 14)
+            .frame(height: 8)
             VStack(spacing: 7) {
                 ForEach(slices) { slice in
                     HStack(spacing: 8) {
-                        Circle()
+                        Rectangle()
                             .fill(slice.tint)
                             .frame(width: 8, height: 8)
                         Text(slice.label)
@@ -397,12 +395,12 @@ struct CoinPilotAllocationBar: View {
 }
 
 extension CoinPilotAllocationBar {
-    /// Fixed tints for cross-asset allocation (코인 · 주식 · 포트폴리오 · 현금).
+    /// Cross-asset allocation (코인 · 주식 · 포트폴리오 · 현금): ink shades, no hues.
     static let categoryTints: [Color] = [
-        Color(red: 27 / 255, green: 100 / 255, blue: 218 / 255),
-        Color(red: 2 / 255, green: 140 / 255, blue: 110 / 255),
-        Color(red: 120 / 255, green: 92 / 255, blue: 220 / 255),
-        Color(red: 176 / 255, green: 184 / 255, blue: 193 / 255)
+        CPColor.ink.opacity(0.85),
+        CPColor.ink.opacity(0.55),
+        CPColor.ink.opacity(0.3),
+        CPColor.line
     ]
 }
 
@@ -428,20 +426,15 @@ struct CPSparkline: View {
     }
 }
 
-/// Filled area chart with a soft gradient under the line.
+/// Line chart (the name is historical: there is no fill under the line).
 struct CPAreaChart: View {
     let values: [Double]
     var tint: Color = CPColor.blue
 
     var body: some View {
         GeometryReader { proxy in
-            ZStack {
-                CPLinePath(values: values, size: proxy.size, closed: true)
-                    .fill(LinearGradient(colors: [tint.opacity(0.22), tint.opacity(0.0)],
-                                         startPoint: .top, endPoint: .bottom))
-                CPLinePath(values: values, size: proxy.size, closed: false)
-                    .stroke(tint, style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
-            }
+            CPLinePath(values: values, size: proxy.size, closed: false)
+                .stroke(tint, style: StrokeStyle(lineWidth: 1.5, lineJoin: .round))
         }
         .accessibilityHidden(true)
     }

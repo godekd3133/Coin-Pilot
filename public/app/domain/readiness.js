@@ -9,12 +9,12 @@ export function validationReportFreshness(value, apiFreshness = null, now = Date
     if (apiFreshness.reason === 'future_timestamp' || apiFreshness.reason === 'timestamp_missing_or_invalid') return '작성 시각을 확인할 수 없습니다.';
     const ageSeconds = Number(apiFreshness.ageSeconds);
     const ageDays = Number.isFinite(ageSeconds) && ageSeconds >= 0 ? Math.max(1, Math.floor(ageSeconds / 86400)) : null;
-    return ageDays === null ? '최신 데이터로 다시 점검하세요.' : `${ageDays}일 전에 만든 결과입니다. 최신 데이터로 다시 점검하세요.`;
+    return ageDays === null ? '재점검 필요.' : `${ageDays}일 전 결과 · 재점검 필요.`;
   }
   const generatedMs = Date.parse(value || '');
   if (!Number.isFinite(generatedMs) || generatedMs > now) return '작성 시각을 확인할 수 없습니다.';
   const ageMs = now - generatedMs;
-  if (ageMs >= 86_400_000) return `${Math.max(1, Math.floor(ageMs / 86_400_000))}일 전에 만든 결과입니다. 최신 데이터로 다시 점검하세요.`;
+  if (ageMs >= 86_400_000) return `${Math.max(1, Math.floor(ageMs / 86_400_000))}일 전 결과 · 재점검 필요.`;
   return '최근 생성';
 }
 
@@ -23,8 +23,8 @@ export const formatReadinessAge = durationSeconds;
 const REASON_LABELS = {
   report_missing: '전략 점검 결과가 없습니다.',
   report_not_current: '점검 결과가 오래됐습니다.',
-  live_validation_bypass_not_supported: '실전 스캘핑은 점검을 건너뛸 수 없습니다. 설정을 확인하세요.',
-  runtime_config_mismatch: '현재 설정과 점검 당시 설정이 다릅니다. 현재 설정으로 다시 점검하세요.',
+  live_validation_bypass_not_supported: '실전 스캘핑은 점검 생략 불가 · 설정 확인 필요.',
+  runtime_config_mismatch: '점검 당시 설정과 다름 · 현재 설정으로 재점검 필요.',
   fixed_config_required: '현재 설정으로 점검을 다시 실행해야 합니다.',
   report_config_incomplete: '점검에 필요한 설정 정보가 빠져 있습니다.',
   confidence_gate_failed: '전략 점검 기준을 충족하지 못했습니다.',

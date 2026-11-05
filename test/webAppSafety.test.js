@@ -473,23 +473,23 @@ test('selected-market order freshness matches server source-age admission and ig
   }, now);
 
   assert.equal(fresh, null);
-  assert.match(staleTrade, /최근 체결 시각이 오래됐어요/);
-  assert.match(futureTrade, /현재보다 앞서 있어요/);
+  assert.match(staleTrade, /체결 시각 오래됨/);
+  assert.match(futureTrade, /현재보다 앞섬/);
   assert.equal(oldFetchFreshSource, null,
     'A cached fetch time alone must not contradict the server fresh-ticker admission policy.');
-  assert.match(serverMarkedUnverified, /최신 여부를 확인할 수 없어요/);
+  assert.match(serverMarkedUnverified, /최신 여부 확인 불가/);
   assert.match(lastGoodMarketQuoteFreshnessIssue({
     price: 100,
     sourceAsOf: new Date(now - 1_000).toISOString(),
     fetchedAt: new Date(now - 2_000).toISOString(),
     quoteFresh: false
-  }, now), /저장된 최근 시세/);
+  }, now), /저장된 이전 시세/);
   assert.match(marketQuoteFreshnessIssue({
     price: 100,
     sourceAsOf: new Date(now - 1_000).toISOString(),
     quoteFresh: false,
     quoteFreshnessReason: 'market_snapshot_last_good'
-  }, now), /저장된 최근 시세/);
+  }, now), /저장된 이전 시세/);
 });
 
 test('stale-quote 409 explains the measured age and direct failures do not record a portfolio snapshot', () => {
@@ -502,7 +502,7 @@ test('stale-quote 409 explains the measured age and direct failures do not recor
   }, '주문을 처리하지 못했습니다.');
   assert.match(message, /BTC 최근 체결 1분 1초 전/);
   assert.match(message, /허용 90초/);
-  assert.match(message, /최신 시세를 확인한 뒤 다시 시도/);
+  assert.match(message, /최신 시세 확인 후 재시도/);
 
 });
 
@@ -534,8 +534,8 @@ test('PWA reads explicit price snapshot metadata and presents complete, partial,
   assert.equal(completeSnapshot.marketListFetchedAt, '2026-09-29T01:01:00.000Z');
   const completePresentation = marketSnapshotPresentation(completeSnapshot, true, completeSnapshot.prices);
   assert.equal(completePresentation.state, 'complete');
-  assert.equal(completePresentation.label, '모든 시장의 시세를 확인했어요');
-  assert.match(completePresentation.detail, /시장 목록을 확인했어요/);
+  assert.equal(completePresentation.label, '전체 시장 시세 확인됨');
+  assert.match(completePresentation.detail, /시장 목록 확인됨/);
 
   const partialSnapshot = normalizeMarketPriceSnapshot({
     complete: false,
@@ -550,7 +550,7 @@ test('PWA reads explicit price snapshot metadata and presents complete, partial,
   const partialPresentation = marketSnapshotPresentation(partialSnapshot, true, partialSnapshot.prices);
   assert.equal(partialPresentation.state, 'partial');
   assert.equal(partialPresentation.label, '2개 시장 시세를 확인할 수 없습니다');
-  assert.match(partialPresentation.detail, /시장 목록을 새로 확인해야 해요/);
+  assert.match(partialPresentation.detail, /시장 목록 갱신 필요/);
   assert.match(partialPresentation.pageDetail, /목록 확인/);
   assert.ok(partialPresentation.pageDetail.includes(formatMarketTimestamp(partialSnapshot.marketListFetchedAt)));
 
@@ -570,13 +570,13 @@ test('PWA reads explicit price snapshot metadata and presents complete, partial,
   const lastGoodPresentation = marketSnapshotPresentation(lastGoodSnapshot, true, lastGoodSnapshot.prices);
   assert.equal(lastGoodPresentation.state, 'stale');
   assert.equal(lastGoodPresentation.tone, 'warning');
-  assert.match(lastGoodPresentation.label, /저장된 최근 시세/);
+  assert.match(lastGoodPresentation.label, /저장된 이전 시세/);
 
   assert.equal(normalizeMarketPriceSnapshot({ complete: true }), null);
   const unavailablePresentation = marketSnapshotPresentation(null, false, []);
   assert.equal(unavailablePresentation.state, 'unavailable');
   assert.match(unavailablePresentation.label, /시세를 불러오지 못했습니다/);
-  assert.match(unavailablePresentation.detail, /시장 목록을 확인할 수 없어요/);
+  assert.match(unavailablePresentation.detail, /시장 목록 확인 불가/);
 
   assert.equal(typeof marketRowQuotePresentation, 'function');
   const rowFetchedAt = '2026-09-29T01:02:08.000Z';
@@ -648,7 +648,7 @@ test('snapshot 404 alone falls back to legacy prices and keeps unknown freshness
   assert.equal(legacyPresentation.state, 'stale');
   assert.equal(legacyPresentation.tone, 'warning');
   assert.match(legacyPresentation.detail, /시세의 최신 여부는 확인할 수 없습니다/);
-  assert.match(legacyPresentation.detail, /시장 목록을 확인했어요/);
+  assert.match(legacyPresentation.detail, /시장 목록 확인됨/);
 
   const unverifiedSnapshot = buildLegacyMarketPriceSnapshot(legacyPrices, null);
   const unverifiedPresentation = marketSnapshotPresentation(
@@ -658,7 +658,7 @@ test('snapshot 404 alone falls back to legacy prices and keeps unknown freshness
   assert.equal(unverifiedSnapshot.marketListStale, null);
   assert.equal(unverifiedSnapshot.marketListFetchedAt, null);
   assert.equal(unverifiedPresentation.state, 'unavailable');
-  assert.match(unverifiedPresentation.detail, /시장 목록을 확인할 수 없어요/);
+  assert.match(unverifiedPresentation.detail, /시장 목록 확인 불가/);
   assert.equal(unverifiedPresentation.tone, 'warning');
 
   for (const error of [
@@ -787,7 +787,7 @@ test('mode banner distinguishes a stopped automatic loop from available manual o
   const operatorStoppedLive = getModeBannerPresentation({ ...base, paper: false });
   assert.equal(operatorStoppedLive.title, '자동매매 중지 · 실거래 가능');
   assert.match(operatorStoppedLive.copy, /운영자가 자동매매를 중지했습니다/);
-  assert.match(operatorStoppedLive.copy, /수동 주문을 보낼 수 있습니다/);
+  assert.match(operatorStoppedLive.copy, /수동 주문 가능/);
   assert.equal(operatorStoppedLive.isLive, false);
 });
 
@@ -905,7 +905,7 @@ test('readiness classifies passed, blocked, stale, and unknown states without fa
   });
   assert.equal(settingsMismatch.stateLabel, '보류');
   assert.equal(settingsMismatch.headline, '실제 주문 조건을 충족하지 못했습니다.');
-  assert.deepEqual(settingsMismatch.reasons, ['현재 설정과 점검 당시 설정이 다릅니다. 현재 설정으로 다시 점검하세요.']);
+  assert.deepEqual(settingsMismatch.reasons, ['점검 당시 설정과 다름 · 현재 설정으로 재점검 필요.']);
 
   const optionalPerformance = classifyReadiness({
     source: 'configured_scalping_validation_report',
@@ -937,7 +937,7 @@ test('readiness classifies passed, blocked, stale, and unknown states without fa
     blockerDetails: [{ code: 'live_validation_bypass_not_supported' }]
   });
   assert.equal(validationBypass.stateLabel, '보류');
-  assert.deepEqual(validationBypass.reasons, ['실전 스캘핑은 점검을 건너뛸 수 없습니다. 설정을 확인하세요.']);
+  assert.deepEqual(validationBypass.reasons, ['실전 스캘핑은 점검 생략 불가 · 설정 확인 필요.']);
   assert.equal(validationBypass.gate.enforced, true);
   assert.equal(validationBypass.gate.enforcedFreshness, true);
 

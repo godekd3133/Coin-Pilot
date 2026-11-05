@@ -60,7 +60,6 @@ struct NativeCard<Content: View>: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(CPColor.surface)
             .clipShape(RoundedRectangle(cornerRadius: CPRadius.card, style: .continuous))
-            .modifier(CoinPilotAppearRise())
     }
 }
 
@@ -102,7 +101,6 @@ struct HeroValue: View {
                 Text(label)
                     .font(.subheadline.weight(.semibold))
                     .foregroundColor(CPColor.secondaryInk)
-                    .cpTextReveal()
                 Spacer(minLength: CPSpace.xs)
                 if let caption {
                     Text(caption)
@@ -116,7 +114,7 @@ struct HeroValue: View {
                     .padding(.vertical, 3)
             } else {
                 CoinPilotCountingWon(value: value, unavailable: unavailable)
-                    .font(.system(size: displaySize, weight: .bold, design: .rounded))
+                    .font(.system(size: displaySize, weight: .bold))
                     .monospacedDigit()
                     .foregroundColor(CPColor.ink)
                     .minimumScaleFactor(0.6)
@@ -139,7 +137,6 @@ struct HeroValue: View {
                         Text(CoinPilotFormatting.percent(changePercent))
                             .font(.caption.weight(.semibold))
                             .monospacedDigit()
-                            .cpNumericTransition(changePercent)
                             .foregroundColor(CPColor.pnl(change ?? changePercent))
                     }
                 }
@@ -162,39 +159,37 @@ struct CPStat: View {
     let item: CPStatItem
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
+        HStack(alignment: .firstTextBaseline, spacing: CPSpace.sm) {
             Text(item.label)
-                .font(.caption)
+                .font(.subheadline)
                 .foregroundColor(CPColor.secondaryInk)
                 .lineLimit(1)
+            Spacer(minLength: CPSpace.xs)
             Text(item.value)
                 .font(.subheadline.weight(.semibold))
                 .monospacedDigit()
-                .cpNumericTransition(text: item.value)
                 .foregroundColor(item.tint)
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, 10)
-        .padding(.horizontal, 12)
-        .background(CPColor.surface2)
-        .clipShape(RoundedRectangle(cornerRadius: CPRadius.sm, style: .continuous))
         .accessibilityElement(children: .combine)
     }
 }
 
+/// Label/value rows separated by dividers (no tiles inside the card).
+/// `columns` is kept for source compatibility and ignored.
 struct CPStatGrid: View {
     let items: [CPStatItem]
     var columns = 2
 
     var body: some View {
-        LazyVGrid(
-            columns: Array(repeating: GridItem(.flexible(), spacing: CPSpace.xs), count: max(1, columns)),
-            alignment: .leading,
-            spacing: CPSpace.xs
-        ) {
-            ForEach(items) { CPStat(item: $0) }
+        VStack(spacing: 0) {
+            ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                if index > 0 { CPDivider() }
+                CPStat(item: item)
+            }
         }
     }
 }
@@ -241,7 +236,6 @@ struct CPListRow<Leading: View>: View {
                     Text(value)
                         .font(.subheadline.weight(.semibold))
                         .monospacedDigit()
-                        .cpNumericTransition(text: value)
                         .foregroundColor(CPColor.ink)
                         .lineLimit(1)
                         .minimumScaleFactor(0.75)
@@ -250,7 +244,6 @@ struct CPListRow<Leading: View>: View {
                     Text(detail)
                         .font(.caption.weight(.medium))
                         .monospacedDigit()
-                        .cpNumericTransition(text: detail)
                         .foregroundColor(detailColor)
                         .lineLimit(1)
                 }
@@ -258,7 +251,6 @@ struct CPListRow<Leading: View>: View {
         }
         .padding(.vertical, 10)
         .frame(minHeight: 44)
-        .modifier(CoinPilotAppearRise(distance: 6))
         .accessibilityElement(children: .combine)
     }
 }
@@ -272,53 +264,30 @@ extension CPListRow where Leading == CPSymbolTile {
     }
 }
 
-/// Tinted rounded icon used as a list-row avatar.
+/// Former tinted icon avatar. Rows no longer carry a decorative icon, so this
+/// renders nothing (an EmptyView takes no space or spacing in a stack).
 struct CPSymbolTile: View {
     let symbol: String
     var tint: Color = CPColor.blue
     var size: CGFloat = 38
 
-    var body: some View {
-        Image(systemName: symbol)
-            .font(.system(size: size * 0.42, weight: .semibold))
-            .foregroundColor(tint)
-            .frame(width: size, height: size)
-            .background(tint.opacity(0.10))
-            .clipShape(RoundedRectangle(cornerRadius: CPRadius.sm, style: .continuous))
-            .accessibilityHidden(true)
-    }
+    var body: some View { EmptyView() }
 }
 
-/// Tinted ticker avatar for symbols (coins, stocks).
+/// Ticker monogram: one neutral style for every symbol (no per-ticker hues).
 struct CoinAvatar: View {
     let coin: String?
     var size: CGFloat = 36
 
-    private static let palette: [Color] = [
-        CPColor.blue,
-        Color(red: 0.30, green: 0.62, blue: 0.93),
-        Color(red: 0.11, green: 0.66, blue: 0.48),
-        Color(red: 0.86, green: 0.55, blue: 0.20),
-        Color(red: 0.56, green: 0.45, blue: 0.87),
-        Color(red: 0.88, green: 0.40, blue: 0.45),
-        Color(red: 0.24, green: 0.63, blue: 0.71)
-    ]
-
     private var ticker: String { CoinPilotFormatting.ticker(coin ?? "") }
-
-    private var tint: Color {
-        var hash = 0
-        for scalar in ticker.unicodeScalars { hash = (hash &* 31 &+ Int(scalar.value)) & 0x7fffffff }
-        return Self.palette[hash % Self.palette.count]
-    }
 
     var body: some View {
         Text(ticker.isEmpty ? "?" : String(ticker.prefix(1)))
-            .font(.system(size: size * 0.42, weight: .bold, design: .rounded))
-            .foregroundColor(.white)
+            .font(.system(size: size * 0.4, weight: .semibold))
+            .foregroundColor(CPColor.secondaryInk)
             .frame(width: size, height: size)
-            .background(tint)
-            .clipShape(Circle())
+            .background(CPColor.surface2)
+            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
             .accessibilityHidden(true)
     }
 }
@@ -344,20 +313,12 @@ struct CPBadge: View {
     var tone: CPTone = .neutral
     var symbol: String? = nil
 
+    /// Plain status text in the tone colour (no capsule, no icon).
     var body: some View {
-        HStack(spacing: 4) {
-            if let symbol {
-                Image(systemName: symbol).font(.system(size: 9, weight: .bold))
-            }
-            Text(text).lineLimit(1)
-        }
-        .font(.caption2.weight(.semibold))
-        .foregroundColor(tone.color)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
-        .background(tone.color.opacity(0.11))
-        .clipShape(Capsule())
-        .accessibilityElement(children: .combine)
+        Text(text)
+            .lineLimit(1)
+            .font(.caption.weight(.semibold))
+            .foregroundColor(tone.color)
     }
 }
 
@@ -366,16 +327,13 @@ struct CPLiveIndicator: View {
     var compact = false
 
     var body: some View {
-        HStack(spacing: 5) {
-            Circle().fill(Color.white).frame(width: 6, height: 6)
-            Text(compact ? "실전" : "실전 · 실제 자금")
-        }
-        .font(.caption2.weight(.bold))
-        .foregroundColor(.white)
-        .padding(.horizontal, 9)
-        .padding(.vertical, 5)
-        .background(CPColor.redFill)
-        .clipShape(Capsule())
+        Text(compact ? "실전" : "실전 · 실제 자금")
+            .font(.caption2.weight(.bold))
+            .foregroundColor(.white)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+            .background(CPColor.redFill)
+            .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("실전 작업공간. 실제 자금이 사용됩니다")
     }
@@ -388,11 +346,11 @@ struct CPRunStateBadge: View {
 
     var body: some View {
         if isRunning == true, let pausedReason {
-            CPBadge(text: pausedReason, tone: .warning, symbol: "pause.fill")
+            CPBadge(text: pausedReason, tone: .warning)
         } else if isRunning == true {
-            CPBadge(text: "실행 중", tone: .positive, symbol: "circle.fill")
+            CPBadge(text: "실행 중", tone: .positive)
         } else if isRunning == false {
-            CPBadge(text: "정지", tone: .neutral, symbol: "stop.fill")
+            CPBadge(text: "정지", tone: .neutral)
         } else {
             CPBadge(text: "확인 중", tone: .neutral)
         }
@@ -415,7 +373,6 @@ struct CPEngineStatus: View {
 
     var body: some View {
         HStack(alignment: .center, spacing: CPSpace.sm) {
-            CPSymbolTile(symbol: symbol, tint: isRunning == true ? CPColor.green : CPColor.secondaryInk)
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 6) {
                     Text(name)
@@ -490,21 +447,24 @@ struct CPNotice: View {
     }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 9) {
-            Image(systemName: resolvedSymbol)
-                .foregroundColor(tone.color)
-                .accessibilityHidden(true)
-            Text(text)
-                .font(.subheadline.weight(.medium))
-                .foregroundColor(CPColor.ink)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(tone.color.opacity(0.09))
-        .clipShape(RoundedRectangle(cornerRadius: CPRadius.md, style: .continuous))
-        .accessibilityElement(children: .combine)
+        CPNoticeBody(text: text, color: tone.color)
+    }
+}
+
+/// Notice layout: a coloured left rule and plain text (no tinted panel, no icon).
+struct CPNoticeBody: View {
+    let text: String
+    let color: Color
+
+    var body: some View {
+        Text(text)
+            .font(.subheadline)
+            .foregroundColor(CPColor.ink)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.vertical, 2)
+            .padding(.leading, 13)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Rectangle().fill(color).frame(width: 3).accessibilityHidden(true), alignment: .leading)
     }
 }
 
@@ -515,21 +475,7 @@ struct InlineNotice: View {
     var symbol: String = "exclamationmark.circle.fill"
 
     var body: some View {
-        HStack(alignment: .top, spacing: 9) {
-            Image(systemName: symbol)
-                .foregroundColor(color)
-                .accessibilityHidden(true)
-            Text(text)
-                .font(.subheadline.weight(.medium))
-                .foregroundColor(CPColor.ink)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 11)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(color.opacity(0.08))
-        .clipShape(RoundedRectangle(cornerRadius: CPRadius.md, style: .continuous))
-        .accessibilityElement(children: .combine)
+        CPNoticeBody(text: text, color: color)
     }
 }
 
@@ -543,23 +489,14 @@ struct CPEmptyState: View {
     var action: (() -> Void)? = nil
 
     var body: some View {
-        VStack(spacing: CPSpace.sm) {
-            Image(systemName: symbol)
-                .font(.system(size: 26, weight: .semibold))
-                .foregroundColor(CPColor.blue)
-                .frame(width: 60, height: 60)
-                .background(CPColor.blue.opacity(0.09))
-                .clipShape(Circle())
-                .accessibilityHidden(true)
+        VStack(alignment: .leading, spacing: CPSpace.xs) {
             Text(title)
-                .font(.headline)
+                .font(.subheadline.weight(.semibold))
                 .foregroundColor(CPColor.ink)
-                .multilineTextAlignment(.center)
             if let message {
                 Text(message)
-                    .font(.subheadline)
+                    .font(.footnote)
                     .foregroundColor(CPColor.secondaryInk)
-                    .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
             }
             if let actionTitle, let action {
@@ -567,8 +504,8 @@ struct CPEmptyState: View {
                     .buttonStyle(CoinPilotSecondaryButtonStyle())
             }
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, CPSpace.md)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, CPSpace.xs)
         .accessibilityElement(children: .contain)
     }
 }
@@ -581,18 +518,11 @@ struct EmptyMessage: View {
     var action: (() -> Void)? = nil
 
     var body: some View {
-        VStack(spacing: 10) {
-            if let image {
-                Image(image)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: 92, height: 92)
-                    .accessibilityHidden(true)
-            }
+        // `image` is ignored: empty states are one line of text, no illustration.
+        VStack(alignment: .leading, spacing: 10) {
             Text(text)
                 .font(.subheadline)
                 .foregroundColor(CPColor.secondaryInk)
-                .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
             if let actionTitle, let action {
                 Button(actionTitle, action: action)
@@ -600,8 +530,8 @@ struct EmptyMessage: View {
                     .disabled(isActionDisabled)
             }
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 8)
     }
 }
 
@@ -624,11 +554,6 @@ struct CPConfirmSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: CPSpace.md) {
-            Capsule()
-                .fill(CPColor.line)
-                .frame(width: 38, height: 5)
-                .frame(maxWidth: .infinity)
-                .accessibilityHidden(true)
             if confirmation.isLive { CPLiveIndicator() }
             Text(confirmation.title)
                 .font(CPFont.title)
@@ -695,7 +620,6 @@ struct SectionHeading: View {
         Text(title)
             .font(.headline.weight(.bold))
             .foregroundColor(CPColor.ink)
-            .cpTextReveal()
     }
 }
 
@@ -706,7 +630,6 @@ struct FeatureMenuRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            CPSymbolTile(symbol: symbol, size: 40)
             VStack(alignment: .leading, spacing: 3) {
                 Text(title).font(.subheadline.weight(.semibold)).foregroundColor(CPColor.ink)
                 if !detail.isEmpty {
@@ -718,30 +641,28 @@ struct FeatureMenuRow: View {
         }
         .contentShape(Rectangle())
         .padding(.vertical, 7)
-        .modifier(CoinPilotAppearRise(distance: 6))
     }
 }
 
-/// 홈 빠른 액션 아이콘 칩 — 틴트 아이콘 + 짧은 라벨.
+/// 홈 빠른 액션 — 텍스트 버튼(아이콘 칩 없음). `symbol`/`tint`는 호환용.
 struct HomeQuickActionContent: View {
     let title: String
     let symbol: String
     let tint: Color
 
     var body: some View {
-        VStack(spacing: 7) {
-            Image(systemName: symbol)
-                .font(.system(size: 17, weight: .semibold))
-                .foregroundColor(tint)
-                .frame(width: 48, height: 48)
-                .background(tint.opacity(0.10))
-                .clipShape(RoundedRectangle(cornerRadius: CPRadius.md, style: .continuous))
-            Text(title)
-                .font(.caption.weight(.medium))
-                .foregroundColor(CPColor.ink)
-        }
-        .frame(maxWidth: .infinity)
-        .contentShape(Rectangle())
+        Text(title)
+            .font(.footnote.weight(.medium))
+            .foregroundColor(CPColor.ink)
+            .lineLimit(1)
+            .minimumScaleFactor(0.7)
+            .padding(.horizontal, 4)
+            .frame(maxWidth: .infinity, minHeight: 44)
+            .overlay(
+                RoundedRectangle(cornerRadius: CPRadius.sm, style: .continuous)
+                    .stroke(CPColor.line, lineWidth: 1)
+            )
+            .contentShape(Rectangle())
     }
 }
 
@@ -755,7 +676,7 @@ struct HomeQuickAction: View {
         Button(action: action) {
             HomeQuickActionContent(title: title, symbol: symbol, tint: tint)
         }
-        .buttonStyle(CoinPilotPressableButtonStyle(haptic: .light))
+        .buttonStyle(CoinPilotPressableButtonStyle())
         .accessibilityLabel(title)
     }
 }
@@ -767,10 +688,6 @@ struct SettingsRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: symbol)
-                .font(.headline)
-                .foregroundColor(CPColor.secondaryInk)
-                .frame(width: 23)
             Text(title)
                 .font(.body)
                 .foregroundColor(CPColor.secondaryInk)

@@ -28,11 +28,11 @@ struct CoinPilotOptimizationView: View {
                             error: store.featureMessages["optimization"]
                         )
                         if store.optimizationSettings["isRunning"] as? Bool == true {
-                            Label("후보 비교 중", systemImage: "clock").font(.subheadline).foregroundColor(CPColor.blue)
+                            Text("후보 비교 중").font(.subheadline).foregroundColor(CPColor.blue)
                         } else if let outcome = store.optimizationSettings["lastOutcome"] as? [String: Any],
                                   let status = outcome["status"] as? String {
                             switch status {
-                            case "COMPLETED": Label("후보 비교 완료", systemImage: "checkmark.circle").foregroundColor(CPColor.green)
+                            case "COMPLETED": Text("후보 비교 완료").foregroundColor(CPColor.green)
                             case "INSUFFICIENT_DATA":
                                 Text("비교할 가격 기록이 부족합니다 (\(outcome["candleCount"] as? Int ?? 0)/\(outcome["minimumCandleCount"] as? Int ?? 250)).")
                                     .foregroundColor(CPColor.secondaryInk)
@@ -46,7 +46,7 @@ struct CoinPilotOptimizationView: View {
                         ))
                         .tint(CPColor.blue)
                         .disabled(store.optimizationBlockReason != nil)
-                        Text("비교 결과는 자동으로 적용되지 않습니다. 검증 자료를 확인한 뒤 설정을 직접 적용해 주세요.")
+                        Text("비교 결과는 자동 적용 안 됨. 검증 후 직접 적용.")
                             .font(.caption).foregroundColor(CPColor.secondaryInk)
                         Picker("비교 간격", selection: Binding(
                             get: { store.optimizationSettings["interval"] as? Int ?? 21_600_000 },

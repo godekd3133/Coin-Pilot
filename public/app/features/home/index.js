@@ -17,13 +17,13 @@ function attentionItems(ctx, s) {
   const items = [];
   const paper = ctx.data('paper');
   const readiness = ctx.data('readiness');
-  if (s.pendingLocked) items.push(notice({ tone: 'warning', title: '이전 요청의 결과를 확인해 주세요', body: '주문이 처리됐을 수 있어요. 위의 안내에서 같은 요청 결과를 확인한 뒤 다음 주문을 진행해 주세요.' }));
+  if (s.pendingLocked) items.push(notice({ tone: 'warning', title: '이전 요청 결과 확인 필요', body: '주문이 처리됐을 수 있음 · 위 안내에서 같은 요청 결과 확인 후 다음 주문.' }));
   if (s.marketPricesLoaded) {
     const market = marketSnapshotPresentation(s.marketSnapshot, true, s.marketPrices, s.freshnessOptions);
     if (market.state !== 'complete') items.push(notice({ tone: 'warning', title: '시세 확인 필요', body: market.detail, action: linkButton({ label: '시세 보기', href: '#/coins' }) }));
   }
   if (paper?.orphaned || paper?.analysisDataHealth?.failClosed || paper?.riskMonitor?.failClosed || paper?.continuityEligible === false) {
-    items.push(notice({ tone: 'danger', title: '모의투자가 안전을 위해 중단됐어요', body: '시세나 분석 자료 공백이 있어 기록을 유효한 근거에서 제외했습니다. 실행 상태를 확인하세요.', action: linkButton({ label: '확인', href: '#/research' }) }));
+    items.push(notice({ tone: 'danger', title: '모의투자 안전 정지', body: '시세·분석 자료 공백 · 이 기록은 유효 근거에서 제외. 실행 상태 확인 필요.', action: linkButton({ label: '확인', href: '#/research' }) }));
   }
   if (s.isLive && readiness) {
     const verdict = classifyReadiness(readiness);
@@ -32,7 +32,7 @@ function attentionItems(ctx, s) {
   const stocks = ctx.data('stocks');
   const stockTrader = stocks?.enabled ? stockTraderSummary(stocks[s.isLive ? 'live' : 'paper']) : null;
   if (stockTrader?.lastError) items.push(notice({ tone: 'warning', title: '주식 엔진 오류', body: ctx.toUserText(stockTrader.lastError), action: linkButton({ label: '주식', href: '#/stocks' }) }));
-  if (stocks?.enabled && stocks.credentialsConfigured === false) items.push(notice({ tone: 'neutral', title: '증권 API 키가 없어요', body: '주식 자동매매를 시작하려면 서버에 증권사 API 키를 설정해야 합니다.' }));
+  if (stocks?.enabled && stocks.credentialsConfigured === false) items.push(notice({ tone: 'neutral', title: '증권 API 키 없음', body: '주식 자동매매를 시작하려면 서버에 증권사 API 키를 설정해야 합니다.' }));
   const horizons = ctx.data('horizons');
   for (const status of [horizons?.coin, ...Object.values(horizons?.stock || {})].filter(Boolean)) {
     const summary = horizonRuntimeSummary(status);
@@ -75,8 +75,8 @@ export default {
       const coinPositionCount = coinPositions(s.account).length;
       const heroLabel = parts.length > 1 ? '총자산 (코인·주식·포트폴리오)' : '총자산';
       const sub = combined.partial
-        ? `${combined.missing.join(', ')} 평가액을 확인할 수 없어 확인된 금액만 표시해요`
-        : s.account?.valuationStatus === 'stale' ? '일부 시세가 오래돼 평가액을 확정하지 않았어요' : `${s.isLive ? '실전 계좌' : '모의투자'} · ${relativeTime(accountState.lastSuccessAt)} 갱신`;
+        ? `${combined.missing.join(', ')} 평가액 확인 불가 · 확인된 금액만 표시`
+        : s.account?.valuationStatus === 'stale' ? '일부 시세 오래됨 · 평가액 미확정' : `${s.isLive ? '실전 계좌' : '모의투자'} · ${relativeTime(accountState.lastSuccessAt)} 갱신`;
       render(slot('hero'), card({
         index: 0,
         tone: s.isLive ? 'live' : undefined,
@@ -102,7 +102,7 @@ export default {
         action: segments,
         body: resourceView(state, () => hasUsableHistoryTrend(state.data?.data)
           ? areaChart(points, { formatValue: value => compactWon(value) })
-          : emptyState({ iconName: 'chart', title: '자산 기록이 아직 적어요', body: '자산 평가가 두 번 이상 기록되면 흐름을 보여드려요.' }), { lines: 4 })
+          : emptyState({ iconName: 'chart', title: '자산 기록 부족', body: '기록 2건 이상부터 표시.' }), { lines: 4 })
       }));
     }
 
@@ -119,12 +119,12 @@ export default {
             name: `주식 ${stockMode === 'live' ? '실전' : '모의'} 트레이더`,
             running: stockTrader?.running,
             tone: stockTrader?.lastError ? 'warning' : stockTrader?.running ? 'ok' : 'neutral',
-            detail: stockTrader ? `${stockTrader.market.label} · 보유 ${stockTrader.positions.length}종목` : '트레이더가 비활성화되어 있어요.',
+            detail: stockTrader ? `${stockTrader.market.label} · 보유 ${stockTrader.positions.length}종목` : '트레이더 비활성',
             meta: stockTrader?.lastCycleAt ? `마지막 실행 ${relativeTime(stockTrader.lastCycleAt)}` : null,
             live: stockMode === 'live',
             actions: linkButton({ label: '주식 보기', href: '#/stocks' })
           })
-          : engineStatus({ name: '주식 트레이더', stateLabel: '꺼짐', detail: '서버에서 주식 자동매매가 비활성화되어 있어요.' }));
+          : engineStatus({ name: '주식 트레이더', stateLabel: '꺼짐', detail: '서버에서 주식 자동매매 비활성' }));
       }
       const horizonList = [horizons?.coin, horizons?.stock?.[stockMode]].filter(Boolean);
       for (const status of horizonList) {
@@ -174,7 +174,7 @@ export default {
         title: '최근 체결',
         action: linkButton({ label: '전체 보기', href: '#/activity', variant: 'ghost' }),
         body: tradesState.data === null && tradesState.status !== 'error' ? skeleton({ lines: 3 })
-          : list(merged.map(recordRow), { empty: emptyState({ iconName: 'list', title: '아직 체결이 없어요', body: '조건에 맞는 거래가 생기면 여기에 표시돼요.' }) })
+          : list(merged.map(recordRow), { empty: emptyState({ iconName: 'list', title: '체결 없음', body: '' }) })
       }));
     }
 
