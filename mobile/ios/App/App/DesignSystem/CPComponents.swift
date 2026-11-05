@@ -102,6 +102,7 @@ struct HeroValue: View {
                 Text(label)
                     .font(.subheadline.weight(.semibold))
                     .foregroundColor(CPColor.secondaryInk)
+                    .cpTextReveal()
                 Spacer(minLength: CPSpace.xs)
                 if let caption {
                     Text(caption)
@@ -138,6 +139,7 @@ struct HeroValue: View {
                         Text(CoinPilotFormatting.percent(changePercent))
                             .font(.caption.weight(.semibold))
                             .monospacedDigit()
+                            .cpNumericTransition(changePercent)
                             .foregroundColor(CPColor.pnl(change ?? changePercent))
                     }
                 }
@@ -168,6 +170,7 @@ struct CPStat: View {
             Text(item.value)
                 .font(.subheadline.weight(.semibold))
                 .monospacedDigit()
+                .cpNumericTransition(text: item.value)
                 .foregroundColor(item.tint)
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
@@ -238,6 +241,7 @@ struct CPListRow<Leading: View>: View {
                     Text(value)
                         .font(.subheadline.weight(.semibold))
                         .monospacedDigit()
+                        .cpNumericTransition(text: value)
                         .foregroundColor(CPColor.ink)
                         .lineLimit(1)
                         .minimumScaleFactor(0.75)
@@ -246,6 +250,7 @@ struct CPListRow<Leading: View>: View {
                     Text(detail)
                         .font(.caption.weight(.medium))
                         .monospacedDigit()
+                        .cpNumericTransition(text: detail)
                         .foregroundColor(detailColor)
                         .lineLimit(1)
                 }
@@ -253,6 +258,7 @@ struct CPListRow<Leading: View>: View {
         }
         .padding(.vertical, 10)
         .frame(minHeight: 44)
+        .modifier(CoinPilotAppearRise(distance: 6))
         .accessibilityElement(children: .combine)
     }
 }
@@ -689,6 +695,7 @@ struct SectionHeading: View {
         Text(title)
             .font(.headline.weight(.bold))
             .foregroundColor(CPColor.ink)
+            .cpTextReveal()
     }
 }
 
@@ -711,6 +718,7 @@ struct FeatureMenuRow: View {
         }
         .contentShape(Rectangle())
         .padding(.vertical, 7)
+        .modifier(CoinPilotAppearRise(distance: 6))
     }
 }
 
@@ -747,7 +755,7 @@ struct HomeQuickAction: View {
         Button(action: action) {
             HomeQuickActionContent(title: title, symbol: symbol, tint: tint)
         }
-        .buttonStyle(CoinPilotPressableButtonStyle())
+        .buttonStyle(CoinPilotPressableButtonStyle(haptic: .light))
         .accessibilityLabel(title)
     }
 }

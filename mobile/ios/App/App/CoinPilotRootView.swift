@@ -6,6 +6,11 @@ struct CoinPilotNativeRootView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @AppStorage(CPAppearance.storageKey) private var appearance = CPAppearance.system.rawValue
 
+    /// Connection ⇄ dashboard: a fade with a slight scale; Reduce Motion fades only.
+    private var phaseTransition: AnyTransition {
+        reduceMotion ? .opacity : .opacity.combined(with: .scale(scale: 0.98))
+    }
+
     var body: some View {
         Group {
             if store.isBundledLocalMarketData {
@@ -16,10 +21,13 @@ struct CoinPilotNativeRootView: View {
                 }
             } else if store.phase == .dashboard && store.serverModeMatchesWorkspace {
                 CoinPilotShellView(store: store)
+                    .transition(phaseTransition)
             } else if !store.didFinishInitialConnect {
                 CoinPilotStartupView()
+                    .transition(.opacity)
             } else {
                 CoinPilotConnectionView(store: store)
+                    .transition(phaseTransition)
             }
         }
         .background(CPColor.paper.ignoresSafeArea())
@@ -193,6 +201,7 @@ struct CoinPilotShellView: View {
                     CoinPilotFeatureScreen(store: store, feature: feature)
                 }
                 .modifier(CoinPilotTabBarContentInset())
+                .modifier(CoinPilotTabEntrance(isActive: selectedFeature == feature.id))
                 .tabItem { Label(feature.label, systemImage: feature.icon) }
                 .tag(feature.id)
             }
@@ -202,6 +211,7 @@ struct CoinPilotShellView: View {
                 selectedFeature = "home"
             }
         }
+        .cpOnChange(of: selectedFeature) { _ in CPHaptics.selection() }
         #endif
     }
 }

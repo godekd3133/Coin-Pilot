@@ -10,7 +10,7 @@ import { connectRealtime } from './core/realtime.js';
 import { deriveSession } from './core/session.js';
 import { html, render, on, escapeHtml } from './core/dom.js';
 import format from './core/format.js';
-import ui, { icon, liveBadge, paperBadge, notice, button, skeleton, emptyState, runCountUps, playEntrance, toast } from './ui/components.js';
+import ui, { icon, liveBadge, paperBadge, notice, button, skeleton, emptyState, runCountUps, observeCountUps, playEntrance, revealText, toast } from './ui/components.js';
 import {
   createPendingMutationClient, createManualMutationKey, createManualMutationTransport,
   pendingMutationPresentation, protectedMutationError, isTerminalOutcome, outcomeToastTone
@@ -166,6 +166,8 @@ app.innerHTML = String(html`
 `);
 app.removeAttribute('aria-busy');
 const content = document.getElementById('cp-content');
+// Numbers re-rendered by a data refresh roll from their previous value.
+observeCountUps(content);
 
 function renderNav(route) {
   const active = route?.id || 'home';
@@ -193,7 +195,7 @@ function renderChrome() {
   const route = store.get('route');
   const entry = route ? registry.get(route.id) : null;
   const titleSlot = app.querySelector('[data-slot="title"]');
-  titleSlot.textContent = entry?.label || 'CoinPilot';
+  revealText(titleSlot, entry?.label || 'CoinPilot');
   document.title = entry && entry.id !== 'home' ? `${entry.label} · CoinPilot` : 'CoinPilot';
   const realtime = store.get('realtime');
   render(app.querySelector('[data-slot="topbar"]'), html`

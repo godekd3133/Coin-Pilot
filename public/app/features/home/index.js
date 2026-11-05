@@ -85,7 +85,7 @@ export default {
           ${pnl?.valuationAvailable ? html`<p class="cp-caption" style="margin-top:6px">코인 누적 손익 · 시작 금액 ${won(pnl.initialSeedMoney)} 대비</p>` : ''}
           <div style="margin-top:16px">${allocationBar(combined.parts.filter(part => part.value !== null).map(part => ({ label: part.label, value: part.value })), { label: '엔진별 자산 구성' })}</div>
           ${parts.length > 1 ? html`<div style="margin-top:14px">${statGrid(combined.parts.map(part => ({ label: part.label, value: part.value === null ? '확인 불가' : compactWon(part.value) + '원', sub: part.note || null })))}</div>` : html`<div style="margin-top:14px">${statGrid([
-            { label: '보유 현금', value: won(s.account?.krwBalance) },
+            { label: '보유 현금', value: won(s.account?.krwBalance), countup: { value: s.account?.krwBalance, key: 'home-cash' } },
             { label: '보유 코인', value: `${coinPositionCount}개` }
           ])}</div>`}`
       }));
@@ -150,11 +150,11 @@ export default {
         index: 3,
         title: '오늘',
         body: resourceView(ctx.resource('today'), () => statGrid([
-          { label: '실현 손익', value: signedWon(today.realizedProfit), tone: tone(today.realizedProfit) },
+          { label: '실현 손익', value: signedWon(today.realizedProfit), tone: tone(today.realizedProfit), countup: { value: today.realizedProfit, key: 'home-today-profit', format: 'signedWon' } },
           { label: '거래', value: `${today.totalTrades ?? 0}건` },
-          { label: '매수 금액', value: won(today.totalBuyAmount) },
-          { label: '매도 금액', value: won(today.totalSellAmount) },
-          pnl?.valuationAvailable ? { label: '누적 수익률', value: percent(pnl.profitPercent), tone: tone(pnl.profitPercent) } : null
+          { label: '매수 금액', value: won(today.totalBuyAmount), countup: { value: today.totalBuyAmount, key: 'home-today-buy' } },
+          { label: '매도 금액', value: won(today.totalSellAmount), countup: { value: today.totalSellAmount, key: 'home-today-sell' } },
+          pnl?.valuationAvailable ? { label: '누적 수익률', value: percent(pnl.profitPercent), tone: tone(pnl.profitPercent), countup: { value: pnl.profitPercent, key: 'home-pnl-percent', format: 'percent' } } : null
         ].filter(Boolean), { columns: 2 }), { lines: 2 })
       }));
     }

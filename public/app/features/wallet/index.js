@@ -51,7 +51,7 @@ export default {
       const lock = walletLock(s);
       const pnl = ctx.data('pnl');
       render(page.querySelector('[data-slot="hero"]'), card({ index: 0, body: html`${heroValue({ label: '모의 계좌 현금', value: s.account?.krwBalance, key: 'wallet-cash', sub: `시작 금액 ${won(s.account?.initialSeedMoney)} · ${relativeTime(ctx.resource('account').lastSuccessAt)} 갱신` })}
-          <div style="margin-top:14px">${statGrid([{ label: '총자산', value: won(s.account?.totalAssets) }, { label: '누적 손익', value: pnl?.valuationAvailable ? won(pnl.profit) : '—' }])}</div>` }));
+          <div style="margin-top:14px">${statGrid([{ label: '총자산', value: won(s.account?.totalAssets), countup: { value: s.account?.totalAssets, key: 'wallet-total' } }, { label: '누적 손익', value: pnl?.valuationAvailable ? won(pnl.profit) : '—', countup: pnl?.valuationAvailable ? { value: pnl.profit, key: 'wallet-pnl' } : undefined }])}</div>` }));
       render(page.querySelector('[data-slot="lock"]'), lock ? lockedNotice(lock) : '');
       page.querySelectorAll('[data-wallet-control]').forEach(control => { control.disabled = Boolean(lock); });
       page.querySelectorAll('[data-mutate-control]').forEach(control => { control.disabled = !s.canMutate; });

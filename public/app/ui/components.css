@@ -50,15 +50,27 @@
 .cp-card.is-live { box-shadow: inset 0 0 0 1.5px var(--cp-red); }
 @media (max-width: 480px) { .cp-card { padding: var(--cp-space-4); border-radius: var(--cp-radius-md); } }
 
-/* staggered entrance */
+/* staggered entrance: cards by --i, rows/stat tiles inside them by --j */
 .is-entering .cp-card, .is-entering .cp-enter {
   animation: cp-enter var(--cp-motion-slow) var(--cp-ease-out) both;
-  animation-delay: calc(var(--i, 0) * 45ms);
+  animation-delay: calc(var(--i, 0) * 40ms);
+}
+.is-entering .cp-list > *, .is-entering .cp-stat-grid > * {
+  animation: cp-enter-row var(--cp-motion-slow) var(--cp-ease-out) both;
+  animation-delay: calc(var(--i, 0) * 40ms + 60ms + var(--j, 0) * 28ms);
+}
+.is-entering .cp-card-title, .is-entering .cp-reveal, .is-entering .cp-btn > span, .is-entering .cp-hero-value {
+  animation: cp-text-in var(--cp-motion-slow) var(--cp-ease-out) both;
+  animation-delay: calc(var(--i, 0) * 40ms + 40ms);
 }
 @keyframes cp-enter { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+@keyframes cp-enter-row { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes cp-text-in { from { opacity: 0; transform: translateY(4px); clip-path: inset(0 0 100% 0); } to { opacity: 1; transform: none; clip-path: inset(0 0 0 0); } }
+@keyframes cp-fade { from { opacity: 0; } to { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) {
   .is-entering .cp-card, .is-entering .cp-enter { animation: cp-fade var(--cp-motion-base) linear both; animation-delay: 0ms; }
-  @keyframes cp-fade { from { opacity: 0; } to { opacity: 1; } }
+  .is-entering .cp-list > *, .is-entering .cp-stat-grid > *, .is-entering .cp-card-title, .is-entering .cp-reveal,
+  .is-entering .cp-btn > span, .is-entering .cp-hero-value { animation: none; }
 }
 
 /* ---------- hero ---------- */
@@ -388,3 +400,47 @@ body.cp-sheet-open { overflow: hidden; }
 .cp-funnel strong { font-variant-numeric: tabular-nums; }
 .cp-ai-advice { display: grid; gap: 6px; padding: var(--cp-space-3); border-radius: var(--cp-radius-md); background: var(--cp-surface2); }
 .cp-ai-advice ul { padding-left: 18px; font: var(--cp-text-caption); color: var(--cp-muted); }
+
+/* ---------- motion layer ----------
+ * Short (140–320ms), transform/opacity only, never blocks input: every
+ * animation is decorative and the final state is the resting style. Reduce
+ * Motion collapses durations through the tokens and drops movement below. */
+
+/* route change: the new screen settles in; the skeleton fades instead of popping */
+.cp-content.is-route-in { animation: cp-route-in var(--cp-motion-base) var(--cp-ease-out) both; }
+@keyframes cp-route-in { from { opacity: 0.001; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+.cp-route-loading { animation: cp-fade var(--cp-motion-base) var(--cp-ease-out) both; animation-delay: 80ms; }
+
+/* topbar title + any revealed label */
+.is-revealing { animation: cp-text-in var(--cp-motion-base) var(--cp-ease-out) both; }
+
+/* tab bar / sidebar: the active icon pops once when it becomes current */
+.cp-tab[aria-current="page"] svg, .cp-nav-link[aria-current="page"] svg { animation: cp-pop var(--cp-motion-slow) var(--cp-ease-spring) both; }
+@keyframes cp-pop { 0% { transform: scale(0.82); } 100% { transform: none; } }
+
+/* buttons: hover lift on pointer devices, press scale, label nudges */
+@media (hover: hover) and (pointer: fine) {
+  .cp-btn:hover:not(:disabled):not([aria-disabled="true"]) { transform: translateY(-1px); }
+  .cp-btn.is-primary:hover:not(:disabled), .cp-btn.is-danger:hover:not(:disabled), .cp-btn.is-up:hover:not(:disabled), .cp-btn.is-down:hover:not(:disabled) { filter: brightness(1.06); box-shadow: 0 6px 16px -8px currentColor; }
+  .cp-btn.is-primary:hover:not(:disabled) { box-shadow: 0 6px 18px -8px var(--cp-blue); }
+  .cp-btn:hover:not(:disabled) > svg { transform: translateX(1px); }
+  .cp-more-item:hover { transform: translateY(-2px); }
+  .cp-chip:hover { transform: translateY(-1px); }
+}
+.cp-btn { transition: transform var(--cp-motion-fast) var(--cp-ease-out), background var(--cp-motion-fast) var(--cp-ease-out), opacity var(--cp-motion-fast), filter var(--cp-motion-fast), box-shadow var(--cp-motion-base) var(--cp-ease-out); }
+.cp-btn > svg { transition: transform var(--cp-motion-fast) var(--cp-ease-out); }
+.cp-btn:active:not(:disabled):not([aria-disabled="true"]) { transform: scale(var(--cp-press-scale)); filter: brightness(0.96); box-shadow: none; transition-duration: 80ms; }
+.cp-chip:active, .cp-seg:active { transform: scale(0.95); }
+.cp-seg { transition: background var(--cp-motion-base) var(--cp-ease-out), color var(--cp-motion-base), transform var(--cp-motion-fast) var(--cp-ease-out); }
+
+/* numbers: a faint lift while a count-up rolls */
+.cp-num.is-ticking, .is-ticking { display: inline-block; animation: cp-tick var(--cp-motion-slow) var(--cp-ease-out); }
+p.is-ticking, dd.is-ticking { display: block; }
+@keyframes cp-tick { 0% { opacity: 0.55; transform: translateY(3px); } 100% { opacity: 1; transform: none; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .cp-content.is-route-in { animation: cp-fade var(--cp-motion-base) linear both; }
+  .cp-route-loading, .is-revealing, .cp-num.is-ticking, .is-ticking,
+  .cp-tab[aria-current="page"] svg, .cp-nav-link[aria-current="page"] svg { animation: none; }
+  .cp-btn:hover:not(:disabled), .cp-more-item:hover, .cp-chip:hover, .cp-btn:hover > svg { transform: none; }
+}
