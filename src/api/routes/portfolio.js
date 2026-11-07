@@ -9,6 +9,7 @@ import { projectPaperValidationMobileSummary } from '../paperValidationMobileSum
 import { summarizePaperStrictTradeCostAudit } from '../../research/paperStrictTradeCostAudit.js';
 import { summarizePaperForwardCohort } from '../../research/paperForwardCohort.js';
 import { respondIfPaperEvidenceMutationBlocked } from '../../research/paperEvidenceMutationGuard.js';
+import { projectTradeReceipt } from '../../trader/tradeReceipt.js';
 import { API_READ_QUERY_LIMITS, parseBoundedIntegerQuery } from '../queryLimits.js';
 import { quoteOfSystem } from '../../exchange/marketCodes.js';
 import { quoteAmountLimits, quoteAmountMutationBlock, parseQuoteAmount, roundQuoteAmount, formatQuoteAmount } from '../manualOrderLegs.js';
@@ -68,11 +69,19 @@ export default function createPortfolioRoutes(server) {
     try {
       const limit = parseBoundedIntegerQuery(req.query.limit, API_READ_QUERY_LIMITS.trades);
       let allTrades = [];
+      // The strategy history belongs to this process, so its mode is the
+      // process mode. Unknown stays null rather than defaulting to paper.
+      const dryRun = server.tradingSystem.dryRun;
+      const mode = dryRun === true ? 'paper' : dryRun === false ? 'live' : null;
+      const withReceipt = trade => {
+        const receipt = projectTradeReceipt(trade, { mode });
+        return receipt ? { ...trade, mode, receipt } : { ...trade, mode };
+      };
 
       // 1. 전략 기반 거래 이력 (자동매매)
       if (server.tradingSystem.strategies) {
         for (const [coin, strategy] of server.tradingSystem.strategies.entries()) {
-          const trades = strategy.getTradeHistory(limit).map(trade => ({
+          const trades = strategy.getTradeHistory(limit).map(trade => withReceipt({
             coin,
             ...trade,
             source: 'strategy'
@@ -80,7 +89,7 @@ export default function createPortfolioRoutes(server) {
           allTrades.push(...trades);
         }
       } else if (server.tradingSystem.strategy) {
-        allTrades = server.tradingSystem.strategy.getTradeHistory(limit).map(trade => ({
+        allTrades = server.tradingSystem.strategy.getTradeHistory(limit).map(trade => withReceipt({
           coin: server.tradingSystem.config.targetCoin,
           ...trade,
           source: 'strategy'

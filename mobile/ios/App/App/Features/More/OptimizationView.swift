@@ -121,7 +121,7 @@ struct CoinPilotOptimizationView: View {
         }
         .cpReadableWidth()
         .background(CPColor.paper.ignoresSafeArea())
-        .navigationTitle("설정 후보 비교")
+        .navigationTitle("최적화")
         .cpInlineTitle()
         .refreshFeatureWhenVisible(enabled: store.canOperate) { _ = await store.loadOptimizationIfStale() }
     }

@@ -10,6 +10,7 @@
 import fs from 'fs';
 import path from 'path';
 import { randomUUID } from 'node:crypto';
+import { buildExitReceipt } from './tradeReceipt.js';
 import {
   addLiveOrderIntentEvidence,
   canAddLiveOrderIntentEvidence,
@@ -786,7 +787,18 @@ export class LiveOrderGateway {
           const priceIsRecent = Number.isFinite(cachedPrice) && cachedPrice > 0 && Date.now() - Number(cached?.at) < 5 * 60 * 1000;
           const exitPrice = priceIsRecent ? cachedPrice : internalPosition.entryPrice;
           console.log(`  ⚠️  [${coin}] 동기화: 내부 포지션 있지만 거래소에 없음 → 포지션 제거 (${priceIsRecent ? '최근 시세' : '시세 없음, 매수가'} ${exitPrice.toLocaleString()}원으로 추정 기록)`);
-          strategy.closePosition(exitPrice, `거래소 동기화: 보유량 없음 (${priceIsRecent ? '최근 시세' : '매수가'} 추정 청산)`);
+          const syncReason = `거래소 동기화: 보유량 없음 (${priceIsRecent ? '최근 시세' : '매수가'} 추정 청산)`;
+          internalPosition.exitReceipt = buildExitReceipt({
+            mode: 'live',
+            decision: { reason: syncReason },
+            exitType: 'EXCHANGE_SYNC',
+            filledPrice: exitPrice,
+            volume: internalPosition.amount,
+            orderAt: new Date(),
+            estimated: true,
+            estimateBasis: priceIsRecent ? 'recent_risk_price' : 'entry_price'
+          });
+          strategy.closePosition(exitPrice, syncReason);
           syncIssues++;
         } else if (!internalPosition && exchangeData && exchangeData.balance > 0) {
           // 거래소에는 있지만 내부에 없음 - 수동 매수 또는 동기화 누락

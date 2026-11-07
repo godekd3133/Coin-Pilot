@@ -9,6 +9,7 @@
 import { inspectLatestCandleFreshness } from '../risk/candleFreshness.js';
 import { inspectTraderMarketQuote } from './positionRiskMonitor.js';
 import { isUnsellableDust } from './positionRebalancer.js';
+import { buildEntryReceipt, buildExitReceipt, attachEntryReceiptToOpenRecord } from './tradeReceipt.js';
 import { measureEntryCost, judgeEntryCost, createEntryCostStats, loadEntryCostStats, saveEntryCostStats } from './entryCostFilter.js';
 import { ListingAgeFilter } from './listingAgeFilter.js';
 
@@ -66,7 +67,7 @@ export class OrderExecutionEngine {
     if (verdict.tooHigh && mode !== 'enforce') {
       console.log(`  👀 [${coin}] 관찰: 진입 비용 ${measurement.costPercent}%가 한도 ${verdict.limitPercent}%를 넘음 (enforce 모드였다면 취소)`);
     }
-    return { measurement, limitPercent: verdict.limitPercent, block: verdict.tooHigh && mode === 'enforce' };
+    return { measurement, limitPercent: verdict.limitPercent, block: verdict.tooHigh && mode === 'enforce', mode };
   }
 
   /** Lazily built so tests and non-Upbit owners pay nothing when it is off. */
@@ -192,7 +193,10 @@ export class OrderExecutionEngine {
       technicalAnalysis,
       delayMs,
       candleFreshness,
-      marketQuoteFreshness
+      marketQuoteFreshness,
+      entryCost: costCheck
+        ? { ...costCheck.measurement, limitPercent: costCheck.limitPercent, filterMode: costCheck.mode }
+        : null
     };
   }
 
@@ -235,6 +239,46 @@ export class OrderExecutionEngine {
     return this.owner._liveExchangeStateKnown || (riskMonitorExit && !this.owner._exchangeSyncPromise);
   }
 
+  /**
+   * Receipt metadata only (see tradeReceipt.js); it never changes a decision.
+   */
+  recordEntryReceipt(strategy, decision, fields) {
+    const position = strategy?.currentPosition;
+    if (!position) return;
+    try {
+      position.entryReceipt = buildEntryReceipt({
+        decision: this.owner.isScalpingMode ? decision : null,
+        signalProfile: this.owner.isScalpingMode ? (this.owner.config?.signalProfile || 'rsi_rebound') : null,
+        candleUnit: this.owner.candleUnit,
+        ...fields
+      });
+      const signalFields = {};
+      for (const key of Object.keys(position)) {
+        if (key.startsWith('signal') || key === 'entryDelayMs' || key === 'executionDriftPercent') {
+          signalFields[key] = position[key];
+        }
+      }
+      attachEntryReceiptToOpenRecord(strategy, { ...signalFields, entryReceipt: position.entryReceipt });
+    } catch (error) {
+      console.error(`거래 영수증 기록 실패: ${error.message}`);
+    }
+  }
+
+  setExitReceipt(strategy, decision, fields) {
+    const position = strategy?.currentPosition;
+    if (!position) return;
+    try {
+      const maxHoldMs = Number(strategy.maxHoldMs);
+      position.exitReceipt = buildExitReceipt({
+        decision,
+        maxHoldMinutes: Number.isFinite(maxHoldMs) && maxHoldMs > 0 ? maxHoldMs / 60000 : null,
+        ...fields
+      });
+    } catch (error) {
+      console.error(`거래 영수증 기록 실패: ${error.message}`);
+    }
+  }
+
   async _executeOrder(
     coin,
     decision,
@@ -267,6 +311,7 @@ export class OrderExecutionEngine {
       const signalStrength = decision.signalStrength || { level: 'WEAK', multiplier: 1 };
       const isStrongSignal = ['STRONG', 'VERY_STRONG'].includes(signalStrength.level);
       let entryDelayMs = null;
+      let entryConfirmation = null;
 
       // 이미 포지션이 있는 경우
       if (strategy.currentPosition) {
@@ -359,6 +404,7 @@ export class OrderExecutionEngine {
 
         currentPrice = confirmation.currentPrice;
         entryDelayMs = confirmation.delayMs;
+        entryConfirmation = confirmation;
         const latestAccounts = await this.owner.getAccountInfo();
         krwBalance = this.owner.getKRWBalance(latestAccounts);
         currentPositions = this.owner.getCurrentPositionCount();
@@ -462,6 +508,22 @@ export class OrderExecutionEngine {
           executionPrice: currentPrice,
           delayMs: entryDelayMs
         });
+        this.recordEntryReceipt(strategy, decision, {
+          mode: 'paper',
+          expectedPrice: currentPrice,
+          filledPrice: entryFillPrice,
+          volume,
+          fee,
+          feeRate: FEE_RATE,
+          feeSource: 'model',
+          slippageSource: paperEntryCostModel ? 'paper_model' : 'none',
+          slippageRate: paperEntryCostModel?.slippageRate ?? 0,
+          orderAt: new Date(),
+          confirmation: entryConfirmation
+            ? { outcome: 'confirmed', reason: 'entry_revalidation_passed', delayMs: entryDelayMs }
+            : null,
+          entryCost: entryConfirmation?.entryCost || null
+        });
         this.owner.recordStrictSignalWindowEntry(decision.entrySignalKey || decision.details?.rebound?.signalKey);
         this.owner.saveVirtualPortfolio();
         console.log(`  잔여 KRW: ${this.owner.virtualPortfolio.krwBalance.toLocaleString()} 원`);
@@ -482,6 +544,7 @@ export class OrderExecutionEngine {
         console.log(`  예상 가격: ${currentPrice.toLocaleString()} 원`);
         console.log(`  투자 금액: ${investmentAmount.toLocaleString()} 원`);
 
+        const entryOrderAt = new Date();
         const orderResult = await this.owner.submitLiveOrder(coin, 'bid', investmentAmount, null, 'price');
         const orderId = orderResult?.data?.uuid || null;
         const submissionEvidenceRecorded = this.owner.recordLiveExecutionEvidence(this.owner.createLiveExecutionEvidence({
@@ -582,6 +645,21 @@ export class OrderExecutionEngine {
             this.owner.decorateEntryPosition(strategy, decision, {
               executionPrice: actualPrice,
               delayMs: entryDelayMs
+            });
+            this.recordEntryReceipt(strategy, decision, {
+              mode: 'live',
+              expectedPrice: currentPrice,
+              filledPrice: actualPrice,
+              volume: actualVolume,
+              fee: paidFee,
+              feeSource: 'exchange_paid_fee',
+              slippageSource: 'exchange_fill',
+              orderAt: entryOrderAt,
+              confirmation: entryConfirmation
+                ? { outcome: 'confirmed', reason: 'entry_revalidation_passed', delayMs: entryDelayMs }
+                : null,
+              entryCost: entryConfirmation?.entryCost || null,
+              orderId
             });
             this.owner.recordStrictSignalWindowEntry(decision.entrySignalKey || decision.details?.rebound?.signalKey);
 
@@ -697,6 +775,18 @@ export class OrderExecutionEngine {
         if (paperExitCostModel && strategy.currentPosition) {
           strategy.currentPosition.paperObservedExitPrice = currentPrice;
         }
+        this.setExitReceipt(strategy, decision, {
+          mode: 'paper',
+          expectedPrice: currentPrice,
+          filledPrice: exitFillPrice,
+          volume: sellVolume,
+          fee,
+          feeRate: FEE_RATE,
+          feeSource: 'model',
+          slippageSource: paperExitCostModel ? 'paper_model' : 'none',
+          slippageRate: paperExitCostModel?.slippageRate ?? 0,
+          orderAt: new Date()
+        });
         const closedTrade = strategy.closePosition(exitFillPrice, decision.reason, closeOptions);
         const profitPercent = Number.isFinite(Number(closedTrade?.profitPercent))
           ? Number(closedTrade.profitPercent).toFixed(2)
@@ -721,6 +811,7 @@ export class OrderExecutionEngine {
         console.log(`  예상 가격: ${currentPrice.toLocaleString()} 원`);
         console.log(`  매도 수량: ${sellVolume.toFixed(8)}`);
 
+        const exitOrderAt = new Date();
         const orderResult = await this.owner.submitLiveOrder(coin, 'ask', sellVolume, null, 'market');
         const orderId = orderResult?.data?.uuid || null;
         const submissionEvidenceRecorded = this.owner.recordLiveExecutionEvidence(this.owner.createLiveExecutionEvidence({
@@ -819,6 +910,17 @@ export class OrderExecutionEngine {
             // 포지션을 유지하고, 취소 후 확인된 수량만 기록한다.
             const isFullSell = !fillResult.partial ||
               actualVolume >= strategy.currentPosition?.amount - 0.00000001;
+            this.setExitReceipt(strategy, decision, {
+              mode: 'live',
+              expectedPrice: currentPrice,
+              filledPrice: actualPrice,
+              volume: actualVolume,
+              fee: paidFee,
+              feeSource: 'exchange_paid_fee',
+              slippageSource: 'exchange_fill',
+              orderAt: exitOrderAt,
+              orderId
+            });
             const closedTrade = isFullSell
               ? strategy.closePosition(actualPrice, decision.reason)
               : strategy.recordPartialSell(actualPrice, actualVolume, decision.reason);

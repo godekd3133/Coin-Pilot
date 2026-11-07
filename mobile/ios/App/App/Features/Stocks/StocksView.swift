@@ -63,8 +63,8 @@ struct CoinPilotStocksView: View {
             skeleton
         } else if let status, !status.isEnabled {
             NativeCard {
-                CPEmptyState(symbol: "pause.circle", title: "주식 자동매매 꺼짐",
-                             message: "서버 설정에서 주식 자동매매를 켜면 이곳에 상태가 표시됩니다.")
+                CPEmptyState(symbol: "pause.circle", title: "이 서버에서는 주식 자동매매를 쓰지 않습니다",
+                             message: "토스증권 국내 주식 단타 기능입니다. 서버에서 켜면 상태와 시작·정지가 이곳에 나타납니다. 코인 자동매매에는 영향이 없습니다.")
             }
         } else if let status {
             if availableModes.count > 1 {

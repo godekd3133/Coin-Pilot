@@ -262,6 +262,14 @@ extension CoinPilotStore {
         return await refreshMobileFeatureGroup(Self.stocksFeatureKey, force: force) { context in
             guard let object = await self.loadMobileFeature("stocks-status", path: "/api/stocks/status", context: context),
                   self.isCurrentMobileFeatureContext(context) else {
+                // A server built without the stock route answers 404: show it as
+                // "stock trading is off here", not as a failed load.
+                if self.missingFeatureRoutes.contains("stocks-status"),
+                   let disabled = CoinPilotFeatureDecoding.decode(CoinPilotStocksStatus.self, from: ["enabled": false]) {
+                    self.stocksStatus = disabled
+                    self.setFeatureMessage(nil, for: Self.stocksFeatureKey)
+                    return true
+                }
                 if let message = self.featureMessages["stocks-status"] {
                     self.setFeatureMessage(message, for: Self.stocksFeatureKey)
                 }

@@ -412,6 +412,11 @@ class TradingStrategy {
       reason,
       id: this.currentPosition.id
     };
+    // Receipt metadata (diagnostic only). The exit receipt belongs to this
+    // partial fill, so it must not carry over to the remaining position.
+    if (this.currentPosition.entryReceipt) partialClose.entryReceipt = this.currentPosition.entryReceipt;
+    if (this.currentPosition.exitReceipt) partialClose.exitReceipt = this.currentPosition.exitReceipt;
+    delete this.currentPosition.exitReceipt;
 
     // 거래 이력에 부분 매도 기록
     this.tradeHistory.push({

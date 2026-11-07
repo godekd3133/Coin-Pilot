@@ -91,7 +91,15 @@ struct CoinPilotActivityView: View {
                                         .font(.subheadline.weight(.semibold))
                                         .foregroundColor(CPColor.ink)
                                     ForEach(group.trades) { trade in
-                                        TradeRow(trade: trade)
+                                        if let receipt = trade.receipt {
+                                            NavigationLink(destination: CoinPilotTradeReceiptView(trade: trade, receipt: receipt)) {
+                                                ReceiptTradeRow(trade: trade, receipt: receipt)
+                                            }
+                                            .buttonStyle(.plain)
+                                            .accessibilityHint("거래 영수증 열기")
+                                        } else {
+                                            TradeRow(trade: trade)
+                                        }
                                         if trade.id != group.trades.last?.id {
                                             Divider().overlay(CPColor.line)
                                         }

@@ -72,8 +72,8 @@ struct CoinPilotPortfoliosView: View {
             tradesCard(runtime)
         } else if status != nil {
             NativeCard {
-                CPEmptyState(symbol: "pause.circle", title: "\(asset.title) 기간별 포트폴리오 꺼짐",
-                             message: "서버 설정에서 기간별 포트폴리오를 켜면 이곳에 슬리브가 표시됩니다.")
+                CPEmptyState(symbol: "pause.circle", title: "이 서버에서는 \(asset.title) 기간별 포트폴리오를 쓰지 않습니다",
+                             message: "며칠에서 몇 달 보유하는 차트 분석 포트폴리오입니다. 서버에서 켜면 단기·스윙·중기·장기 구성이 이곳에 나타납니다. 1분 단타 자동매매에는 영향이 없습니다.")
             }
         } else {
             NativeCard {
