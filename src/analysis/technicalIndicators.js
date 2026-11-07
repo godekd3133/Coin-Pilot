@@ -71,18 +71,24 @@ export function calculateMACD(candles, fastPeriod = 12, slowPeriod = 26, signalP
 
   const prices = candles.map(c => c.trade_price).reverse();
 
-  const fastEMA = calculateEMA(prices, fastPeriod);
-  const slowEMA = calculateEMA(prices, slowPeriod);
+  // 단일 패스로 fast/slow EMA를 누적한다. 각 인덱스의 값은 prices[0]부터
+  // 해당 인덱스까지 같은 순서로 누적한 EMA와 동일하다(이전 O(n²) 재계산과
+  // 부동소수점 연산 순서까지 같다). 300개 마켓을 5초마다 분석하므로 중요하다.
+  const fastMultiplier = 2 / (fastPeriod + 1);
+  const slowMultiplier = 2 / (slowPeriod + 1);
+  let fastEMA = prices[0];
+  let slowEMA = prices[0];
+  const macdValues = [];
+  for (let i = 0; i < prices.length; i++) {
+    if (i > 0) {
+      fastEMA = (prices[i] - fastEMA) * fastMultiplier + fastEMA;
+      slowEMA = (prices[i] - slowEMA) * slowMultiplier + slowEMA;
+    }
+    // MACD 라인의 배열 생성 (시그널 계산용)
+    if (i >= slowPeriod - 1) macdValues.push(fastEMA - slowEMA);
+  }
 
   const macdLine = fastEMA - slowEMA;
-
-  // MACD 라인의 배열 생성 (시그널 계산용)
-  const macdValues = [];
-  for (let i = slowPeriod - 1; i < prices.length; i++) {
-    const fastEMAValue = calculateEMAAtIndex(prices, fastPeriod, i);
-    const slowEMAValue = calculateEMAAtIndex(prices, slowPeriod, i);
-    macdValues.push(fastEMAValue - slowEMAValue);
-  }
 
   const signal = calculateEMA(macdValues, signalPeriod);
   const histogram = macdLine - signal;
@@ -105,20 +111,6 @@ function calculateEMA(prices, period) {
   let ema = prices[0];
 
   for (let i = 1; i < prices.length; i++) {
-    ema = (prices[i] - ema) * multiplier + ema;
-  }
-
-  return ema;
-}
-
-/**
- * 특정 인덱스에서의 EMA 계산
- */
-function calculateEMAAtIndex(prices, period, index) {
-  const multiplier = 2 / (period + 1);
-  let ema = prices[0];
-
-  for (let i = 1; i <= index; i++) {
     ema = (prices[i] - ema) * multiplier + ema;
   }
 

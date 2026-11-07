@@ -163,7 +163,8 @@ export class TradingCycleRunner {
     if (this.owner.useNews && this.owner.newsData) {
       newsSentiment = this.owner.newsMonitor.analyzeMarketSentiment(this.owner.newsData);
     } else {
-      console.log('⚠️  뉴스 데이터 없음 - 기술적 분석만으로 진행');
+      // 스캘핑 모드(useNews=false)는 매 사이클 이 분기를 타므로 로그를 남기지 않는다.
+      if (this.owner.useNews) console.log('⚠️  뉴스 데이터 없음 - 기술적 분석만으로 진행');
       // 중립 뉴스 감성으로 대체
       newsSentiment = { overall: 'neutral', score: 0.5, confidence: 0.5 };
     }

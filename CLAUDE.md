@@ -119,6 +119,8 @@ Live sizing matches the backtest: each entry's budget is `positionBudget()` (ris
 
 `GET /api/status` (`src/api/routes/account.js`) also carries `engineActivity` (`src/api/engineActivity.js`): last analysis cycle time, markets analyzed, unique BUY signals (per market per minute) and entries in the last hour, and the last LIVE exchange sync time, so the home card can tell a quiet market from a stalled engine.
 
+Memory on the 412MB nano host: both trader env files run `NODE_OPTIONS=--max-semi-space-size=1` (with their `--max-old-space-size` cap) and `MALLOC_ARENA_MAX=2`. The live heap is only ~40-50MB; the RSS swell came from the default young generation absorbing each 300-market scan's garbage (measured replica: peak RSS 154MB → 93MB). `newsMonitor` loads `cheerio` on first use because scalping mode never scrapes news. Keep new heavy dependencies off the boot path the same way.
+
 Host hardening lives in `ops/` and is applied with `ops/lightsail/apply-host-hardening.sh`: OOM priorities (paper +500 and MemoryHigh 220M, LIVE -500, Upbit rate coordinator -300), journald capped at 300M/14 days, `vm.swappiness=10`, and nginx `limit_req` (login 10/min burst 5, everything else 20/s burst 100) for both `/` and `/live/`.
 Both trader units `Requires=coinpilot-upbit-rate.service`, so restarting the coordinator first stops paper and LIVE; LIVE then waits in its protective drain until every position closes. Restart the coordinator only when no LIVE position is open.
 
@@ -194,8 +196,6 @@ src/
 │   └── backtestEngine.js      # Backtesting with fee/slippage simulation, MDD, Sharpe ratio
 ├── optimization/
 │   └── parameterOptimizer.js  # Genetic algorithm for parameter optimization
-├── ml/
-│   └── pricePredictor.js      # Linear regression price prediction
 ├── scripts/
 │   ├── runBacktest.js
 │   ├── runOptimization.js

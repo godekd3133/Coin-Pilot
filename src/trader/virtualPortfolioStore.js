@@ -329,7 +329,6 @@ export class VirtualPortfolioStore {
     }
 
     this.owner.writeJsonAtomically(portfolioFile, data, { mode: 0o600, fsync: true, syncDirectory });
-    console.log('💾 가상 포트폴리오 저장됨');
   }
 
   writeJsonAtomically(file, data, { mode, fsync = false, syncDirectory = false } = {}) {
@@ -342,7 +341,10 @@ export class VirtualPortfolioStore {
       temporaryFileCreated = true;
       try {
         if (mode !== undefined) fs.fchmodSync(descriptor, mode);
-        fs.writeFileSync(descriptor, JSON.stringify(data, null, 2), 'utf8');
+        // Compact JSON: these ledgers are rewritten (often with fsync) on every
+        // fill/journal update and keep growing with trade history, so
+        // indentation only adds bytes and serialization time on the small host.
+        fs.writeFileSync(descriptor, JSON.stringify(data), 'utf8');
         if (fsync) fs.fsyncSync(descriptor);
       } finally {
         fs.closeSync(descriptor);

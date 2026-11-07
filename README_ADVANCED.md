@@ -47,12 +47,7 @@
 - 포트폴리오 관리 (최대 포지션 수, 할당 비율)
 - 각 코인별 독립적인 전략 적용
 
-### 7. 🆕 머신러닝 가격 예측
-- Linear Regression 기반 가격 예측
-- 추세 강도 분석
-- 특징 추출 (Feature Engineering)
-
-### 8. 🆕 웹 대시보드
+### 7. 🆕 웹 대시보드
 - 실시간 계좌 정보 모니터링
 - 거래 통계 및 이력 조회
 - 뉴스 및 시장 심리 분석
@@ -201,35 +196,6 @@ ELITE_SIZE=2                  # 엘리트 보존 수
 - 빠른 테스트: `POPULATION_SIZE=10, GENERATIONS=5`
 - 정밀한 최적화: `POPULATION_SIZE=30, GENERATIONS=20`
 
-### 머신러닝 예측
-
-선형 회귀를 사용한 가격 예측 모델이 포함되어 있습니다.
-
-**특징 (Features):**
-- 이동평균선 (5, 10, 20일)
-- 가격 변화율
-- 거래량 변화율
-- 변동성 (표준편차)
-- 최근 추세
-- 고가/저가 범위
-
-**사용법:**
-```javascript
-import PricePredictor from './src/ml/pricePredictor.js';
-
-const predictor = new PricePredictor();
-await predictor.train(historicalCandles);
-
-const prediction = predictor.predictPrice(currentCandles);
-console.log(prediction);
-// {
-//   currentPrice: 50000000,
-//   predictedPrice: 51000000,
-//   direction: 'UP',
-//   confidence: 75
-// }
-```
-
 ### 지속적 파라미터 최적화
 
 백그라운드에서 주기적으로 파라미터를 최적화할 수 있습니다.
@@ -313,8 +279,6 @@ coin-automandation/
 │   │   └── backtestEngine.js      # 백테스팅 엔진
 │   ├── optimization/
 │   │   └── parameterOptimizer.js  # 파라미터 최적화
-│   ├── ml/
-│   │   └── pricePredictor.js      # 가격 예측 모델
 │   ├── utils/
 │   │   └── logger.js              # 로깅 시스템
 │   ├── scripts/

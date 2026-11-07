@@ -1,10 +1,29 @@
 import axios from 'axios';
-import * as cheerio from 'cheerio';
-import Sentiment from 'sentiment';
+// cheerio (~15MB RSS) is only needed when news is actually scraped, which the
+// default scalping mode never does, so it is loaded on first use.
+let cheerioModule = null;
+const getCheerio = async () => (cheerioModule ||= await import('cheerio'));
+import { createRequire } from 'node:module';
+// The sentiment lexicon is likewise only needed when news is analyzed; the
+// CommonJS package is required synchronously on first use so analyzeSentiment
+// stays synchronous.
+const requireCjs = createRequire(import.meta.url);
 
 class NewsMonitor {
+  get sentiment() {
+    if (!this._sentiment) {
+      const Sentiment = requireCjs('sentiment');
+      this._sentiment = new Sentiment();
+    }
+    return this._sentiment;
+  }
+
+  set sentiment(value) {
+    this._sentiment = value;
+  }
+
   constructor() {
-    this.sentiment = new Sentiment();
+    this._sentiment = null;
     this.newsCache = new Map();
     this.coinNewsCache = new Map(); // 코인별 뉴스 캐시
     this.coinSentimentCache = new Map(); // 코인별 감성 캐시
@@ -78,7 +97,7 @@ class NewsMonitor {
           timeout: 8000
         });
 
-        const $ = cheerio.load(response.data);
+        const $ = (await getCheerio()).load(response.data);
 
         // Nitter 트윗 파싱
         $('.timeline-item').each((i, element) => {
@@ -292,7 +311,7 @@ class NewsMonitor {
         timeout: 10000
       });
 
-      const $ = cheerio.load(response.data);
+      const $ = (await getCheerio()).load(response.data);
       const articles = [];
 
       $('.card-title').each((i, element) => {
@@ -328,7 +347,7 @@ class NewsMonitor {
         timeout: 10000
       });
 
-      const $ = cheerio.load(response.data);
+      const $ = (await getCheerio()).load(response.data);
       const articles = [];
 
       $('article').each((i, element) => {
@@ -367,7 +386,7 @@ class NewsMonitor {
         timeout: 10000
       });
 
-      const $ = cheerio.load(response.data);
+      const $ = (await getCheerio()).load(response.data);
       const articles = [];
 
       // 네이버 뉴스 검색 결과 파싱
@@ -424,7 +443,7 @@ class NewsMonitor {
         timeout: 10000
       });
 
-      const $ = cheerio.load(response.data, { xmlMode: true });
+      const $ = (await getCheerio()).load(response.data, { xmlMode: true });
       const articles = [];
 
       $('item').each((i, element) => {
@@ -463,7 +482,7 @@ class NewsMonitor {
         timeout: 10000
       });
 
-      const $ = cheerio.load(response.data, { xmlMode: true });
+      const $ = (await getCheerio()).load(response.data, { xmlMode: true });
       const articles = [];
 
       $('item').each((i, element) => {
