@@ -1,0 +1,6 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    { "name": "dashboard-mock", "runtimeExecutable": "env", "runtimeArgs": ["DASHBOARD_TOKEN=", "DASHBOARD_PASSWORD_HASH=", "DASHBOARD_MOBILE_TOKEN=", "DASHBOARD_READ_ONLY_TOKEN=", "npm", "run", "dashboard"], "port": 3000 }
+  ]
+}
