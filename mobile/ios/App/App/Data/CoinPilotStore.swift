@@ -701,7 +701,7 @@ final class CoinPilotAPIClient: CoinPilotAPIProviding, @unchecked Sendable {
             "/api/ai/monitoring", "/api/ai/events", "/api/ai/consultations",
             "/api/ai/effectiveness", "/api/ai/sessions", "/api/logs", "/api/system-status",
             "/api/stream",
-            "/api/stocks/status", "/api/horizons/status"
+            "/api/stocks/status", "/api/horizons/status", "/api/scorecard"
         ]
         if simplePaths.contains(components.path) && (components.queryItems?.isEmpty ?? true) { return true }
 
@@ -1209,11 +1209,17 @@ struct CoinPilotStatus {
     let quoteCurrency: String?
     let desiredAutomationRunning: Bool?
     let automationTrackingSavedAt: String?
+    let autoRecoveryArmed: Bool?
+    let engineActivity: CoinPilotEngineActivity?
+    let accountLossGuard: CoinPilotAccountLossGuard?
 
     init(_ object: [String: Any]) {
+        engineActivity = (object["engineActivity"] as? [String: Any]).map(CoinPilotEngineActivity.init)
+        accountLossGuard = (object["accountLossGuard"] as? [String: Any]).map(CoinPilotAccountLossGuard.init)
         let recovery = object["autoRecovery"] as? [String: Any]
         desiredAutomationRunning = recovery?["desiredRunning"] as? Bool
         automationTrackingSavedAt = (recovery?["tracking"] as? [String: Any])?["savedAt"] as? String
+        autoRecoveryArmed = recovery?["armed"] as? Bool
         isRunning = object["isRunning"] as? Bool
         mode = object["mode"] as? String
         isReadOnlyObserver = object["readOnlyObserver"] as? Bool
@@ -1976,6 +1982,7 @@ final class CoinPilotStore: ObservableObject {
     private static let mobileFeatureFreshnessSeconds: [String: TimeInterval] = [
         "stocks": 20,
         "horizons": 30,
+        "scorecard": 30,
         "news": 300,
         "ai": 60,
         "account-analytics": 60,
@@ -2112,6 +2119,8 @@ final class CoinPilotStore: ObservableObject {
     @Published var stocksStatus: CoinPilotStocksStatus?
     /// `GET /api/horizons/status` (see CoinPilotStore+Horizons.swift).
     @Published var horizonsStatus: CoinPilotHorizonsStatus?
+    /// `GET /api/scorecard` (see CoinPilotStore+Scorecard.swift).
+    @Published var scorecard: CoinPilotScorecard?
 
     private let api: CoinPilotAPIProviding
     private let tokens: CoinPilotTokenProviding
@@ -5810,6 +5819,7 @@ final class CoinPilotStore: ObservableObject {
     private func clearMobileFeatureData() {
         stocksStatus = nil
         horizonsStatus = nil
+        scorecard = nil
         systemStatus = [:]
         analysisResults = []
         analysisSummary = [:]

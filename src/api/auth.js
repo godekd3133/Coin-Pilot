@@ -39,6 +39,7 @@ const READ_ONLY_PORTFOLIO_PERIODS = new Set(['24h', '7d', '30d']);
 // native app. A dedicated LIVE setup route can enroll keys, but key retrieval
 // and Socket.IO remain full-token-only.
 const MOBILE_READ_PATHS = new Set([
+  '/api/scorecard',
   '/api/stocks/status',
   '/api/horizons/status',
   '/api/market/prices/snapshot',

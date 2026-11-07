@@ -23,6 +23,7 @@ import createTradingRoutes from './routes/trading.js';
 import createAiRoutes from './routes/ai.js';
 import createResearchRoutes from './routes/research.js';
 import createStatusRoutes from './routes/status.js';
+import createScorecardRoutes from './routes/scorecard.js';
 import createStockRoutes from './routes/stocks.js';
 import createHorizonRoutes from './routes/horizons.js';
 import AIAdvisorService from '../ai/aiAdvisorService.js';
@@ -410,6 +411,7 @@ class DashboardServer {
     this.app.use('/api', createTradingRoutes(this));
     this.app.use('/api', createAiRoutes(this));
     this.app.use('/api', createStatusRoutes(this));
+    this.app.use('/api', createScorecardRoutes(this));
     this.app.use('/api', createStockRoutes(this));
     this.app.use('/api', createHorizonRoutes(this));
     this.app.use('/api', createResearchRoutes(this, {
