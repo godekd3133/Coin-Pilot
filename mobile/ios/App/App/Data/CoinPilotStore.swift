@@ -2100,6 +2100,9 @@ final class CoinPilotStore: ObservableObject {
     @Published private(set) var backtestResults: [String: Any] = [:]
     @Published private(set) var optimalConfig: [String: Any] = [:]
     @Published private(set) var featureMessages: [String: String] = [:]
+    /// Mobile feature reads the server answered with 404 (route not on this
+    /// server build). Cleared on the next successful read of the same key.
+    private(set) var missingFeatureRoutes: Set<String> = []
     @Published private(set) var loadingFeatures: Set<String> = []
     @Published private(set) var refreshingFeatureGroups: Set<String> = []
     @Published private(set) var featureLastSuccessfulAt: [String: Date] = [:]
@@ -4951,6 +4954,11 @@ final class CoinPilotStore: ObservableObject {
         do {
             let response = try await api.mobileRead(path: path, at: serverURL, token: context.token)
             guard isCurrentRequest() else { return nil }
+            if response.statusCode == 404 {
+                missingFeatureRoutes.insert(key)
+            } else {
+                missingFeatureRoutes.remove(key)
+            }
             guard (200..<300).contains(response.statusCode),
                   let object = try? Self.jsonObject(response.body),
                   (object as? [String: Any])?["error"] == nil else {

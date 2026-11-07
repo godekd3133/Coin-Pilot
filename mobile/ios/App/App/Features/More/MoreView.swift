@@ -1,68 +1,37 @@
 import SwiftUI
 
-/// 더보기: primary features that are not tabs on this platform (from the
-/// registry), then the advanced tools grouped by purpose.
-struct CoinPilotMoreView: View {
+/// 연구실: everything that is not needed every day, grouped by purpose from the
+/// registry (`CPFeature.group`). The Mac sidebar shows the same sections.
+struct CoinPilotLabView: View {
     @ObservedObject var store: CoinPilotStore
+    @AppStorage(CPNavigation.labDestinationKey) private var pendingDestination = ""
+    @State private var activeDestination: String?
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                let primary = CPFeatureRegistry.moreLinks
-                if !primary.isEmpty {
-                    CPCard {
-                        VStack(spacing: 0) {
-                            ForEach(primary) { feature in
-                                NavigationLink(destination: CoinPilotFeatureScreen(store: store, feature: feature)) {
-                                    FeatureMenuRow(title: feature.label, detail: moreDetail(for: feature.id), symbol: feature.icon)
+                ForEach(CPLabGroup.allCases) { group in
+                    let items = CPFeatureRegistry.labItems(in: group).filter { $0.isVisible(in: store) }
+                    if !items.isEmpty {
+                        CPCard(group.title) {
+                            VStack(spacing: 0) {
+                                ForEach(items) { feature in
+                                    NavigationLink(
+                                        destination: CoinPilotFeatureScreen(store: store, feature: feature, isPushed: true),
+                                        tag: feature.id,
+                                        selection: $activeDestination
+                                    ) {
+                                        FeatureMenuRow(title: feature.label, detail: feature.detail, symbol: feature.icon)
+                                    }
+                                    .accessibilityHint(feature.detail)
+                                    if feature.id != items.last?.id { CPDivider() }
                                 }
-                                if feature.id != primary.last?.id { CPDivider() }
                             }
                         }
                     }
                 }
 
-                CPCard("기록과 분석") {
-                    VStack(spacing: 0) {
-                        NavigationLink(destination: CoinPilotAccountAnalyticsView(store: store)) {
-                            FeatureMenuRow(title: "포트폴리오 분석", detail: "코인 계좌 비중과 코인별 성과", symbol: "chart.pie")
-                        }
-                        if !store.isBundledPreview {
-                            CPDivider()
-                            NavigationLink(destination: CoinPilotResearchDeskView(store: store)) {
-                                FeatureMenuRow(title: "주문 전 점검", detail: "검증 결과와 운용 상태", symbol: "checkmark.shield")
-                            }
-                        }
-                    }
-                }
-
-                if !store.isBundledPreview {
-                    CPCard("전략 관리") {
-                        VStack(spacing: 0) {
-                            NavigationLink(destination: CoinPilotOptimizationView(store: store)) {
-                                FeatureMenuRow(title: "설정 후보 비교", detail: "최적화 기록과 백테스트", symbol: "slider.horizontal.3")
-                            }
-                            CPDivider()
-                            NavigationLink(destination: CoinPilotPresetView(store: store)) {
-                                FeatureMenuRow(title: "전략 프리셋 · 튜닝", detail: "투자 비중과 지표 기간", symbol: "square.stack.3d.up")
-                            }
-                        }
-                    }
-
-                    CPCard("시장 의견") {
-                        VStack(spacing: 0) {
-                            NavigationLink(destination: CoinPilotNewsView(store: store)) {
-                                FeatureMenuRow(title: "뉴스", detail: "코인별 뉴스와 심리", symbol: "newspaper")
-                            }
-                            CPDivider()
-                            NavigationLink(destination: CoinPilotAIDeskView(store: store)) {
-                                FeatureMenuRow(title: "시장 자문", detail: "관심 신호 기록과 의견 확인 (주문하지 않음)", symbol: "text.bubble")
-                            }
-                        }
-                    }
-                }
-
-                Text("고급 도구는 조회와 설정만 다룹니다. 주문은 코인·주식 화면의 확인 단계를 거쳐야 나갑니다.")
+                Text("연구실 화면은 조회와 설정만 다룹니다. 주문은 코인·주식 화면의 확인 단계를 거쳐야 나갑니다.")
                     .font(.caption)
                     .foregroundColor(CPColor.secondaryInk)
                     .fixedSize(horizontal: false, vertical: true)
@@ -73,13 +42,84 @@ struct CoinPilotMoreView: View {
         .buttonStyle(CoinPilotPressableButtonStyle())
         .cpReadableWidth()
         .background(CPColor.paper.ignoresSafeArea())
+        .onAppear(perform: consumePendingDestination)
+        .onChange(of: pendingDestination) { _ in consumePendingDestination() }
     }
 
-    private func moreDetail(for id: String) -> String {
-        switch id {
-        case "activity": return "코인·주식·포트폴리오 체결 내역"
-        case "settings": return "서버, 작업공간, 실전 키, 테마"
-        default: return ""
+    /// `CPNavigation.open(id)` for a 연구실 screen selects this tab and leaves the
+    /// id here; push it once.
+    private func consumePendingDestination() {
+        guard !pendingDestination.isEmpty else { return }
+        let destination = pendingDestination
+        pendingDestination = ""
+        guard let feature = CPFeatureRegistry.feature(destination),
+              feature.surfaces.contains(.labLink), feature.isVisible(in: store) else { return }
+        activeDestination = destination
+    }
+}
+
+/// 튜닝: the editor is a sheet with its own save/close; this screen explains it
+/// and opens it, so 튜닝 can be a plain list destination (and a Mac sidebar item).
+struct CoinPilotTuningEntryView: View {
+    @ObservedObject var store: CoinPilotStore
+    @State private var showingEditor = false
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                CPCard("튜닝") {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("현재 작업공간 서버의 투자 비율, 손절·익절, 최대 보유 시간 같은 값을 하나씩 확인하고 바꿉니다. 저장하면 서버 설정이 바로 바뀝니다.")
+                            .font(.subheadline)
+                            .foregroundColor(CPColor.secondaryInk)
+                            .fixedSize(horizontal: false, vertical: true)
+                        if let reason = store.tuningBlockReason {
+                            CPNotice(text: reason, tone: .info)
+                        }
+                        Button("튜닝값 열기") { showingEditor = true }
+                            .buttonStyle(CoinPilotSecondaryButtonStyle())
+                            .disabled(!store.canViewTuning)
+                    }
+                }
+                Text("여러 값을 한 번에 바꾸려면 프리셋을 쓰세요.")
+                    .font(.caption)
+                    .foregroundColor(CPColor.secondaryInk)
+                    .padding(.horizontal, 4)
+            }
+            .cpPage()
+        }
+        .cpReadableWidth()
+        .background(CPColor.paper.ignoresSafeArea())
+        .sheet(isPresented: $showingEditor) {
+            CoinPilotTuningEditor(store: store)
+        }
+    }
+}
+
+/// 오프라인 리플레이 runs only in the bundled-local build, where it is the whole
+/// app. In a server-connected app this screen explains that instead of showing
+/// an empty market list.
+struct CoinPilotOfflineReplayEntryView: View {
+    @ObservedObject var store: CoinPilotStore
+
+    var body: some View {
+        if store.isBundledLocalMarketData {
+            CoinPilotLocalMarketView(store: store)
+        } else {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    CPCard("오프라인 리플레이") {
+                        CPEmptyState(
+                            symbol: "play.rectangle",
+                            title: "이 앱에서는 사용하지 않는 모드입니다",
+                            message: "오프라인 리플레이는 고정 시세 자료를 넣어 따로 만든 앱에서만 열립니다. 그 앱은 서버나 계좌에 연결하지 않고 저장된 시세로 과거 구간만 계산합니다. 지금 앱은 서버에 연결된 상태라 이 화면에 보여줄 자료가 없습니다."
+                        )
+                    }
+                }
+                .cpPage()
+            }
+            .cpReadableWidth()
+            .background(CPColor.paper.ignoresSafeArea())
         }
     }
 }

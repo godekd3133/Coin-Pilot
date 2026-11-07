@@ -140,7 +140,7 @@ struct CoinPilotAccountAnalyticsView: View {
         }
         .cpReadableWidth()
         .background(CPColor.paper.ignoresSafeArea())
-        .navigationTitle("포트폴리오 분석")
+        .navigationTitle("계좌 분석")
         .cpInlineTitle()
         .refreshFeatureWhenVisible(enabled: store.canOperate) { await store.loadAccountAnalyticsIfStale() }
     }

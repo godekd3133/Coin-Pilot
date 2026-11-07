@@ -159,7 +159,7 @@ struct CoinPilotResearchDeskView: View {
         }
         .cpReadableWidth()
         .background(CPColor.paper.ignoresSafeArea())
-        .navigationTitle("주문 전 점검")
+        .navigationTitle("연구 데스크")
         .cpInlineTitle()
         .confirmationDialog(
             requestedPaperAction == true ? "모의투자 점검 시작" : "모의투자 점검 중지",

@@ -353,6 +353,14 @@ extension CoinPilotStore {
         return await refreshMobileFeatureGroup(Self.horizonsFeatureKey, force: force) { context in
             guard let object = await self.loadMobileFeature("horizons-status", path: "/api/horizons/status", context: context),
                   self.isCurrentMobileFeatureContext(context) else {
+                // A server built without the horizon route answers 404: show every
+                // sleeve as off, not as a failed load.
+                if self.missingFeatureRoutes.contains("horizons-status"),
+                   let disabled = CoinPilotFeatureDecoding.decode(CoinPilotHorizonsStatus.self, from: ["stock": [String: Any]()]) {
+                    self.horizonsStatus = disabled
+                    self.setFeatureMessage(nil, for: Self.horizonsFeatureKey)
+                    return true
+                }
                 if let message = self.featureMessages["horizons-status"] {
                     self.setFeatureMessage(message, for: Self.horizonsFeatureKey)
                 }

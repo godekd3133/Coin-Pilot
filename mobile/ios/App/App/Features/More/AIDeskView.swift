@@ -48,7 +48,7 @@ struct CoinPilotAIDeskView: View {
         }
         .cpReadableWidth()
         .background(CPColor.paper.ignoresSafeArea())
-        .navigationTitle("시장 자문")
+        .navigationTitle("AI 데스크")
         .cpInlineTitle()
         .refreshFeatureWhenVisible(enabled: store.canOperate) { await store.loadAIDeskIfStale() }
     }

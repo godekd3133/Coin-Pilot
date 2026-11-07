@@ -56,7 +56,7 @@ struct CoinPilotPresetView: View {
         }
         .cpReadableWidth()
         .background(CPColor.paper.ignoresSafeArea())
-        .navigationTitle("전략 프리셋")
+        .navigationTitle("프리셋")
         .cpInlineTitle()
         .confirmationDialog(
             requestedPreset.map(coinPilotPresetName) ?? "프리셋 적용",

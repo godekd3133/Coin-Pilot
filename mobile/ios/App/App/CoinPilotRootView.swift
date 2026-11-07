@@ -193,6 +193,7 @@ struct CoinPilotShellView: View {
     var body: some View {
         #if os(macOS)
         CoinPilotSidebarShell(store: store, selectedFeature: $selectedFeature)
+            .onAppear(perform: normalizeSelection)
         #else
         TabView(selection: $selectedFeature) {
             ForEach(CPFeatureRegistry.phoneTabs) { feature in
@@ -204,12 +205,21 @@ struct CoinPilotShellView: View {
                 .tag(feature.id)
             }
         }
-        .onAppear {
-            if CPFeatureRegistry.phoneTabs.contains(where: { $0.id == selectedFeature }) == false {
-                selectedFeature = "home"
-            }
-        }
+        .onAppear(perform: normalizeSelection)
         #endif
+    }
+
+    /// Migrates a selection stored by an older shell (v3 tabs 주식/포트폴리오/더보기)
+    /// and replaces any id this platform cannot show, so the shell never lands
+    /// on a blank tab.
+    private func normalizeSelection() {
+        CPNavigation.migrateStoredSelection()
+        let stored = UserDefaults.standard.string(forKey: CPNavigation.selectedFeatureKey) ?? selectedFeature
+        let target = CPNavigation.resolve(stored)
+        if let destination = target.labDestination {
+            UserDefaults.standard.set(destination, forKey: CPNavigation.labDestinationKey)
+        }
+        if selectedFeature != target.selection { selectedFeature = target.selection }
     }
 }
 
@@ -217,6 +227,8 @@ struct CoinPilotShellView: View {
 struct CoinPilotFeatureScreen: View {
     @ObservedObject var store: CoinPilotStore
     let feature: CPFeature
+    /// Pushed from 연구실: keep the system back button, skip the workspace menu.
+    var isPushed = false
 
     var body: some View {
         feature.makeView(store)
@@ -225,7 +237,7 @@ struct CoinPilotFeatureScreen: View {
             .cpInlineTitle()
             .toolbar {
                 #if !os(macOS)
-                CoinPilotWorkspaceToolbar(store: store)
+                CoinPilotWorkspaceToolbar(store: store, hidden: isPushed)
                 #endif
                 ToolbarItemGroup(placement: .cpTrailing) {
                     if feature.showsRefresh {
@@ -248,34 +260,38 @@ struct CoinPilotFeatureScreen: View {
 
 struct CoinPilotWorkspaceToolbar: ToolbarContent {
     @ObservedObject var store: CoinPilotStore
+    /// Pushed screens keep the back button in the leading slot.
+    var hidden = false
 
     var body: some ToolbarContent {
         ToolbarItem(placement: .cpLeading) {
-            Menu {
-                ForEach(CoinPilotWorkspaceMode.allCases) { mode in
-                    Button {
-                        store.selectWorkspace(mode)
-                    } label: {
-                        if mode == store.activeWorkspace {
-                            Label(mode.title, systemImage: "checkmark")
-                        } else {
-                            Text(mode.title)
+            if !hidden {
+                Menu {
+                    ForEach(CoinPilotWorkspaceMode.allCases) { mode in
+                        Button {
+                            store.selectWorkspace(mode)
+                        } label: {
+                            if mode == store.activeWorkspace {
+                                Label(mode.title, systemImage: "checkmark")
+                            } else {
+                                Text(mode.title)
+                            }
                         }
                     }
+                } label: {
+                    let exchangeSuffix = store.isBundledPreview || store.isBundledLocalMarketData
+                        ? "" : " (\(store.exchangeDisplayName))"
+                    let isLive = store.activeWorkspace == .live && !store.isBundledPreview
+                    Label("\(store.isBundledPreview ? "예시 데이터" : store.activeWorkspace.title)\(exchangeSuffix)",
+                          systemImage: isLive ? "exclamationmark.circle.fill" : "arrow.left.arrow.right")
+                        .labelStyle(.titleAndIcon)
+                        .font(.caption.weight(.semibold))
+                        .foregroundColor(isLive ? CPColor.red : CPColor.blue)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
                 }
-            } label: {
-                let exchangeSuffix = store.isBundledPreview || store.isBundledLocalMarketData
-                    ? "" : " (\(store.exchangeDisplayName))"
-                let isLive = store.activeWorkspace == .live && !store.isBundledPreview
-                Label("\(store.isBundledPreview ? "예시 데이터" : store.activeWorkspace.title)\(exchangeSuffix)",
-                      systemImage: isLive ? "exclamationmark.circle.fill" : "arrow.left.arrow.right")
-                    .labelStyle(.titleAndIcon)
-                    .font(.caption.weight(.semibold))
-                    .foregroundColor(isLive ? CPColor.red : CPColor.blue)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.85)
+                .accessibilityLabel("현재 \(store.activeWorkspace.title) 작업공간. 전환")
             }
-            .accessibilityLabel("현재 \(store.activeWorkspace.title) 작업공간. 전환")
         }
     }
 }
@@ -297,13 +313,21 @@ struct CoinPilotSidebarShell: View {
         NavigationSplitView {
             List(selection: selection) {
                 Section {
-                    ForEach(CPFeatureRegistry.sidebarItems.filter { $0.id != "more" }) { feature in
+                    ForEach(CPFeatureRegistry.sidebarItems) { feature in
                         Label(feature.label, systemImage: feature.icon).tag(feature.id)
                     }
                 }
-                if let more = CPFeatureRegistry.feature("more") {
-                    Section("고급 도구") {
-                        Label(more.label, systemImage: more.icon).tag(more.id)
+                // 연구실 sections, same grouping as the iOS 연구실 tab.
+                ForEach(CPLabGroup.allCases) { group in
+                    let items = CPFeatureRegistry.labItems(in: group).filter { $0.isVisible(in: store) }
+                    if !items.isEmpty {
+                        Section(group.title) {
+                            ForEach(items) { feature in
+                                Label(feature.label, systemImage: feature.icon)
+                                    .help(feature.detail)
+                                    .tag(feature.id)
+                            }
+                        }
                     }
                 }
             }
