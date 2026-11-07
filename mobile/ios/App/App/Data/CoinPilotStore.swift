@@ -1465,6 +1465,10 @@ struct CoinPilotTrade: Identifiable {
     let amount: Double?
     let quantity: Double?
     let source: String?
+    /// "paper" | "live" from GET /api/trades (process mode); nil on older servers.
+    let mode: String?
+    /// Closed strategy trades only; nil on older servers and for entries.
+    let receipt: CoinPilotTradeReceipt?
 
     init(_ object: [String: Any], index: Int) {
         let type = (object["type"] as? String ?? "").uppercased()
@@ -1498,6 +1502,8 @@ struct CoinPilotTrade: Identifiable {
         quantity = Self.nonnegative(object["volume"]) ?? Self.nonnegative(object["quantity"]) ??
             (strategyAmountIsQuantity ? rawAmount : nil)
         id = "\(timestamp ?? "trade")-\(coin ?? "")-\(action)-\(index)"
+        mode = object["mode"] as? String
+        receipt = CoinPilotTradeReceipt(object["receipt"] as? [String: Any])
     }
 
     private static func symbol(_ value: String) -> String? {
@@ -1521,6 +1527,166 @@ struct CoinPilotTrade: Identifiable {
     private static func nonnegative(_ value: Any?) -> Double? {
         guard let parsed = number(value), parsed >= 0 else { return nil }
         return parsed
+    }
+}
+
+/// Projection of `receipt` from GET /api/trades (src/trader/tradeReceipt.js).
+/// Every field is optional: older trades carry only part of it and a missing
+/// value is shown as "기록 없음", never estimated on the device.
+struct CoinPilotTradeReceipt {
+    struct Line {
+        let percent: Double?
+        let krw: Double?
+    }
+
+    struct Signal {
+        let profile: String?
+        let candleUnit: Double?
+        let candleTime: String?
+        let candleCloseAt: String?
+        let rsi: Double?
+        let oversoldRsi: Double?
+        let rsiRecovery: Double?
+        let reboundPercent: Double?
+        let volumeRatio: Double?
+    }
+
+    struct Confirmation {
+        let outcome: String?
+        let reason: String?
+        let delayMs: Double?
+    }
+
+    struct EntryCost {
+        let spreadPercent: Double?
+        let tickPercent: Double?
+        let costPercent: Double?
+        let limitPercent: Double?
+        let filterMode: String?
+    }
+
+    let mode: String?
+    let partial: Bool
+    let estimated: Bool
+    let estimateBasis: String?
+
+    let entryTime: String?
+    let entryPrice: Double?
+    let entryExpectedPrice: Double?
+    let signal: Signal?
+    let confirmation: Confirmation?
+    let signalToOrderMs: Double?
+
+    let exitTime: String?
+    let exitPrice: Double?
+    let exitExpectedPrice: Double?
+    let exitType: String?
+    let exitReason: String?
+    let maxHoldMinutes: Double?
+    let holdMs: Double?
+
+    let volume: Double?
+    let notional: Double?
+
+    let feeRate: Double?
+    let feeSource: String?
+    let entryFee: Line?
+    let exitFee: Line?
+    let totalFee: Line?
+    let slippageSource: String?
+    let slippageRate: Double?
+    let entrySlippage: Line?
+    let exitSlippage: Line?
+    let entryCost: EntryCost?
+
+    let grossProfit: Double?
+    let grossProfitPercent: Double?
+    let netProfit: Double?
+    let netProfitPercent: Double?
+    let netProfitWithPaidFees: Double?
+
+    init?(_ object: [String: Any]?) {
+        guard let object else { return nil }
+        let entry = object["entry"] as? [String: Any] ?? [:]
+        let exit = object["exit"] as? [String: Any] ?? [:]
+        let costs = object["costs"] as? [String: Any] ?? [:]
+        let result = object["result"] as? [String: Any] ?? [:]
+        mode = object["mode"] as? String
+        partial = object["partial"] as? Bool ?? false
+        estimated = object["estimated"] as? Bool ?? false
+        estimateBasis = object["estimateBasis"] as? String
+
+        entryTime = entry["time"] as? String
+        entryPrice = Self.number(entry["price"])
+        entryExpectedPrice = Self.number(entry["expectedPrice"])
+        signalToOrderMs = Self.number(entry["signalToOrderMs"])
+        if let signal = entry["signal"] as? [String: Any] {
+            self.signal = Signal(
+                profile: signal["profile"] as? String,
+                candleUnit: Self.number(signal["candleUnit"]),
+                candleTime: signal["candleTime"] as? String,
+                candleCloseAt: signal["candleCloseAt"] as? String,
+                rsi: Self.number(signal["rsi"]),
+                oversoldRsi: Self.number(signal["oversoldRsi"]),
+                rsiRecovery: Self.number(signal["rsiRecovery"]),
+                reboundPercent: Self.number(signal["reboundPercent"]),
+                volumeRatio: Self.number(signal["volumeRatio"]))
+        } else { signal = nil }
+        if let confirmation = entry["confirmation"] as? [String: Any] {
+            self.confirmation = Confirmation(outcome: confirmation["outcome"] as? String,
+                                             reason: confirmation["reason"] as? String,
+                                             delayMs: Self.number(confirmation["delayMs"]))
+        } else { confirmation = nil }
+
+        exitTime = exit["time"] as? String
+        exitPrice = Self.number(exit["price"])
+        exitExpectedPrice = Self.number(exit["expectedPrice"])
+        exitType = exit["type"] as? String
+        exitReason = exit["reason"] as? String
+        maxHoldMinutes = Self.number(exit["maxHoldMinutes"])
+        holdMs = Self.number(exit["holdMs"])
+
+        volume = Self.number(object["volume"])
+        notional = Self.number(object["notional"])
+
+        feeRate = Self.number(costs["feeRate"])
+        feeSource = costs["feeSource"] as? String
+        entryFee = Self.line(costs["entryFee"])
+        exitFee = Self.line(costs["exitFee"])
+        totalFee = Self.line(costs["totalFee"])
+        slippageSource = costs["slippageSource"] as? String
+        slippageRate = Self.number(costs["slippageRate"])
+        entrySlippage = Self.line(costs["entrySlippage"])
+        exitSlippage = Self.line(costs["exitSlippage"])
+        if let cost = costs["entryCost"] as? [String: Any] {
+            entryCost = EntryCost(spreadPercent: Self.number(cost["spreadPercent"]),
+                                  tickPercent: Self.number(cost["tickPercent"]),
+                                  costPercent: Self.number(cost["costPercent"]),
+                                  limitPercent: Self.number(cost["limitPercent"]),
+                                  filterMode: cost["filterMode"] as? String)
+        } else { entryCost = nil }
+
+        grossProfit = Self.number(result["grossProfit"])
+        grossProfitPercent = Self.number(result["grossProfitPercent"])
+        netProfit = Self.number(result["netProfit"])
+        netProfitPercent = Self.number(result["netProfitPercent"])
+        netProfitWithPaidFees = Self.number(result["netProfitWithPaidFees"])
+    }
+
+    private static func line(_ value: Any?) -> Line? {
+        guard let object = value as? [String: Any] else { return nil }
+        let line = Line(percent: number(object["percent"]), krw: number(object["krw"]))
+        return line.percent == nil && line.krw == nil ? nil : line
+    }
+
+    private static func number(_ value: Any?) -> Double? {
+        guard let value, !(value is NSNull) else { return nil }
+        if let number = value as? NSNumber {
+            guard String(cString: number.objCType) != "c" else { return nil }
+            return number.doubleValue.isFinite ? number.doubleValue : nil
+        }
+        if let string = value as? String, let parsed = Double(string), parsed.isFinite { return parsed }
+        return nil
     }
 }
 
